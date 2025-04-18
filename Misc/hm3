@@ -1,0 +1,456 @@
+program HangmanGame;
+
+uses CRT;
+
+const
+  MAX_WRONG = 8;   { maximum number of wrong guesses }
+  MIN_LENGTH = 4;
+  MAX_LENGTH = 7;
+
+var
+  chosen: string;
+  display: string;
+  guessed: string;
+  letter: char;
+  i, wrong: integer;
+  found: boolean;
+  hintUsed: boolean;
+  wins, losses: integer;
+  replay: char;
+  isHintRequest : boolean; // Flag for hint processing
+
+  // Variables for dynamic screen layout
+  TermCols, TermRows: integer;
+  WordRow, HangmanRow, HangmanCol, GuessBarRow, GuessedRow, PromptRow, MsgRow: integer;
+
+// --- Utility Functions (Unchanged) ---
+
+function UpperCaseStr(s: string): string;
+var
+  i: integer;
+begin
+  for i := 1 to length(s) do
+    s[i] := UpCase(s[i]);
+  UpperCaseStr := s;
+end;
+
+procedure SortString(var s: string);
+var
+  i, j: integer;
+  temp: char;
+begin
+  // Simple Bubble Sort for guessed letters string
+  for i := 1 to length(s) - 1 do
+    for j := i + 1 to length(s) do
+      if s[i] > s[j] then
+      begin
+        temp := s[i];
+        s[i] := s[j];
+        s[j] := temp;
+      end;
+end;
+
+function ChooseRandomWord: string;
+var
+  f: Text;
+  word: string;
+  filename: string;
+  validCount, target: integer;
+begin
+  // *** IMPORTANT: Update this path to your actual 'words' file location ***
+  filename := '/Users/mke/Pscal/etc/words';
+  ChooseRandomWord := '';
+  assign(f, filename);
+  {$I-} reset(f); {$I+} // Disable IO checking for reset
+  if IOResult <> 0 then
+  begin
+    writeln('Error opening word file: ', filename);
+    writeln('Please ensure the file exists at the specified path.');
+    halt(1);
+  end;
+  {$I+} // Re-enable IO checking
+
+  // First pass: Count valid words
+  validCount := 0;
+  while not eof(f) do
+  begin
+    readln(f, word);
+    // Basic check for mostly alphabetic words
+    found := true;
+    for i := 1 to length(word) do
+        if not (UpCase(word[i]) in ['A'..'Z']) then found := false;
+
+    if found and (length(word) >= MIN_LENGTH) and (length(word) <= MAX_LENGTH) then
+      inc(validCount);
+  end;
+  close(f);
+
+  if validCount = 0 then
+  begin writeln('No valid words found between length ', MIN_LENGTH, ' and ', MAX_LENGTH, ' in ', filename); halt(1); end;
+
+  // Second pass: Select the random word
+  target := Random(validCount) + 1; // Random number between 1 and validCount
+  assign(f, filename);
+  {$I-} reset(f); {$I+}
+  if IOResult <> 0 then // Should not fail if first pass worked, but check anyway
+  begin writeln('Error reopening file: ', filename); halt(1); end;
+
+  validCount := 0; // Reset counter for second pass
+  while (not eof(f)) and (ChooseRandomWord = '') do
+  begin
+    readln(f, word);
+    // Repeat validation logic
+    found := true;
+    for i := 1 to length(word) do
+        if not (UpCase(word[i]) in ['A'..'Z']) then found := false;
+
+    if found and (length(word) >= MIN_LENGTH) and (length(word) <= MAX_LENGTH) then
+    begin
+      inc(validCount);
+      if validCount = target then
+        ChooseRandomWord := UpperCaseStr(word); // Found the target word
+    end;
+  end;
+  close(f);
+
+  // Handle rare case where word wasn't found (e.g., file changed between passes)
+  if ChooseRandomWord = '' then
+  begin
+    writeln('Error: Could not select a random word.');
+    halt(1);
+  end;
+end;
+
+// --- Drawing Procedures (Modified for Dynamic Layout) ---
+
+procedure DrawHangman(wrong: integer; baseRow, baseCol: integer);
+// Draws hangman relative to baseRow, baseCol
+begin
+  // Ensure drawing stays within reasonable bounds
+  if (baseCol < 1) or (baseRow < 1) or (baseRow + 7 > TermRows) then
+  begin
+     // Draw in a default position if calculated one is bad
+     baseRow := 5;
+     baseCol := 1;
+  end;
+
+  GotoXY(baseCol, baseRow);     write('  +---+');
+  GotoXY(baseCol, baseRow + 1); write('  |   |');
+
+  case wrong of
+    0: begin // Initial state (post only)
+         GotoXY(baseCol, baseRow + 2); write('      |');
+         GotoXY(baseCol, baseRow + 3); write('      |');
+         GotoXY(baseCol, baseRow + 4); write('      |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+    1: begin // Head
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write('      |');
+         GotoXY(baseCol, baseRow + 4); write('      |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+    2: begin // Body
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write('  |   |');
+         GotoXY(baseCol, baseRow + 4); write('      |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+    3: begin // One arm
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write(' /|   |');
+         GotoXY(baseCol, baseRow + 4); write('      |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+    4: begin // Both arms
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write(' /|\  |');
+         GotoXY(baseCol, baseRow + 4); write('      |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+    5: begin // One leg
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write(' /|\  |');
+         GotoXY(baseCol, baseRow + 4); write(' /    |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+    6: begin // Both legs
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write(' /|\  |');
+         GotoXY(baseCol, baseRow + 4); write(' / \  |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+     7: begin // Left Foot
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write(' /|\  |');
+         GotoXY(baseCol, baseRow + 4); write('_/ \  |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+     8: begin // Right Foot (Lost)
+         GotoXY(baseCol, baseRow + 2); write('  O   |');
+         GotoXY(baseCol, baseRow + 3); write(' /|\  |');
+         GotoXY(baseCol, baseRow + 4); write('_/ \_ |');
+         GotoXY(baseCol, baseRow + 5); write('      |');
+       end;
+  end; // end case
+
+  // Draw base line consistently
+  GotoXY(baseCol - 2, baseRow + 6); write('========'); // Adjust col slightly left
+end;
+
+procedure ShowGuessesBar(wrong: integer; barRow: integer);
+// Uses calculated barRow
+var
+  i: integer;
+  remaining: integer;
+  barText: string;
+  startCol: integer;
+begin
+  remaining := MAX_WRONG - wrong;
+  barText := 'Guesses Left: ';
+
+  GotoXY(1, barRow); clreol; // Clear the line first
+  write(barText);
+
+  TextColor(LightGreen);
+  for i := 1 to remaining do write('#');
+  TextColor(LightRed);
+  for i := 1 to wrong do write('#');
+  TextColor(LightGray);
+
+  // Use IntToStr if available, otherwise format manually (less robust)
+  { If IntToStr is not available/working in your pscal version:
+    You would need a manual integer-to-string conversion here,
+    or just display the bars without the numeric count.
+    Example without numbers: write(' ');
+  }
+  // Assuming IntToStr works:
+   write(' [', IntToStr(remaining), '/', IntToStr(MAX_WRONG), ']');
+
+end;
+
+procedure ShowHint(word: string; display: string; var hintUsed: boolean; msgRowVal, promptRowVal : integer);
+// Uses calculated msgRowVal, promptRowVal
+var
+  i, attempts: integer;
+  hintIndex: integer;
+  pause: string;
+  hintMsg: string;
+begin
+  GotoXY(1, msgRowVal); clreol;
+
+  if hintUsed then
+  begin
+    write('Hint Used Already. Press Enter to Continue:');
+    readln(pause); // Readln still works fine here
+  end
+  else
+  begin
+    hintIndex := -1; attempts := 0;
+    repeat
+      i := Random(length(word)) + 1;
+      if display[i] = '_' then hintIndex := i;
+      inc(attempts);
+    until (hintIndex <> -1) or (attempts > length(word) * 2) or (display = word);
+
+    if hintIndex <> -1 then
+    begin
+      TextColor(Cyan);
+      // Use IntToStr if available
+      hintMsg := 'Hint: Letter at position ' + IntToStr(hintIndex) + ' is ''' + word[hintIndex] + '''';
+      write(hintMsg);
+      TextColor(LightGray);
+      hintUsed := true;
+    end
+    else
+    begin
+      write('No more hints available (word might be complete).');
+    end;
+
+    // Common pause logic
+    GotoXY(1, msgRowVal + 1); clreol; // Use next line for prompt
+    write('Press Enter to Continue:');
+    readln(pause);
+  end;
+
+  // Common cleanup / cursor repositioning
+  GotoXY(1, msgRowVal); clreol;
+  GotoXY(1, msgRowVal + 1); clreol;
+  GotoXY(1, promptRowVal); clreol; // Move cursor back to main prompt row
+end;
+
+// --- Main Program Block ---
+begin
+  wins := 0;
+  losses := 0;
+
+  // --- Get Terminal Size ONCE ---
+  TermCols := ScreenCols;
+  TermRows := ScreenRows;
+
+  // --- Calculate Relative Row Positions ---
+  // Adjust these divisions/offsets as needed for desired layout
+  WordRow     := 4;
+  HangmanRow  := WordRow + 2; // Start hangman below the word
+  GuessBarRow := TermRows - 6;
+  GuessedRow  := TermRows - 4;
+  PromptRow   := TermRows - 2;
+  MsgRow      := TermRows;     // Message on the very last line
+
+  // --- Calculate Column for Centering Hangman ---
+  // Hangman drawing is about 9 chars wide. Center based on that.
+  HangmanCol := (TermCols - 9) div 2;
+  if HangmanCol < 1 then HangmanCol := 1; // Ensure it's at least 1
+
+  // --- Game Loop ---
+  repeat // Main game replay loop
+    Randomize;
+    chosen := ChooseRandomWord;
+    display := ''; guessed := ''; hintUsed := false;
+    wrong := 0;
+
+    for i := 1 to length(chosen) do
+      display := display + '_';
+
+    while (wrong < MAX_WRONG) and (display <> chosen) do
+    begin
+      // --- START: Draw Screen Elements (Redraw ENTIRE game state each turn) ---
+      ClrScr;
+      GotoXY(1, 1); TextColor(LightGreen); write('Welcome to Hangman!'); TextColor(LightGray); // Top Left
+      GotoXY(1, 2); write(' (Guess a letter, or ? for a hint)');
+
+      // Center the word display string
+      GotoXY((TermCols - length(display)) div 2, WordRow); write(display);
+
+      // Draw hangman at calculated position
+      DrawHangman(wrong, HangmanRow, HangmanCol);
+
+      // Show guesses bar at calculated position
+      ShowGuessesBar(wrong, GuessBarRow);
+
+      SortString(guessed);
+      GotoXY(1, GuessedRow); clreol;
+      if length(guessed) > 0 then
+        write('Letters chosen so far: ', guessed);
+      // --- END: Draw Screen Elements ---
+
+
+      // --- START: Get Player Input ---
+      isHintRequest := false; // Reset flag
+      repeat
+        GotoXY(1, PromptRow); clreol; // Use calculated prompt row
+        write('Enter a letter (A-Z, or ? for hint): ');
+        readln(letter); // Use readln for guess
+        letter := UpCase(letter);
+      until (letter in ['A'..'Z']) or (letter = '?');
+      // --- END: Get Player Input ---
+
+
+      // --- START: Process Input (Hint or Guess) ---
+      if (letter = '?') then
+      begin
+        isHintRequest := true; // Set the flag
+        // Pass calculated rows to ShowHint
+        ShowHint(chosen, display, hintUsed, MsgRow, PromptRow);
+        // Loop continues, screen redraws without processing guess
+      end;
+
+      // --- Process Letter Guess ONLY if it wasn't a hint request ---
+      if not isHintRequest then
+      begin
+          if pos(letter, guessed) > 0 then // Check if already guessed
+          begin
+            // Already guessed - Give feedback but don't penalize
+            GotoXY(1, MsgRow); clreol; // Use calculated message row
+            TextColor(Yellow); write('You already guessed ''', letter, '''. Try again.'); TextColor(LightGray);
+            GotoXY(1, MsgRow + 1); clreol; write('Press Enter...'); readln; // Pause on next line
+            GotoXY(1, MsgRow + 1); clreol; // Clear pause message line
+            GotoXY(1, MsgRow); clreol; // Clear message line
+          end
+          else // It's a new letter guess
+          begin
+            guessed := guessed + letter; // Add new letter
+
+            found := false;
+            for i := 1 to length(chosen) do
+            begin
+              if chosen[i] = letter then
+              begin
+                display[i] := letter;
+                found := true;
+              end;
+            end;
+
+            // Prepare message area for redraw (messages shown implicitly by state change)
+            GotoXY(1, MsgRow); clreol; // Use calculated message row
+
+            if not found then // Letter was not found
+            begin
+              // Increment wrong count ONLY for a wrong NEW letter
+              wrong := wrong + 1;
+              // Message handled by redraw showing increased wrong count / hangman part
+            end;
+            // If 'found' is true, message handled by redraw showing updated display string
+          end; // End processing NEW letter guess
+      end; // End 'if not isHintRequest'
+      // --- END: Process Input ---
+
+      // Screen is redrawn at the START of the next loop iteration
+
+    end; // End of main game while loop
+
+    // --- START: Game Over Display ---
+    ClrScr;
+    GotoXY(1, 1); TextColor(LightGreen); write('Hangman Game Over'); TextColor(LightGray);
+    // Center the final word display
+    GotoXY((TermCols - length(display)) div 2, WordRow); write(display);
+
+    // Draw final hangman and guess bar
+    DrawHangman(wrong, HangmanRow, HangmanCol);
+    ShowGuessesBar(wrong, GuessBarRow);
+
+    GotoXY(1, GuessedRow); clreol;
+    SortString(guessed);
+    if length(guessed) > 0 then write('Letters chosen: ', guessed);
+
+    GotoXY(1, MsgRow - 2); clreol; // Use MsgRow - 2 for outcome message
+    if display = chosen then
+    begin
+      TextColor(Green);
+      write('Congratulations, you guessed the word: ', chosen);
+      inc(wins);
+    end
+    else
+    begin
+      TextColor(LightRed);
+      write('Sorry, you lost. The word was: ', chosen);
+      inc(losses);
+    end;
+    TextColor(LightGray);
+    GotoXY(1, MsgRow - 1); clreol; // Use MsgRow - 1 for score
+    // Use IntToStr if available
+    write('Score: ', IntToStr(wins), ' wins / ', IntToStr(losses), ' losses');
+
+    // --- END: Game Over Display ---
+
+    // --- START: Replay Prompt ---
+    GotoXY(1, MsgRow); clreol; // Use MsgRow for replay prompt
+    write('Play again? (Y/Enter=Yes, N=No): ');
+    repeat
+      replay := ReadKey; // Use ReadKey here to avoid needing Enter
+      if replay = #0 then Delay(10); // Handle potential extended key codes briefly
+    until (replay <> #0); // Wait for a valid key press
+
+    // REMOVED: if (UpCase(replay) = 'N') then break;
+    // The loop condition below handles exiting.
+
+    // --- END: Replay Prompt ---
+    writeln; // Add a newline after ReadKey consumes the character
+
+  // The loop condition checks if 'N' or 'n' was pressed.
+  // If so, the loop terminates naturally. Otherwise, it repeats.
+  until (UpCase(replay) = 'N');
+
+  // Final screen clear before exiting
+  ClrScr;
+end. // End main program

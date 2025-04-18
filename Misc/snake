@@ -1,0 +1,299 @@
+program SnakeGame;
+
+uses CRT;
+
+const
+  MaxX = 78; // Leave space for border
+  MinX = 2;
+  MaxY = 22; // Leave space for border and score
+  MinY = 2;
+  MaxSnakeLen = 100;
+  InitialLength = 5;
+  UpKey    = 'W'; // Using WASD for simpler ReadKey handling
+  DownKey  = 'S';
+  LeftKey  = 'A';
+  RightKey = 'D';
+  QuitKey  = 'Q'; // Or use Esc (#27)
+
+type
+  TDirection = (dirUp, dirDown, dirLeft, dirRight);
+  TPoint = record
+    x, y: integer;
+  end;
+
+var
+  snake: array[1..MaxSnakeLen] of TPoint;
+  snakeLen: integer;
+  head: TPoint;
+  food: TPoint;
+  direction, lastDirection: TDirection;
+  gameOver, quitGame: boolean;
+  score: integer;
+  gameSpeed: word; // Delay in milliseconds
+  ch: char;
+
+// --- Helper Procedures ---
+
+procedure DrawBorder;
+var i: integer;
+begin
+  TextColor(White);
+  TextBackground(DarkGray); // Use a background for the border
+
+  // Top and Bottom lines
+  for i := MinX - 1 to MaxX + 1 do
+  begin
+    GotoXY(i, MinY - 1); write(' ');
+    GotoXY(i, MaxY + 1); write(' ');
+  end;
+
+  // Left and Right lines
+  for i := MinY to MaxY do
+  begin
+    GotoXY(MinX - 1, i); write(' ');
+    GotoXY(MaxX + 1, i); write(' ');
+  end;
+  TextBackground(Black); // Reset background
+end;
+
+procedure PlaceFood;
+var
+  onSnake: boolean;
+  i: integer;
+begin
+  Randomize;
+  repeat
+    food.x := Random(MaxX - MinX + 1) + MinX;
+    food.y := Random(MaxY - MinY + 1) + MinY;
+
+    // Check if food placed on the snake
+    onSnake := false;
+    i := 1; // Initialize counter for while loop
+
+    // --- Modified Loop (replaces for loop + break) ---
+    while (i <= snakeLen) and (not onSnake) do
+    begin
+      if (food.x = snake[i].x) and (food.y = snake[i].y) then
+      begin
+        onSnake := true;
+        // No break needed; loop condition (not onSnake) will handle exit
+      end
+      else
+      begin
+        Inc(i); // Only increment if no collision found at current 'i'
+      end;
+    end;
+    // --- End of Modified Loop ---
+
+  until not onSnake; // Keep trying until food is placed clear of the snake
+
+  // Draw food (unchanged)
+  GotoXY(food.x, food.y);
+  TextColor(LightRed);
+  write('$'); // Food character
+end;
+
+procedure InitializeGame;
+var i: integer;
+begin
+  ClrScr;
+  HideCursor;
+  DrawBorder;
+
+  // Center snake initially
+  head.x := (MinX + MaxX) div 2;
+  head.y := (MinY + MaxY) div 2;
+
+  snakeLen := InitialLength;
+  for i := 1 to snakeLen do
+  begin
+    snake[i].x := head.x - i + 1;
+    snake[i].y := head.y;
+  end;
+
+  direction := dirRight; // Start moving right
+  lastDirection := dirRight;
+  gameOver := false;
+  quitGame := false;
+  score := 0;
+  gameSpeed := 150; // Initial speed (lower is faster)
+
+  PlaceFood;
+
+  // Initial Score Display
+  GotoXY(MinX, MaxY + 2); // Below the border
+  TextColor(White);
+  write('Score: ', score);
+end;
+
+procedure HandleInput;
+begin
+  if KeyPressed then
+  begin
+    ch := ReadKey;
+    ch := UpCase(ch); // Make input case-insensitive
+
+    lastDirection := direction; // Store current direction before changing
+
+    case ch of
+      UpKey:    if lastDirection <> dirDown then direction := dirUp;
+      DownKey:  if lastDirection <> dirUp then direction := dirDown;
+      LeftKey:  if lastDirection <> dirRight then direction := dirLeft;
+      RightKey: if lastDirection <> dirLeft then direction := dirRight;
+      QuitKey:  quitGame := true;
+      #27:      quitGame := true; // Allow Esc key as well
+    end;
+  end;
+end;
+
+procedure UpdateSnake;
+var
+  i: integer;
+  newHead: TPoint;
+  tail: TPoint;
+  collisionDetected: boolean; // Flag for self-collision loop
+begin
+  // Check if game should proceed BEFORE doing anything else
+  if not (gameOver or quitGame) then
+  begin
+    // Store old tail position
+    tail := snake[snakeLen];
+
+    // Move body forward (this part is okay)
+    for i := snakeLen downto 2 do
+    begin
+      snake[i] := snake[i-1];
+    end;
+
+    // Calculate new head position
+    newHead := snake[1];
+    case direction of
+      dirUp:    Dec(newHead.y);
+      dirDown:  Inc(newHead.y);
+      dirLeft:  Dec(newHead.x);
+      dirRight: Inc(newHead.x);
+    end;
+
+    // --- Check Collisions ---
+    // 1. Wall Collision
+    if (newHead.x < MinX) or (newHead.x > MaxX) or
+       (newHead.y < MinY) or (newHead.y > MaxY) then
+    begin
+      gameOver := true;
+    end;
+
+    // 2. Self Collision (Only check if no wall collision happened yet)
+    if not gameOver then
+    begin
+      // --- Modified Self-Collision Loop (replaces for loop + break) ---
+      i := 2; // Start checking from the second segment
+      collisionDetected := false;
+      while (i <= snakeLen) and (not collisionDetected) do
+      begin
+        if (newHead.x = snake[i].x) and (newHead.y = snake[i].y) then
+        begin
+          gameOver := true;
+          collisionDetected := true; // Set flag to stop loop
+          // No 'break' needed, loop condition handles it
+        end
+        else
+        begin
+          Inc(i); // Move to next segment only if no collision found
+        end;
+      end;
+      // --- End of Modified Self-Collision Loop ---
+    end;
+
+    // --- Update Head and Check Food (Only if game is still not over) ---
+    if not gameOver then
+    begin
+      snake[1] := newHead; // Update the head position
+
+      // Check if food eaten (logic remains the same)
+      if (newHead.x = food.x) and (newHead.y = food.y) then
+      begin
+        Inc(score);
+        if snakeLen < MaxSnakeLen then Inc(snakeLen);
+        if (gameSpeed > 50) and (score mod 5 = 0) then Dec(gameSpeed, 10);
+        PlaceFood;
+        GotoXY(MinX + 7, MaxY + 2); TextColor(White); write(score);
+      end
+      else
+      begin
+        // Erase old tail position only if food wasn't eaten
+        GotoXY(tail.x, tail.y);
+        write(' ');
+      end;
+    end;
+
+  end; // end outer 'if not (gameOver or quitGame)'
+end;
+
+procedure GameOverScreen;
+begin
+   GotoXY( (MinX + MaxX) div 2 - 5, (MinY + MaxY) div 2);
+   TextColor(LightRed);
+   TextBackground(Black);
+   write('GAME OVER!');
+   GotoXY( (MinX + MaxX) div 2 - 10, (MinY + MaxY) div 2 + 1);
+   write('Final Score: ', score);
+   GotoXY( (MinX + MaxX) div 2 - 12, (MinY + MaxY) div 2 + 3);
+   write('Press any key to exit...');
+   ch := ReadKey; // Wait for final key press
+end;
+
+procedure DrawSnake;
+var i: integer;
+begin
+    // Check if the game has ended or been quit
+    if gameOver or quitGame then
+    begin
+        // Display the Game Over screen *only* if the game ended normally
+        if gameOver then
+        begin
+             GameOverScreen; // Display message and wait for key press
+        end;
+
+        // Now halt the program execution with exit code 0
+        halt(0);
+    end
+    else
+    begin
+        // --- This is the original snake drawing logic ---
+        // Draw body first
+        TextColor(Green);
+        for i := 2 to snakeLen do
+        begin
+          GotoXY(snake[i].x, snake[i].y);
+          write('*'); // Body character
+        end;
+
+        // Draw head last (overwrites previous head position if it was part of body)
+        TextColor(LightGreen);
+        GotoXY(snake[1].x, snake[1].y);
+        write('@'); // Head character
+        // --- End of original snake drawing logic ---
+    end;
+end;
+
+
+// --- Main Game ---
+begin
+  InitializeGame;
+
+  repeat
+    HandleInput;
+    UpdateSnake;
+    DrawSnake;
+    Delay(gameSpeed);
+  until gameOver or quitGame;
+
+  if gameOver then GameOverScreen;
+
+  // Cleanup
+  ShowCursor;
+  NormalColors;
+  ClrScr;
+  writeln('Snake game finished. Final score: ', score);
+
+end.

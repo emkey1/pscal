@@ -1,0 +1,63 @@
+program GuessTheNumber;
+
+uses CRT; // Uses the CRT unit for screen control and ReadKey
+
+var
+  secretNumber, guess, attempts: integer;
+  playAgain: char;
+  correct: boolean;
+
+begin
+  Randomize; // Initialize the random number generator
+
+  repeat // Main game loop - allows playing again
+    ClrScr; // Clear the screen
+    TextColor(White); // Set text color
+    writeln('Guess the Number Game!');
+    writeln('----------------------');
+    writeln('I''m thinking of a number between 1 and 100.');
+    writeln;
+
+    secretNumber := Random(100) + 1; // Generate random number between 1 and 100
+    attempts := 0;
+    correct := false;
+
+    repeat // Loop for guesses within a single game
+      write('Enter your guess (1-100): ');
+      readln(guess);
+      attempts := attempts + 1; // Increment attempt counter (same as Inc(attempts))
+
+      if guess = secretNumber then
+      begin
+        TextColor(LightGreen);
+        writeln;
+        writeln('Congratulations! You guessed the number ', secretNumber, ' correctly!');
+        writeln('It took you ', attempts, ' attempts.');
+        correct := true;
+      end
+      else if guess < secretNumber then
+      begin
+        TextColor(LightRed);
+        writeln('Too low! Try again.');
+      end
+      else // guess > secretNumber
+      begin
+        TextColor(LightCyan);
+        writeln('Too high! Try again.');
+      end;
+
+      TextColor(White); // Reset color for the next prompt
+
+    until correct; // Keep guessing until correct
+
+    writeln;
+    write('Play again? (Y/N): ');
+    playAgain := ReadKey; // Read a single character without needing Enter
+    writeln(playAgain); // Echo the character
+
+  until UpCase(playAgain) <> 'Y'; // Loop the whole game if user enters 'Y' or 'y'
+
+  ClrScr;
+  writeln('Thanks for playing!');
+
+end.

@@ -1,0 +1,242 @@
+program BuiltinTestSuite;
+{---------------------------------------------------------------------
+  BuiltinTestSuite.pas
+
+  A self-contained test suite for pscal built-in functions
+  and procedures, based on registrations found in main.c.
+---------------------------------------------------------------------}
+
+// uses CRT; // Uncomment if CRT functions like Delay, ReadKey are tested interactively
+
+const
+  PI = 3.1415926535;
+  FILENAME = '/tmp/pscal_builtin_test.txt';
+  MS_FILENAME = '/tmp/pscal_ms_test.bin';
+
+type
+  // Define types needed for tests if not built-in
+  TMemoryStream = Pointer; // Representing the MemoryStream handle type if needed
+                           // Adjust if pscal maps it to a specific type like Integer
+
+var
+  // General variables
+  i, i1, i2: integer;
+  r, r1, r2: real;
+  s, s1, s2: string;
+  b: boolean;
+  c: char;
+  f: file; // Standard file type
+  ms, ms2: TMemoryStream; // Assuming MemoryStream needs a variable
+
+{---------------------------------------------------------------------
+  Assertion Procedures (Copied & slightly extended)
+---------------------------------------------------------------------}
+
+procedure Assert(condition: boolean; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if condition then
+    writeln('PASS')
+  else
+    writeln('FAIL');
+end;
+
+procedure AssertEqualInt(expected, actual: integer; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+procedure AssertEqualStr(expected, actual: string; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: "', expected, '", got: "', actual, '")');
+end;
+
+procedure AssertEqualBool(expected, actual: boolean; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+procedure AssertEqualReal(expected, actual: real; tolerance: real; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if abs(expected - actual) < tolerance then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected:0:4, ', got: ', actual:0:4, ')');
+end;
+
+procedure AssertEqualChar(expected, actual: char; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ''', expected, ''' (#', Ord(expected), '), got: ''', actual, ''' (#', Ord(actual), '))');
+end;
+
+{---------------------------------------------------------------------
+  Test Procedures for Built-ins
+---------------------------------------------------------------------}
+
+procedure TestMathBuiltins;
+begin
+  writeln('-- Testing Math Builtins --');
+  // Assuming registrations were corrected: cos, sin, tan, sqrt, ln, exp, abs, trunc are FUNCTIONS
+  r := cos(0.0); AssertEqualReal(1.0, r, 0.0001, 'cos(0.0)');
+  r := sin(0.0); AssertEqualReal(0.0, r, 0.0001, 'sin(0.0)');
+  // r := sin(PI / 2.0); AssertEqualReal(1.0, r, 0.0001, 'sin(pi/2)'); // Requires PI constant
+  r := tan(0.0); AssertEqualReal(0.0, r, 0.0001, 'tan(0.0)');
+  r := sqrt(16.0); AssertEqualReal(4.0, r, 0.0001, 'sqrt(16.0)');
+  r := sqrt(0.0); AssertEqualReal(0.0, r, 0.0001, 'sqrt(0.0)');
+  r := exp(0.0); AssertEqualReal(1.0, r, 0.0001, 'exp(0.0)');
+  r := exp(1.0); AssertEqualReal(2.7182, r, 0.0001, 'exp(1.0)');
+  r := ln(1.0); AssertEqualReal(0.0, r, 0.0001, 'ln(1.0)');
+  r := ln(exp(2.0)); AssertEqualReal(2.0, r, 0.0001, 'ln(exp(2.0))');
+  r := abs(-123.45); AssertEqualReal(123.45, r, 0.0001, 'abs(-123.45)');
+  r := abs(123.45); AssertEqualReal(123.45, r, 0.0001, 'abs(123.45)');
+  i := abs(-50); AssertEqualInt(50, i, 'abs(-50)');
+  i := trunc(12.9); AssertEqualInt(12, i, 'trunc(12.9)');
+  i := trunc(-12.9); AssertEqualInt(-12, i, 'trunc(-12.9)');
+  i := trunc(0.5); AssertEqualInt(0, i, 'trunc(0.5)');
+end;
+
+procedure TestFileIOBuiltins;
+begin
+  writeln('-- Testing File I/O Builtins --');
+  // Procedures: assign, close, reset, rewrite
+  // Functions: ioresult, eof (eof needs file var)
+
+  // Test assign, rewrite, writeln, close
+  assign(f, FILENAME);
+  rewrite(f);
+  writeln(f, 'Line 1'); // Assumes writeln to file works
+  writeln(f, 'Line 2');
+  close(f);
+  // No direct assert, relies on next steps
+
+  // Test reset, readln, close
+  assign(f, FILENAME);
+  reset(f);
+  AssertEqualBool(false, eof(f), 'eof(f) after reset'); // Should not be EOF yet
+  readln(f, s1);
+  AssertEqualStr('Line 1', s1, 'readln(f, s1)');
+  AssertEqualBool(false, eof(f), 'eof(f) after read 1');
+  readln(f, s2);
+  AssertEqualStr('Line 2', s2, 'readln(f, s2)');
+  AssertEqualBool(true, eof(f), 'eof(f) after read 2'); // Should be EOF now
+  close(f);
+
+  // Test IOResult (success case)
+  i := ioresult; AssertEqualInt(0, i, 'ioresult after successful close');
+
+  // Test IOResult (failure case - reset non-existent file)
+  assign(f, '/tmp/pscal_no_such_file.xyz');
+  reset(f); // This should fail
+  i := ioresult; // Read the error code
+  Assert(i <> 0, 'ioresult after failed reset');
+  // Note: Specific error code is OS/runtime dependent, just check not zero
+
+end;
+
+
+procedure TestStringCharBuiltins;
+begin
+  writeln('-- Testing String/Char Builtins --');
+  // Functions: copy, pos, length, upcase, chr, ord, IntToStr
+
+  s1 := 'Pascal Programming';
+  s2 := copy(s1, 8, 11); AssertEqualStr('Programming', s2, 'copy(s1, 8, 11)');
+  s2 := copy(s1, 1, 6); AssertEqualStr('Pascal', s2, 'copy(s1, 1, 6)');
+  s2 := copy(s1, 20, 5); AssertEqualStr('', s2, 'copy(s1, 20, 5) OOB'); // Start out of bounds
+  s2 := copy(s1, 8, 20); AssertEqualStr('Programming', s2, 'copy(s1, 8, 20) Long count'); // Count too long
+
+  i := pos('cal', s1); AssertEqualInt(4, i, 'pos("cal", s1)');
+  i := pos('ram', s1); AssertEqualInt(12, i, 'pos("ram", s1)');
+  i := pos('Basic', s1); AssertEqualInt(0, i, 'pos("Basic", s1) Not found');
+  i := pos('', s1); AssertEqualInt(1, i, 'pos("", s1)'); // Standard Pascal returns 1
+
+  i := length(s1); AssertEqualInt(18, i, 'length(s1)');
+  i := length(''); AssertEqualInt(0, i, 'length("")');
+
+  c := upcase('a'); AssertEqualChar('A', c, 'upcase(''a'')');
+  c := upcase('A'); AssertEqualChar('A', c, 'upcase(''A'')');
+  c := upcase('5'); AssertEqualChar('5', c, 'upcase(''5'')');
+  c := upcase(' '); AssertEqualChar(' ', c, 'upcase('' '')');
+
+  c := chr(65); AssertEqualChar('A', c, 'chr(65)');
+  c := chr(97); AssertEqualChar('a', c, 'chr(97)');
+  c := chr(0); AssertEqualChar(#0, c, 'chr(0)'); // Null character
+
+  i := ord('A'); AssertEqualInt(65, i, 'ord(''A'')');
+  i := ord('a'); AssertEqualInt(97, i, 'ord(''a'')');
+  i := ord(#0); AssertEqualInt(0, i, 'ord(#0)');
+
+  s := IntToStr(12345); AssertEqualStr('12345', s, 'IntToStr(12345)');
+  s := IntToStr(-987); AssertEqualStr('-987', s, 'IntToStr(-987)');
+  s := IntToStr(0); AssertEqualStr('0', s, 'IntToStr(0)');
+end;
+
+procedure TestOrdinalBuiltins;
+type
+  TMyEnum = (RedVal, GreenVal, BlueVal);
+var
+  myVal: TMyEnum;
+  boolVal: Boolean;
+  charVal: Char;
+  intVal: Integer;
+begin
+  writeln('-- Testing Ordinal Builtins --');
+  // Functions: low, high, succ, pred (pred not listed in main.c)
+  // Procedures: inc, dec
+
+  // Low / High (requires type identifier as argument)
+  intVal := low(integer); Assert(intVal <= 0, 'low(integer)'); // Exact min_int varies
+  intVal := high(integer); Assert(intVal > 2000000000, 'high(integer)'); // Exact max_int varies
+  charVal := low(char); AssertEqualChar(#0, charVal, 'low(char)');
+  charVal := high(char); AssertEqualChar(#255, charVal, 'high(char)');
+  boolVal := low(boolean); AssertEqualBool(false, boolVal, 'low(boolean)');
+  boolVal := high(boolean); AssertEqualBool(true, boolVal, 'high(boolean)');
+  myVal := low(TMyEnum); AssertEqualInt(Ord(RedVal), Ord(myVal), 'low(TMyEnum)'); // Assumes Enum is registered
+  myVal := high(TMyEnum); AssertEqualInt(Ord(BlueVal), Ord(myVal), 'high(TMyEnum)');
+
+  // Succ
+  charVal := succ('A'); AssertEqualChar('B', charVal, 'succ(''A'')');
+  boolVal := succ(false); AssertEqualBool(true, boolVal, 'succ(false)');
+  myVal := succ(RedVal); AssertEqualInt(Ord(GreenVal), Ord(myVal), 'succ(RedVal)');
+  // pred not listed, skipping
+
+  // Inc / Dec (Procedures)
+  i := 5; inc(i); AssertEqualInt(6, i, 'inc(i)');
+  inc(i, 10); AssertEqualInt(16, i, 'inc(i, 10)');
+  // dec not listed, skipping
+  c := 'C'; (* dec(c); AssertEqualChar('B', c, 'dec(c)'); *) // dec not registered
+  myVal := BlueVal; (* dec(myVal); AssertEqualInt(Ord(GreenVal), Ord(myVal), 'dec(BlueVal)'); *) // dec not registered
+
+end;
+
+procedure TestSystemBuiltins;
+var
+  rRand: Real;
+  iRand: Integer;
+begin
+  writeln('-- Testing System Builtins --');
+  // Procedures: halt, randomize, delay
+  // Functions: random, paramcount, paramstr, readkey, keypressed
+
+  randomize; // Procedure, just call it to ensure no crash
+  Assert(true, 'randomize call');
+
+  rRand := random; Assert((rRand >= 0.0) and (rRand < 1.0), 'random() real');
+  iRand := random(100); Assert((iRand >= 0) and (iRand < 100), 'random(100)

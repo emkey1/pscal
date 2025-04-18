@@ -1,0 +1,116 @@
+program CrtDemo;
+
+uses CRT;
+
+const
+  MaxX = 80; // Assuming a standard 80-column width
+  MaxY = 24; // Assuming a standard 24-row height
+
+var
+  i, x, y: integer;
+  ch: char;
+
+// Helper procedure to draw a horizontal line
+procedure HLine(x1, y1, len: integer; color: byte);
+var k: integer;
+begin
+  TextBackground(color);
+  GotoXY(x1, y1);
+  for k := 1 to len do
+  begin
+    write(' '); // Write a space with the background color
+  end;
+  TextBackground(Black); // Reset background
+end;
+
+// Helper procedure to draw a vertical line
+procedure VLine(x1, y1, len: integer; color: byte);
+var k: integer;
+begin
+  TextBackground(color);
+  for k := 0 to len - 1 do
+  begin
+    GotoXY(x1, y1 + k);
+    write(' ');
+  end;
+  TextBackground(Black);
+end;
+
+// Helper procedure to draw a simple box
+procedure DrawBox(x1, y1, x2, y2: integer; color: byte);
+begin
+  HLine(x1, y1, x2 - x1 + 1, color); // Top
+  HLine(x1, y2, x2 - x1 + 1, color); // Bottom
+  VLine(x1, y1 + 1, y2 - y1 - 1, color); // Left
+  VLine(x2, y1 + 1, y2 - y1 - 1, color); // Right
+end;
+
+begin
+  ClrScr; // Clear the screen
+  HideCursor; // Hide the blinking cursor
+
+  // --- Demonstrate Colors and Positioning ---
+  TextColor(White);
+  TextBackground(Blue);
+  GotoXY(10, 2); // Go to column 10, row 2
+  writeln('======= CRT Demo =======');
+  TextBackground(Black); // Reset background
+
+  // Display color swatches
+  GotoXY(5, 4);
+  writeln('Color Palette:');
+  for i := 0 to 15 do
+  begin
+    GotoXY(5 + (i * 4), 5); // Position swatch
+    TextColor(i);
+    if i = Black then TextColor(White); // Make black visible on black bg
+    TextBackground(i);
+    write(' Txt '); // Show text on background
+    TextBackground(Black); // Reset background for spacing
+    write(' ');
+
+    GotoXY(5 + (i * 4), 6);
+    TextColor(White);
+    write(i:2); // Write the color number
+  end;
+  TextColor(White); // Reset text color
+
+  // --- Draw some boxes ---
+  DrawBox(4, 8, 24, 12, Red);
+  GotoXY(6, 10); TextColor(Yellow); write('Red Box');
+
+  DrawBox(55, 8, 75, 12, Green);
+  GotoXY(57, 10); TextColor(LightCyan); write('Green Box');
+
+  // --- Demonstrate WhereX/WhereY and ClrEOL ---
+  TextColor(LightGray);
+  GotoXY(1, 15);
+  write('This line will be partially cleared -> ');
+  x := WhereX; // Get current X position
+  y := WhereY; // Get current Y position
+  write('*********');
+  Delay(1500); // Pause for 1.5 seconds
+  GotoXY(x, y); // Go back to the saved position
+  ClrEOL; // Clear to end of line
+  GotoXY(x, y); // Go back again
+  write('(Cleared!)');
+
+  // --- Wait for key press ---
+  GotoXY(1, MaxY - 2); // Position near the bottom
+  TextColor(White);
+  TextBackground(DarkGray);
+  write(' Current Cursor Position: X=', WhereX, ', Y=', WhereY, ' '); // Show initial pos after write
+  TextBackground(Black);
+
+  GotoXY(1, MaxY - 1);
+  TextColor(LightMagenta);
+  write('Press any key to exit...');
+
+  ch := ReadKey; // Wait for a single key press
+
+  ShowCursor; // Make cursor visible again
+  NormalColors; // Reset colors to default
+  ClrScr; // Clear screen on exit
+  writeln('CRT Demo Finished. You pressed: ', ch, ' (Ord=', Ord(ch), ')');
+
+end.

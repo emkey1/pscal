@@ -1,0 +1,103 @@
+program TestKeyPressed;
+
+uses CRT;
+
+var
+  ch: char;
+  isPressed: boolean;
+  counter: longint; // Use longint for potentially fast loops
+  exitKey: char;
+
+begin
+  ClrScr;
+  TextColor(White);
+  TextBackground(Black);
+  writeln('--- KeyPressed Test ---');
+  writeln('This program continuously checks KeyPressed.');
+  writeln('It will report True when a key buffer contains data.');
+  writeln('Press various keys to see them detected.');
+  writeln('Press <Esc> to quit the test.');
+  writeln('-----------------------');
+
+  counter := 0;
+  exitKey := #27; // Use Escape key to exit the main loop
+
+  GotoXY(1, 7); write('Status:');
+  GotoXY(1, 8); write('Last Key:');
+  HideCursor;
+
+  repeat
+    Inc(counter);
+
+    // --- Check KeyPressed ---
+    isPressed := KeyPressed;
+
+    // --- Update Status Display ---
+    GotoXY(10, 7); ClrEol;
+    if isPressed then
+    begin
+      TextColor(LightGreen);
+      write('True  (Key available)');
+    end
+    else
+    begin
+      TextColor(Yellow);
+      // Only update the 'False' status occasionally to reduce flicker
+      if (counter mod 100 = 0) or (counter = 1) then
+      begin
+          write('False (Loop: ', counter, ')');
+      end;
+    end;
+    TextColor(White); // Reset color
+
+    // --- If a key was pressed, read and process it ---
+    if isPressed then
+    begin
+      ch := ReadKey; // Consume the key
+
+      GotoXY(10, 8); ClrEol; // Clear previous key info
+      TextColor(LightCyan);
+      if (Ord(ch) >= 32) and (Ord(ch) <= 126) then
+        write('''', ch, '''')
+      else if Ord(ch) = 10 then write('<Enter>')
+      else if Ord(ch) = 13 then write('<CR>')
+      else if Ord(ch) = 27 then write('<Esc>')
+      else if Ord(ch) = 9 then write('<Tab>')
+      // Add more special key checks if needed (e.g., for arrow keys if ReadKey returns them)
+      else write('Non-Printable');
+
+      writeln(' (Ord = ', Ord(ch), ')');
+      TextColor(White);
+
+      // Reset counter after processing a key
+      counter := 0;
+
+      // Check if the consumed key is the exit key
+      if ch = exitKey then
+      begin
+          GotoXY(1,12); Write('Exit key pressed!'); Delay(500);
+          // Break loop implicitly by letting 'until' condition be met
+      end
+      else
+      begin
+           GotoXY(1,10); ClrEol; write('Press another key or <Esc> to quit...');
+      end;
+
+    end;
+
+    // Add a tiny delay to prevent 100% CPU usage,
+    // but keep it small to maintain responsiveness.
+    // Remove or adjust if performance is acceptable without it.
+    // Delay(1);
+
+  until ch = exitKey; // Exit loop when the exit key is consumed
+
+
+  // --- Cleanup ---
+  GotoXY(1, 14); ClrEol;
+  TextColor(LightGreen);
+  writeln('KeyPressed test finished.');
+  ShowCursor;
+  NormalColors;
+
+end.

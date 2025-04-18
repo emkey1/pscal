@@ -1,0 +1,1866 @@
+Node(type=PROGRAM, token="program", var_type=VOID)
+  Left:
+    Node(type=VARIABLE, token="testsuite", var_type=VOID)
+  Right:
+    Node(type=BLOCK, var_type=VOID)
+      Children (2):
+        Node(type=COMPOUND, var_type=VOID)
+          Children (29):
+            Node(type=CONST_DECL, token="greeting", var_type=VOID)
+              Left:
+                Node(type=STRING, token="Hello, world!", var_type=STRING)
+            Node(type=TYPE_DECL, token="tstudent", var_type=VOID)
+              Left:
+                Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                  Children (3):
+                    Node(type=VAR_DECL, var_type=INTEGER)
+                      Right:
+                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Children (1):
+                        Node(type=VARIABLE, token="id", var_type=VOID)
+                    Node(type=VAR_DECL, var_type=STRING)
+                      Right:
+                        Node(type=VARIABLE, token="string", var_type=STRING)
+                      Children (1):
+                        Node(type=VARIABLE, token="name", var_type=VOID)
+                    Node(type=VAR_DECL, var_type=REAL)
+                      Right:
+                        Node(type=VARIABLE, token="real", var_type=REAL)
+                      Children (1):
+                        Node(type=VARIABLE, token="grade", var_type=VOID)
+            Node(type=VAR_DECL, var_type=INTEGER)
+              Right:
+                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+              Children (3):
+                Node(type=VARIABLE, token="a", var_type=INTEGER)
+                  Right:
+                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                Node(type=VARIABLE, token="b", var_type=INTEGER)
+                  Right:
+                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                Node(type=VARIABLE, token="c", var_type=INTEGER)
+                  Right:
+                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+            Node(type=VAR_DECL, var_type=REAL)
+              Right:
+                Node(type=VARIABLE, token="real", var_type=REAL)
+              Children (1):
+                Node(type=VARIABLE, token="r", var_type=REAL)
+                  Right:
+                    Node(type=VARIABLE, token="real", var_type=REAL)
+            Node(type=VAR_DECL, var_type=STRING)
+              Right:
+                Node(type=VARIABLE, token="string", var_type=STRING)
+              Children (1):
+                Node(type=VARIABLE, token="s", var_type=STRING)
+                  Right:
+                    Node(type=VARIABLE, token="string", var_type=STRING)
+            Node(type=VAR_DECL, var_type=RECORD)
+              Right:
+                Node(type=TYPE_REFERENCE, token="tstudent", var_type=RECORD)
+                  Right:
+                    Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                      Children (3):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="id", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="name", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=REAL)
+                          Right:
+                            Node(type=VARIABLE, token="real", var_type=REAL)
+                          Children (1):
+                            Node(type=VARIABLE, token="grade", var_type=VOID)
+              Children (1):
+                Node(type=VARIABLE, token="student", var_type=RECORD)
+                  Right:
+                    Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                      Children (3):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="id", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="name", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=REAL)
+                          Right:
+                            Node(type=VARIABLE, token="real", var_type=REAL)
+                          Children (1):
+                            Node(type=VARIABLE, token="grade", var_type=VOID)
+            Node(type=VAR_DECL, var_type=RECORD)
+              Right:
+                Node(type=TYPE_REFERENCE, token="tstudent", var_type=RECORD)
+                  Right:
+                    Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                      Children (3):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="id", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="name", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=REAL)
+                          Right:
+                            Node(type=VARIABLE, token="real", var_type=REAL)
+                          Children (1):
+                            Node(type=VARIABLE, token="grade", var_type=VOID)
+              Children (1):
+                Node(type=VARIABLE, token="st", var_type=RECORD)
+                  Right:
+                    Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                      Children (3):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="id", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="name", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=REAL)
+                          Right:
+                            Node(type=VARIABLE, token="real", var_type=REAL)
+                          Children (1):
+                            Node(type=VARIABLE, token="grade", var_type=VOID)
+            Node(type=VAR_DECL, var_type=FILE)
+              Right:
+                Node(type=VARIABLE, token="file", var_type=FILE)
+              Children (1):
+                Node(type=VARIABLE, token="f", var_type=FILE)
+                  Right:
+                    Node(type=VARIABLE, token="file", var_type=FILE)
+            Node(type=PROCEDURE_DECL, token="assertequalint", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (2):
+                    Node(type=WRITE, var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="START: ", var_type=STRING)
+                        Node(type=VARIABLE, token="testname", var_type=VOID)
+                        Node(type=STRING, token=": ", var_type=STRING)
+                    Node(type=IF, var_type=VOID)
+                      Left:
+                        Node(type=BINARY_OP, token="=", var_type=BOOLEAN)
+                          Left:
+                            Node(type=VARIABLE, token="expected", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="actual", var_type=VOID)
+                      Right:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (1):
+                            Node(type=STRING, token="PASS", var_type=STRING)
+                      Extra:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (5):
+                            Node(type=STRING, token="FAIL (expected: ", var_type=STRING)
+                            Node(type=VARIABLE, token="expected", var_type=VOID)
+                            Node(type=STRING, token=", got: ", var_type=STRING)
+                            Node(type=VARIABLE, token="actual", var_type=VOID)
+                            Node(type=STRING, token=")", var_type=STRING)
+              Children (3):
+                Node(type=VAR_DECL, var_type=INTEGER)
+                  Children (1):
+                    Node(type=VARIABLE, token="expected", var_type=VOID)
+                Node(type=VAR_DECL, var_type=INTEGER)
+                  Children (1):
+                    Node(type=VARIABLE, token="actual", var_type=VOID)
+                Node(type=VAR_DECL, var_type=STRING)
+                  Children (1):
+                    Node(type=VARIABLE, token="testname", var_type=VOID)
+            Node(type=PROCEDURE_DECL, token="assertequalstr", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (2):
+                    Node(type=WRITE, var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="START: ", var_type=STRING)
+                        Node(type=VARIABLE, token="testname", var_type=VOID)
+                        Node(type=STRING, token=": ", var_type=STRING)
+                    Node(type=IF, var_type=VOID)
+                      Left:
+                        Node(type=BINARY_OP, token="=", var_type=BOOLEAN)
+                          Left:
+                            Node(type=VARIABLE, token="expected", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="actual", var_type=VOID)
+                      Right:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (1):
+                            Node(type=STRING, token="PASS", var_type=STRING)
+                      Extra:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (5):
+                            Node(type=STRING, token="FAIL (expected: ", var_type=STRING)
+                            Node(type=VARIABLE, token="expected", var_type=VOID)
+                            Node(type=STRING, token=", got: ", var_type=STRING)
+                            Node(type=VARIABLE, token="actual", var_type=VOID)
+                            Node(type=STRING, token=")", var_type=STRING)
+              Children (3):
+                Node(type=VAR_DECL, var_type=STRING)
+                  Children (1):
+                    Node(type=VARIABLE, token="expected", var_type=VOID)
+                Node(type=VAR_DECL, var_type=STRING)
+                  Children (1):
+                    Node(type=VARIABLE, token="actual", var_type=VOID)
+                Node(type=VAR_DECL, var_type=STRING)
+                  Children (1):
+                    Node(type=VARIABLE, token="testname", var_type=VOID)
+            Node(type=PROCEDURE_DECL, token="assertequalbool", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (2):
+                    Node(type=WRITE, var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="START: ", var_type=STRING)
+                        Node(type=VARIABLE, token="testname", var_type=VOID)
+                        Node(type=STRING, token=": ", var_type=STRING)
+                    Node(type=IF, var_type=VOID)
+                      Left:
+                        Node(type=BINARY_OP, token="=", var_type=BOOLEAN)
+                          Left:
+                            Node(type=VARIABLE, token="expected", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="actual", var_type=VOID)
+                      Right:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (1):
+                            Node(type=STRING, token="PASS", var_type=STRING)
+                      Extra:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (5):
+                            Node(type=STRING, token="FAIL (expected: ", var_type=STRING)
+                            Node(type=VARIABLE, token="expected", var_type=VOID)
+                            Node(type=STRING, token=", got: ", var_type=STRING)
+                            Node(type=VARIABLE, token="actual", var_type=VOID)
+                            Node(type=STRING, token=")", var_type=STRING)
+              Children (3):
+                Node(type=VAR_DECL, var_type=BOOLEAN)
+                  Children (1):
+                    Node(type=VARIABLE, token="expected", var_type=VOID)
+                Node(type=VAR_DECL, var_type=BOOLEAN)
+                  Children (1):
+                    Node(type=VARIABLE, token="actual", var_type=VOID)
+                Node(type=VAR_DECL, var_type=STRING)
+                  Children (1):
+                    Node(type=VARIABLE, token="testname", var_type=VOID)
+            Node(type=PROCEDURE_DECL, token="assertequalreal", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (2):
+                    Node(type=WRITE, var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="START: ", var_type=STRING)
+                        Node(type=VARIABLE, token="testname", var_type=VOID)
+                        Node(type=STRING, token=": ", var_type=STRING)
+                    Node(type=IF, var_type=VOID)
+                      Left:
+                        Node(type=BINARY_OP, token="<", var_type=REAL)
+                          Left:
+                            Node(type=PROCEDURE_CALL, token="abs", var_type=VOID)
+                              Children (1):
+                                Node(type=BINARY_OP, token="-", var_type=INTEGER)
+                                  Left:
+                                    Node(type=VARIABLE, token="expected", var_type=VOID)
+                                  Right:
+                                    Node(type=VARIABLE, token="actual", var_type=VOID)
+                          Right:
+                            Node(type=NUMBER, token="0.0001", var_type=REAL)
+                      Right:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (1):
+                            Node(type=STRING, token="PASS", var_type=STRING)
+                      Extra:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (5):
+                            Node(type=STRING, token="FAIL (expected: ", var_type=STRING)
+                            Node(type=FORMATTED_EXPR, token="0,4", var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="expected", var_type=VOID)
+                            Node(type=STRING, token=", got: ", var_type=STRING)
+                            Node(type=FORMATTED_EXPR, token="0,4", var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="actual", var_type=VOID)
+                            Node(type=STRING, token=")", var_type=STRING)
+              Children (3):
+                Node(type=VAR_DECL, var_type=REAL)
+                  Children (1):
+                    Node(type=VARIABLE, token="expected", var_type=VOID)
+                Node(type=VAR_DECL, var_type=REAL)
+                  Children (1):
+                    Node(type=VARIABLE, token="actual", var_type=VOID)
+                Node(type=VAR_DECL, var_type=STRING)
+                  Children (1):
+                    Node(type=VARIABLE, token="testname", var_type=VOID)
+            Node(type=PROCEDURE_DECL, token="testarithmetic", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (10):
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="a", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=NUMBER, token="10", var_type=INTEGER)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="b", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=NUMBER, token="20", var_type=INTEGER)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="a", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="b", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                      Children (3):
+                        Node(type=NUMBER, token="30", var_type=INTEGER)
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=STRING, token="Addition Test", var_type=STRING)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=BINARY_OP, token="-", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="b", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="a", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                      Children (3):
+                        Node(type=NUMBER, token="10", var_type=INTEGER)
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=STRING, token="Subtraction Test", var_type=STRING)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=BINARY_OP, token="*", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="a", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="3", var_type=INTEGER)
+                    Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                      Children (3):
+                        Node(type=NUMBER, token="30", var_type=INTEGER)
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=STRING, token="Multiplication Test", var_type=STRING)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=BINARY_OP, token="div", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="b", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="a", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                      Children (3):
+                        Node(type=NUMBER, token="2", var_type=INTEGER)
+                        Node(type=VARIABLE, token="c", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=STRING, token="Integer Division Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testoperatorprecedence", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="res", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (2):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                              Left:
+                                Node(type=NUMBER, token="2", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token="*", var_type=INTEGER)
+                                  Left:
+                                    Node(type=NUMBER, token="3", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="4", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="14", var_type=INTEGER)
+                            Node(type=VARIABLE, token="res", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Operator Precedence Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testcontrolstructures", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (2):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (14):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="0", var_type=INTEGER)
+                        Node(type=FOR_TO, token="i", var_type=VOID)
+                          Left:
+                            Node(type=NUMBER, token="1", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="5", var_type=INTEGER)
+                          Extra:
+                            Node(type=ASSIGN, var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                  Left:
+                                    Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="15", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="For Loop Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="1", var_type=INTEGER)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="0", var_type=INTEGER)
+                        Node(type=WHILE, var_type=VOID)
+                          Left:
+                            Node(type=BINARY_OP, token="<=", var_type=BOOLEAN)
+                              Left:
+                                Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=NUMBER, token="5", var_type=INTEGER)
+                          Right:
+                            Node(type=COMPOUND, var_type=VOID)
+                              Children (2):
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                      Left:
+                                        Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                      Left:
+                                        Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Right:
+                                        Node(type=NUMBER, token="1", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="15", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="While Loop Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="0", var_type=INTEGER)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="1", var_type=INTEGER)
+                        Node(type=REPEAT, var_type=VOID)
+                          Left:
+                            Node(type=COMPOUND, var_type=VOID)
+                              Children (2):
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                      Left:
+                                        Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                      Left:
+                                        Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Right:
+                                        Node(type=NUMBER, token="1", var_type=INTEGER)
+                          Right:
+                            Node(type=BINARY_OP, token=">", var_type=BOOLEAN)
+                              Left:
+                                Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=NUMBER, token="5", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="15", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Repeat Loop Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="0", var_type=INTEGER)
+                        Node(type=FOR_DOWNTO, token="i", var_type=VOID)
+                          Left:
+                            Node(type=NUMBER, token="5", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="1", var_type=INTEGER)
+                          Extra:
+                            Node(type=ASSIGN, var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                  Left:
+                                    Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="15", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="For Downto Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="teststringoperations", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (4):
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="s", var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                      Right:
+                        Node(type=STRING, token="Test", var_type=STRING)
+                    Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="Test", var_type=STRING)
+                        Node(type=VARIABLE, token="s", var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=STRING, token="String Assignment Test", var_type=STRING)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="s", var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                      Right:
+                        Node(type=BINARY_OP, token="+", var_type=STRING)
+                          Left:
+                            Node(type=VARIABLE, token="s", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                          Right:
+                            Node(type=STRING, token="ing", var_type=STRING)
+                    Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="Testing", var_type=STRING)
+                        Node(type=VARIABLE, token="s", var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=STRING, token="String Concatenation Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testupcase", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=CHAR)
+                          Right:
+                            Node(type=VARIABLE, token="char", var_type=CHAR)
+                          Children (1):
+                            Node(type=VARIABLE, token="c", var_type=CHAR)
+                              Right:
+                                Node(type=VARIABLE, token="char", var_type=CHAR)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (2):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="c", var_type=CHAR)
+                              Right:
+                                Node(type=VARIABLE, token="char", var_type=CHAR)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="upcase", var_type=VOID)
+                              Children (1):
+                                Node(type=STRING, token="p", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                          Children (3):
+                            Node(type=STRING, token="P", var_type=STRING)
+                            Node(type=BINARY_OP, token="+", var_type=STRING)
+                              Left:
+                                Node(type=PROCEDURE_CALL, token="upcase", var_type=VOID)
+                                  Children (1):
+                                    Node(type=STRING, token="p", var_type=STRING)
+                              Right:
+                                Node(type=STRING, token="", var_type=STRING)
+                            Node(type=STRING, token="Upcase Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testrecord", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (4):
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=FIELD_ACCESS, token="id", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="st", var_type=RECORD)
+                              Right:
+                                Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                                  Children (3):
+                                    Node(type=VAR_DECL, var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="id", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="name", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=REAL)
+                                      Right:
+                                        Node(type=VARIABLE, token="real", var_type=REAL)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="grade", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=NUMBER, token="100", var_type=INTEGER)
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=FIELD_ACCESS, token="name", var_type=STRING)
+                          Left:
+                            Node(type=VARIABLE, token="st", var_type=RECORD)
+                              Right:
+                                Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                                  Children (3):
+                                    Node(type=VAR_DECL, var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="id", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="name", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=REAL)
+                                      Right:
+                                        Node(type=VARIABLE, token="real", var_type=REAL)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="grade", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                      Right:
+                        Node(type=STRING, token="Alice", var_type=STRING)
+                    Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                      Children (3):
+                        Node(type=NUMBER, token="100", var_type=INTEGER)
+                        Node(type=FIELD_ACCESS, token="id", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="st", var_type=RECORD)
+                              Right:
+                                Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                                  Children (3):
+                                    Node(type=VAR_DECL, var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="id", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="name", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=REAL)
+                                      Right:
+                                        Node(type=VARIABLE, token="real", var_type=REAL)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="grade", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=STRING, token="Record Field (id) Test", var_type=STRING)
+                    Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                      Children (3):
+                        Node(type=STRING, token="Alice", var_type=STRING)
+                        Node(type=FIELD_ACCESS, token="name", var_type=STRING)
+                          Left:
+                            Node(type=VARIABLE, token="st", var_type=RECORD)
+                              Right:
+                                Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                                  Children (3):
+                                    Node(type=VAR_DECL, var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="id", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="name", var_type=VOID)
+                                    Node(type=VAR_DECL, var_type=REAL)
+                                      Right:
+                                        Node(type=VARIABLE, token="real", var_type=REAL)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="grade", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=STRING, token="Record Field (name) Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testarray", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (2):
+                        Node(type=VAR_DECL, var_type=ARRAY)
+                          Right:
+                            Node(type=ARRAY_TYPE, var_type=ARRAY)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=VOID)
+                              Children (1):
+                                Node(type=SUBRANGE, var_type=VOID)
+                                  Left:
+                                    Node(type=NUMBER, token="1", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="5", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="arr", var_type=ARRAY)
+                              Right:
+                                Node(type=ARRAY_TYPE, var_type=ARRAY)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=VOID)
+                                  Children (1):
+                                    Node(type=SUBRANGE, var_type=VOID)
+                                      Left:
+                                        Node(type=NUMBER, token="1", var_type=INTEGER)
+                                      Right:
+                                        Node(type=NUMBER, token="5", var_type=INTEGER)
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (2):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (4):
+                        Node(type=FOR_TO, token="i", var_type=VOID)
+                          Left:
+                            Node(type=NUMBER, token="1", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="5", var_type=INTEGER)
+                          Extra:
+                            Node(type=ASSIGN, var_type=VOID)
+                              Left:
+                                Node(type=ARRAY_ACCESS, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="arr", var_type=ARRAY)
+                                      Right:
+                                        Node(type=ARRAY_TYPE, var_type=ARRAY)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=VOID)
+                                          Children (1):
+                                            Node(type=SUBRANGE, var_type=VOID)
+                                              Left:
+                                                Node(type=NUMBER, token="1", var_type=INTEGER)
+                                              Right:
+                                                Node(type=NUMBER, token="5", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=VOID)
+                                  Children (1):
+                                    Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token="*", var_type=INTEGER)
+                                  Left:
+                                    Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="2", var_type=INTEGER)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="0", var_type=INTEGER)
+                        Node(type=FOR_TO, token="i", var_type=VOID)
+                          Left:
+                            Node(type=NUMBER, token="1", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="5", var_type=INTEGER)
+                          Extra:
+                            Node(type=ASSIGN, var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                                  Left:
+                                    Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                                  Right:
+                                    Node(type=ARRAY_ACCESS, var_type=VOID)
+                                      Left:
+                                        Node(type=VARIABLE, token="arr", var_type=ARRAY)
+                                          Right:
+                                            Node(type=ARRAY_TYPE, var_type=ARRAY)
+                                              Right:
+                                                Node(type=VARIABLE, token="integer", var_type=VOID)
+                                              Children (1):
+                                                Node(type=SUBRANGE, var_type=VOID)
+                                                  Left:
+                                                    Node(type=NUMBER, token="1", var_type=INTEGER)
+                                                  Right:
+                                                    Node(type=NUMBER, token="5", var_type=INTEGER)
+                                      Right:
+                                        Node(type=VARIABLE, token="integer", var_type=VOID)
+                                      Children (1):
+                                        Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                          Right:
+                                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="30", var_type=INTEGER)
+                            Node(type=VARIABLE, token="sum", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Array Access Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testpassbyreference", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (1):
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="x", var_type=VOID)
+                      Right:
+                        Node(type=BINARY_OP, token="+", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="x", var_type=VOID)
+                          Right:
+                            Node(type=NUMBER, token="100", var_type=INTEGER)
+              Children (1):
+                Node(type=VAR_DECL, var_type=INTEGER)
+                  Children (1):
+                    Node(type=VARIABLE, token="x", var_type=VOID)
+            Node(type=PROCEDURE_DECL, token="testreference", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (3):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="5", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="testpassbyreference", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="105", var_type=INTEGER)
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Pass by Reference Test", var_type=STRING)
+            Node(type=FUNCTION_DECL, token="multiply", var_type=VOID)
+              Right:
+                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+              Extra:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (1):
+                    Node(type=ASSIGN, var_type=VOID)
+                      Left:
+                        Node(type=VARIABLE, token="multiply", var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                      Right:
+                        Node(type=BINARY_OP, token="*", var_type=INTEGER)
+                          Left:
+                            Node(type=VARIABLE, token="a", var_type=VOID)
+                          Right:
+                            Node(type=VARIABLE, token="b", var_type=VOID)
+              Children (2):
+                Node(type=VAR_DECL, var_type=INTEGER)
+                  Children (1):
+                    Node(type=VARIABLE, token="a", var_type=VOID)
+                Node(type=VAR_DECL, var_type=INTEGER)
+                  Children (1):
+                    Node(type=VARIABLE, token="b", var_type=VOID)
+            Node(type=PROCEDURE_DECL, token="testfunction", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="res", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (2):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="multiply", var_type=VOID)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Children (2):
+                                Node(type=NUMBER, token="7", var_type=INTEGER)
+                                Node(type=NUMBER, token="8", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="56", var_type=INTEGER)
+                            Node(type=VARIABLE, token="res", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Function Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testbooleanoperations", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=BOOLEAN)
+                          Right:
+                            Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                          Children (1):
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (6):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                          Right:
+                            Node(type=BINARY_OP, token="and", var_type=BOOLEAN)
+                              Left:
+                                Node(type=BINARY_OP, token=">", var_type=BOOLEAN)
+                                  Left:
+                                    Node(type=NUMBER, token="5", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="3", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token=">", var_type=BOOLEAN)
+                                  Left:
+                                    Node(type=NUMBER, token="3", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="2", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalbool", var_type=VOID)
+                          Children (3):
+                            Node(type=BOOLEAN, token="true", var_type=BOOLEAN)
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                            Node(type=STRING, token="Boolean AND Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                          Right:
+                            Node(type=BINARY_OP, token="or", var_type=BOOLEAN)
+                              Left:
+                                Node(type=BINARY_OP, token=">", var_type=BOOLEAN)
+                                  Left:
+                                    Node(type=NUMBER, token="5", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="3", var_type=INTEGER)
+                              Right:
+                                Node(type=BINARY_OP, token=">", var_type=BOOLEAN)
+                                  Left:
+                                    Node(type=NUMBER, token="2", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="3", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalbool", var_type=VOID)
+                          Children (3):
+                            Node(type=BOOLEAN, token="true", var_type=BOOLEAN)
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                            Node(type=STRING, token="Boolean OR Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                          Right:
+                            Node(type=UNARY_OP, token="not", var_type=BOOLEAN)
+                              Left:
+                                Node(type=BINARY_OP, token=">", var_type=BOOLEAN)
+                                  Left:
+                                    Node(type=NUMBER, token="5", var_type=INTEGER)
+                                  Right:
+                                    Node(type=NUMBER, token="3", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalbool", var_type=VOID)
+                          Children (3):
+                            Node(type=BOOLEAN, token="false", var_type=BOOLEAN)
+                            Node(type=VARIABLE, token="b", var_type=BOOLEAN)
+                              Right:
+                                Node(type=VARIABLE, token="boolean", var_type=BOOLEAN)
+                            Node(type=STRING, token="Boolean NOT Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testcase", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (2):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="x", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="resultstr", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (3):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="x", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="2", var_type=INTEGER)
+                        Node(type=CASE, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="x", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Extra:
+                            Node(type=ASSIGN, var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="resultstr", var_type=STRING)
+                                  Right:
+                                    Node(type=VARIABLE, token="string", var_type=STRING)
+                              Right:
+                                Node(type=STRING, token="unknown", var_type=STRING)
+                          Children (3):
+                            Node(type=CASE_BRANCH, var_type=VOID)
+                              Left:
+                                Node(type=NUMBER, token="1", var_type=INTEGER)
+                              Right:
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="resultstr", var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                  Right:
+                                    Node(type=STRING, token="one", var_type=STRING)
+                            Node(type=CASE_BRANCH, var_type=VOID)
+                              Left:
+                                Node(type=NUMBER, token="2", var_type=INTEGER)
+                              Right:
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="resultstr", var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                  Right:
+                                    Node(type=STRING, token="two", var_type=STRING)
+                            Node(type=CASE_BRANCH, var_type=VOID)
+                              Left:
+                                Node(type=NUMBER, token="3", var_type=INTEGER)
+                              Right:
+                                Node(type=ASSIGN, var_type=VOID)
+                                  Left:
+                                    Node(type=VARIABLE, token="resultstr", var_type=STRING)
+                                      Right:
+                                        Node(type=VARIABLE, token="string", var_type=STRING)
+                                  Right:
+                                    Node(type=STRING, token="three", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                          Children (3):
+                            Node(type=STRING, token="two", var_type=STRING)
+                            Node(type=VARIABLE, token="resultstr", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                            Node(type=STRING, token="Case Statement Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testfileio", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (1):
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="tmp", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (9):
+                        Node(type=PROCEDURE_CALL, token="assign", var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="/tmp/testfile.txt", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="rewrite", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="File Test", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="close", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=PROCEDURE_CALL, token="assign", var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="/tmp/testfile.txt", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="reset", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=READLN, var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=VARIABLE, token="tmp", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="close", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                          Children (3):
+                            Node(type=STRING, token="File Test", var_type=STRING)
+                            Node(type=VARIABLE, token="tmp", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                            Node(type=STRING, token="File I/O Test", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testmathbuiltins", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (2):
+                        Node(type=VAR_DECL, var_type=REAL)
+                          Right:
+                            Node(type=VARIABLE, token="real", var_type=REAL)
+                          Children (1):
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (18):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="cos", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="0.0", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="1.0", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Cosine of 0", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="sin", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="0.0", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="0.0", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Sine of 0", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="tan", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="0.0", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="0.0", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Tangent of 0", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="sqrt", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="4.0", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="2.0", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Square Root of 4", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="ln", var_type=VOID)
+                              Children (1):
+                                Node(type=PROCEDURE_CALL, token="exp", var_type=VOID)
+                                  Children (1):
+                                    Node(type=NUMBER, token="1.0", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="1.0", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Ln(exp(1))", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="exp", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="1.0", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=PROCEDURE_CALL, token="exp", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="1.0", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Exp(1)", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="abs", var_type=VOID)
+                              Children (1):
+                                Node(type=UNARY_OP, token="-", var_type=REAL)
+                                  Left:
+                                    Node(type=NUMBER, token="5.5", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalreal", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="5.5", var_type=REAL)
+                            Node(type=VARIABLE, token="res", var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                            Node(type=STRING, token="Abs(-5.5)", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="trunc", var_type=VOID)
+                              Children (1):
+                                Node(type=NUMBER, token="3.7", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="3", var_type=INTEGER)
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Trunc(3.7)", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="trunc", var_type=VOID)
+                              Children (1):
+                                Node(type=UNARY_OP, token="-", var_type=REAL)
+                                  Left:
+                                    Node(type=NUMBER, token="3.7", var_type=REAL)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=UNARY_OP, token="-", var_type=INTEGER)
+                              Left:
+                                Node(type=NUMBER, token="3", var_type=INTEGER)
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Trunc(-3.7)", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="testotherbuiltins", var_type=VOID)
+              Right:
+                Node(type=BLOCK, var_type=VOID)
+                  Children (2):
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (3):
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (2):
+                            Node(type=VARIABLE, token="str", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                            Node(type=VARIABLE, token="substr", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=VAR_DECL, var_type=FILE)
+                          Right:
+                            Node(type=VARIABLE, token="file", var_type=FILE)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                    Node(type=COMPOUND, var_type=VOID)
+                      Children (25):
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="str", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                          Right:
+                            Node(type=STRING, token="Hello, world!", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="substr", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="copy", var_type=VOID)
+                              Children (3):
+                                Node(type=VARIABLE, token="str", var_type=STRING)
+                                  Right:
+                                    Node(type=VARIABLE, token="string", var_type=STRING)
+                                Node(type=NUMBER, token="8", var_type=INTEGER)
+                                Node(type=NUMBER, token="5", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                          Children (3):
+                            Node(type=STRING, token="world", var_type=STRING)
+                            Node(type=VARIABLE, token="substr", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                            Node(type=STRING, token="Copy Function Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="pos", var_type=VOID)
+                              Children (2):
+                                Node(type=STRING, token="world", var_type=STRING)
+                                Node(type=VARIABLE, token="str", var_type=STRING)
+                                  Right:
+                                    Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="8", var_type=INTEGER)
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Pos Function Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="length", var_type=VOID)
+                              Children (1):
+                                Node(type=VARIABLE, token="str", var_type=STRING)
+                                  Right:
+                                    Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="13", var_type=INTEGER)
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Length Function Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=NUMBER, token="10", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="inc", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                        Node(type=PROCEDURE_CALL, token="assertequalint", var_type=VOID)
+                          Children (3):
+                            Node(type=NUMBER, token="11", var_type=INTEGER)
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                            Node(type=STRING, token="Inc Function Test", var_type=STRING)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="str", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="upcase", var_type=VOID)
+                              Children (1):
+                                Node(type=STRING, token="a", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                          Children (3):
+                            Node(type=STRING, token="A", var_type=STRING)
+                            Node(type=VARIABLE, token="str", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                            Node(type=STRING, token="Upcase Function Test", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assign", var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="/tmp/temp_test.txt", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="rewrite", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="Test", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="close", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=PROCEDURE_CALL, token="assign", var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="/tmp/temp_test.txt", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="reset", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=READLN, var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=VARIABLE, token="str", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="close", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=PROCEDURE_CALL, token="assertequalstr", var_type=VOID)
+                          Children (3):
+                            Node(type=STRING, token="Test", var_type=STRING)
+                            Node(type=VARIABLE, token="str", var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                            Node(type=STRING, token="File I/O Builtins Test", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="assign", var_type=VOID)
+                          Children (2):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                            Node(type=STRING, token="/tmp/nonexistent_file.txt", var_type=STRING)
+                        Node(type=PROCEDURE_CALL, token="reset", var_type=VOID)
+                          Children (1):
+                            Node(type=VARIABLE, token="f", var_type=FILE)
+                              Right:
+                                Node(type=VARIABLE, token="file", var_type=FILE)
+                        Node(type=ASSIGN, var_type=VOID)
+                          Left:
+                            Node(type=VARIABLE, token="i", var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Right:
+                            Node(type=PROCEDURE_CALL, token="ioresult", var_type=VOID)
+                        Node(type=IF, var_type=VOID)
+                          Left:
+                            Node(type=BINARY_OP, token="<>", var_type=BOOLEAN)
+                              Left:
+                                Node(type=VARIABLE, token="i", var_type=INTEGER)
+                                  Right:
+                                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Right:
+                                Node(type=NUMBER, token="0", var_type=INTEGER)
+                          Right:
+                            Node(type=WRITELN, var_type=VOID)
+                              Children (1):
+                                Node(type=STRING, token="START: IOResult Test: PASS", var_type=STRING)
+                          Extra:
+                            Node(type=WRITELN, var_type=VOID)
+                              Children (1):
+                                Node(type=STRING, token="START: IOResult Test: FAIL", var_type=STRING)
+            Node(type=PROCEDURE_DECL, token="printstudent", var_type=VOID)
+              Right:
+                Node(type=COMPOUND, var_type=VOID)
+                  Children (1):
+                    Node(type=IF, var_type=VOID)
+                      Left:
+                        Node(type=BINARY_OP, token="=", var_type=BOOLEAN)
+                          Left:
+                            Node(type=FIELD_ACCESS, token="id", var_type=VOID)
+                              Left:
+                                Node(type=VARIABLE, token="student", var_type=VOID)
+                          Right:
+                            Node(type=NUMBER, token="123", var_type=INTEGER)
+                      Right:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (1):
+                            Node(type=STRING, token="START: RecordPassing Test: PASS", var_type=STRING)
+                      Extra:
+                        Node(type=WRITELN, var_type=VOID)
+                          Children (1):
+                            Node(type=STRING, token="START: RecordPassing Test: FAIL", var_type=STRING)
+              Children (1):
+                Node(type=VAR_DECL, var_type=RECORD)
+                  Children (1):
+                    Node(type=VARIABLE, token="student", var_type=VOID)
+        Node(type=COMPOUND, var_type=VOID)
+          Children (20):
+            Node(type=WRITELN, var_type=VOID)
+              Children (1):
+                Node(type=STRING, token="Running pscal Test Suite", var_type=STRING)
+            Node(type=PROCEDURE_CALL, token="testarithmetic", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testoperatorprecedence", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testcontrolstructures", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="teststringoperations", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testupcase", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testrecord", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testarray", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testreference", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testfunction", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testbooleanoperations", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testcase", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testfileio", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testmathbuiltins", var_type=VOID)
+            Node(type=PROCEDURE_CALL, token="testotherbuiltins", var_type=VOID)
+            Node(type=ASSIGN, var_type=VOID)
+              Left:
+                Node(type=FIELD_ACCESS, token="id", var_type=INTEGER)
+                  Left:
+                    Node(type=VARIABLE, token="student", var_type=RECORD)
+                      Right:
+                        Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                          Children (3):
+                            Node(type=VAR_DECL, var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Children (1):
+                                Node(type=VARIABLE, token="id", var_type=VOID)
+                            Node(type=VAR_DECL, var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                              Children (1):
+                                Node(type=VARIABLE, token="name", var_type=VOID)
+                            Node(type=VAR_DECL, var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                              Children (1):
+                                Node(type=VARIABLE, token="grade", var_type=VOID)
+                  Right:
+                    Node(type=VARIABLE, token="integer", var_type=INTEGER)
+              Right:
+                Node(type=NUMBER, token="123", var_type=INTEGER)
+            Node(type=ASSIGN, var_type=VOID)
+              Left:
+                Node(type=FIELD_ACCESS, token="grade", var_type=REAL)
+                  Left:
+                    Node(type=VARIABLE, token="student", var_type=RECORD)
+                      Right:
+                        Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                          Children (3):
+                            Node(type=VAR_DECL, var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Children (1):
+                                Node(type=VARIABLE, token="id", var_type=VOID)
+                            Node(type=VAR_DECL, var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                              Children (1):
+                                Node(type=VARIABLE, token="name", var_type=VOID)
+                            Node(type=VAR_DECL, var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                              Children (1):
+                                Node(type=VARIABLE, token="grade", var_type=VOID)
+                  Right:
+                    Node(type=VARIABLE, token="real", var_type=REAL)
+              Right:
+                Node(type=NUMBER, token="88.5", var_type=REAL)
+            Node(type=ASSIGN, var_type=VOID)
+              Left:
+                Node(type=FIELD_ACCESS, token="name", var_type=STRING)
+                  Left:
+                    Node(type=VARIABLE, token="student", var_type=RECORD)
+                      Right:
+                        Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                          Children (3):
+                            Node(type=VAR_DECL, var_type=INTEGER)
+                              Right:
+                                Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                              Children (1):
+                                Node(type=VARIABLE, token="id", var_type=VOID)
+                            Node(type=VAR_DECL, var_type=STRING)
+                              Right:
+                                Node(type=VARIABLE, token="string", var_type=STRING)
+                              Children (1):
+                                Node(type=VARIABLE, token="name", var_type=VOID)
+                            Node(type=VAR_DECL, var_type=REAL)
+                              Right:
+                                Node(type=VARIABLE, token="real", var_type=REAL)
+                              Children (1):
+                                Node(type=VARIABLE, token="grade", var_type=VOID)
+                  Right:
+                    Node(type=VARIABLE, token="string", var_type=STRING)
+              Right:
+                Node(type=STRING, token="Bob", var_type=STRING)
+            Node(type=PROCEDURE_CALL, token="printstudent", var_type=VOID)
+              Children (1):
+                Node(type=VARIABLE, token="student", var_type=RECORD)
+                  Right:
+                    Node(type=RECORD_TYPE, token="record", var_type=RECORD)
+                      Children (3):
+                        Node(type=VAR_DECL, var_type=INTEGER)
+                          Right:
+                            Node(type=VARIABLE, token="integer", var_type=INTEGER)
+                          Children (1):
+                            Node(type=VARIABLE, token="id", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=STRING)
+                          Right:
+                            Node(type=VARIABLE, token="string", var_type=STRING)
+                          Children (1):
+                            Node(type=VARIABLE, token="name", var_type=VOID)
+                        Node(type=VAR_DECL, var_type=REAL)
+                          Right:
+                            Node(type=VARIABLE, token="real", var_type=REAL)
+                          Children (1):
+                            Node(type=VARIABLE, token="grade", var_type=VOID)
+            Node(type=WRITELN, var_type=VOID)
+              Children (1):
+                Node(type=STRING, token="Test Suite Completed", var_type=STRING)
+  Children (1):
+    Node(type=USES_CLAUSE, var_type=VOID)
+      Children (1):
+        Node(type=LIST, var_type=VOID)

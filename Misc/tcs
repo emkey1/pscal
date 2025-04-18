@@ -1,0 +1,84 @@
+program TestCaseStatements;
+
+type
+  TColor = (cRed, cGreen, cBlue, cYellow); // Enum for testing
+  TSize = (sSmall, sMedium, sLarge);
+
+var
+  i: integer;
+  ch: char;
+  color: TColor;
+  size: TSize;
+  doneLooping: boolean; // <<< ADDED flag for loop control
+
+begin
+  writeln('--- Testing CASE Statements ---');
+  writeln;
+
+  // Test CASE with Integer (Same as before)
+  writeln('Testing INTEGER CASE:');
+  for i := 0 to 6 do
+  begin
+    write('  i = ', i, ': ');
+    case i of
+      1: writeln('One');
+      2, 3: writeln('Two or Three');
+      4..5: writeln('Four to Five');
+    else
+      writeln('Other Integer');
+    end; // end case i
+  end;
+  writeln;
+
+  // Test CASE with Char (Still likely needs valueMatchesLabel fix)
+  writeln('Testing CHAR CASE:');
+  for ch := 'X' to ']' do
+  begin
+    write('  ch = ''', ch, ''' (', Ord(ch), '): ');
+    case ch of
+      'A': writeln('Letter A');
+      'B'..'D': writeln('Letter B, C, or D');
+      'Y', 'Z': writeln('Letter Y or Z');
+      '[': writeln('Opening Bracket');
+    else
+      writeln('Other Character');
+    end; // end case ch
+  end;
+  writeln;
+
+  // Test CASE with Enum (TColor) - Using WHILE loop and boolean flag
+  writeln('Testing ENUM CASE (TColor):');
+  color := Low(TColor); // Start with the first enum value
+  doneLooping := false;    // <<< Initialize flag
+  while not doneLooping do // <<< Loop based on flag
+  begin
+    write('  color = ', Ord(color), ': ');
+    case color of
+      cRed: writeln('Red');
+      cGreen, cBlue: writeln('Green or Blue');
+    else
+      writeln('Other Color (Yellow)');
+    end; // end case color
+
+    if color = High(TColor) then
+       doneLooping := true // <<< Set flag to terminate AFTER this iteration
+    else
+       Inc(color);         // <<< Go to next enum value using Inc
+  end; // end while
+  writeln;
+
+   // Test CASE with Enum (TSize) - checking non-match (Same as before)
+  writeln('Testing ENUM CASE (TSize):');
+  size := sMedium;
+  write('  size = ', Ord(size), ': ');
+  case size of
+     sSmall : writeln('Small');
+     sLarge : writeln('Large');
+   else
+     writeln('Default Size (Else)');
+   end; // end case size
+   writeln;
+
+
+  writeln('--- Test Complete ---');
+end.

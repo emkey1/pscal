@@ -1,0 +1,309 @@
+program SnakeGame;
+
+uses CRT;
+
+const
+  MaxX = 78; // Leave space for border
+  MinX = 2;
+  MaxY = 22; // Leave space for border and score
+  MinY = 2;
+  MaxSnakeLen = 100;
+  InitialLength = 5;
+  UpKey    = 'W'; // Using WASD for simpler ReadKey handling
+  DownKey  = 'S';
+  LeftKey  = 'A';
+  RightKey = 'D';
+  QuitKey  = 'Q'; // Or use Esc (#27)
+
+type
+  TDirection = (dirUp, dirDown, dirLeft, dirRight);
+  TPoint = record
+    x, y: integer;
+  end;
+
+var
+  snake: array[1..MaxSnakeLen] of TPoint;
+  snakeLen: integer;
+  head: TPoint;
+  food: TPoint;
+  direction, lastDirection: TDirection;
+  gameOver, quitGame: boolean;
+  score: integer;
+  gameSpeed: word; // Delay in milliseconds
+  ch: char;
+
+// --- Helper Procedures ---
+
+procedure DrawBorder;
+var i: integer;
+begin
+  // ... (DrawBorder code remains the same) ...
+  TextColor(White);
+  TextBackground(DarkGray); // Use a background for the border
+
+  // Top and Bottom lines
+  for i := MinX - 1 to MaxX + 1 do
+  begin
+    GotoXY(i, MinY - 1); write(' ');
+    GotoXY(i, MaxY + 1); write(' ');
+  end;
+
+  // Left and Right lines
+  for i := MinY to MaxY do
+  begin
+    GotoXY(MinX - 1, i); write(' ');
+    GotoXY(MaxX + 1, i); write(' ');
+  end;
+  TextBackground(Black); // Reset background
+end;
+
+procedure PlaceFood;
+var
+  onSnake: boolean;
+  i: integer;
+begin
+  // ... (PlaceFood code remains the same) ...
+   Randomize;
+   repeat
+     food.x := Random(MaxX - MinX + 1) + MinX;
+     food.y := Random(MaxY - MinY + 1) + MinY;
+
+     // Check if food placed on the snake
+     onSnake := false;
+     i := 1; // Initialize counter for while loop
+
+     while (i <= snakeLen) and (not onSnake) do
+     begin
+       if (food.x = snake[i].x) and (food.y = snake[i].y) then
+       begin
+         onSnake := true;
+       end
+       else
+       begin
+         Inc(i);
+       end;
+     end;
+   until not onSnake;
+
+   GotoXY(food.x, food.y);
+   TextColor(LightRed);
+   write('$');
+end;
+
+procedure InitializeGame;
+var i: integer;
+begin
+  ClrScr;
+  HideCursor;
+  DrawBorder;
+
+  head.x := (MinX + MaxX) div 2;
+  head.y := (MinY + MaxY) div 2;
+
+  snakeLen := InitialLength;
+  for i := 1 to snakeLen do
+  begin
+    snake[i].x := head.x - i + 1;
+    snake[i].y := head.y;
+  end;
+
+  direction := dirRight;
+  lastDirection := dirRight;
+  gameOver := false;
+  quitGame := false;
+  score := 0;
+  gameSpeed := 150;
+
+  PlaceFood;
+
+  GotoXY(MinX, MaxY + 2);
+  TextColor(White);
+  write('Score: ', score);
+
+  // DEBUG: Print initial state
+  writeln; writeln; // Add new lines for clarity
+  writeln('DEBUG: InitializeGame complete.');
+  writeln('DEBUG: Initial Head: (', snake[1].x, ',', snake[1].y, ')');
+  writeln('DEBUG: Initial Direction: ', ord(direction)); // Print ordinal
+  writeln('DEBUG: Initial gameOver: ', gameOver);
+  writeln('DEBUG: Initial quitGame: ', quitGame);
+  writeln('DEBUG: Press any key to start loop...');
+  //ch := ReadKey; // Temporarily pause to see init state if needed
+
+end;
+
+procedure HandleInput;
+begin
+  // ... (HandleInput code remains the same) ...
+  if KeyPressed then
+  begin
+    ch := ReadKey;
+    ch := UpCase(ch);
+
+    lastDirection := direction;
+
+    case ch of
+      UpKey:    if lastDirection <> dirDown then direction := dirUp;
+      DownKey:  if lastDirection <> dirUp then direction := dirDown;
+      LeftKey:  if lastDirection <> dirRight then direction := dirLeft;
+      RightKey: if lastDirection <> dirLeft then direction := dirRight;
+      QuitKey:  quitGame := true;
+      #27:      quitGame := true;
+    end;
+  end;
+end;
+
+procedure UpdateSnake;
+var
+  i: integer;
+  newHead: TPoint;
+  tail: TPoint;
+  collisionDetected: boolean;
+begin
+  writeln('DEBUG: UpdateSnake start. gameOver=', gameOver, ' quitGame=', quitGame);
+  writeln('DEBUG: UpdateSnake - Initial snake[1]=(', snake[1].x, ',', snake[1].y, ')'); // <-- ADDED
+
+  if not (gameOver or quitGame) then
+  begin
+    tail := snake[snakeLen];
+
+    for i := snakeLen downto 2 do
+    begin
+      snake[i] := snake[i-1];
+    end;
+
+    // --- Check state right before and after assignment ---
+    writeln('DEBUG: UpdateSnake - Before newHead := snake[1]. snake[1]=(', snake[1].x, ',', snake[1].y, ')'); // <-- ADDED
+    newHead := snake[1];
+    writeln('DEBUG: UpdateSnake - After newHead := snake[1]. newHead=(', newHead.x, ',', newHead.y, ')'); // <-- ADDED
+
+    // --- Check direction and newHead before and after case ---
+    writeln('DEBUG: UpdateSnake - Before case. Direction=', ord(direction), ' newHead=(', newHead.x, ',', newHead.y, ')'); // <-- ADDED
+    case direction of
+      dirUp:
+        begin
+          Dec(newHead.y);
+          writeln('DEBUG: UpdateSnake - After Dec(newHead.y). newHead=(', newHead.x, ',', newHead.y, ')'); // <-- ADDED
+        end;
+      dirDown:
+        begin
+          Inc(newHead.y);
+          writeln('DEBUG: UpdateSnake - After Inc(newHead.y). newHead=(', newHead.x, ',', newHead.y, ')'); // <-- ADDED
+        end;
+      dirLeft:
+        begin
+          Dec(newHead.x);
+           writeln('DEBUG: UpdateSnake - After Dec(newHead.x). newHead=(', newHead.x, ',', newHead.y, ')'); // <-- ADDED
+        end;
+      dirRight:
+        begin
+          Inc(newHead.x);
+          writeln('DEBUG: UpdateSnake - After Inc(newHead.x). newHead=(', newHead.x, ',', newHead.y, ')'); // <-- ADDED
+        end;
+    end;
+
+    // --- Original debug line ---
+    writeln('DEBUG: Calculated newHead=(', newHead.x, ',', newHead.y, ')');
+
+    // ... (rest of the procedure) ...
+
+  end; // end outer 'if not (gameOver or quitGame)'
+
+  writeln('DEBUG: UpdateSnake end. gameOver=', gameOver);
+end;
+
+procedure GameOverScreen;
+begin
+  GotoXY( (MinX + MaxX) div 2 - 5, (MinY + MaxY) div 2);
+  TextColor(LightRed);
+  TextBackground(Black);
+  write('GAME OVER!');
+  GotoXY( (MinX + MaxX) div 2 - 10, (MinY + MaxY) div 2 + 1);
+  write('Final Score: ', score);
+  GotoXY( (MinX + MaxX) div 2 - 12, (MinY + MaxY) div 2 + 3);
+  write('Press any key to exit...');
+  ch := ReadKey; // Wait for final key press
+end;
+
+procedure DrawSnake;
+var i: integer;
+begin
+    // DEBUG: Entering DrawSnake
+    // writeln('DEBUG: DrawSnake start. gameOver=', gameOver, ' quitGame=', quitGame); // Can be noisy
+
+    // Check if the game has ended or been quit
+    if gameOver or quitGame then
+    begin
+        // Display the Game Over screen *only* if the game ended normally
+        if gameOver then
+        begin
+             // DEBUG: Calling GameOverScreen from DrawSnake
+             writeln('DEBUG: Calling GameOverScreen from DrawSnake');
+             GameOverScreen;
+        end;
+
+        // DEBUG: Calling halt(0) from DrawSnake
+        writeln('DEBUG: Calling halt(0) from DrawSnake');
+        halt(0);
+    end
+    else
+    begin
+        // Original drawing logic
+        TextColor(Green);
+        for i := 2 to snakeLen do
+        begin
+          GotoXY(snake[i].x, snake[i].y);
+          write('*');
+        end;
+
+        TextColor(LightGreen);
+        GotoXY(snake[1].x, snake[1].y);
+        write('@');
+    end;
+     // DEBUG: Exiting DrawSnake
+    // writeln('DEBUG: DrawSnake end.'); // Can be noisy
+end;
+// --- Main Game ---
+begin
+  InitializeGame;
+
+  repeat
+    // DEBUG: Main loop top
+    writeln('DEBUG: Loop Start. gameOver=', gameOver, ' quitGame=', quitGame);
+
+    HandleInput;
+    // DEBUG: After HandleInput
+    writeln('DEBUG: After HandleInput. Dir=', ord(direction), ' gameOver=', gameOver, ' quitGame=', quitGame);
+
+    UpdateSnake;
+    // DEBUG: After UpdateSnake
+    writeln('DEBUG: After UpdateSnake. Head=(', snake[1].x, ',', snake[1].y, ') gameOver=', gameOver, ' quitGame=', quitGame);
+
+    DrawSnake; // Contains halt() if gameOver/quitGame is true
+
+    // DEBUG: After DrawSnake (only reached if game not over)
+    writeln('DEBUG: After DrawSnake.');
+
+    Delay(gameSpeed);
+    // DEBUG: After Delay
+    writeln('DEBUG: After Delay.');
+
+  until gameOver or quitGame;
+
+  // DEBUG: Loop finished
+  writeln('DEBUG: Loop finished. gameOver=', gameOver, ' quitGame=', quitGame);
+
+  // This might not be reached if halt() works correctly inside DrawSnake
+  if gameOver then
+  begin
+     writeln('DEBUG: Calling GameOverScreen AFTER loop.'); // Should not see this if halt worked
+     GameOverScreen;
+  end;
+
+  // Cleanup
+  ShowCursor;
+  NormalColors;
+  ClrScr;
+  writeln('Snake game finished. Final score: ', score);
+
+end.

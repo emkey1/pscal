@@ -1,0 +1,50 @@
+program TestFuncAssign;
+
+uses CRT; // For writeln
+
+var
+  globalTarget: integer; // A global variable for comparison
+  resultStr: string[20]; // For displaying results
+
+// Globally defined function that returns an integer
+// (This mimics 'Min' after we moved it to global scope)
+function AddOne(inputVal: integer): integer;
+begin
+  AddOne := inputVal + 1; // Assign result using function name
+end;
+
+// A procedure containing a local variable and the critical assignment
+procedure PerformAssignment;
+var
+  localTarget: integer; // The local variable receiving the function result
+  tempValue: integer;
+begin
+  writeln('  Entering PerformAssignment...');
+  tempValue := 5;
+  writeln('  Assigning result of AddOne(5) to localTarget...');
+
+  localTarget := AddOne(tempValue); // <<< This assignment is expected to trigger the error
+
+  // Code below might not be reached if the error occurs above
+  resultStr := IntToStr(localTarget);
+  writeln('  Assignment complete. localTarget = ', resultStr); // Should be 6 if it works
+  writeln('  Leaving PerformAssignment...');
+end;
+
+
+begin // Main program block
+  writeln('--- Testing Function Assignment ---');
+
+  // Optional: Test assigning to a global variable (might work differently)
+  writeln('Assigning result of AddOne(99) to globalTarget...');
+  globalTarget := AddOne(99);
+  resultStr := IntToStr(globalTarget);
+  writeln('Assignment complete. globalTarget = ', resultStr); // Should be 100
+  writeln('-----------------------------------');
+
+  // Call the procedure where the problematic assignment occurs
+  PerformAssignment;
+
+  writeln('-----------------------------------');
+  writeln('--- Test Finished ---');
+end.
