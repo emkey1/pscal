@@ -935,6 +935,9 @@ Value executeBuiltinRandom(AST *node) {
             long long n = arg.i_val;
             if (n <= 0) { fprintf(stderr, "Runtime error: Random argument must be > 0.\n"); EXIT_FAILURE_HANDLER(); }
             int r = rand() % n;
+#ifdef DEBUG
+            if(dumpExec) fprintf(stderr, "[DEBUG_RANDOM] Random(%lld) calculated r=%d\n", n, r);
+#endif
             return makeInt(r);
         } else if (arg.type == TYPE_REAL) {
             double n = arg.r_val;

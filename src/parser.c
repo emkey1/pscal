@@ -996,9 +996,9 @@ AST *paramList(Parser *parser) {
     while (parser->current_token->type != TOKEN_RPAREN) {
         int byRef = 0;
         // Check for pass-by-reference keyword.
-        if (parser->current_token->type == TOKEN_VAR) {
+        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) { // <<< CHECK FOR TOKEN_OUT
             byRef = 1;
-            eat(parser, TOKEN_VAR);
+            eat(parser, parser->current_token->type); // Eat either VAR or OUT
         }
         // Parse one or more identifiers separated by commas.
         AST *group = newASTNode(AST_VAR_DECL, NULL);

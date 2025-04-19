@@ -102,6 +102,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_INITIALIZATION:return "INITIALIZATION";
         case TOKEN_IN:            return "IN";
         case TOKEN_BREAK:         return "BREAK";
+        case TOKEN_OUT:           return "OUT"; 
         default:
             return "INVALID_TOKEN";
     }
