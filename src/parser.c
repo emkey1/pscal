@@ -781,7 +781,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) { // allowAnonymous might
             setTypeAST(node, TYPE_FILE);
             eat(parser, TOKEN_IDENTIFIER);
         }
-        else if (strcasecmp(typeName, "memorystream") == 0) { // If you have this type
+        else if (strcasecmp(typeName, "mstream") == 0) { // If you have this type
             node = newASTNode(AST_VARIABLE, typeToken);
             setTypeAST(node, TYPE_MEMORYSTREAM);
             eat(parser, TOKEN_IDENTIFIER);

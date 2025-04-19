@@ -106,10 +106,10 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("chr",       AST_PROCEDURE_DECL);
     registerBuiltinFunction("ord",       AST_PROCEDURE_DECL);
     registerBuiltinFunction("upcase",    AST_PROCEDURE_DECL);
-    registerBuiltinFunction("memorystreamcreate", AST_PROCEDURE_DECL);
-    registerBuiltinFunction("memorystreamloadfromfile", AST_PROCEDURE_DECL);
-    registerBuiltinFunction("memorystreamsavetofile", AST_PROCEDURE_DECL);
-    registerBuiltinFunction("memorystreamfree", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("mstreamcreate", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("mstreamloadfromfile", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("mstreamsavetofile", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("mstreamfree", AST_PROCEDURE_DECL);
     registerBuiltinFunction("api_send",  AST_FUNCTION_DECL);
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL);
     registerBuiltinFunction("paramcount", AST_PROCEDURE_DECL);

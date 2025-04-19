@@ -994,14 +994,15 @@ Value executeBuiltinMstreamCreate(AST *node) {
         fprintf(stderr, "Runtime error: TMemoryStream.Create expects no arguments.\n");
         EXIT_FAILURE_HANDLER();
     }
-    MemoryStream *ms = malloc(sizeof(MemoryStream));
+    MStream *ms = malloc(sizeof(MStream));
     if (!ms) {
         fprintf(stderr, "Memory allocation error in TMemoryStream.Create.\n");
         EXIT_FAILURE_HANDLER();
     }
     ms->buffer = NULL;
     ms->size = 0;
-    return makeMemoryStream(ms);
+    ms->capacity = 0;
+    return makeMStream(ms);
 }
 
 Value executeBuiltinMstreamLoadFromFile(AST *node) {
@@ -1040,7 +1041,7 @@ Value executeBuiltinMstreamLoadFromFile(AST *node) {
     fclose(f);
     msVal.mstream->buffer = (unsigned char *)buffer;
     msVal.mstream->size = size;
-    return makeMemoryStream(msVal.mstream);
+    return makeMStream(msVal.mstream);
 }
 
 Value executeBuiltinMstreamSaveToFile(AST *node) {
@@ -1050,7 +1051,7 @@ Value executeBuiltinMstreamSaveToFile(AST *node) {
     }
     Value msVal = eval(node->children[0]);
     if (msVal.type != TYPE_MEMORYSTREAM) {
-        fprintf(stderr, "Runtime error: first parameter of SaveToFile must be a TMemoryStream.\n");
+        fprintf(stderr, "Runtime error: first parameter of SaveToFile must be a Ttype MStream.\n");
         EXIT_FAILURE_HANDLER();
     }
     Value fileNameVal = eval(node->children[1]);
@@ -1065,7 +1066,7 @@ Value executeBuiltinMstreamSaveToFile(AST *node) {
     }
     fwrite(msVal.mstream->buffer, 1, msVal.mstream->size, f);
     fclose(f);
-    return makeMemoryStream(msVal.mstream);
+    return makeMStream(msVal.mstream);
 }
 
 void executeBuiltinMstreamFree(AST *node) {
@@ -1075,7 +1076,7 @@ void executeBuiltinMstreamFree(AST *node) {
     }
     Value msVal = eval(node->children[0]);
     if (msVal.type != TYPE_MEMORYSTREAM) {
-        fprintf(stderr, "Runtime error: parameter of TMemoryStream.Free must be a TMemoryStream.\n");
+        fprintf(stderr, "Runtime error: parameter of MStreamFree must be a Type MStream.\n");
         EXIT_FAILURE_HANDLER();
     }
     if (msVal.mstream->buffer)
@@ -1128,15 +1129,15 @@ Value executeBuiltinProcedure(AST *node) {
     }
     if (strcmp(node->token->value, "copy") == 0)
         return executeBuiltinCopy(node);
-    if (strcmp(node->token->value, "memorystreamloadfromfile") == 0)
+    if (strcmp(node->token->value, "mstreamloadfromfile") == 0)
         return executeBuiltinMstreamLoadFromFile(node);
-    if (strcmp(node->token->value, "memorystreamsavetofile") == 0)
+    if (strcmp(node->token->value, "mstreamsavetofile") == 0)
         return executeBuiltinMstreamSaveToFile(node);
-    if (strcmp(node->token->value, "memorystreamfree") == 0) {
+    if (strcmp(node->token->value, "mstreamfree") == 0) {
         executeBuiltinMstreamFree(node);
         return makeVoid();
     }
-    if (strcmp(node->token->value, "memorystreamcreate") == 0)
+    if (strcmp(node->token->value, "mstreamcreate") == 0)
         return executeBuiltinMstreamCreate(node);
     if (strcmp(node->token->value, "inc") == 0) {
         executeBuiltinInc(node);
@@ -1223,7 +1224,7 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
     setExtra(dummy, NULL);
 
     if (strcmp(lowerName, "api_send") == 0) {
-        AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "memorystream"));
+        AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "mstream"));
         setTypeAST(retTypeNode, TYPE_MEMORYSTREAM);
         setRight(dummy, retTypeNode);
     } else if (strcmp(lowerName, "api_receive") == 0) {
@@ -1423,7 +1424,7 @@ int isBuiltin(const char *name) {
         "trunc","assign","close","reset","rewrite",
         "eof","ioresult","copy","length","pos",
         "upcase","halt","inc","randomize","random",
-        "mstream_create","mstream_loadfromfile",
+        "mstreamcreate","mstreamloadfromfile",
         "mstream_savetofile","mstream_free","ord",
         "chr","api_send","api_receive","paramstr",
         "paramcount","readkey", "dec", "wherex",
@@ -1636,7 +1637,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
         "upcase", "low", "high", "succ", "pred", // Added Pred assuming it might exist
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
-        "keypressed", "memorystreamcreate"
+        "keypressed", "mstreamcreate"
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
     int num_functions = sizeof(functions) / sizeof(functions[0]);
@@ -1650,7 +1651,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     const char *procedures[] = {
          "writeln", "write", "readln", "read", "reset", "rewrite",
          "close", "assign", "halt", "inc", "dec", "delay",
-         "randomize", "memorystreamfree"
+         "randomize", "mstreamfree"
          // Add others like clrscr, gotoxy, assert if implemented
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);

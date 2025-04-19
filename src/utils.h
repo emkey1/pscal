@@ -21,8 +21,8 @@ const char *varTypeToString(VarType type);
 const char *tokenTypeToString(TokenType type);
 const char *astTypeToString(ASTNodeType type);
 
-MemoryStream *createMemoryStream(void);
-void freeMemoryStream(MemoryStream *ms);
+MStream *createMStream(void);
+void freeMStream(MStream *ms);
 FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
 void freeFieldValue(FieldValue *fv);
@@ -37,7 +37,7 @@ Value makeChar(char c);
 Value makeBoolean(int b);
 Value makeFile(FILE *f);
 Value makeRecord(FieldValue *rec);
-Value makeMemoryStream(MemoryStream *ms);
+Value makeMStream(MStream *ms);
 Value makeVoid(void);
 Value makeValueForType(VarType type, AST *type_def); // This simplifies the code.  Transitioning to it
 

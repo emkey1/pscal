@@ -20,11 +20,11 @@ typedef enum {
     TYPE_SET 
 } VarType;
 
-typedef struct MemoryStream {
+typedef struct MStream {
     unsigned char *buffer;
     int size;
     int capacity;
-} MemoryStream;
+} MStream;
 
 // Definition of Type struct for enum metadata
 typedef struct EnumType {
@@ -47,7 +47,7 @@ typedef struct ValueStruct {
         FieldValue *record_val;
         FILE *f_val;
         struct ValueStruct *array_val;
-        MemoryStream *mstream;
+        MStream *mstream;
         struct {
             char *enum_name; // Name of the enumerated type
             int ordinal;     // Ordinal value

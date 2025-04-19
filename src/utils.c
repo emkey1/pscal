@@ -169,8 +169,8 @@ void cleanupLocalEnv(void) {
     }
 }
 
-MemoryStream *createMemoryStream(void) {
-    MemoryStream *ms = malloc(sizeof(MemoryStream));
+MStream *createMStream(void) {
+    MStream *ms = malloc(sizeof(MStream));
     if (!ms) {
         fprintf(stderr, "Memory allocation error in create_memory_stream\n");
         EXIT_FAILURE_HANDLER();
@@ -181,7 +181,7 @@ MemoryStream *createMemoryStream(void) {
     return ms;
 }
 
-void freeMemoryStream(MemoryStream *ms) { // Is this used?  Should it be?
+void freeMStream(MStream *ms) { // Is this used?  Should it be?
     if (ms) {
         free(ms->buffer);
         free(ms);
@@ -482,7 +482,7 @@ Value makeValueForType(VarType type, AST *type_def) {
             v.array_val = NULL;
             break;
         case TYPE_MEMORYSTREAM:
-            v.mstream = createMemoryStream();
+            v.mstream = createMStream();
             break;
         case TYPE_ENUM:
             v.enum_val.enum_name = (type_def && type_def->token) ? strdup(type_def->token->value) : strdup("");
@@ -558,7 +558,7 @@ void freeTypeTable(void) {
     type_table = NULL;
 }
 
-Value makeMemoryStream(MemoryStream *ms) {
+Value makeMStream(MStream *ms) {
     Value v;
     v.type = TYPE_MEMORYSTREAM;
     v.mstream = ms;
@@ -753,7 +753,7 @@ static void dumpSymbol(Symbol *sym) {
                 printf("File (handle: %p)", (void *)sym->value->f_val);
                 break;
             case TYPE_MEMORYSTREAM:
-                printf("MemoryStream (size: %d)", sym->value->mstream->size);
+                printf("MStream (size: %d)", sym->value->mstream->size);
                 break;
             default:
                 printf("(not printed)");
@@ -901,7 +901,7 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                 // Handle array types appropriately
                 break;
             case TYPE_MEMORYSTREAM:
-                updateSymbol(unit_symbol->name, makeMemoryStream(unit_symbol->value->mstream));
+                updateSymbol(unit_symbol->name, makeMStream(unit_symbol->value->mstream));
                 break;
             default:
                 fprintf(stderr, "Error: Unsupported type %s in unit symbol table.\n", varTypeToString(unit_symbol->type));
@@ -1046,7 +1046,7 @@ int areValuesEqual(Value a, Value b) {
         case TYPE_INTEGER:   return a.i_val == b.i_val;
         case TYPE_REAL:      return a.r_val == b.r_val;
         case TYPE_STRING:    return strcmp(a.s_val, b.s_val) == 0;
-        case TYPE_CHAR:     return a.c_val == b.c_val;
+        case TYPE_CHAR:      return a.c_val == b.c_val;
         case TYPE_BOOLEAN:   return a.i_val == b.i_val;
         case TYPE_BYTE:      return a.i_val == b.i_val;
         case TYPE_WORD:      return a.i_val == b.i_val;

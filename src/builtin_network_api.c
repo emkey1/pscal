@@ -8,10 +8,10 @@
 #include "globals.h"
 #include "utils.h"
 
-/* Callback for libcurl: writes received data into a MemoryStream */
+/* Callback for libcurl: writes received data into a MStream */
 static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t real_size = size * nmemb;
-    MemoryStream *mstream = (MemoryStream *)userp;
+    MStream *mstream = (MStream *)userp;
     unsigned char *new_buffer = realloc(mstream->buffer, mstream->size + real_size + 1);
     if (!new_buffer) {
         fprintf(stderr, "Memory allocation error in write_callback\n");
@@ -53,7 +53,7 @@ Value executeBuiltinAPISend(AST *node) {
     }
 
     /* Initialize a memory stream to store the response */
-    MemoryStream *response_stream = malloc(sizeof(MemoryStream));
+    MStream *response_stream = malloc(sizeof(MStream));
     if (!response_stream) {
         fprintf(stderr, "Memory allocation error for response stream structure.\n");
         EXIT_FAILURE_HANDLER();
@@ -94,10 +94,10 @@ Value executeBuiltinAPISend(AST *node) {
     curl_slist_free_all(headers);
 
     /* Return the response as a memory stream */
-    return makeMemoryStream(response_stream);
+    return makeMStream(response_stream);
 }
 
-/* Built–in function: api_receive(memoryStream)
+/* Built–in function: api_receive(MStream)
    For now, this simply converts the memory stream into a string.
    You could extend it to parse JSON or otherwise process the API response.
 */
