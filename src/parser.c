@@ -1458,18 +1458,29 @@ AST *caseStatement(Parser *parser) {
     return node;
 }
 
+// In src/parser.c
+
 AST *repeatStatement(Parser *parser) {
     eat(parser, TOKEN_REPEAT); // Consume REPEAT
     AST *body = newASTNode(AST_COMPOUND, NULL);
 
-    // Parse the sequence of statements until UNTIL is encountered
-    while (parser->current_token->type != TOKEN_UNTIL) {
-        // Skip leading semicolons (optional empty statements)
-        // Moved this inside the loop to handle multiple empty statements potentially
-        while (parser->current_token->type == TOKEN_SEMICOLON) {
-             eat(parser, TOKEN_SEMICOLON);
+    // Loop until the UNTIL token is encountered and consumed
+    while (1) {
+        // Check for UNTIL *before* parsing a statement
+        if (parser->current_token->type == TOKEN_UNTIL) {
+            break; // Exit the loop, UNTIL will be consumed below
         }
-        // Check again for UNTIL after skipping semicolons
+
+        // Skip any optional empty statements (just semicolons)
+        // This prevents calling statement() when it's just a separator
+        while (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            // Check for UNTIL immediately after a semicolon
+            if (parser->current_token->type == TOKEN_UNTIL) {
+                 goto end_loop; // Use goto to break outer loop cleanly
+            }
+        }
+        // Check again for UNTIL after potentially skipping semicolons
         if (parser->current_token->type == TOKEN_UNTIL) {
             break;
         }
@@ -1478,32 +1489,39 @@ AST *repeatStatement(Parser *parser) {
         AST *stmt = statement(parser);
         if (stmt && stmt->type != AST_NOOP) {
              addChild(body, stmt);
-        } else if (!stmt || stmt->type == AST_NOOP) {
-            // If statement() failed or returned NOOP when not expected (e.g., not a simple ';')
-            if (parser->current_token->type != TOKEN_UNTIL && parser->current_token->type != TOKEN_SEMICOLON) {
-                 errorParser(parser, "Invalid statement or structure within REPEAT loop");
-                 // Attempt to recover might be complex, exiting loop is safer
-                 break;
-            }
-            // If it was just an empty statement ';', we loop back and skip it.
+        } else if (!stmt) {
+            // statement() should ideally signal errors via errorParser
+            // If it returns NULL without erroring, something is wrong.
+            errorParser(parser, "Failed to parse statement within REPEAT loop");
+            break; // Exit loop on error
         }
+        // Note: We intentionally DO NOT error on AST_NOOP here,
+        // as statement() might return that for a valid empty statement ';',
+        // which the semicolon skipping loop at the top should handle on the next iteration.
 
-        // After a valid statement, we might have a semicolon separator, or directly UNTIL
+        // After parsing a statement, check if the next token is UNTIL.
+        // If not UNTIL, it *should* ideally be a semicolon if more statements follow,
+        // but standard Pascal allows omitting the semicolon before UNTIL.
+        // So, we only consume a semicolon if it's present.
         if (parser->current_token->type == TOKEN_SEMICOLON) {
-            eat(parser, TOKEN_SEMICOLON); // Consume the separator
-            // The loop condition `while (parser->current_token->type != TOKEN_UNTIL)` will handle the next step.
-        } else if (parser->current_token->type != TOKEN_UNTIL) {
-             // If it's not a semicolon AND not UNTIL after a statement, it's an error.
-             errorParser(parser, "Expected semicolon or UNTIL after statement in REPEAT loop");
-             break; // Exit loop on error
+             eat(parser, TOKEN_SEMICOLON);
         }
-        // If it *was* UNTIL, the main loop condition will catch it next iteration.
-    }
+        // If the token after the statement is neither UNTIL nor SEMICOLON,
+        // it implies a syntax error *within* the statement list or structure.
+        // For example, `if ... end else ... end UNTIL` is valid, the token after
+        // the first `end` is `else`. `statement()` should handle parsing the full `if/else`.
+        // If `statement()` completed successfully, but the next token isn't UNTIL or ;,
+        // it indicates a potential issue. However, directly erroring here might be too strict.
+        // Let the main loop condition `while(1)` and the check at the start handle finding UNTIL.
 
-    // Now the current token MUST be UNTIL
-    eat(parser, TOKEN_UNTIL); // Consume the UNTIL token
+    } // End while(1)
 
-    // Now parse the condition expression AFTER consuming UNTIL
+end_loop: // Label for goto
+
+    // Current token must be UNTIL now
+    eat(parser, TOKEN_UNTIL);
+
+    // Parse the condition expression AFTER consuming UNTIL
     AST *condition = boolExpr(parser);
 
     // Create the REPEAT node
