@@ -1,0 +1,159 @@
+program TestRandomDistribution;
+
+uses
+  Crt; 
+
+const
+  NumToGenerate = 1000000;
+  UpperBound = 200;
+
+type
+  // Array to hold counts for numbers 1 through UpperBound
+  TCountArray = array[1..UpperBound] of Integer;
+
+var
+  i: Integer;         // Loop counter for generation
+  j: Integer;         // Loop counter for printing/analysis
+  r: Integer;         // Random number result
+  errors: Integer;    // Count of out-of-range numbers
+  outOfRange: Boolean; // Flag if any error occurred
+  Counts: TCountArray; // Array to store frequencies
+  minCount: Integer;   // To store the minimum frequency found
+  maxCount: Integer;   // To store the maximum frequency found
+  firstMin: Boolean;   // Flag for finding the first min number
+  firstMax: Boolean;   // Flag for finding the first max number
+  screenWidth: Integer;    // <-- New variable for screen width
+  itemWidth: Integer;      // <-- New variable for calculated width of one item
+  itemsPerLine: Integer;   // <-- New variable for number of items per line
+  avgCount: Real;          // <-- New: Average expected count
+  countDiff: Integer;      // <-- New: Difference between max and min
+  variancePercent: Real;   // <-- New: Calculated variance percentage
+
+begin
+  Randomize; // Seed the random number generator
+  errors := 0;
+  outOfRange := False;
+
+  // Initialize counts array to zero
+  for j := 1 to UpperBound do
+  begin
+    Counts[j] := 0;
+  end;
+
+  Writeln('Generating ', NumToGenerate, ' random numbers (expecting range 1..', UpperBound, ')...');
+
+  // --- Generation Loop (same as before) ---
+  for i := 1 to NumToGenerate do
+  begin
+    r := Random(UpperBound) + 1;
+    if (r < 1) or (r > UpperBound) then
+    begin
+      Writeln('*** ERROR: Random(', UpperBound, ') + 1 generated ', r, ' on iteration ', i);
+      outOfRange := True;
+      Inc(errors);
+    end
+    else
+    begin
+      Inc(Counts[r]);
+    end;
+  end;
+
+  Writeln('Generation complete.');
+  Writeln;
+
+  // --- Report out-of-range errors (same as before) ---
+  if outOfRange then
+  begin
+    Writeln('!!! Found ', errors, ' number(s) outside the expected range [1..', UpperBound, '].');
+  end
+  else
+  begin
+    Writeln('OK: All ', NumToGenerate, ' numbers were within the expected range [1..', UpperBound, '].');
+  end;
+  Writeln;
+
+// --- Calculate how many items fit per line ---
+  screenWidth := ScreenCols; // Get terminal width
+  // Calculate width needed for one item: 'Num XXX: XXXXX   '
+  // Num_ = 4, XXX = 3, :_ = 2, XXXXX = 5, ___ = 3 => 4+3+2+5+3 = 17
+  itemWidth := 17;
+  itemsPerLine := screenWidth div itemWidth; // Integer division
+
+  // Ensure at least 1 item per line, even if screen is very narrow
+  if itemsPerLine < 1 then
+  begin
+    itemsPerLine := 1;
+  end;
+
+  // --- Print the frequency of each number (Modified) ---
+  Writeln('Frequency of each number generated (', itemsPerLine, ' items per line):');
+  for j := 1 to UpperBound do
+  begin
+    // Use the same formatting for each item
+    Write('Num ', j:3, ': ', Counts[j]:5, '   ');
+
+    // Check if we need a newline based on calculated itemsPerLine
+    if (j mod itemsPerLine = 0) then Writeln;
+  end;
+
+  // Ensure a final newline if the last line wasn't complete
+  if (UpperBound mod itemsPerLine <> 0) then Writeln;
+  Writeln; // Add a blank line before min/max summary
+
+  // --- Find and Report Minimum and Maximum Counts (same as before) ---
+  // Initialize min/max with the count of the first number
+  minCount := Counts[1];
+  maxCount := Counts[1];
+  // Iterate through the rest of the counts
+  for j := 2 to UpperBound do
+  begin
+    if Counts[j] < minCount then minCount := Counts[j];
+    if Counts[j] > maxCount then maxCount := Counts[j];
+  end;
+
+  // Report Minimum
+  Write('Minimum Count: ', minCount, ' (Generated for number(s): ');
+  firstMin := True;
+  for j := 1 to UpperBound do
+  begin
+    if Counts[j] = minCount then
+    begin
+      if not firstMin then Write(', ');
+      Write(j);
+      firstMin := False;
+    end;
+  end;
+  Writeln(')');
+
+  // Report Maximum
+  Write('Maximum Count: ', maxCount, ' (Generated for number(s): ');
+  firstMax := True;
+  for j := 1 to UpperBound do
+  begin
+    if Counts[j] = maxCount then
+    begin
+      if not firstMax then Write(', ');
+      Write(j);
+      firstMax := False;
+    end;
+  end;
+  Writeln(')');
+    // --- Calculate and Report Variance Percentage ---
+  avgCount := NumToGenerate / UpperBound; // Real division
+  countDiff := maxCount - minCount;
+
+  // Calculate variance percentage relative to the average expected count
+  if avgCount > 0 then
+  begin
+    variancePercent := (countDiff / avgCount) * 100.0;
+    Writeln('Average Expected Count: ', avgCount:0:2);
+    Writeln('Difference (Max - Min): ', countDiff);
+    Writeln('Spread Variance vs Average: ', variancePercent:0:2, '%');
+  end
+  else
+  begin
+    Writeln('Cannot calculate variance percentage (average count is zero).');
+  end;
+
+
+end.

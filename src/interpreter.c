@@ -685,7 +685,7 @@ Value eval(AST *node) {
                     // --- Start of type-specific handling ---
 
                     // 1. INTEGER math & comparison (if both operands are currently INTEGER type after potential promotion)
-                    if (left.type == TYPE_INTEGER && right.type == TYPE_INTEGER) {
+                    if (left.type == TYPE_INTEGER && right.type == TYPE_INTEGER && op != TOKEN_SLASH) {
                         long long a = left.i_val, b = right.i_val;
                         switch (op) {
                             // Arithmetic (result is Integer)
