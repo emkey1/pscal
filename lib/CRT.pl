@@ -33,6 +33,7 @@ procedure Delay(ms: word);
 procedure HideCursor;
 procedure CursorOff;
 procedure ShowCursor;
+procedure CursorOn;
 procedure DelLine;      // Added
 procedure InsLine;      // Added
 procedure Beep;
@@ -167,8 +168,12 @@ begin
   Write(ESC, '[?25l');
 end;
 
-
 procedure ShowCursor;
+begin
+  Write(ESC, '[?25h');
+end;
+
+procedure CursorOn;
 begin
   Write(ESC, '[?25h');
 end;
