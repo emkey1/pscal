@@ -55,7 +55,7 @@ void executeWithASTDump(AST *program_ast, const char *program_name) {
         base = program_name;
 
     // Build filename using the basename.
-    snprintf(filename, sizeof(filename), "/Users/mke/Pscal/lib/%s.%d", base, (int)pid);
+    snprintf(filename, sizeof(filename), "/tmp/pscal/%s.%d", base, (int)pid);
 
     FILE *f = fopen(filename, "w");
     if (!f) {

@@ -1,2 +1,6 @@
 build-*/
 bin/
+CMakeFiles/dscal.dir
+CMakeFiles/hscal.dir
+testing.p
+CMakeFiles/pscal.dir/compiler_depend.internal
