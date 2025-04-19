@@ -31,6 +31,7 @@ procedure TextColor(color: byte);
 procedure TextBackground(color: byte);
 procedure Delay(ms: word);
 procedure HideCursor;
+procedure CursorOff;
 procedure ShowCursor;
 procedure DelLine;      // Added
 procedure InsLine;      // Added
@@ -99,7 +100,6 @@ end;
 
 { Map Turbo Pascal colors (0..15) to ANSI foreground codes }
 function ForegroundCode(color: byte): string;
-// Implementation unchanged...
 begin
   case color of
     0: ForegroundCode := '30';  { Black }
@@ -125,7 +125,6 @@ end;
 
 { Map Turbo Pascal colors (0..15) to ANSI background codes }
 function BackgroundCode(color: byte): string;
-// Implementation unchanged...
 begin
   case color of
     0: BackgroundCode := '40';  { Black }
@@ -149,103 +148,92 @@ begin
 end;
 
 procedure TextColor(color: byte);
-// Implementation unchanged...
 begin
   Write(ESC, '[', ForegroundCode(color), 'm');
 end;
 
 procedure TextBackground(color: byte);
-// Implementation unchanged...
 begin
   Write(ESC, '[', BackgroundCode(color), 'm');
 end;
 
 procedure HideCursor;
-// Implementation unchanged...
 begin
   Write(ESC, '[?25l');
 end;
 
+procedure CursorOff;
+begin
+  Write(ESC, '[?25l');
+end;
+
+
 procedure ShowCursor;
-// Implementation unchanged...
 begin
   Write(ESC, '[?25h');
 end;
 
 procedure ClrEol;
-// Implementation unchanged...
 begin
   Write(ESC, '[K');
 end;
 
 procedure InvertColors;
-// Implementation unchanged...
 begin
   Write(ESC, '[7m');
 end;
 
 procedure NormalColors;
-// Implementation unchanged...
 begin
   Write(ESC, '[0m');
 end;
 
 procedure Beep;
-// Implementation unchanged...
 begin
   Write(#7);
 end;
 
 procedure TextColorE(color: byte);
-// Implementation unchanged...
 begin
   Write(ESC, '[38;5;', color, 'm');
 end;
 
 procedure TextBackgroundE(color: byte);
-// Implementation unchanged...
 begin
   Write(ESC, '[48;5;', color, 'm');
 end;
 
 procedure SaveCursor;
-// Implementation unchanged...
 begin
   Write(ESC, '[s');
 end;
 
 procedure RestoreCursor;
-// Implementation unchanged...
 begin
   Write(ESC, '[u');
 end;
 
 procedure BoldText;
-// Implementation unchanged...
 begin
   Write(ESC, '[1m');
 end;
 
 procedure UnderlineText;
-// Implementation unchanged...
 begin
   Write(ESC, '[4m');
 end;
 
 procedure BlinkText;
-// Implementation unchanged...
 begin
   Write(ESC, '[5m');
 end;
 
 function WhereX: integer;
-// Implementation unchanged... relies on C built-in
 begin
   WhereX := BIWhereX; // Assumes BIWhereX is a built-in returning X coord
 end;
 
 function WhereY: integer;
-// Implementation unchanged... relies on C built-in
 begin
   WhereY := BIWhereY; // Assumes BIWhereY is a built-in returning Y coord
 end;

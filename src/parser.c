@@ -602,11 +602,70 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 }
 
 AST *constDeclaration(Parser *parser) {
-    AST *node = newASTNode(AST_CONST_DECL, parser->current_token);
+    Token *constNameToken = parser->current_token;
     eat(parser, TOKEN_IDENTIFIER);
-    eat(parser, TOKEN_EQUAL);
-    setLeft(node, expr(parser));
-    eat(parser, TOKEN_SEMICOLON);
+
+    AST *typeNode = NULL;
+    AST *valueNode = NULL;
+
+    // Check for optional type specifier (Pascal extension)
+    if (parser->current_token->type == TOKEN_COLON) {
+        eat(parser, TOKEN_COLON);
+        typeNode = typeSpecifier(parser, 1); // Parse the type (e.g., array[1..10] of string)
+        // We expect an ARRAY type here for array constants
+        if (!typeNode || (typeNode->type != AST_ARRAY_TYPE && typeNode->var_type != TYPE_ARRAY)) {
+             // If it's a named type, var_type might be ARRAY, check that too.
+             // Check if it's a reference to an array type
+             int is_array_ref = 0;
+             if (typeNode->type == AST_TYPE_REFERENCE) {
+                  AST* ref_target = lookupType(typeNode->token->value);
+                  if (ref_target && ref_target->var_type == TYPE_ARRAY) {
+                       is_array_ref = 1;
+                       // Optionally link typeNode directly to the target definition
+                       // setRight(typeNode, ref_target); // Could be useful
+                  }
+             }
+             if (!is_array_ref) {
+                  errorParser(parser, "Expected array type specifier in typed constant array declaration");
+                  // Basic error recovery: return a NOOP node
+                   return newASTNode(AST_NOOP, NULL);
+             }
+        }
+    }
+
+    eat(parser, TOKEN_EQUAL); // Expect '=' after name or type
+
+    // Parse the value: either a simple expression or an array initializer
+    if (typeNode != NULL) { // If type was specified, expect array initializer
+        if (parser->current_token->type != TOKEN_LPAREN) {
+            errorParser(parser, "Expected '(' for array constant initializer list");
+             return newASTNode(AST_NOOP, NULL);
+        }
+        valueNode = parseArrayInitializer(parser); // Parse (...)
+        // Link the type definition to the literal for later use in interpreter
+        setRight(valueNode, typeNode);
+    } else { // No type specified, parse a simple constant expression
+        valueNode = expr(parser);
+    }
+
+    eat(parser, TOKEN_SEMICOLON); // Expect ';' at the end
+
+    // Create the main declaration node
+    AST *node = newASTNode(AST_CONST_DECL, constNameToken);
+    setLeft(node, valueNode); // Link the value/literal node
+
+    // If an explicit type was parsed, store it.
+    // Storing it on the valueNode might be more direct if eval needs it.
+    // Let's attach it to the main CONST_DECL node for now.
+    if (typeNode) {
+       setRight(node, typeNode); // Link type specifier AST if present
+       setTypeAST(node, TYPE_ARRAY); // Mark the CONST_DECL node as array type
+    } else {
+       // Type will be inferred during evaluation for simple constants
+       setTypeAST(node, TYPE_VOID); // Mark as VOID initially for simple const
+    }
+
+
     return node;
 }
 
@@ -1400,18 +1459,54 @@ AST *caseStatement(Parser *parser) {
 }
 
 AST *repeatStatement(Parser *parser) {
-    eat(parser, TOKEN_REPEAT);
+    eat(parser, TOKEN_REPEAT); // Consume REPEAT
     AST *body = newASTNode(AST_COMPOUND, NULL);
+
+    // Parse the sequence of statements until UNTIL is encountered
     while (parser->current_token->type != TOKEN_UNTIL) {
-        AST *stmt = statement(parser);
-        addChild(body, stmt);
-        if (parser->current_token->type == TOKEN_SEMICOLON)
-            eat(parser, TOKEN_SEMICOLON);
-        else
+        // Skip leading semicolons (optional empty statements)
+        // Moved this inside the loop to handle multiple empty statements potentially
+        while (parser->current_token->type == TOKEN_SEMICOLON) {
+             eat(parser, TOKEN_SEMICOLON);
+        }
+        // Check again for UNTIL after skipping semicolons
+        if (parser->current_token->type == TOKEN_UNTIL) {
             break;
+        }
+
+        // Parse one statement
+        AST *stmt = statement(parser);
+        if (stmt && stmt->type != AST_NOOP) {
+             addChild(body, stmt);
+        } else if (!stmt || stmt->type == AST_NOOP) {
+            // If statement() failed or returned NOOP when not expected (e.g., not a simple ';')
+            if (parser->current_token->type != TOKEN_UNTIL && parser->current_token->type != TOKEN_SEMICOLON) {
+                 errorParser(parser, "Invalid statement or structure within REPEAT loop");
+                 // Attempt to recover might be complex, exiting loop is safer
+                 break;
+            }
+            // If it was just an empty statement ';', we loop back and skip it.
+        }
+
+        // After a valid statement, we might have a semicolon separator, or directly UNTIL
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON); // Consume the separator
+            // The loop condition `while (parser->current_token->type != TOKEN_UNTIL)` will handle the next step.
+        } else if (parser->current_token->type != TOKEN_UNTIL) {
+             // If it's not a semicolon AND not UNTIL after a statement, it's an error.
+             errorParser(parser, "Expected semicolon or UNTIL after statement in REPEAT loop");
+             break; // Exit loop on error
+        }
+        // If it *was* UNTIL, the main loop condition will catch it next iteration.
     }
-    eat(parser, TOKEN_UNTIL);
+
+    // Now the current token MUST be UNTIL
+    eat(parser, TOKEN_UNTIL); // Consume the UNTIL token
+
+    // Now parse the condition expression AFTER consuming UNTIL
     AST *condition = boolExpr(parser);
+
+    // Create the REPEAT node
     AST *node = newASTNode(AST_REPEAT, NULL);
     setLeft(node, body);
     setRight(node, condition);
@@ -2030,4 +2125,29 @@ AST *parseWriteArgument(Parser *parser) {
         // return the plain expression node.
         return exprNode;
     }
+}
+
+AST *parseArrayInitializer(Parser *parser) {
+    eat(parser, TOKEN_LPAREN); // Consume '('
+    AST *node = newASTNode(AST_ARRAY_LITERAL, NULL);
+    setTypeAST(node, TYPE_ARRAY); // Mark the literal node itself as array type
+
+    if (parser->current_token->type != TOKEN_RPAREN) { // Check for non-empty list
+        while (1) {
+            // Parse one element expression. IMPORTANT: These should evaluate
+            // to constants during interpretation for a const declaration.
+            // The parser itself just ensures valid expression syntax here.
+            AST *elementExpr = expr(parser);
+            addChild(node, elementExpr);
+
+            if (parser->current_token->type == TOKEN_COMMA) {
+                eat(parser, TOKEN_COMMA);
+            } else {
+                break; // Exit loop if no comma follows
+            }
+        }
+    }
+
+    eat(parser, TOKEN_RPAREN); // Consume ')'
+    return node;
 }

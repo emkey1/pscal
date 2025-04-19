@@ -153,6 +153,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_ENUM_VALUE:     return "ENUM_VALUE";
         case AST_SET:            return "SET";
         case AST_BREAK:          return "BREAK";
+        case AST_ARRAY_LITERAL:  return "ARRAY_LITERAL";
         default:                 return "UNKNOWN_AST_TYPE";
     }
 }

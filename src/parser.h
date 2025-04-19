@@ -61,6 +61,7 @@ void errorParser(Parser *parser, const char *msg);
 AST *lookupType(const char *name);
 void insertType(const char *name, AST *typeAST);
 void eat_internal(Parser *parser, TokenType type);
+AST *parseArrayInitializer(Parser *parser); 
 
 #ifdef DEBUG
 

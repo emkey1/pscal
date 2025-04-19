@@ -145,6 +145,7 @@ typedef enum {
     AST_ENUM_TYPE,
     AST_ENUM_VALUE,
     AST_SET,
+    AST_ARRAY_LITERAL,
     AST_BREAK
 } ASTNodeType;
 

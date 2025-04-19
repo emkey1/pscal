@@ -239,7 +239,7 @@ end;
 
 { Start a new Blackjack game (reset counters) }
 
-procedure NewGame(out DealerScore, PlayerScore, NCard: Integer; var CardDeck: TCardDeck);
+procedure NewGame(var DealerScore, PlayerScore, NCard: Integer; var CardDeck: TCardDeck);
 
 begin
   DealerScore := 0; PlayerScore := 0;                                          // reset scores
@@ -258,7 +258,7 @@ end;
 
 { Calculate Blackjack values for actual dealer or player cards}
 
-procedure BJValue(Cards: TCards; NCards: Integer; out V1, V2: Integer);
+procedure BJValue(Cards: TCards; NCards: Integer; var V1, V2: Integer);
 
 // The procedure is used for both the dealer and the player, the TCards array given
 // as argument being the dealer's or the player's cards. NCards is the number of
@@ -289,7 +289,7 @@ end;
 
 { Get dealer's hold Blackjack value }
 
-function GetDealerDoneValue(var Cards: TCards; NCards: Integer; out BJValue1, BJValue2: Integer): Integer;
+function GetDealerDoneValue(var Cards: TCards; NCards: Integer; var BJValue1, BJValue2: Integer): Integer;
 
 var
   DoneValue: Integer;
@@ -329,28 +329,40 @@ begin
       Inc(N);
       CardDeck[N].Suit := Suit;
       CardDeck[N].Value := CardValues[Rank];
-      if Rank <= 10 then
+      if Rank <= 10 then // A=1, 2-10 count as face value
         CardDeck[N].BJValue := Rank
-      else
+      else // J, Q, K count as 10
         CardDeck[N].BJValue := 10;
     end;
   end;
-  // Start a new gane
+  // Start a new game
   NewGame(DealerScore, PlayerScore, NCard, CardDeck);
-  // Loop around until user pushes X to exit the program
+
+  // Main Game Loop - Loop around until user pushes X to exit the program
   repeat
-    // Loop around until user pushes one of the command shortcut keys
+    // Inner Input Loop - Loop around until user pushes one of the command shortcut keys
     repeat
       Key := ReadKey;
-      if Key = #0 then
+      if Key = #0 then // Handle potential extended key codes
         Key := ReadKey;
-    until UpperCase(Key)[1] in ['N', 'D', 'H', 'S', 'X'];
+
+      // *** FIX: Convert to uppercase *before* the until check ***
+      if Key <> #0 then // Avoid processing null from potential special key sequence
+         InputKeyUpper := UpperCase(Key) // Assign to temp var
+      else
+         InputKeyUpper := #0; // Assign a non-matching value if key was null
+
+    // *** FIX: Use the temporary variable in the condition ***
+    until InputKeyUpper in ['N', 'D', 'H', 'S', 'X'];
+
+    // --- Process Validated Input using InputKeyUpper ---
+
     // N: Start a new game
-    if UpperCase(Key) = 'N' then begin
+    if InputKeyUpper = 'N' then begin
       NewGame(DealerScore, PlayerScore, NCard, CardDeck);
     end
     // D: Deal the first 4 cards
-    else if DealEnabled and (UpperCase(Key) = 'D') then begin
+    else if DealEnabled and (InputKeyUpper = 'D') then begin
       NCard := NextDeckCard(NCard); PlayerCards[1].Card := CardDeck[NCard];    // first player card
       NCard := NextDeckCard(NCard); DealerCards[1].Card := CardDeck[NCard];    // first dealer card
       NCard := NextDeckCard(NCard); PlayerCards[2].Card := CardDeck[NCard];    // second player card
@@ -359,13 +371,13 @@ begin
       PlayerCards[1].FaceUp := True; DealerCards[1].FaceUp := True;
       PlayerCards[2].FaceUp := True; DealerCards[2].FaceUp := False;           // second dealer card is face down
       // Display the dealer and player cards
-      RemoveCards;                                                             // remove the cards from the table
+      RemoveCards;
       DisplayCards(DealerCards, NDealerCards, 'dealer', SuitColors);
       DisplayCards(PlayerCards, NPlayerCards, 'player', SuitColors);
       // Calculate the dealer and player Blackjack values
       BJValue(DealerCards, NDealerCards, DealerBJValue1, DealerBJValue2);
       BJValue(PlayerCards, NPlayerCards, PlayerBJValue1, PlayerBJValue2);
-      // Display the game status (dealer Blackjack value will appear as a ?, as 2nd card is face down)
+      // Display the game status (dealer Blackjack value will appear as a ?)
       DisplayGameStatus(-1, PlayerBJValue1, PlayerBJValue2, DealerScore, PlayerScore);
       GotoXY(50, 15); ClrEoL;
       // Enable the Hit and Stay commands
@@ -374,7 +386,7 @@ begin
       StayEnabled := True;
     end
     // H: Hit (player takes another card)
-    else if HitEnabled and (UpperCase(Key) = 'H') then begin
+    else if HitEnabled and (InputKeyUpper = 'H') then begin
       NCard := NextDeckCard(NCard);
       Inc(NPlayerCards);
       PlayerCards[NPlayerCards].FaceUp := True;
@@ -384,7 +396,7 @@ begin
       // Calculate player's new Blackjack value(s)
       BJValue(PlayerCards, NPlayerCards, PlayerBJValue1, PlayerBJValue2);
       if PlayerBJValue1 > 21 then begin
-        // If player busted (> 21) this round is over (player looses) without that the dealer has to hit
+        // If player busted (> 21) this round is over
         GotoXY(50, 15);
         TextColor(LightRed);
         Write('You busted!');
@@ -397,24 +409,21 @@ begin
       // Display new game status
       DisplayGameStatus(-1, PlayerBJValue1, PlayerBJValue2, DealerScore, PlayerScore);
     end
-    // S: Stay (player stays and dealer hits until he gets 17 (or more)
-    else if StayEnabled and (UpperCase(Key) = 'S') then begin
+    // S: Stay (player stays and dealer hits until he gets 17 or more)
+    else if StayEnabled and (InputKeyUpper = 'S') then begin
       DealerCards[2].FaceUp := True;
       // Calculate dealer Blackjack value (with 2nd card now face up)
       BJValue(DealerCards, NDealerCards, DealerBJValue1, DealerBJValue2);
-      // Deterime if dealer stays with these two cards
+      // Determine if dealer stays with these two cards
       DealerDoneValue := GetDealerDoneValue(DealerCards, NDealerCards, DealerBJValue1, DealerBJValue2);
       if DealerDoneValue = 0 then begin
-        // If these two cards don't give 17 or more, dealer continues hitting until the hold value is reached
+        // If these two cards don't give 17 or more, dealer continues hitting
         repeat
-          // Dealer hits again
           Inc(NDealerCards);
           NCard := NextDeckCard(NCard);
           DealerCards[NDealerCards].FaceUp := True;
           DealerCards[NDealerCards].Card := CardDeck[NCard];
-          // Calculate new dealer Blackjack value
           BJValue(DealerCards, NDealerCards, DealerBJValue1, DealerBJValue2);
-          // Deterime if dealer stays now
           DealerDoneValue := GetDealerDoneValue(DealerCards, NDealerCards, DealerBJValue1, DealerBJValue2);
         until DealerDoneValue <> 0;
       end;
@@ -423,46 +432,33 @@ begin
         PlayerDoneValue := PlayerBJValue1
       else
         PlayerDoneValue := PlayerBJValue2;
-      // Round evaluation: Determine the winner (or possible stand-off)
-      if DealerDoneValue = PlayerDoneValue then                                // dealer BJ value = player BJ value (stand-off)
-          Winner := ''
-      else if DealerDoneValue = -21 then                                       // dealer has Blackjack (dealer wins)
-        Winner := 'dealer'
-      else if PlayerDoneValue = -21 then                                       // player has Blackjack (player wins if dealer hasn't)
-        Winner := 'player'
+      // Round evaluation: Determine the winner
+      if DealerDoneValue = PlayerDoneValue then
+        Winner := '' // Stand-off
+      else if DealerDoneValue = -21 then
+        Winner := 'dealer' // Dealer Blackjack
+      else if PlayerDoneValue = -21 then
+        Winner := 'player' // Player Blackjack
       else begin
-        if (DealerDoneValue > 21) or (PlayerDoneValue > DealerDoneValue) then  // dealer busted (dealer looses) or player BJ value > dealer BJ value (player wins)
-          Winner := 'player'
-        else                                                                   // dealer BJ value > player BJ value (dealer wins)
-          Winner := 'dealer';
+        if (DealerDoneValue > 21) or (PlayerDoneValue > DealerDoneValue) then
+          Winner := 'player' // Dealer busted or player higher
+        else
+          Winner := 'dealer'; // Dealer higher or equal (but not stand-off)
       end;
       // Display round winner and update game scores
       if Winner = 'player' then begin
-        // Round won by player
-        GotoXY(50, 15);
-        TextColor(LightGreen);
-        Write('You win!');
-        TextColor(LightGray);
-        Inc(PlayerScore);
+        GotoXY(50, 15); TextColor(LightGreen); Write('You win!'); Inc(PlayerScore);
       end
       else if Winner = 'dealer' then begin
-        // Round won by dealer
-        GotoXY(50, 3);
-        TextColor(LightRed);
-        Write('Dealer wins');
-        TextColor(LightGray);
-        Inc(DealerScore);
+        GotoXY(50, 3); TextColor(LightRed); Write('Dealer wins'); Inc(DealerScore);
       end
       else begin
-        // Stand-off
-        GotoXY(50, 3);
-        TextColor(Yellow);
-        Write('Stand-off');
-        TextColor(LightGray);
+        GotoXY(50, 3); TextColor(Yellow); Write('Stand-off');
       end;
-      // Display dealer's card (all together)
+      TextColor(LightGray);
+      // Display dealer's cards (all face up now)
       DisplayCards(DealerCards, NDealerCards, 'dealer', SuitColors);
-      // Display game status (as is when dealer has hold)
+      // Display final game status for the round
       DisplayGameStatus(DealerDoneValue, PlayerBJValue1, PlayerBJValue2, DealerScore, PlayerScore);
       // Enable the Deal command for next round
       DealEnabled := True;
@@ -470,10 +466,12 @@ begin
       StayEnabled := False;
     end
     // X: Exit the program
-    else if UpperCase(Key) = 'X' then begin
+    else if InputKeyUpper = 'X' then begin
       TextBackground(Black); TextColor(LightCyan);
       ClrScr;
     end;
-  until UpperCase(Key) = 'X';
-end.
 
+  // *** FIX: Use the temporary variable for main loop exit condition ***
+  until InputKeyUpper = 'X';
+
+end.

@@ -421,6 +421,124 @@ Value eval(AST *node) {
                 EXIT_FAILURE_HANDLER();
             }
         }
+        case AST_ARRAY_LITERAL: {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG] Evaluating AST_ARRAY_LITERAL\n");
+#endif
+            // The type definition should be linked via node->right,
+            // which was set in parseArrayInitializer referencing the
+            // typeNode parsed in constDeclaration.
+            AST* typeNode = node->right;
+            if (!typeNode) {
+                fprintf(stderr, "Runtime error: Missing type definition for array literal.\n");
+                dumpASTFromRoot(node); // Dump AST for context
+                EXIT_FAILURE_HANDLER();
+            }
+
+            // Resolve type reference if needed
+            AST* actualArrayTypeNode = typeNode;
+            if (actualArrayTypeNode->type == AST_TYPE_REFERENCE) {
+                 actualArrayTypeNode = lookupType(actualArrayTypeNode->token->value);
+                 if (!actualArrayTypeNode) {
+                      fprintf(stderr, "Runtime error: Could not resolve array type reference '%s' for literal.\n", typeNode->token->value);
+                       EXIT_FAILURE_HANDLER();
+                 }
+            }
+
+            if (!actualArrayTypeNode || actualArrayTypeNode->type != AST_ARRAY_TYPE) {
+                 fprintf(stderr, "Runtime error: Invalid type node associated with array literal. Expected ARRAY_TYPE, got %s.\n",
+                         actualArrayTypeNode ? astTypeToString(actualArrayTypeNode->type) : "NULL");
+                 dumpASTFromRoot(node); // Dump AST for context
+                 EXIT_FAILURE_HANDLER();
+            }
+
+            // --- Extract bounds and element type from the actualArrayTypeNode ---
+            int dimensions = actualArrayTypeNode->child_count;
+            if (dimensions <= 0) { /* error handling */ }
+
+            int *lower_bounds = malloc(sizeof(int) * dimensions);
+            int *upper_bounds = malloc(sizeof(int) * dimensions);
+            if (!lower_bounds || !upper_bounds) { /* error handling */ }
+
+            int expected_size = 1;
+            for (int dim = 0; dim < dimensions; dim++) {
+                 AST *subrange = actualArrayTypeNode->children[dim];
+                 if (!subrange || subrange->type != AST_SUBRANGE) { /* error handling */ }
+
+                 // --- Evaluate bounds and get ordinal values ---
+                 Value low_val = eval(subrange->left);
+                 Value high_val = eval(subrange->right);
+                 long long low_ord, high_ord;
+
+                 // Check type of lower bound
+                 if (low_val.type == TYPE_INTEGER) low_ord = low_val.i_val;
+                 else if (low_val.type == TYPE_ENUM) low_ord = low_val.enum_val.ordinal;
+                 else if (low_val.type == TYPE_CHAR) low_ord = low_val.c_val;
+                 // Add other ordinal types if needed (Boolean, Byte, Word)
+                 else {
+                     fprintf(stderr, "Runtime error: Invalid type (%s) for lower bound of array constant.\n", varTypeToString(low_val.type));
+                     free(lower_bounds); free(upper_bounds); EXIT_FAILURE_HANDLER();
+                 }
+
+                 // Check type of upper bound
+                 if (high_val.type == TYPE_INTEGER) high_ord = high_val.i_val;
+                 else if (high_val.type == TYPE_ENUM) high_ord = high_val.enum_val.ordinal;
+                 else if (high_val.type == TYPE_CHAR) high_ord = high_val.c_val;
+                 // Add other ordinal types if needed
+                 else {
+                      fprintf(stderr, "Runtime error: Invalid type (%s) for upper bound of array constant.\n", varTypeToString(high_val.type));
+                      free(lower_bounds); free(upper_bounds); EXIT_FAILURE_HANDLER();
+                 }
+                 // --- End bound evaluation ---
+
+                 lower_bounds[dim] = (int)low_ord; // <<< Use calculated ordinal
+                 upper_bounds[dim] = (int)high_ord; // <<< Use calculated ordinal
+
+                 if (lower_bounds[dim] > upper_bounds[dim]) { /* error handling */ }
+                 expected_size *= (upper_bounds[dim] - lower_bounds[dim] + 1);
+            }
+
+            // Determine element type (existing logic should be okay)
+            AST* elemTypeNode = actualArrayTypeNode->right;
+            // ... (rest of element type determination logic) ...
+            VarType elementType = elemTypeNode->var_type;
+
+            // --- Check number of initializers --- (existing logic)
+            int provided_size = node->child_count;
+            if (provided_size != expected_size) { // <<< This check should now work correctly
+                fprintf(stderr, "Runtime error: Incorrect number of initializers for constant array. Expected %d, got %d.\n", expected_size, provided_size);
+                free(lower_bounds); free(upper_bounds);
+                EXIT_FAILURE_HANDLER();
+            }
+
+            // --- Create the Array Value --- (existing logic)
+            Value v = makeArrayND(dimensions, lower_bounds, upper_bounds, elementType, elemTypeNode);
+
+            // --- Fill the array --- (existing logic, ensure type check handles enums if needed)
+            for (int i = 0; i < provided_size; i++) {
+                Value elemVal = eval(node->children[i]);
+                // Adjust type check if necessary, e.g., allow assigning integer const to byte array
+                if (elemVal.type != elementType) {
+                     if (!(((elementType == TYPE_BYTE) || (elementType == TYPE_WORD)) && elemVal.type == TYPE_INTEGER)) {
+                        // Handle case where element type is enum and initializer is identifier like 'Red'
+                        if(!(elementType == TYPE_ENUM && elemVal.type == TYPE_ENUM)) {
+                           fprintf(stderr, "Runtime error: Type mismatch in constant array initializer element %d. Expected %s, got %s.\n",
+                                   i + 1, varTypeToString(elementType), varTypeToString(elemVal.type));
+                           // Cleanup needed before exit
+                           freeValue(&v);
+                           free(lower_bounds); free(upper_bounds);
+                           EXIT_FAILURE_HANDLER();
+                        }
+                     }
+                }
+                v.array_val[i] = makeCopyOfValue(&elemVal);
+                freeValue(&elemVal); // Free temporary value from eval
+            }
+
+            free(lower_bounds);
+            free(upper_bounds);
+            return v;
+        } // End case AST_ARRAY_LITERAL
         case AST_BOOLEAN:
             return makeBoolean((node->token->type == TOKEN_TRUE) ? 1 : 0);
         case AST_NUMBER:

@@ -263,47 +263,83 @@ void updateSymbol(const char *name, Value val) {
             }
             break;
         case TYPE_ARRAY: {
-            // NOTE: This array assignment logic might need review for N-dimensions
-            // and deep copying complex element types (like records/strings within arrays).
-            // Assuming the user-provided code is functionally correct for now.
-             if (val.type != TYPE_ARRAY) {
-                fprintf(stderr, "Runtime error: type mismatch in array assignment.\n");
-                EXIT_FAILURE_HANDLER();
-            }
-            // ... [Existing array assignment code from user paste - potentially needs review later] ...
-             if (sym->value->array_val) {
-                 // Simplified size calculation assuming 1D for now based on original code
-                 int old_size = sym->value->upper_bound - sym->value->lower_bound + 1;
-                 for (int i = 0; i < old_size; i++) {
-                     Value elem = sym->value->array_val[i];
-                     // Potential deep free needed here depending on element type
-                     // if (elem.type == TYPE_STRING && elem.s_val) free(elem.s_val);
-                     // else if (elem.type == TYPE_RECORD) freeFieldValue(elem.record_val);
-                     freeValue(&elem); // Use freeValue utility if it handles deep free
-                 }
-                 free(sym->value->array_val);
-             }
-            // Simplified size calculation assuming 1D
-             int size = val.upper_bound - val.lower_bound + 1;
-             Value *new_array = malloc(sizeof(Value) * size);
-             if (!new_array) {
-                 fprintf(stderr, "Memory allocation error in array assignment.\n");
-                 EXIT_FAILURE_HANDLER();
-             }
-             for (int i = 0; i < size; i++) {
-                 // Potential deep copy needed here
-                 // new_array[i] = makeCopyOfValue(&val.array_val[i]); // Use makeCopyOfValue utility
-                 new_array[i] = val.array_val[i]; // Original shallow copy - potentially dangerous for strings/records etc.
-             }
-             sym->value->array_val = new_array;
-             sym->value->lower_bound = val.lower_bound;
-             sym->value->upper_bound = val.upper_bound;
-             sym->value->element_type = val.element_type;
-             // N-dimensional info needs copying too if applicable
-             sym->value->dimensions = val.dimensions;
-             // ... copy lower_bounds, upper_bounds arrays ...
-             break;
-        }
+                    // Ensure incoming value is also an array
+                    if (val.type != TYPE_ARRAY) {
+                        fprintf(stderr, "Runtime error: type mismatch in array assignment (expected ARRAY, got %s).\n", varTypeToString(val.type));
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    // Check if dimensions match (optional but recommended)
+                    if (sym->value && sym->value->array_val && sym->value->dimensions != val.dimensions) {
+                         fprintf(stderr, "Runtime error: Array dimension mismatch in assignment for '%s' (expected %d, got %d).\n", sym->name, sym->value->dimensions, val.dimensions);
+                         // Consider freeing existing sym->value array data here if necessary before exiting
+                         EXIT_FAILURE_HANDLER();
+                    }
+
+                    // --- Correctly Free Existing Array Data (if any) ---
+                    if (sym->value && sym->value->array_val) {
+        #ifdef DEBUG
+                        fprintf(stderr,"[DEBUG_UPDATE] Freeing old array for '%s'\n", sym->name);
+        #endif
+                        int old_total_size = 1;
+                        // Check if bounds arrays exist before accessing them
+                        if (sym->value->dimensions > 0 && sym->value->lower_bounds && sym->value->upper_bounds) {
+                             for (int i = 0; i < sym->value->dimensions; i++) {
+                                 old_total_size *= (sym->value->upper_bounds[i] - sym->value->lower_bounds[i] + 1);
+                             }
+                        } else {
+                            old_total_size = 0; // Cannot determine size if info missing
+                        }
+
+                        for (int i = 0; i < old_total_size; i++) {
+                            freeValue(&sym->value->array_val[i]); // Deep free elements
+                        }
+                        free(sym->value->array_val);
+                        free(sym->value->lower_bounds); // Free the bounds arrays
+                        free(sym->value->upper_bounds);
+                        sym->value->array_val = NULL;
+                        sym->value->lower_bounds = NULL;
+                        sym->value->upper_bounds = NULL;
+                        sym->value->dimensions = 0;
+                    }
+
+                    // --- Allocate and Copy New Array Data ---
+        #ifdef DEBUG
+                     fprintf(stderr,"[DEBUG_UPDATE] Allocating and copying new array for '%s'\n", sym->name);
+        #endif
+                     // Calculate correct total size using incoming value's multi-dim info
+                     int new_total_size = 1;
+                     if (val.dimensions <= 0 || !val.lower_bounds || !val.upper_bounds) {
+                         fprintf(stderr, "Runtime error: Invalid dimensions or bounds in source array for assignment to '%s'.\n", sym->name);
+                         EXIT_FAILURE_HANDLER(); // Exit, cannot proceed
+                     }
+                     for (int i = 0; i < val.dimensions; i++) {
+                         new_total_size *= (val.upper_bounds[i] - val.lower_bounds[i] + 1);
+                     }
+
+                     // Allocate space for the Value structs
+                     sym->value->array_val = malloc(sizeof(Value) * new_total_size);
+                     if (!sym->value->array_val) { fprintf(stderr, "Memory allocation error in array assignment (array_val).\n"); EXIT_FAILURE_HANDLER(); }
+
+                     // Allocate and copy bounds arrays
+                     sym->value->lower_bounds = malloc(sizeof(int) * val.dimensions);
+                     sym->value->upper_bounds = malloc(sizeof(int) * val.dimensions);
+                     if (!sym->value->lower_bounds || !sym->value->upper_bounds) { fprintf(stderr, "Memory allocation error in array assignment (bounds).\n"); EXIT_FAILURE_HANDLER(); }
+
+                     memcpy(sym->value->lower_bounds, val.lower_bounds, sizeof(int) * val.dimensions);
+                     memcpy(sym->value->upper_bounds, val.upper_bounds, sizeof(int) * val.dimensions);
+
+                     // Copy metadata
+                     sym->value->dimensions = val.dimensions;
+                     sym->value->element_type = val.element_type;
+                     sym->value->element_type_def = val.element_type_def; // Copy type def link
+
+                     // Deep copy each element
+                     for (int i = 0; i < new_total_size; i++) {
+                         sym->value->array_val[i] = makeCopyOfValue(&val.array_val[i]);
+                     }
+                     sym->value->type = TYPE_ARRAY; // Ensure type is set correctly
+                    break;
+                } 
         case TYPE_CHAR:
             if (val.type == TYPE_CHAR) {
                 // Assigning CHAR to CHAR
