@@ -1,8 +1,0 @@
-build-*/
-bin/
-testing.p
-CMakeFiles/
-MakeFiles/dscal.dir/src/main.c.o
-MakeFiles/hscal.dir/src/main.c.o
-MakeFiles/pscal.dir/src/main.c.o
-
