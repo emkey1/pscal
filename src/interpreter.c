@@ -468,7 +468,7 @@ Value eval(AST *node) {
                  // --- Evaluate bounds and get ordinal values ---
                  Value low_val = eval(subrange->left);
                  Value high_val = eval(subrange->right);
-                 long long low_ord, high_ord;
+                 long long low_ord = 0, high_ord = 0; // <<< Initialize to 0
 
                  // Check type of lower bound
                  if (low_val.type == TYPE_INTEGER) low_ord = low_val.i_val;
