@@ -1114,6 +1114,12 @@ Value executeBuiltinProcedure(AST *node) {
         executeBuiltinClose(node);
         return makeVoid();
     }
+    if (strcmp(node->token->value, "halt") == 0) {
+         executeBuiltinHalt(node); // Call the function that exits
+         // Note: exit() should prevent the code below from running,
+         // but returning makeVoid() is formally correct for a procedure.
+         return makeVoid();
+    }
     if (strcmp(node->token->value, "low") == 0) // Use lowercase
         return executeBuiltinLow(node);
     if (strcmp(node->token->value, "high") == 0) // Use lowercase

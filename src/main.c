@@ -112,7 +112,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("mstreamfree", AST_PROCEDURE_DECL);
     registerBuiltinFunction("api_send",  AST_FUNCTION_DECL);
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL);
-    registerBuiltinFunction("paramcount", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("paramcount", AST_FUNCTION_DECL);
     registerBuiltinFunction("paramstr",  AST_FUNCTION_DECL);
     registerBuiltinFunction("readkey",  AST_FUNCTION_DECL);
     registerBuiltinFunction("delay",  AST_FUNCTION_DECL);
