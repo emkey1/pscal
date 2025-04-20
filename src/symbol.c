@@ -96,6 +96,15 @@ Symbol *lookupLocalSymbol(const char *name) {
 void updateSymbol(const char *name, Value val) {
     Symbol *sym = lookupSymbol(name);
     
+#ifdef DEBUG
+fprintf(stderr, "[DEBUG_UPDATE_CHECK] Called updateSymbol for: '%s'. Symbol found: %p. is_const: %d. Incoming value type: %s\n",
+        name,
+        (void*)sym,
+        sym ? sym->is_const : -1, // Print is_const status if sym found
+        varTypeToString(val.type));
+ // Optionally add a way to print the call stack or caller function if possible
+#endif
+    
     if (sym->is_const) {
         fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n", name);
         EXIT_FAILURE_HANDLER();
