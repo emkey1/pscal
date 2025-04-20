@@ -34,18 +34,18 @@ procedure HideCursor;
 procedure CursorOff;
 procedure ShowCursor;
 procedure CursorOn;
-procedure DelLine;      // Added
-procedure InsLine;      // Added
+procedure DelLine; 
+procedure InsLine;
 procedure Beep;
-procedure NormVideo;    // Added
-procedure HighVideo;    // Added
-procedure LowVideo;     // Added
-procedure Window(x1, y1, x2, y2: integer); // Added
+procedure NormVideo;
+procedure HighVideo;
+procedure LowVideo;
+procedure Window(x1, y1, x2, y2: integer);
 function WhereX: integer;
 function WhereY: integer;
-function KeyPressed: boolean; // Added
+function KeyPressed: boolean;
 
-// --- Extended/Helper Procedures/Functions (already present) ---
+// --- Extended/Helper Procedures/Functions 
 procedure InvertColors;
 procedure NormalColors; // Note: Same effect as NormVideo
 procedure TextColorE(color: byte);

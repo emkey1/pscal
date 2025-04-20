@@ -43,11 +43,40 @@ AST *declarations(Parser *parser, bool in_interface) {
         if (parser->current_token->type == TOKEN_CONST) {
             eat(parser, TOKEN_CONST);
             while (parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *constDecl = constDeclaration(parser);
-                addChild(node, constDecl);
-                Value constVal = eval(constDecl->left);
-                insertGlobalSymbol(constDecl->token->value, constVal.type, NULL);
-                updateSymbol(constDecl->token->value, constVal);
+                AST *constDecl = constDeclaration(parser); // Parses Name = Value;
+                addChild(node, constDecl); // Add AST node as before
+
+                Value constVal = eval(constDecl->left); // Evaluate the constant's value expression
+
+                // --- MODIFICATION START ---
+                // Insert the symbol but DO NOT call updateSymbol afterwards for constants
+                insertGlobalSymbol(constDecl->token->value, constVal.type, constDecl->right); // Pass type definition if available (constDecl->right)
+
+                // Get the newly inserted symbol
+                Symbol *sym = lookupGlobalSymbol(constDecl->token->value);
+                if (sym && sym->value) {
+                    // Free the default value allocated by insertGlobalSymbol
+                    // (Be careful if insertGlobalSymbol changes to not allocate)
+                     if (!sym->is_alias) { // Only free if not an alias
+                          freeValue(sym->value); // Free the contents of the default value
+                     }
+                    // Assign the evaluated constant value directly (deep copy)
+                    *sym->value = makeCopyOfValue(&constVal);
+                    // Set the is_const flag
+                    sym->is_const = true;
+                     #ifdef DEBUG
+                     fprintf(stderr, "[DEBUG_PARSER] Set is_const=TRUE for global constant '%s'\n", sym->name);
+                     #endif
+                } else {
+                     fprintf(stderr, "Parser error: Failed to find or allocate value for global constant '%s'\n", constDecl->token->value);
+                     // Handle error appropriately
+                }
+                // Free the temporary value obtained from eval
+                freeValue(&constVal);
+                // --- MODIFICATION END ---
+
+                // Original updateSymbol call removed:
+                // updateSymbol(constDecl->token->value, constVal); // *** REMOVE THIS LINE ***
             }
         }
         else if (parser->current_token->type == TOKEN_TYPE) {
