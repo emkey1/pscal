@@ -1799,33 +1799,50 @@ AST *parseSetConstructor(Parser *parser) {
 }
 
 AST *relExpr(Parser *parser) {
-    AST *node = expr(parser);
+    DEBUG_PRINT("[DEBUG_REL] Entering relExpr. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
+    AST *node = expr(parser); // Parses left operand
+    DEBUG_PRINT("[DEBUG_REL] After parsing left operand. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
+
+    // Loop for relational operators
     while (parser->current_token->type == TOKEN_GREATER ||
            parser->current_token->type == TOKEN_GREATER_EQUAL ||
            parser->current_token->type == TOKEN_EQUAL ||
            parser->current_token->type == TOKEN_LESS ||
            parser->current_token->type == TOKEN_LESS_EQUAL ||
            parser->current_token->type == TOKEN_NOT_EQUAL ||
-           parser->current_token->type == TOKEN_IN) {
-        Token *op = parser->current_token;
-        eat(parser, op->type);
-        
-        AST *right;
+           parser->current_token->type == TOKEN_IN)
+           {
+        Token *op = parser->current_token; // Store the operator token
+        DEBUG_PRINT("[DEBUG_REL] Found relational operator: %s\n", tokenTypeToString(op->type)); // Added
+
+        eat(parser, op->type); // Consume the operator token
+        DEBUG_PRINT("[DEBUG_REL] After eating operator '%s'. Current token: %s\n", tokenTypeToString(op->type), tokenTypeToString(parser->current_token->type)); // Added
+
+        AST *right; // Node for the right operand
+
         // Special handling for 'in': right side must be a set constructor
         if (op->type == TOKEN_IN) {
-            right = parseSetConstructor(parser); // Parse the set part
+             DEBUG_PRINT("[DEBUG_REL] Parsing right operand (SET for IN)...\n"); // Added specific debug
+             right = parseSetConstructor(parser); // Parse the set part
         } else {
-            right = expr(parser); // Parse regular expression for other ops
+             DEBUG_PRINT("[DEBUG_REL] Parsing right operand (Expression)...\n"); // Added specific debug
+             right = expr(parser); // Parse regular expression for other ops
         }
-        
-        AST *new_node = newASTNode(AST_BINARY_OP, op);
-        setLeft(new_node, node);
-        setRight(new_node, right);
-        setTypeAST(new_node, TYPE_BOOLEAN);
-        node = new_node;
-    }
-    DEBUG_DUMP_AST(node, 0);
-    return node;
+        DEBUG_PRINT("[DEBUG_REL] After parsing right operand. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
+
+        // --- Create the new binary operation node --- <<<< FIX IS HERE >>>>
+        AST *new_node = newASTNode(AST_BINARY_OP, op); // Create the binary op node
+        setLeft(new_node, node);                      // Set left child (previous node)
+        setRight(new_node, right);                    // Set right child
+        setTypeAST(new_node, TYPE_BOOLEAN);           // Relational ops result in Boolean
+        // --- End of fix ---
+
+        node = new_node; // Update 'node' to be the new binary op for the next loop iteration or return
+    } // End while loop
+
+    DEBUG_PRINT("[DEBUG_REL] Exiting relExpr. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
+    DEBUG_DUMP_AST(node, 0); // Original debug dump
+    return node; // Return the final expression tree
 }
 
 AST *boolExpr(Parser *parser) {
