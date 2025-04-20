@@ -7,3 +7,27 @@ The bulk of my recent development has been by way of Google's Gemeni 2.5 Pro.  W
 Pscal uses cmake, but I've only just started learning that particular tool.  I do my development on an M1 MacBook Pro, primarily using (shudder) Xcode.
 
 As the code was written primarily by AI's I'm releasing this to the public domain via the 'unlicense".
+
+Install:
+
+After clonging the repo...
+
+```
+cd pscal
+mkdir build
+cd build
+cmake ..
+make
+```
+
+Binaries will be in ../bin
+
+You will also need to do something similar to the following to get units and the code in Examples/ and Tests/ to work...
+
+```
+# Be sure you are in the root of the git repo
+sudo mkdir /usr/local/Pscal
+sudo ln -s `pwd`/etc /usr/local/Pscal
+sudo ln -s `pwd`/lib /usr/local/Pscal
+```
+
