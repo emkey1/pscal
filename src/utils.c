@@ -518,18 +518,37 @@ Token *newToken(TokenType type, const char *value) {
 }
 
 /* Copy a token */
-Token *copyToken(const Token *orig) {
-    if (!orig) return NULL;
-    return newToken(orig->type, orig->value);
+Token *copyToken(const Token *token) {
+    if (!token) return NULL;
+    Token *new_token = malloc(sizeof(Token));
+    if (!new_token) { fprintf(stderr, "Memory allocation error\n"); EXIT_FAILURE_HANDLER(); }
+    *new_token = *token; // Copy basic fields
+    // Deep copy the string value if it exists
+    new_token->value = token->value ? strdup(token->value) : NULL; // Use strdup, check for NULL
+    if (token->value && !new_token->value) { // Check if strdup failed
+         fprintf(stderr, "Memory allocation error (strdup in copyToken)\n");
+         free(new_token); // Free the partially allocated token
+         EXIT_FAILURE_HANDLER();
+    }
+    return new_token;
 }
-
 
 /* Free a token */
 void freeToken(Token *token) {
-    if (token) {
-        free(token->value);
-        free(token);
+    if (!token) return;
+    // --- ADD THIS CHECK AND FREE ---
+    if (token->value) {
+#ifdef DEBUG_FREE // Optional: Use a separate define for free-specific logs
+         fprintf(stderr, "[DEBUG_FREE] Freeing token value '%s' at %p\n", token->value, (void*)token->value);
+#endif
+        free(token->value); // Free the duplicated string
+        token->value = NULL; // Prevent double-free
     }
+    // --- END ADDITION ---
+#ifdef DEBUG_FREE // Optional: Use a separate define for free-specific logs
+     fprintf(stderr, "[DEBUG_FREE] Freeing token struct at %p\n", (void*)token);
+#endif
+    free(token); // Free the token struct itself
 }
 
 void freeProcedureTable(void) {
