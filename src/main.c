@@ -166,7 +166,7 @@ int runProgram(const char *source, const char *programName) {
 
     freeProcedureTable();
     freeTypeTable();
-    // free_ast(root);  // Uncomment if free_ast() is stable.
+    freeAST(GlobalAST);  // Uncomment if free_ast() is stable.
     
     return EXIT_SUCCESS;
 }
