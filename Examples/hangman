@@ -49,7 +49,7 @@ var
   filename: string;
   validCount, target: integer;
 begin
-  filename := '/Users/mke/Pscal/etc/words';  { Adjust path as needed }
+  filename := '/usr/local/Pscal/etc/words';  { Adjust path as needed }
   ChooseRandomWord := '';  
   assign(f, filename);
   {$I-}

@@ -17,7 +17,8 @@ typedef struct Symbol {
     VarType type;
     Value *value;
     bool is_alias;  // indicates value is not owned by this symbol
-    bool is_local_var;  
+    bool is_local_var;
+    bool is_const;
     AST *type_def;
     struct Symbol *next;
 } Symbol;

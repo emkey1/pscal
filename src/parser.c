@@ -567,39 +567,62 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
     Token *procName = parser->current_token;
     eat(parser, TOKEN_IDENTIFIER);
     AST *node = newASTNode(AST_PROCEDURE_DECL, procName);
+
+    // Parse parameters if present (Unchanged)
     if (parser->current_token->type == TOKEN_LPAREN) {
         eat(parser, TOKEN_LPAREN);
         AST *params = paramList(parser);
         eat(parser, TOKEN_RPAREN);
-        node->children = params->children;
-        node->child_count = params->child_count;
-    }
-    if (in_interface) {
-        // Do not expect a BEGIN or body
-        // Add to symbol table as forward declaration
-        // (Assuming add_procedure handles this)
-    } else {
-        eat(parser, TOKEN_SEMICOLON);
-        if (parser->current_token->type == TOKEN_VAR) {
-            eat(parser, TOKEN_VAR);
-            AST *localDecls = newASTNode(AST_COMPOUND, NULL);
-            while (parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *vdecl = varDeclaration(parser, false);
-                addChild(localDecls, vdecl);
-                eat(parser, TOKEN_SEMICOLON);
-            }
-            AST *compound = compoundStatement(parser);
-            AST *blockNode = newASTNode(AST_BLOCK, NULL);
-            addChild(blockNode, localDecls);
-            addChild(blockNode, compound);
-            setRight(node, blockNode);
+        // Transfer parameter children safely
+        if (params && params->child_count > 0) {
+            node->children = params->children;
+            node->child_count = params->child_count;
+            params->children = NULL; // Prevent double free by params node
+            params->child_count = 0;
+             // Update parent pointers
+             for (int i = 0; i < node->child_count; i++) {
+                 if (node->children[i]) node->children[i]->parent = node;
+             }
         } else {
-            setRight(node, compoundStatement(parser));
+             node->children = NULL;
+             node->child_count = 0;
         }
+        if (params) free(params); // Free the temporary compound node from paramList
+    } else {
+         node->children = NULL; // Ensure these are NULL if no params
+         node->child_count = 0;
     }
-    DEBUG_DUMP_AST(node, 0);
+
+    // Handle interface vs implementation (Unchanged 'if' part)
+    if (in_interface) {
+        // Interface section: no body expected
+        // The semicolon is eaten by the caller (declarations)
+    }
+    // { *** START MODIFIED Implementation Block Logic *** }
+    else { // Implementation part
+        eat(parser, TOKEN_SEMICOLON); // Consume semicolon after header/params
+
+        // Call 'declarations' to parse CONST, TYPE, VAR, nested PROC/FUNC sections
+        // Pass 'false' because these are local to the implementation
+        AST *local_declarations = declarations(parser, false);
+
+        // After declarations, parse the main BEGIN..END body
+        AST *compound_body = compoundStatement(parser);
+
+        // Create the BLOCK node to hold both local declarations and the body
+        AST *blockNode = newASTNode(AST_BLOCK, NULL);
+        addChild(blockNode, local_declarations); // Child 0: Declarations subtree
+        addChild(blockNode, compound_body);     // Child 1: Body subtree
+        blockNode->is_global_scope = false;      // Mark as non-global
+
+        // Attach the blockNode to the PROCEDURE_DECL node
+        setRight(node, blockNode); // Procedures store the block in 'right'
+    }
+    // { *** END MODIFIED Implementation Block Logic *** }
+
+    DEBUG_DUMP_AST(node, 0); // Original debug dump
     return node;
-}
+} // End of procedureDeclaration
 
 AST *constDeclaration(Parser *parser) {
     Token *constNameToken = parser->current_token;
@@ -953,42 +976,69 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
     Token *funcName = parser->current_token;
     eat(parser, TOKEN_IDENTIFIER);
     AST *node = newASTNode(AST_FUNCTION_DECL, funcName);
+
+    // Parse parameters if present (Unchanged)
     if (parser->current_token->type == TOKEN_LPAREN) {
         eat(parser, TOKEN_LPAREN);
         AST *params = paramList(parser);
         eat(parser, TOKEN_RPAREN);
-        node->children = params->children;
-        node->child_count = params->child_count;
-    }
-    eat(parser, TOKEN_COLON);
-    AST *returnType = typeSpecifier(parser, 0);
-    setRight(node, returnType);
-    if (in_interface) {
-        // Do not expect a BEGIN or body
-        // Add to symbol table as forward declaration
-        // (Assuming add_procedure handles this)
-    } else {
-        eat(parser, TOKEN_SEMICOLON);
-        if (parser->current_token->type == TOKEN_VAR) {
-            eat(parser, TOKEN_VAR);
-            AST *localDecls = newASTNode(AST_COMPOUND, NULL);
-            while (parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *vdecl = varDeclaration(parser, false);
-                addChild(localDecls, vdecl);
-                eat(parser, TOKEN_SEMICOLON);
-            }
-            AST *compound = compoundStatement(parser);
-            AST *blockNode = newASTNode(AST_BLOCK, NULL);
-            addChild(blockNode, localDecls);
-            addChild(blockNode, compound);
-            setExtra(node, blockNode);
+        // Transfer parameter children safely
+        if (params && params->child_count > 0) {
+            node->children = params->children;
+            node->child_count = params->child_count;
+            params->children = NULL; // Prevent double free by params node
+            params->child_count = 0;
+             // Update parent pointers
+             for (int i = 0; i < node->child_count; i++) {
+                 if (node->children[i]) node->children[i]->parent = node;
+             }
         } else {
-            setExtra(node, compoundStatement(parser));
+             node->children = NULL;
+             node->child_count = 0;
         }
+        if (params) free(params); // Free the temporary compound node from paramList
+    } else {
+         node->children = NULL; // Ensure these are NULL if no params
+         node->child_count = 0;
     }
-    DEBUG_DUMP_AST(node, 0);
+
+    // Parse return type (Unchanged)
+    eat(parser, TOKEN_COLON);
+    AST *returnType = typeSpecifier(parser, 0); // Allow named types for return
+    setRight(node, returnType); // Return type node is stored in 'right'
+    node->var_type = returnType->var_type; // Set function's return type early
+
+    // Handle interface vs implementation (Unchanged 'if' part)
+    if (in_interface) {
+        // Interface section: no body expected
+        // The semicolon is eaten by the caller (declarations)
+    }
+    // { *** START MODIFIED Implementation Block Logic *** }
+    else { // Implementation part
+        eat(parser, TOKEN_SEMICOLON); // Consume semicolon after header/params/return type
+
+        // Call 'declarations' to parse CONST, TYPE, VAR, nested PROC/FUNC sections
+        // Pass 'false' because these are local to the implementation
+        AST *local_declarations = declarations(parser, false);
+
+        // After declarations, parse the main BEGIN..END body
+        AST *compound_body = compoundStatement(parser);
+
+        // Create the BLOCK node to hold both local declarations and the body
+        AST *blockNode = newASTNode(AST_BLOCK, NULL);
+        addChild(blockNode, local_declarations); // Child 0: Declarations subtree
+        addChild(blockNode, compound_body);     // Child 1: Body subtree
+        blockNode->is_global_scope = false;      // Mark as non-global
+
+        // Attach the blockNode to the FUNCTION_DECL node
+        // Functions store the block in 'extra' because 'right' holds the return type
+        setExtra(node, blockNode);
+    }
+    // { *** END MODIFIED Implementation Block Logic *** }
+
+    DEBUG_DUMP_AST(node, 0); // Original debug dump
     return node;
-}
+} // End of functionDeclaration
 
 AST *paramList(Parser *parser) {
     AST *compound = newASTNode(AST_COMPOUND, NULL);

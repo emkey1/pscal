@@ -95,6 +95,12 @@ Symbol *lookupLocalSymbol(const char *name) {
 
 void updateSymbol(const char *name, Value val) {
     Symbol *sym = lookupSymbol(name);
+    
+    if (sym->is_const) {
+        fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n", name);
+        EXIT_FAILURE_HANDLER();
+    }
+    
 #ifdef DEBUG
     // This first switch is only for DEBUG printing the incoming value 'val'
     // It should NOT contain assignment logic or use 'sym' as 'sym' is not declared yet.

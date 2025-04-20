@@ -803,9 +803,9 @@ void debugASTFile(AST *node) {
 char *findUnitFile(const char *unit_name) {
     const char *base_path;
 #ifdef DEBUG
-    base_path = "/Users/mke/Pscal/lib";
+    base_path = "/usr/local/Pscal/lib";
 #else
-    base_path = "/Users/mke/Pscal/lib";
+    base_path = "/usr/local/Pscal/lib";
 #endif
 
     // Allocate enough space: path + '/' + unit name + ".pl" + null terminator

@@ -261,6 +261,85 @@ Value executeProcedureCall(AST *node) {
     }
 }
 
+// New function to process local declarations within a scope
+void processLocalDeclarations(AST* declarationsNode) {
+    if (!declarationsNode || declarationsNode->type != AST_COMPOUND) {
+        // Should be an AST_COMPOUND node containing decls, or NULL/empty compound if none
+        if (declarationsNode && declarationsNode->type != AST_NOOP) { // Ignore NOOP from empty decls section
+             fprintf(stderr, "Warning: Expected COMPOUND node for local declarations, got %s\n",
+                     declarationsNode ? astTypeToString(declarationsNode->type) : "NULL");
+        }
+        return; // Nothing to process
+    }
+
+    // Iterate through all declaration nodes (CONST_DECL, TYPE_DECL, VAR_DECL...)
+    for (int i = 0; i < declarationsNode->child_count; i++) {
+        AST *declNode = declarationsNode->children[i];
+        if (!declNode) continue;
+
+        switch (declNode->type) {
+            case AST_CONST_DECL: {
+                 const char *constName = declNode->token->value;
+                 DEBUG_PRINT("[DEBUG_LOCALS] Processing local CONST_DECL: %s\n", constName);
+                 Value constVal = eval(declNode->left);
+                 Symbol *sym = insertLocalSymbol(constName, constVal.type, declNode->right, false);
+
+                 if (sym && sym->value) {
+                     freeValue(sym->value);
+                     *sym->value = makeCopyOfValue(&constVal);
+                     sym->is_const = true;
+#ifdef DEBUG
+                     fprintf(stderr, "[DEBUG_LOCALS] Set is_const=TRUE for local constant '%s'\n", constName);
+#endif
+                 } // ... error handling ...
+                 freeValue(&constVal);
+                 break;
+             }
+            case AST_VAR_DECL: {
+                // Process local variable declarations
+                AST *typeNode = declNode->right; // The type definition node
+                for (int j = 0; j < declNode->child_count; j++) {
+                    AST *varNode = declNode->children[j]; // The VARIABLE node
+                    const char *varName = varNode->token->value;
+                    DEBUG_PRINT("[DEBUG_LOCALS] Processing local VAR_DECL: %s\n", varName);
+
+                    // Insert into local symbol table, mark as variable
+                    Symbol *sym = insertLocalSymbol(varName, declNode->var_type, typeNode, true);
+
+                    // Value initialization happens within insertLocalSymbol via makeValueForType
+                    if (!sym || !sym->value) {
+                        fprintf(stderr, "Error: Failed to insert or initialize local variable '%s'.\n", varName);
+                        // Handle error
+                    }
+                     // Handle fixed-length string size if needed (might be redundant if insertLocalSymbol does it)
+                     if (sym && sym->type == TYPE_STRING && typeNode && typeNode->right) {
+                          // ... (code to evaluate length and set sym->value->max_length) ...
+                          // This logic might be better placed entirely within insertLocalSymbol
+                     }
+                }
+                break;
+            }
+            case AST_TYPE_DECL: {
+                // Handling local TYPE declarations is complex.
+                // Standard Pascal often doesn't allow types truly local *only*
+                // to the procedure scope; they might be visible outwards.
+                // For simplicity, we can IGNORE local type declarations for now.
+                // Global types are already handled by the parser/linkUnit.
+                DEBUG_PRINT("[DEBUG_LOCALS] Skipping local TYPE_DECL: %s\n", declNode->token->value);
+                break;
+            }
+            case AST_PROCEDURE_DECL:
+            case AST_FUNCTION_DECL: {
+                // Handle nested procedures/functions if you implement them later
+                DEBUG_PRINT("[DEBUG_LOCALS] Skipping nested PROCEDURE/FUNCTION: %s\n", declNode->token->value);
+                break;
+            }
+            default:
+                // Ignore other node types that might appear in the declarations compound node
+                break;
+        }
+    }
+}
 
 char *enumValueToString(Type *enum_type, int value) {
     if (!enum_type) return strdup("<invalid>");

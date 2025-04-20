@@ -33,7 +33,7 @@ target_link_libraries(  hscal PRIVATE m curl)
 
 # ---- optional install rule (matches `make install`) -----------------------
 include(GNUInstallDirs)
-install(TARGETS pscal RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS pscal dscal RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # --------------------------------------------------------------------------
 

@@ -62,7 +62,7 @@ var
   validCount, target: integer;
 begin
   // *** IMPORTANT: Update this path to your actual 'words' file location ***
-  filename := '/Users/mke/Pscal/etc/words';
+  filename := '/usr/local/Pscal/etc/words';  { Adjust path as needed }
   ChooseRandomWord := '';
   assign(f, filename);
   {$I-} reset(f); {$I+} // Disable IO checking for reset
