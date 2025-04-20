@@ -25,9 +25,12 @@ Binaries will be in ../bin
 You will also need to do something similar to the following to get units and the code in Examples/ and Tests/ to work...
 
 ```
-# Be sure you are in the root of the git repo
-sudo mkdir /usr/local/Pscal
-sudo ln -s `pwd`/etc /usr/local/Pscal
-sudo ln -s `pwd`/lib /usr/local/Pscal
+# Run this from the root of your git repo
+REPO_DIR="$(pwd)"
+
+sudo mkdir -p /usr/local/Pscal
+
+sudo ln -s "${REPO_DIR}/etc" /usr/local/Pscal/etc
+sudo ln -s "${REPO_DIR}/lib" /usr/local/Pscal/lib
 ```
 
