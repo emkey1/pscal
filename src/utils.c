@@ -206,12 +206,7 @@ FieldValue *copyRecord(FieldValue *orig) {
              EXIT_FAILURE_HANDLER();
         }
 
-        // *** FIX: Use makeCopyOfValue for deep copy of the field's value ***
         new_field->value = makeCopyOfValue(&curr->value);
-
-        // *** REMOVE redundant string copy (now handled by makeCopyOfValue) ***
-        // if (new_field->value.type == TYPE_STRING && curr->value.s_val != NULL)
-        //     new_field->value.s_val = strdup(curr->value.s_val); // This is no longer needed
 
         new_field->next = NULL;
         *ptr = new_field;
@@ -538,15 +533,15 @@ void freeToken(Token *token) {
     if (!token) return;
     // --- ADD THIS CHECK AND FREE ---
     if (token->value) {
-#ifdef DEBUG_FREE // Optional: Use a separate define for free-specific logs
-         fprintf(stderr, "[DEBUG_FREE] Freeing token value '%s' at %p\n", token->value, (void*)token->value);
+#ifdef DEBUG // Optional: Use a separate define for free-specific logs
+         fprintf(stderr, "[DEBUG] Freeing token value '%s' at %p\n", token->value, (void*)token->value);
 #endif
         free(token->value); // Free the duplicated string
         token->value = NULL; // Prevent double-free
     }
     // --- END ADDITION ---
-#ifdef DEBUG_FREE // Optional: Use a separate define for free-specific logs
-     fprintf(stderr, "[DEBUG_FREE] Freeing token struct at %p\n", (void*)token);
+#ifdef DEBUG // Optional: Use a separate define for free-specific logs
+     fprintf(stderr, "[DEBUG] Freeing token struct at %p\n", (void*)token);
 #endif
     free(token); // Free the token struct itself
 }
@@ -599,7 +594,7 @@ void freeValue(Value *v) {
 
     // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] freeValue called for Value* at %p, type=%s\n",
+    fprintf(stderr, "[DEBUG] freeValue called for Value* at %p, type=%s\n",
             (void*)v, varTypeToString(v->type));
 #endif
     // *** END DEBUG PRINT ***
@@ -611,11 +606,12 @@ void freeValue(Value *v) {
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
         case TYPE_ENUM: // Enum name is usually shared/static, ordinal is inline
+            
         case TYPE_BYTE:
         case TYPE_WORD:
             // No heap data associated with the Value struct itself for these
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]   No heap data to free for type %s\n", varTypeToString(v->type));
+            fprintf(stderr, "[DEBUG]   No heap data to free for type %s\n", varTypeToString(v->type));
 #endif
             break;
 
@@ -623,14 +619,14 @@ void freeValue(Value *v) {
             if (v->s_val) {
                 // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG_FREE]   Freeing string content '%s' at %p\n", v->s_val, (void*)v->s_val);
+                fprintf(stderr, "[DEBUG]   Freeing string content '%s' at %p\n", v->s_val, (void*)v->s_val);
 #endif
                 // *** END DEBUG PRINT ***
                 free(v->s_val);
                 v->s_val = NULL;
             } else {
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG_FREE]   String content is NULL\n");
+                fprintf(stderr, "[DEBUG]   String content is NULL\n");
 #endif
             }
             break;
@@ -639,14 +635,14 @@ void freeValue(Value *v) {
             FieldValue *f = v->record_val;
             // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]   Processing record fields for Value* at %p (record_val=%p)\n", (void*)v, (void*)f);
+            fprintf(stderr, "[DEBUG]   Processing record fields for Value* at %p (record_val=%p)\n", (void*)v, (void*)f);
 #endif
             // *** END DEBUG PRINT ***
             while (f) {
                 FieldValue *next = f->next;
                 // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG_FREE]     Freeing FieldValue* at %p (name='%s' @ %p)\n",
+                fprintf(stderr, "[DEBUG]     Freeing FieldValue* at %p (name='%s' @ %p)\n",
                         (void*)f, f->name ? f->name : "NULL", (void*)f->name);
 #endif
                 // *** END DEBUG PRINT ***
@@ -661,7 +657,7 @@ void freeValue(Value *v) {
         case TYPE_ARRAY: {
             // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG_FREE]   Processing array for Value* at %p (array_val=%p)\n", (void*)v, (void*)v->array_val);
+             fprintf(stderr, "[DEBUG]   Processing array for Value* at %p (array_val=%p)\n", (void*)v, (void*)v->array_val);
 #endif
             // *** END DEBUG PRINT ***
              if (v->array_val) {
@@ -672,23 +668,23 @@ void freeValue(Value *v) {
                  } else {
                    total = 0; // Prevent calculation if bounds are missing
 #ifdef DEBUG
-                   fprintf(stderr, "[DEBUG_FREE]   Warning: Array bounds missing or zero dimensions.\n");
+                   fprintf(stderr, "[DEBUG]   Warning: Array bounds missing or zero dimensions.\n");
 #endif
                  }
 
                  for (int i = 0; i < total; i++) {
 #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG_FREE]     Freeing array element %d\n", i); // Added print
+                    fprintf(stderr, "[DEBUG]     Freeing array element %d\n", i); // Added print
 #endif
                     freeValue(&v->array_val[i]); // Frees contents of each element
                  }
 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG_FREE]   Freeing array data buffer at %p\n", (void*)v->array_val); // Added print
+                 fprintf(stderr, "[DEBUG]   Freeing array data buffer at %p\n", (void*)v->array_val); // Added print
 #endif
                  free(v->array_val); // Frees the array of Value structs itself
              }
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG_FREE]   Freeing array bounds at %p and %p\n", (void*)v->lower_bounds, (void*)v->upper_bounds); // Added print
+             fprintf(stderr, "[DEBUG]   Freeing array bounds at %p and %p\n", (void*)v->lower_bounds, (void*)v->upper_bounds); // Added print
 #endif
              free(v->lower_bounds);
              free(v->upper_bounds);
@@ -700,7 +696,7 @@ void freeValue(Value *v) {
         // Add other types if they allocate memory pointed to by Value struct members
         default:
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG_FREE]   Unhandled type %s in freeValue\n", varTypeToString(v->type));
+             fprintf(stderr, "[DEBUG]   Unhandled type %s in freeValue\n", varTypeToString(v->type));
 #endif
              break; // Or handle error
     }

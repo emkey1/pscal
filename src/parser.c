@@ -1613,8 +1613,16 @@ end_loop: // Label for goto
 
 AST *forStatement(Parser *parser) {
     eat(parser, TOKEN_FOR);
-    AST *var_node = newASTNode(AST_VARIABLE, parser->current_token);
-    eat(parser, TOKEN_IDENTIFIER);
+    // Parse the loop variable identifier FIRST
+    Token *loopVarToken = parser->current_token;
+    if (loopVarToken->type != TOKEN_IDENTIFIER) {
+         errorParser(parser, "Expected identifier for loop variable");
+         return newASTNode(AST_NOOP, NULL); // Error recovery
+    }
+    AST *loopVarNode = newASTNode(AST_VARIABLE, loopVarToken);
+    eat(parser, TOKEN_IDENTIFIER); // Consume loop variable identifier
+
+    // Now parse the rest: := start [to|downto] end do body
     eat(parser, TOKEN_ASSIGN);
     AST *start_expr = expr(parser);
     TokenType direction = parser->current_token->type;
@@ -1627,12 +1635,22 @@ AST *forStatement(Parser *parser) {
     AST *end_expr = expr(parser);
     eat(parser, TOKEN_DO);
     AST *body = statement(parser);
+
+    // Create the FOR node (use NULL for token, it's structural)
     ASTNodeType for_type = (direction == TOKEN_TO) ? AST_FOR_TO : AST_FOR_DOWNTO;
-    AST *node = newASTNode(for_type, var_node->token);
-    setLeft(node, start_expr);
-    setRight(node, end_expr);
-    setExtra(node, body);
-    DEBUG_DUMP_AST(node, 0);
+    // ---> THE KEY FIX IS HERE <---
+    AST *node = newASTNode(for_type, NULL); // <<< Ensure NULL token for FOR node
+    // ----------------------------
+
+    // Assign components to the correct places
+    setLeft(node, start_expr);   // Start expression
+    setRight(node, end_expr);    // End expression
+    setExtra(node, body);        // Loop body
+    addChild(node, loopVarNode); // <<< Store loop variable node in children[0]
+
+    #ifdef DEBUG // Keep debug dump if helpful
+    if (dumpExec) debugAST(node, 0);
+    #endif
     return node;
 }
 

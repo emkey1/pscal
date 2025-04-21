@@ -103,13 +103,95 @@ void setExtra(AST *parent, AST *child) {
 
 void freeAST(AST *node) {
     if (!node) return;
-    if (node->token) freeToken(node->token);
-    if (node->left) freeAST(node->left);
-    if (node->right) freeAST(node->right);
-    if (node->extra) freeAST(node->extra);
-    for (int i = 0; i < node->child_count; i++) freeAST(node->children[i]);
-    free(node->children);
+
+    // --- Print Node address and Type BEFORE processing ---
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG] Enter freeAST for Node %p (Type: %s, Token: '%s')\n",
+            (void*)node,
+            astTypeToString(node->type),
+            (node->token && node->token->value) ? node->token->value : "NULL");
+#endif
+
+    // --- CHANGE: New Freeing Order ---
+
+    // 1. Recurse Left
+    if (node->left) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG]  - Recursing Left from Node %p into Node %p (Type: %s)\n",
+                (void*)node, (void*)node->left, astTypeToString(node->left->type));
+#endif
+        freeAST(node->left);
+        node->left = NULL;
+    }
+
+    // 2. Recurse Right
+    if (node->right) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG]  - Recursing Right from Node %p into Node %p (Type: %s)\n",
+                (void*)node, (void*)node->right, astTypeToString(node->right->type));
+#endif
+        freeAST(node->right);
+        node->right = NULL;
+    }
+
+    // 3. Recurse Extra
+    if (node->extra) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG]  - Recursing Extra from Node %p into Node %p (Type: %s)\n",
+                (void*)node, (void*)node->extra, astTypeToString(node->extra->type));
+#endif
+        freeAST(node->extra);
+        node->extra = NULL;
+    }
+
+    // 4. Recurse Children and free array
+    if (node->children) {
+         for (int i = 0; i < node->child_count; i++) {
+             if (node->children[i]) {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG]  - Recursing Child %d from Node %p into Node %p (Type: %s)\n",
+                        i, (void*)node, (void*)node->children[i], astTypeToString(node->children[i]->type));
+#endif
+                 freeAST(node->children[i]);
+                 node->children[i] = NULL; // Not strictly necessary before freeing array, but good practice
+             } else {
+#ifdef DEBUG
+                 fprintf(stderr, "[DEBUG]  - Child %d of Node %p is NULL, skipping free.\n", i, (void*)node);
+#endif
+             }
+         }
+#ifdef DEBUG
+         fprintf(stderr, "[DEBUG]  - Freeing children array for Node %p\n", (void*)node);
+#endif
+         free(node->children); // Free the array itself
+         node->children = NULL;
+         node->child_count = 0;
+         node->child_capacity = 0;
+    }
+
+    // 5. Free token (after all subtrees/children are handled)
+    if (node->token) {
+#ifdef DEBUG // Or DEBUG_FREE if you prefer
+fprintf(stderr, "[DEBUG_FREE_TOKEN] Preparing to free token for Node %p (Type: %s, TokenValue: '%s')\n",
+        (void*)node,
+        astTypeToString(node->type),
+        (node->token && node->token->value) ? node->token->value : "NULL");
+#endif
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG]  - Freeing Token for Node %p\n", (void*)node);
+#endif
+        freeToken(node->token); // freeToken should handle freeing value and struct
+        node->token = NULL;
+    }
+
+    // 6. Free the node struct itself
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG] Freeing Node struct %p itself (Type: %s)\n",
+            (void*)node, astTypeToString(node->type));
+#endif
     free(node);
+
+    // --- END CHANGE ---
 }
 
 void dumpASTFromRoot(AST *node) {
@@ -400,39 +482,34 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
             AST* declNode = findStaticDeclarationInAST(varName, currentScopeNode, globalProgramNode);
 
             if (declNode) {
-                AST* typeNode = NULL;
-                if (declNode->type == AST_FUNCTION_DECL) { typeNode = declNode->right; }
-                else { typeNode = declNode->right; } // Assumed AST_VAR_DECL
+                 AST* typeNode = NULL;
+                 if (declNode->type == AST_FUNCTION_DECL) { typeNode = declNode->right; }
+                 else { typeNode = declNode->right; } // Assumed AST_VAR_DECL
 
-                if(typeNode) {
-                    AST* actualTypeNode = typeNode;
-                    if (actualTypeNode->type == AST_TYPE_REFERENCE) {
-                        actualTypeNode = actualTypeNode->right; // Resolve reference
-                    }
-                    if (actualTypeNode) {
-                        node->var_type = actualTypeNode->var_type; // Get type from definition
-                        setRight(node, actualTypeNode); // Link usage to definition
-#ifdef DEBUG
-                        fprintf(stderr, "[Annotate]   Found declaration for '%s'. Set type to %s.\n", varName, varTypeToString(node->var_type));
-#endif
-                    } else { node->var_type = TYPE_VOID; /* Broken link? */ }
-                } else { node->var_type = TYPE_VOID; /* Decl node missing type? */ }
-            } else {
-                // 2. Not a variable/param, maybe a TYPE name?
-                AST* typeNode = lookupType(varName);
-                if (typeNode) {
-#ifdef DEBUG
-                    fprintf(stderr, "[Annotate]   Identifier '%s' is a TYPE name. Setting node type to %s.\n", varName, varTypeToString(typeNode->var_type));
-#endif
-                    node->var_type = typeNode->var_type;
-                    setRight(node, typeNode);
-                } else {
-#ifdef DEBUG
-                    fprintf(stderr, "[Annotate]   Identifier '%s' not found as variable or type.\n", varName);
-#endif
-                     node->var_type = TYPE_VOID; // Undeclared
-                }
-            }
+                 if(typeNode) {
+                     AST* actualTypeNode = typeNode;
+                     if (actualTypeNode->type == AST_TYPE_REFERENCE) {
+                         actualTypeNode = actualTypeNode->right; // Resolve reference
+                     }
+                     if (actualTypeNode) {
+                         node->var_type = actualTypeNode->var_type; // Get type from definition
+                         // setRight(node, actualTypeNode); // <<< REMOVED/COMMENTED OUT >>>
+ #ifdef DEBUG
+                         fprintf(stderr, "[Annotate]   Found declaration for '%s'. Set type to %s.\n", varName, varTypeToString(node->var_type));
+ #endif
+                     } else { node->var_type = TYPE_VOID; /* Broken link? */ }
+                 } else { node->var_type = TYPE_VOID; /* Decl node missing type? */ }
+             } else {
+                 // ... (Type lookup fallback) ...
+                  AST* typeNode = lookupType(varName);
+                  if (typeNode) {
+                      // ... (Set var_type from type lookup) ...
+                      node->var_type = typeNode->var_type;
+                      // setRight(node, typeNode); // <<< REMOVED/COMMENTED OUT >>>
+                  } else {
+                       // ... (Undeclared) ...
+                  }
+             }
 #ifdef DEBUG
             fprintf(stderr, "[Annotate]   After processing, node '%s' var_type is now: %s\n", varName, varTypeToString(node->var_type));
 #endif
@@ -554,4 +631,152 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
              }
              break;
     }
+}
+
+// In src/ast.c (Replace the previous copyAST with this)
+#include <string.h> // For strdup if needed by copyToken
+#include <stdlib.h> // For malloc, NULL
+// Include ast.h, list.h, utils.h etc.
+
+AST *copyAST(AST *node) {
+    if (!node) return NULL;
+
+    // Create a new node of the same type, copying the token
+    // copyToken handles copying token->value (string, etc.)
+    AST *newNode = newASTNode(node->type, node->token);
+    if (!newNode) return NULL; // Allocation failed
+
+    // Copy simple properties from the AST struct definition
+    newNode->var_type = node->var_type;
+    newNode->by_ref = node->by_ref;
+    newNode->is_global_scope = node->is_global_scope;
+    newNode->i_val = node->i_val; // Copy the integer value field
+
+    // Note: symbol_table and unit_list are not deep copied here.
+    // If they need deep copies, that logic would be added.
+    // For now, let's assume they are metadata/references managed elsewhere.
+    newNode->unit_list = node->unit_list;     // Shallow copy (pointer)
+    newNode->symbol_table = node->symbol_table; // Shallow copy (pointer)
+
+
+    // Recursively copy subtrees
+    AST *copiedLeft = copyAST(node->left);
+    AST *copiedRight = copyAST(node->right);
+    AST *copiedExtra = copyAST(node->extra);
+
+    // --- Safely assign copied subtrees and set parent pointers ---
+    newNode->left = copiedLeft;
+    if (newNode->left) newNode->left->parent = newNode;
+
+    newNode->right = copiedRight;
+    if (newNode->right) newNode->right->parent = newNode;
+
+    newNode->extra = copiedExtra;
+    if (newNode->extra) newNode->extra->parent = newNode;
+    // ---
+
+    // Copy children array
+    if (node->child_count > 0 && node->children) {
+        newNode->child_capacity = node->child_count; // Allocate exact capacity needed
+        newNode->child_count = node->child_count;
+        newNode->children = malloc(sizeof(AST*) * newNode->child_capacity);
+        if (!newNode->children) { freeAST(newNode); return NULL; } // Allocation failed
+
+        // Initialize child pointers to NULL
+        for (int i = 0; i < newNode->child_count; i++) {
+             newNode->children[i] = NULL;
+        }
+
+        // Copy each child
+        for (int i = 0; i < node->child_count; i++) {
+            newNode->children[i] = copyAST(node->children[i]);
+            // Check if copy failed for a non-NULL original child
+            if (!newNode->children[i] && node->children[i]) {
+                 // Important: Need to free already copied children before returning NULL
+                 for(int j = 0; j < i; ++j) { // Free successfully copied children so far
+                     freeAST(newNode->children[j]);
+                 }
+                 free(newNode->children); // Free the children array itself
+                 newNode->children = NULL;
+                 newNode->child_count = 0;
+                 newNode->child_capacity = 0;
+                 // Free other copied parts (left, right, extra, token, node itself)
+                 freeAST(newNode);
+                 return NULL; // Indicate copy failure
+             }
+            // Set parent pointer in the successfully copied child
+            if (newNode->children[i]) {
+                newNode->children[i]->parent = newNode;
+            }
+        }
+    } else {
+        newNode->children = NULL;
+        newNode->child_count = 0;
+        newNode->child_capacity = 0;
+    }
+
+    return newNode;
+}
+
+// Function to recursively verify parent pointers in the AST
+// Returns true if all links are consistent, false otherwise.
+// Prints errors to stderr upon finding inconsistencies.
+bool verifyASTLinks(AST *node, AST *expectedParent) {
+    if (!node) return true; // Base case: NULL node is valid
+
+    bool links_ok = true;
+
+    // --- ADDED: Detailed Debug Print BEFORE check ---
+    #ifdef DEBUG // Optional: Use your existing DEBUG flag
+    fprintf(stderr, "[VERIFY_CHECK] Node %p (Type: %s, Token: '%s'), Actual Parent: %p, Expected Parent Param: %p\n",
+            (void*)node,
+            astTypeToString(node->type),
+            (node->token && node->token->value) ? node->token->value : "NULL",
+            (void*)node->parent,
+            (void*)expectedParent);
+    #endif
+    // --- END ADDED DEBUG PRINT ---
+
+    // 1. Check current node's parent pointer
+    if (node->parent != expectedParent) {
+        // Existing error print
+        fprintf(stderr, "AST Link Error: Node %p (Type: %s, Token: '%s') has parent %p, but expected %p\n",
+                (void*)node,
+                astTypeToString(node->type),
+                (node->token && node->token->value) ? node->token->value : "NULL",
+                (void*)node->parent,
+                (void*)expectedParent);
+        links_ok = false;
+    }
+
+    // 2. Recursively check subtrees, passing 'node' as the expectedParent
+    if (!verifyASTLinks(node->left, node)) {
+        links_ok = false;
+    }
+    if (!verifyASTLinks(node->right, node)) {
+        links_ok = false;
+    }
+    if (!verifyASTLinks(node->extra, node)) {
+        links_ok = false;
+    }
+
+    // 3. Recursively check children array
+    if (node->children) {
+        for (int i = 0; i < node->child_count; i++) {
+            // Pass 'node' as the expected parent for each child
+            if (node->children[i]) {
+                 // --- ADDED: Debug Print BEFORE recursive call for child ---
+                 #ifdef DEBUG
+                 fprintf(stderr, "[VERIFY_RECURSE] Calling verify for Child %d of Node %p. Child Node: %p, Passing Expected Parent: %p\n",
+                         i, (void*)node, (void*)node->children[i], (void*)node);
+                 #endif
+                 // --- END ADDED DEBUG PRINT ---
+                 if (!verifyASTLinks(node->children[i], node)) {
+                     links_ok = false;
+                 }
+            }
+        }
+    }
+
+    return links_ok;
 }

@@ -697,18 +697,43 @@ Value executeBuiltinIntToStr(AST *node) {
         EXIT_FAILURE_HANDLER();
     }
 
-    // Determine buffer size needed for the string representation
-    // Long long can be up to 20 digits + sign + null terminator
-    char buffer[32];
-    int chars_written = snprintf(buffer, sizeof(buffer), "%lld", arg.i_val);
+    // --- MODIFICATION START: Dynamic Allocation ---
+    // 1. Determine required size using snprintf with size 0
+    //    (Returns number of chars needed *excluding* null terminator)
+    int required_size = snprintf(NULL, 0, "%lld", arg.i_val);
+    if (required_size < 0) {
+         fprintf(stderr, "Runtime error: snprintf failed to determine size in IntToStr.\n");
+         return makeString(""); // Return empty string on error
+    }
 
-    if (chars_written < 0 || chars_written >= sizeof(buffer)) {
-        // Handle potential snprintf error (though unlikely for integers)
-        fprintf(stderr, "Runtime error: Failed to convert integer to string in IntToStr.\n");
+    // 2. Allocate buffer on the heap (+1 for null terminator)
+    char *buffer = malloc(required_size + 1);
+    if (!buffer) {
+         fprintf(stderr, "Runtime error: Memory allocation failed for buffer in IntToStr.\n");
+         // No EXIT_FAILURE_HANDLER needed here, just return empty string? Or maybe exit is safer.
+         // EXIT_FAILURE_HANDLER();
+         return makeString(""); // Let's return empty for now
+    }
+
+    // 3. Perform the actual formatting into the allocated buffer
+    //    Pass the allocated size (required_size + 1) to snprintf.
+    int chars_written = snprintf(buffer, required_size + 1, "%lld", arg.i_val);
+
+    if (chars_written < 0 || chars_written >= (required_size + 1)) {
+        // Handle potential snprintf error (shouldn't happen if size calculation was correct)
+        fprintf(stderr, "Runtime error: Failed to convert integer to string in IntToStr (step 2).\n");
+        free(buffer); // Free the allocated buffer before returning
         return makeString(""); // Return empty string on error
     }
 
-    return makeString(buffer); // Create and return the string Value
+    // 4. Create the Value using makeString (which copies the buffer content to new heap memory)
+    Value result = makeString(buffer);
+
+    // 5. Free the dynamically allocated buffer used for formatting
+    free(buffer);
+    // --- MODIFICATION END ---
+
+    return result; // Return the string Value (contains its own heap copy)
 }
 
 void executeBuiltinInc(AST *node) {

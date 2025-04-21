@@ -13,45 +13,45 @@ void popLocalEnv(void) {
     Symbol *sym = localSymbols;
     
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] Popping local env (localSymbols=%p)\n", (void*)sym);
+    fprintf(stderr, "[DEBUG] Popping local env (localSymbols=%p)\n", (void*)sym);
 #endif
     while (sym) {
         Symbol *next = sym->next;
 #ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]   Processing local symbol '%s' at %p (is_alias=%d, is_local_var=%d)\n", // Added is_local_var
+        fprintf(stderr, "[DEBUG]   Processing local symbol '%s' at %p (is_alias=%d, is_local_var=%d)\n", // Added is_local_var
                 sym->name ? sym->name : "NULL", (void*)sym, sym->is_alias, sym->is_local_var); // Added is_local_var
 #endif
 
         // *** FIX: Only free Value if it's NOT an alias AND NOT a standard local variable ***
         if (sym->value && !sym->is_alias && !sym->is_local_var) {
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG_FREE]     Freeing Value* at %p for non-alias, non-local symbol '%s'\n", (void*)sym->value, sym->name ? sym->name : "NULL");
+             fprintf(stderr, "[DEBUG]     Freeing Value* at %p for non-alias, non-local symbol '%s'\n", (void*)sym->value, sym->name ? sym->name : "NULL");
 #endif
              freeValue(sym->value);
              free(sym->value); // Free the Value struct itself
              sym->value = NULL; // Prevent dangling pointer in Symbol struct
         } else if (sym->value && (sym->is_alias || sym->is_local_var)) { // Log why it's skipped
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG_FREE]     Skipping freeValue for symbol '%s' (value=%p, alias=%d, local=%d)\n",
+             fprintf(stderr, "[DEBUG]     Skipping freeValue for symbol '%s' (value=%p, alias=%d, local=%d)\n",
                      sym->name ? sym->name : "NULL", (void*)sym->value, sym->is_alias, sym->is_local_var);
 #endif
         }
         // ... (free name, free symbol struct) ...
          if (sym->name) {
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]     Freeing name '%s' at %p\n", sym->name, (void*)sym->name);
+            fprintf(stderr, "[DEBUG]     Freeing name '%s' at %p\n", sym->name, (void*)sym->name);
 #endif
             free(sym->name);
         }
 #ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]     Freeing Symbol* at %p\n", (void*)sym);
+        fprintf(stderr, "[DEBUG]     Freeing Symbol* at %p\n", (void*)sym);
 #endif
         free(sym); // Free the Symbol struct itself
         sym = next;
     }
     localSymbols = NULL;
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] Finished popping local env\n");
+    fprintf(stderr, "[DEBUG] Finished popping local env\n");
 #endif
 }
 
@@ -823,12 +823,17 @@ Value eval(AST *node) {
                          if (op == TOKEN_PLUS) { // Concatenation
                              int len_left = (int)strlen(left_s);
                              int len_right = (int)strlen(right_s);
-                             char *result = malloc(len_left + len_right + 1);
+                             // Allocate sufficient buffer size (+1 for null terminator)
+                             size_t buffer_size = len_left + len_right + 1;
+                             char *result = malloc(buffer_size);
                              if (!result) { /* Mem alloc error */ EXIT_FAILURE_HANDLER(); }
-                             strcpy(result, left_s);
-                             strcat(result, right_s);
-                             Value out = makeString(result); // makeString handles copying
-                             free(result);
+
+                             // Copy the left part first
+                             strcpy(result, left_s); // strcpy null-terminates
+                             strncat(result, right_s, len_right);
+
+                             Value out = makeString(result); // makeString copies 'result'
+                             free(result);                  // Free the temporary buffer
                              return out;
                          }
                          else if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
@@ -1297,119 +1302,121 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             executeWithScope(node->right, true);
             break;
         case AST_ASSIGN: {
-            Value val = eval(node->right);
+                    // Evaluate the right-hand side expression.
+                    // 'val' might hold heap-allocated data (string, record, array).
+                    Value val = eval(node->right);
 
-            if (node->left->type == AST_ARRAY_ACCESS || node->left->type == AST_FIELD_ACCESS) {
-                Value container = eval(node->left->left);
+                    if (node->left->type == AST_ARRAY_ACCESS || node->left->type == AST_FIELD_ACCESS) {
+                        // Handle assignment to array elements or record fields.
+                        // NOTE: This section needs careful review to ensure it correctly modifies
+                        // the original symbol's data, not just a temporary 'container' copy.
+                        // Assuming 'assignToContainer' or direct logic modifies the symbol.
+                        Value container = eval(node->left->left); // Evaluating container might create copies? Be careful.
 
-                if (container.type == TYPE_ARRAY && node->left->type == AST_ARRAY_ACCESS) {
-                    Symbol *sym = lookupSymbol(node->left->left->token->value);
-                    if (!sym || (sym->value->type != TYPE_ARRAY && sym->value->type != TYPE_STRING)) {
-                        fprintf(stderr, "Runtime error: array access on non-array variable '%s'.\n", node->left->left->token->value);
-                        EXIT_FAILURE_HANDLER();
-                    }
-                    if (sym->value->type == TYPE_STRING) {
-                        long long idx = eval(node->left->children[0]).i_val;
-                        int len = (int)strlen(sym->value->s_val);
-
-                        if (idx < 1 || idx > len) {
-                            dumpASTFromRoot(node);
-                            dumpSymbolTable();
-                            fprintf(stderr, "Runtime error: string index %lld out of bounds [1..%d].\n", idx, len);
-                            EXIT_FAILURE_HANDLER();
-                        }
-
-                        char char_to_assign = '\0';
-                        if (val.type == TYPE_CHAR) {
-                            char_to_assign = val.c_val;
-                        } else if (val.type == TYPE_STRING && strlen(val.s_val) == 1) {
-                            char_to_assign = val.s_val[0];
-                        } else {
-                            fprintf(stderr, "Runtime error: assignment to string index requires a char or single-character string.\n");
-                            EXIT_FAILURE_HANDLER();
-                        }
-
-                        sym->value->s_val[idx - 1] = char_to_assign;
-                        break;
-                    }
-                }
-
-                assignToContainer(&container, node->left, val);
-            } else {
-                Symbol *sym = lookupSymbol(node->left->token->value);
-                if (!sym) {
-                    fprintf(stderr, "Runtime error: variable '%s' not declared.\n", node->left->token->value);
-#ifdef DEBUG
-                    fprintf(stderr, "[DEBUG_ASSIGN] Target symbol '%s' NOT FOUND before updateSymbol!\n", node->left->token->value);
-#endif
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                if (sym->type == TYPE_ENUM) {
-                    if (val.type != TYPE_ENUM) {
-                        fprintf(stderr, "Runtime error: Type mismatch in assignment. Expected TYPE_ENUM, got %s.\n", varTypeToString(val.type));
-                        EXIT_FAILURE_HANDLER();
-                    }  else {
-                        // <<< ADD THIS DEBUG PRINT >>>
-#ifdef DEBUG
-                        fprintf(stderr, "[DEBUG_ASSIGN] Before updateSymbol: Target='%s', TargetType=%s, ValueType=%s\n",
-                                node->left->token->value,                  // e.g., "relendpos"
-                                varTypeToString(sym->type),          // Should be INTEGER for relendpos
-                                varTypeToString(val.type));                // Should be INTEGER (result of Min)
-#endif
-                   }
-                    
-                    /*
-                    if (strcmp(sym->value->enum_val.enum_name, val.enum_val.enum_name) != 0) {
-                        fprintf(stderr, "Runtime error: Enumerated type mismatch in assignment. Expected '%s', got '%s'.\n",
-                                sym->value->enum_val.enum_name, val.enum_val.enum_name);
-#ifdef DEBUG
-                        printf(" ====== AST DUMP START =====\n");
-                        dumpASTFromRoot(node);
-                        printf(" ====== AST DUMP END =====\n");
-#endif
-                        EXIT_FAILURE_HANDLER();
-                    }
-                     */
-                    sym->value->enum_val.ordinal = val.enum_val.ordinal;
-
-                } else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && strlen(val.s_val) == 1) {
-                    Value ch = makeChar(val.s_val[0]);
-                    updateSymbol(sym->name, ch);
-
-                } else {
-                    if (sym->type == TYPE_STRING) {
-                        if (val.type == TYPE_STRING) {
-                            // use as-is
-                        } else if (val.type == TYPE_CHAR) {
-                            char *temp = malloc(2);
-                            if (!temp) {
-                                fprintf(stderr, "Runtime error: Memory allocation failed during char-to-string coercion.\n");
+                        if (container.type == TYPE_ARRAY && node->left->type == AST_ARRAY_ACCESS) {
+                            Symbol *sym = lookupSymbol(node->left->left->token->value);
+                            if (!sym || (sym->value->type != TYPE_ARRAY && sym->value->type != TYPE_STRING)) {
+                                fprintf(stderr, "Runtime error: array access on non-array variable '%s'.\n", node->left->left->token->value);
+                                 // <<< ADDED FREE before exit >>>
+                                 freeValue(&val);
+                                 freeValue(&container); // Also free the evaluated container
                                 EXIT_FAILURE_HANDLER();
                             }
-                            temp[0] = val.c_val;
-                            temp[1] = '\0';
-                            val = makeString(temp);
-                            free(temp);
-                        } else {
-                            fprintf(stderr, "Runtime error: Cannot assign non-string/char to string variable '%s'.\n", sym->name);
+                            if (sym->value->type == TYPE_STRING) {
+                                long long idx = eval(node->left->children[0]).i_val;
+                                // Ensure sym->value->s_val is not NULL before strlen
+                                int len = (sym->value->s_val) ? (int)strlen(sym->value->s_val) : 0;
+
+                                if (idx < 1 || (sym->value->s_val == NULL && idx > 0) || (sym->value->s_val != NULL && idx > len)) {
+                                    dumpASTFromRoot(node);
+                                    dumpSymbolTable();
+                                    fprintf(stderr, "Runtime error: string index %lld out of bounds [1..%d].\n", idx, len);
+                                     // <<< ADDED FREE before exit >>>
+                                     freeValue(&val);
+                                     freeValue(&container); // Also free the evaluated container
+                                    EXIT_FAILURE_HANDLER();
+                                }
+
+                                char char_to_assign = '\0';
+                                if (val.type == TYPE_CHAR) {
+                                    char_to_assign = val.c_val;
+                                } else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) { // Added NULL check
+                                    char_to_assign = val.s_val[0];
+                                } else {
+                                    fprintf(stderr, "Runtime error: assignment to string index requires a char or single-character string.\n");
+                                     // <<< ADDED FREE before exit >>>
+                                     freeValue(&val);
+                                     freeValue(&container); // Also free the evaluated container
+                                    EXIT_FAILURE_HANDLER();
+                                }
+                                // Ensure string is mutable and large enough (should be handled by makeString/updateSymbol if needed)
+                                sym->value->s_val[idx - 1] = char_to_assign;
+
+                                 // <<< ADDED FREE after assignment >>>
+                                 freeValue(&val);
+                                 freeValue(&container); // Free the evaluated container
+                                 // Need to break out of the AST_ASSIGN case entirely here for string index assignment
+                                 goto assign_end; // Use goto to jump past other assignment logic
+                            }
+                        } // End specific string index assignment handling
+
+                        // General assignment for array/record elements - assuming assignToContainer works
+                        assignToContainer(&container, node->left, val); // Ensure this modifies the original symbol data
+
+                        // <<< ADDED FREE after using val and container >>>
+                        freeValue(&val);
+                        freeValue(&container);
+
+                    } else if (node->left->type == AST_VARIABLE) {
+                        // Simple variable assignment
+                        Symbol *sym = lookupSymbol(node->left->token->value);
+                        if (!sym) {
+                            fprintf(stderr, "Runtime error: variable '%s' not declared.\n", node->left->token->value);
+        #ifdef DEBUG
+                            fprintf(stderr, "[DEBUG_ASSIGN] Target symbol '%s' NOT FOUND before updateSymbol!\n", node->left->token->value);
+        #endif
+                             // <<< ADDED FREE before exit >>>
+                             freeValue(&val);
                             EXIT_FAILURE_HANDLER();
                         }
-                        if (sym->value->s_val) {
-                            free(sym->value->s_val);
+
+                        // --- Specific handling for Enum Assignment ---
+                        // Note: updateSymbol should handle type checking and value copying/assignment
+                        // The explicit ordinal copy here might be redundant if updateSymbol handles ENUM correctly.
+                        // Let's rely on updateSymbol for consistency. Remove the explicit ordinal copy.
+                        /*
+                        if (sym->type == TYPE_ENUM) {
+                            if (val.type != TYPE_ENUM) {
+                                fprintf(stderr, "Runtime error: Type mismatch in assignment. Expected TYPE_ENUM, got %s.\n", varTypeToString(val.type));
+                                // <<< ADDED FREE before exit >>>
+                                freeValue(&val);
+                                EXIT_FAILURE_HANDLER();
+                            } else {
+                                // Debug print was here
+                            }
+                            // Rely on updateSymbol to handle enum assignment
+                            // sym->value->enum_val.ordinal = val.enum_val.ordinal; // <<< REMOVE THIS
                         }
-                        sym->value->s_val = strdup(val.s_val);
-                        if (!sym->value->s_val) {
-                            fprintf(stderr, "Runtime error: Memory allocation failed during string assignment.\n");
-                            EXIT_FAILURE_HANDLER();
-                        }
-                    } else {
+                        */
+                        // --- End specific Enum handling ---
+
+                        // updateSymbol handles type checking, freeing old value, and copying new value
                         updateSymbol(node->left->token->value, val);
+
+                        // <<< ADDED FREE after updateSymbol uses val >>>
+                        freeValue(&val);
+
+                    } else {
+                         // Invalid LValue type
+                         fprintf(stderr, "Runtime error: Invalid lvalue node type in assignment: %s\n", astTypeToString(node->left->type));
+                          // <<< ADDED FREE before exit >>>
+                          freeValue(&val);
+                         EXIT_FAILURE_HANDLER();
                     }
-                }
-            }
-            break;
-        }
+
+                assign_end: // Label for goto jump after string index assignment
+                    break; // Break from the main switch statement for AST_ASSIGN
+                } // End case AST_ASSIGN
         case AST_CASE: {
                    // Evaluate the case expression
                    Value caseValue = eval(node->left);
@@ -1539,32 +1546,42 @@ void executeWithScope(AST *node, bool is_global_scope)  {
         }
         case AST_FOR_TO:
         case AST_FOR_DOWNTO: {
-            const char *var_name = node->token->value;
-            Value start_val = eval(node->left);
-            Value end_val = eval(node->right);
+            // <<< CHANGE START: Get loop variable from children[0] >>>
+            if (node->child_count < 1 || !node->children[0] || node->children[0]->type != AST_VARIABLE || !node->children[0]->token) {
+                 fprintf(stderr, "Internal error: Invalid AST structure for FOR loop variable.\n");
+                 dumpASTFromRoot(node); // Dump AST for context
+                 EXIT_FAILURE_HANDLER();
+            }
+            AST* loopVarNode = node->children[0];
+            const char *var_name = loopVarNode->token->value;
+            // <<< CHANGE END >>>
+
+            Value start_val = eval(node->left); // Start value from left (Correct)
+            Value end_val = eval(node->right);   // End value from right (Correct)
             int step = (node->type == AST_FOR_TO) ? 1 : -1;
 
-            Symbol *sym = lookupSymbol(var_name);
+            Symbol *sym = lookupSymbol(var_name); // Use var_name fetched above
             if (!sym) {
                 fprintf(stderr,"Runtime error: Loop variable %s not found\n", var_name);
                 EXIT_FAILURE_HANDLER();
             }
 
             // Initial Assignment (using updateSymbol for type coercion)
-            updateSymbol(var_name, start_val);
+            updateSymbol(var_name, start_val); // Use var_name
 
             // Determine Loop End Condition Value (compatible with loop var type)
             long long end_condition_val;
             VarType loop_var_type = sym->type;
 
             // --- Determine end condition value based on loop variable type ---
-            // (This part remains the same as your original code)
+            // (This logic remains the same)
             if (loop_var_type == TYPE_CHAR) {
                  if(end_val.type == TYPE_CHAR) end_condition_val = end_val.c_val;
                  else if(end_val.type == TYPE_STRING && end_val.s_val && strlen(end_val.s_val)==1) end_condition_val = end_val.s_val[0];
                  else { /* Error: Incompatible end value */ fprintf(stderr, "Incompatible end value type %s for CHAR loop\n", varTypeToString(end_val.type)); EXIT_FAILURE_HANDLER(); }
             } else if (loop_var_type == TYPE_INTEGER || loop_var_type == TYPE_BYTE || loop_var_type == TYPE_WORD || loop_var_type == TYPE_ENUM || loop_var_type == TYPE_BOOLEAN) {
-                 if(end_val.type == loop_var_type || end_val.type == TYPE_INTEGER) end_condition_val = end_val.i_val;
+                 if(end_val.type == loop_var_type || end_val.type == TYPE_INTEGER || end_val.type == TYPE_ENUM) // Allow comparing Enum loop var with Int end val
+                    end_condition_val = (end_val.type == TYPE_ENUM) ? end_val.enum_val.ordinal : end_val.i_val;
                  else { /* Error: Incompatible end value */ fprintf(stderr, "Incompatible end value type %s for %s loop\n", varTypeToString(end_val.type), varTypeToString(loop_var_type)); EXIT_FAILURE_HANDLER(); }
              } else { /* Error: Invalid loop variable type */ fprintf(stderr, "Invalid loop variable type: %s\n", varTypeToString(loop_var_type)); EXIT_FAILURE_HANDLER(); }
 
@@ -1577,6 +1594,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 // --- Loop Condition Check (using loop_var_type) ---
                 long long current_condition_val;
                  if (loop_var_type == TYPE_CHAR) current_condition_val = current.c_val;
+                 else if (loop_var_type == TYPE_ENUM) current_condition_val = current.enum_val.ordinal; // Use ordinal for comparison
                  else current_condition_val = current.i_val; // Assume other ordinals use i_val
 
                 bool loop_finished = (node->type == AST_FOR_TO) ? (current_condition_val > end_condition_val)
@@ -1584,21 +1602,20 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 if (loop_finished) break; // Exit FOR loop normally
                 // --- End Loop Condition Check ---
 
-                // <<< ADDED: Reset break flag before executing body >>>
+                // Reset break flag before executing body
                 break_requested = 0;
 
-                executeWithScope(node->extra, false); // Execute loop body
+                executeWithScope(node->extra, false); // Execute loop body (from extra - Correct)
 
-                // <<< ADDED: Check break flag after executing body >>>
+                // Check break flag after executing body
                 if (break_requested) {
                      DEBUG_PRINT("[DEBUG] FOR loop exiting due to break.\n");
-                     // No need for 'for_broken' flag if using global flag directly
                      break; // Exit the C 'while(1)' loop
                 }
 
                 // --- Calculate and Assign Next Value ---
-                // Read value again, as it might have been changed in the loop body
-                current = *sym->value; // Re-read current value
+                // Re-read value again, as it might have been changed in the loop body
+                current = *sym->value;
                 long long next_ordinal;
                 Value next_val = makeInt(0); // Initialize temporary value holder
 
@@ -1608,12 +1625,17 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                      next_ordinal = current.c_val + step;
                      next_val = makeChar((char)next_ordinal);
                 } else if (loop_var_type == TYPE_INTEGER || loop_var_type == TYPE_BYTE || loop_var_type == TYPE_WORD || loop_var_type == TYPE_ENUM || loop_var_type == TYPE_BOOLEAN) {
-                     if (current.type != loop_var_type) { /* Error */ fprintf(stderr, "Loop variable %s changed type mid-loop\n", var_name); EXIT_FAILURE_HANDLER(); }
-                     next_ordinal = current.i_val + step;
-                     next_val = makeInt(next_ordinal);
-                     next_val.type = loop_var_type;
-                     if(loop_var_type == TYPE_ENUM && current.enum_val.enum_name) {
-                         next_val.enum_val.enum_name = strdup(current.enum_val.enum_name); // Maintain enum type name
+                     // Use ordinal for enum calculation
+                     long long current_ordinal = (loop_var_type == TYPE_ENUM) ? current.enum_val.ordinal : current.i_val;
+                     if ((loop_var_type != TYPE_ENUM && current.type != loop_var_type) || (loop_var_type == TYPE_ENUM && current.type != TYPE_ENUM)) { /* Error */ fprintf(stderr, "Loop variable %s changed type mid-loop\n", var_name); EXIT_FAILURE_HANDLER(); }
+                     next_ordinal = current_ordinal + step; // Use ordinal for calculation
+
+                     // Create the correct Value type
+                     if (loop_var_type == TYPE_ENUM) {
+                         next_val = makeEnum(current.enum_val.enum_name, (int)next_ordinal); // Recreate Enum value
+                     } else {
+                         next_val = makeInt(next_ordinal); // Create Integer/Byte/Word/Bool value
+                         next_val.type = loop_var_type; // Ensure correct type is set
                      }
                 } else {
                      fprintf(stderr, "Runtime error: Invalid FOR loop variable type '%s' during update.\n", varTypeToString(loop_var_type));
@@ -1621,18 +1643,18 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 }
 
                 // Use updateSymbol for the assignment back to the loop variable
-                updateSymbol(var_name, next_val);
+                updateSymbol(var_name, next_val); // Use var_name
 
-                // Free temporary strdup if needed (for enum name)
+                // Free temporary resources from makeEnum if necessary
                 if (next_val.type == TYPE_ENUM && next_val.enum_val.enum_name) {
-                     free(next_val.enum_val.enum_name);
-                     next_val.enum_val.enum_name = NULL; // Avoid double free issues
+                    free(next_val.enum_val.enum_name);
+                    next_val.enum_val.enum_name = NULL;
                 }
                  // --- End Calculate and Assign ---
 
             } // end C while(1)
 
-            // <<< ADDED: Ensure flag is reset after the loop finishes >>>
+            // Ensure flag is reset after the loop finishes
             break_requested = 0;
 
             break; // Break from the switch case for AST_FOR_TO/DOWNTO

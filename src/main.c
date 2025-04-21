@@ -141,6 +141,17 @@ int runProgram(const char *source, const char *programName) {
     //dumpAST(GlobalAST, 0);
     //return(0);
     GlobalASTRoot = GlobalAST;
+#ifdef DEBUG
+fprintf(stderr, "--- Verifying AST Links ---\n");
+if (verifyASTLinks(GlobalAST, NULL)) { // Initial call expects NULL parent for the root
+    fprintf(stderr, "--- AST Link Verification Passed ---\n");
+} else {
+    fprintf(stderr, "--- AST Link Verification FAILED ---\n");
+    // You might want to dump the AST here or exit if links are bad
+    // dumpAST(GlobalAST, 0);
+    // EXIT_FAILURE_HANDLER(); // Or just let it continue to see the free crash
+}
+#endif
 
 #ifdef DEBUG
     DEBUG_DUMP_AST(GlobalAST, 0);
@@ -166,7 +177,7 @@ int runProgram(const char *source, const char *programName) {
 
     freeProcedureTable();
     freeTypeTable();
-    freeAST(GlobalAST);  // Uncomment if free_ast() is stable.
+    //freeAST(GlobalAST);  // Uncomment if free_ast() is stable.
     
     return EXIT_SUCCESS;
 }

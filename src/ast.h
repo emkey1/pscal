@@ -32,4 +32,6 @@ void dumpASTFromRoot(AST *node);
 void debugAST(AST *node, int indent);
 void setTypeAST(AST *node, VarType type);
 void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode);
+AST *copyAST(AST *node);
+bool verifyASTLinks(AST *node, AST *expectedParent);
 #endif // AST_H
