@@ -60,8 +60,9 @@ Procedure *lookupProcedure(const char *name);
 void errorParser(Parser *parser, const char *msg);
 AST *lookupType(const char *name);
 void insertType(const char *name, AST *typeAST);
-void eat_internal(Parser *parser, TokenType type);
-AST *parseArrayInitializer(Parser *parser); 
+void eatInternal(Parser *parser, TokenType type);
+AST *parseArrayInitializer(Parser *parser);
+Token *peekToken(Parser *parser);
 
 #ifdef DEBUG
 
@@ -75,7 +76,7 @@ void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const 
 #else // If DEBUG is NOT defined
 
 // Define 'eat' macro to call the internal implementation directly
-#define eat(parser_ptr, expected_token_type) eat_internal(parser_ptr, expected_token_type) // <<< Use eat_internal
+#define eat(parser_ptr, expected_token_type) eatInternal(parser_ptr, expected_token_type) // <<< Use eatInternal
 
 #endif // DEBUG
 

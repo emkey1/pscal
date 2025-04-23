@@ -1332,6 +1332,7 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
       dummy->var_type = TYPE_INTEGER; // Set function's return type
  }
     addProcedure(dummy);
+    free(lowerName); 
 }
 
 Value executeBuiltinParamcount(AST *node) {

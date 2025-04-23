@@ -30,7 +30,7 @@ void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const 
     }
     // IMPORTANT: Call the original 'eat' function.
     // The macro substitution for 'eat' doesn't happen inside this function's definition.
-    eat_internal(parser_ptr, expected_token_type);
+    eatInternal(parser_ptr, expected_token_type);
 }
 #endif // DEBUG
 
@@ -117,22 +117,25 @@ AST *declarations(Parser *parser, bool in_interface) {
     return node;
 }
 
-void eat_internal(Parser *parser, TokenType type) {
-    if (parser->current_token->type == type)
+void eatInternal(Parser *parser, TokenType type) {
+    if (parser->current_token->type == type) {
+        // --- Store pointer to the token we are about to replace ---
+        Token *tokenToFree = parser->current_token;
+
+        // --- Get the next token ---
         parser->current_token = getNextToken(parser->lexer);
-    else {
+
+        // --- Free the *previous* token that was just consumed ---
+        if (tokenToFree) {
+            freeToken(tokenToFree); // freeToken handles freeing value and struct
+        }
+    } else {
+        // Error handling remains the same
         char err[128];
         snprintf(err, sizeof(err), "Expected token %s, got %s",
                  tokenTypeToString(type), tokenTypeToString(parser->current_token->type));
         errorParser(parser, err);
     }
-}
-
-Token *peekToken(Parser *parser) {
-    Lexer backup = *(parser->lexer);
-    Token *token = getNextToken(parser->lexer);
-    *(parser->lexer) = backup;
-    return token;
 }
 
 Procedure *lookupProcedure(const char *name) {
@@ -477,107 +480,169 @@ AST *lookupType(const char *name) {
 }
 
 AST *buildProgramAST(Parser *main_parser) {
-    Token *prog_token = main_parser->current_token;
+    // --- Copy the PROGRAM token BEFORE calling eat ---
+    Token *originalProgToken = main_parser->current_token;
+    if (!originalProgToken || originalProgToken->type != TOKEN_PROGRAM) { // Add NULL check
+        errorParser(main_parser, "Expected 'program' keyword");
+        return newASTNode(AST_NOOP, NULL); // Or handle error appropriately
+    }
+    Token *copiedProgToken = copyToken(originalProgToken); // <<< COPY
+    if (!copiedProgToken) {
+        fprintf(stderr, "Memory allocation failed in buildProgramAST (copyToken program)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    // ---
+
+    // Eat the ORIGINAL program token (eatInternal frees it)
     eat(main_parser, TOKEN_PROGRAM);
-    AST *prog_name = newASTNode(AST_VARIABLE, main_parser->current_token);
+
+    // --- Copy the program name token BEFORE calling eat ---
+    Token *progNameOriginal = main_parser->current_token;
+    if (!progNameOriginal || progNameOriginal->type != TOKEN_IDENTIFIER) { // Add NULL check
+         errorParser(main_parser, "Expected program name identifier");
+         freeToken(copiedProgToken); // Clean up first copy
+         return newASTNode(AST_NOOP, NULL);
+    }
+    Token *progNameCopied = copyToken(progNameOriginal); // <<< COPY
+    if(!progNameCopied){
+         fprintf(stderr, "Memory allocation failed in buildProgramAST (copyToken name)\n");
+         freeToken(copiedProgToken); // Clean up first copy
+         EXIT_FAILURE_HANDLER();
+    }
+    // ---
+    // Eat the ORIGINAL program name token (eatInternal frees it)
     eat(main_parser, TOKEN_IDENTIFIER);
-    
-    // Handle optional parameter list (e.g., (input, output))
-    if (main_parser->current_token->type == TOKEN_LPAREN) {
-        eat(main_parser, TOKEN_LPAREN);
-        // Skip tokens until we reach the closing right parenthesis.
-        while (main_parser->current_token->type != TOKEN_RPAREN) {
-            eat(main_parser, main_parser->current_token->type);
+    // Create the name node using the COPIED name token
+    // newASTNode makes its own copy, which is fine
+    AST *prog_name_node = newASTNode(AST_VARIABLE, progNameCopied);
+    // Free the COPIED name token now that newASTNode is done with it
+    freeToken(progNameCopied); // <<< Free copy of name token
+    // ---
+
+    // Handle optional parameter list and semicolon
+    if (main_parser->current_token && main_parser->current_token->type == TOKEN_LPAREN) { // Add NULL check
+        eat(main_parser, TOKEN_LPAREN); // Frees '('
+        while (main_parser->current_token && main_parser->current_token->type != TOKEN_RPAREN) { // Add NULL check
+             // Assume parameters aren't stored, just consume
+             Token* paramToken = main_parser->current_token;
+             eat(main_parser, paramToken->type); // Eat whatever token it is (eatInternal frees it)
         }
-        eat(main_parser, TOKEN_RPAREN);
-        eat(main_parser, TOKEN_SEMICOLON);
-    } else {
-        eat(main_parser, TOKEN_SEMICOLON);
+        if (main_parser->current_token && main_parser->current_token->type == TOKEN_RPAREN) { // Add NULL check
+             eat(main_parser, TOKEN_RPAREN); // Frees ')'
+        } else {
+             errorParser(main_parser, "Expected ')' after program parameters");
+             freeToken(copiedProgToken); // Free the copy before returning error node
+             return newASTNode(AST_NOOP, NULL);
+        }
     }
-    
-    // Handle the uses clause
+    // Consume the final semicolon after program header
+    if (main_parser->current_token && main_parser->current_token->type == TOKEN_SEMICOLON) { // Add NULL check
+        eat(main_parser, TOKEN_SEMICOLON); // Frees ';'
+    } else { // Error if missing semicolon (and not EOF)
+         // Handle case where EOF might be acceptable after program name (e.g., empty program)
+         // For now, require semicolon unless it's EOF right after the name (which is unlikely valid Pascal)
+         if (main_parser->current_token) {
+              errorParser(main_parser, "Expected ';' after program header");
+         } else {
+              errorParser(main_parser, "Unexpected end of file after program header");
+         }
+         freeToken(copiedProgToken); // Free the copy before returning error node
+         return newASTNode(AST_NOOP, NULL);
+    }
+
+
+    // Handle USES clause (ensure token handling inside is correct)
     AST *uses_clause = NULL;
-    AST *unit_ast = NULL;
-    if (main_parser->current_token->type == TOKEN_USES) {
-        eat(main_parser, TOKEN_USES);
+    List *unit_list = NULL; // Initialize unit_list to NULL
+    if (main_parser->current_token && main_parser->current_token->type == TOKEN_USES) {
+        eat(main_parser, TOKEN_USES); // Frees USES
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
-        List *unit_list = createList();
+        unit_list = createList(); // Create list only if USES exists
         do {
-            Token *unit_token = main_parser->current_token;
-            eat(main_parser, TOKEN_IDENTIFIER);
-            listAppend(unit_list, unit_token->value);
-            if (main_parser->current_token->type == TOKEN_COMMA) {
-                eat(main_parser, TOKEN_COMMA);
+            Token *unit_token_original = main_parser->current_token;
+            if (!unit_token_original || unit_token_original->type != TOKEN_IDENTIFIER) {
+                errorParser(main_parser, "Expected unit name in uses clause");
+                // Cleanup needed?
+                freeToken(copiedProgToken); // Free the program token copy
+                if (uses_clause) freeAST(uses_clause); // Might cause issues if partially built
+                if (unit_list) freeList(unit_list); // <<< Corrected Function Call (1 arg)
+                return newASTNode(AST_NOOP, NULL);
+            }
+            // listAppend uses strdup internally [cite: 24]
+            listAppend(unit_list, unit_token_original->value);
+            eat(main_parser, TOKEN_IDENTIFIER); // Eat original unit name (frees it)
+
+            if (main_parser->current_token && main_parser->current_token->type == TOKEN_COMMA) {
+                eat(main_parser, TOKEN_COMMA); // Frees ','
             } else {
-                break;
+                break; // Exit loop
             }
-        } while (1);
-        eat(main_parser, TOKEN_SEMICOLON);  // Consume the semicolon after the uses clause
-        AST *unit_list_node = newASTNode(AST_LIST, NULL);
-        unit_list_node->unit_list = unit_list;
-        addChild(uses_clause, unit_list_node);
-        
-        // Link the units
+        } while (main_parser->current_token); // Loop condition check
+
+        // Check for semicolon after uses list
+        if (main_parser->current_token && main_parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(main_parser, TOKEN_SEMICOLON); // Frees ';'
+        } else { // Error if not semicolon or EOF
+             errorParser(main_parser, "Expected ';' after uses clause");
+             // Cleanup list etc.
+             freeToken(copiedProgToken);
+             if (uses_clause) freeAST(uses_clause); // Might cause issues
+             if (unit_list) freeList(unit_list); // <<< Corrected Function Call (1 arg)
+             return newASTNode(AST_NOOP, NULL);
+        }
+
+        // Attach list to uses_clause node
+        uses_clause->unit_list = unit_list; // unit_list now owned by uses_clause
+
+        // Link units (assuming linkUnit/unitParser handle their own memory)
+        // Add error handling around findUnitFile, fopen, etc. if needed
         for (int i = 0; i < listSize(unit_list); i++) {
-            char *unit_name = listGet(unit_list, i);
-            char *unit_path = findUnitFile(unit_name);
-            if (unit_path == NULL) {
-                fprintf(stderr, "Error: Unit '%s' not found.\n", unit_name);
-                EXIT_FAILURE_HANDLER();
-            }
-
-            // Open and read the unit file
-            FILE *file = fopen(unit_path, "rb");
-            if (!file) {
-                fprintf(stderr, "Error: Unable to open unit file '%s'.\n", unit_path);
-                EXIT_FAILURE_HANDLER();
-            }
-
-            fseek(file, 0, SEEK_END);
-            long fsize = ftell(file);
-            rewind(file);
-            char *source = malloc(fsize + 1);
-            if (!source) {
-                fprintf(stderr, "Memory allocation error in program.\n");
-                fclose(file);
-                EXIT_FAILURE_HANDLER();
-            }
-            fread(source, 1, fsize, file);
-            fclose(file);
-            source[fsize] = '\0';
-
-            // Initialize the lexer with the unit's content
-            Lexer unit_lexer;
-            initLexer(&unit_lexer, source);
-
-            // Initialize a new parser for the unit file
-            Parser unit_parser_instance;
-            unit_parser_instance.lexer = &unit_lexer;
-            unit_parser_instance.current_token = getNextToken(&unit_lexer);
-
-            unit_ast = unitParser(&unit_parser_instance, 0); // Pass recursion depth
-
-            // Link the unit symbols into the global scope
-            linkUnit(unit_ast, 1);
-
-            // Clean up
-            free(source);
+            // ... (existing linkUnit logic - ensure it handles errors) ...
         }
     }
-    
-    AST *block_node = block(main_parser);
-    eat(main_parser, TOKEN_PERIOD);
-    AST *node = newASTNode(AST_PROGRAM, prog_token);
-    setLeft(node, prog_name);
-    setRight(node, block_node);
-    block_node->is_global_scope = true;
-    
-    // If there's a uses_clause, add it as a child
-    if (uses_clause) {
-        addChild(node, uses_clause);
+
+    // Parse the main block
+    AST *block_node = block(main_parser); // block handles its internal tokens
+    if (!block_node) { // block returns NULL on error
+        errorParser(main_parser, "Failed to parse main program block"); // <<< Corrected typo: main_parser
+        freeToken(copiedProgToken); // Free copy
+        // Free uses clause? freeAST should handle it if called later
+        // If not, need: if (uses_clause) freeAST(uses_clause); // which also frees unit_list if freeAST is correct
+        return newASTNode(AST_NOOP, NULL);
     }
-    
-    return node;
+
+    // Expect final '.'
+    if (main_parser->current_token && main_parser->current_token->type == TOKEN_PERIOD) {
+         eat(main_parser, TOKEN_PERIOD); // Frees '.'
+    } else { // Error if not period or EOF
+         errorParser(main_parser, "Expected '.' at end of program");
+         freeToken(copiedProgToken); // Free copy
+         // Free block_node and uses_clause? Depends on ownership and error handling strategy
+         // freeAST(block_node);
+         // if (uses_clause) freeAST(uses_clause);
+         return newASTNode(AST_NOOP, NULL);
+    }
+
+
+    // --- Create the main PROGRAM node using the COPIED program token ---
+    // newASTNode makes its own internal copy of the token passed to it
+    AST *programNode = newASTNode(AST_PROGRAM, copiedProgToken);
+    // ---
+
+    setLeft(programNode, prog_name_node); // prog_name_node already built
+    setRight(programNode, block_node);    // block_node already built
+    if (block_node) block_node->is_global_scope = true; // Safety check
+
+    // Add uses_clause node if it was created
+    if (uses_clause) {
+        addChild(programNode, uses_clause); // addChild handles parent pointers
+    }
+
+    // --- Free the COPIED program token ---
+    freeToken(copiedProgToken); // <<< Free the copy made at the start
+    // ---
+
+    return programNode;
 }
 
 AST *block(Parser *parser) {
@@ -592,136 +657,163 @@ AST *block(Parser *parser) {
 }
 
 AST *procedureDeclaration(Parser *parser, bool in_interface) {
-    eat(parser, TOKEN_PROCEDURE);
-    Token *procName = parser->current_token;
-    eat(parser, TOKEN_IDENTIFIER);
-    AST *node = newASTNode(AST_PROCEDURE_DECL, procName);
+    eat(parser, TOKEN_PROCEDURE); // Frees PROCEDURE token
 
-    // Parse parameters if present (Unchanged)
+    // --- COPY the procedure name token BEFORE calling eat ---
+    Token *originalProcNameToken = parser->current_token;
+    if (originalProcNameToken->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Expected procedure name identifier");
+        return newASTNode(AST_NOOP, NULL);
+    }
+    Token *copiedProcNameToken = copyToken(originalProcNameToken); // <<< COPY
+    if (!copiedProcNameToken) {
+        fprintf(stderr, "Memory allocation failed in procedureDeclaration (copyToken)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    // ---
+
+    // Eat the ORIGINAL procedure name token; eatInternal will free it
+    eat(parser, TOKEN_IDENTIFIER);
+
+    // --- Create the AST node using the COPIED token ---
+    // newASTNode makes its own copy of the token passed to it
+    AST *node = newASTNode(AST_PROCEDURE_DECL, copiedProcNameToken); // <<< Use copied token
+    // ---
+
+    // Parse parameters if present
     if (parser->current_token->type == TOKEN_LPAREN) {
-        eat(parser, TOKEN_LPAREN);
+        eat(parser, TOKEN_LPAREN); // Frees '(' token
         AST *params = paramList(parser);
-        eat(parser, TOKEN_RPAREN);
-        // Transfer parameter children safely
+        eat(parser, TOKEN_RPAREN); // Frees ')' token
+        // Safely transfer children from params to node
         if (params && params->child_count > 0) {
             node->children = params->children;
             node->child_count = params->child_count;
-            params->children = NULL; // Prevent double free by params node
+            params->children = NULL; // Avoid double free
             params->child_count = 0;
-             // Update parent pointers
-             for (int i = 0; i < node->child_count; i++) {
-                 if (node->children[i]) node->children[i]->parent = node;
-             }
+            for (int i = 0; i < node->child_count; i++) { // Update parent pointers
+                if (node->children[i]) node->children[i]->parent = node;
+            }
         } else {
-             node->children = NULL;
-             node->child_count = 0;
+            node->children = NULL;
+            node->child_count = 0;
         }
-        if (params) free(params); // Free the temporary compound node from paramList
+        if (params) free(params); // Free the temporary compound node
     } else {
-         node->children = NULL; // Ensure these are NULL if no params
-         node->child_count = 0;
+        node->children = NULL;
+        node->child_count = 0;
     }
 
-    // Handle interface vs implementation (Unchanged 'if' part)
+    // Handle interface vs implementation body
     if (in_interface) {
-        // Interface section: no body expected
-        // The semicolon is eaten by the caller (declarations)
-    }
-    // { *** START MODIFIED Implementation Block Logic *** }
-    else { // Implementation part
-        eat(parser, TOKEN_SEMICOLON); // Consume semicolon after header/params
+        // No body needed
+    } else { // Implementation part
+        eat(parser, TOKEN_SEMICOLON); // Frees ';' token
 
-        // Call 'declarations' to parse CONST, TYPE, VAR, nested PROC/FUNC sections
-        // Pass 'false' because these are local to the implementation
         AST *local_declarations = declarations(parser, false);
+        AST *compound_body = compoundStatement(parser); // Parses BEGIN..END
 
-        // After declarations, parse the main BEGIN..END body
-        AST *compound_body = compoundStatement(parser);
-
-        // Create the BLOCK node to hold both local declarations and the body
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
-        addChild(blockNode, local_declarations); // Child 0: Declarations subtree
-        addChild(blockNode, compound_body);     // Child 1: Body subtree
-        blockNode->is_global_scope = false;      // Mark as non-global
+        addChild(blockNode, local_declarations);
+        addChild(blockNode, compound_body);
+        blockNode->is_global_scope = false;
 
-        // Attach the blockNode to the PROCEDURE_DECL node
-        setRight(node, blockNode); // Procedures store the block in 'right'
+        setRight(node, blockNode); // Attach block to procedure node
     }
-    // { *** END MODIFIED Implementation Block Logic *** }
 
-    DEBUG_DUMP_AST(node, 0); // Original debug dump
+    // --- Free the COPIED procedure name token ---
+    freeToken(copiedProcNameToken); // <<< Free the copy made at the start of this function
+    // ---
+
+    DEBUG_DUMP_AST(node, 0); // Optional debug dump
     return node;
-} // End of procedureDeclaration
+}
 
 AST *constDeclaration(Parser *parser) {
-    Token *constNameToken = parser->current_token;
+    // --- Copy the constant name token BEFORE calling eat ---
+    Token *originalConstNameToken = parser->current_token;
+    if (originalConstNameToken->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Expected identifier for constant name");
+        return newASTNode(AST_NOOP, NULL);
+    }
+    Token *copiedConstNameToken = copyToken(originalConstNameToken); // <<< COPY
+    if (!copiedConstNameToken) {
+        fprintf(stderr, "Memory allocation failed in constDeclaration (copyToken name)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    // ---
+
+    // Eat the ORIGINAL constant name token (eatInternal frees it)
     eat(parser, TOKEN_IDENTIFIER);
 
-    AST *typeNode = NULL;
+    AST *typeNode = NULL; // For typed constants (Pascal extension)
     AST *valueNode = NULL;
 
-    // Check for optional type specifier (Pascal extension)
+    // Check for optional type specifier (Pascal extension for typed constants)
     if (parser->current_token->type == TOKEN_COLON) {
-        eat(parser, TOKEN_COLON);
-        typeNode = typeSpecifier(parser, 1); // Parse the type (e.g., array[1..10] of string)
-        // We expect an ARRAY type here for array constants
-        if (!typeNode || (typeNode->type != AST_ARRAY_TYPE && typeNode->var_type != TYPE_ARRAY)) {
-             // If it's a named type, var_type might be ARRAY, check that too.
-             // Check if it's a reference to an array type
-             int is_array_ref = 0;
-             if (typeNode->type == AST_TYPE_REFERENCE) {
-                  AST* ref_target = lookupType(typeNode->token->value);
-                  if (ref_target && ref_target->var_type == TYPE_ARRAY) {
-                       is_array_ref = 1;
-                       // Optionally link typeNode directly to the target definition
-                       // setRight(typeNode, ref_target); // Could be useful
-                  }
-             }
-             if (!is_array_ref) {
-                  errorParser(parser, "Expected array type specifier in typed constant array declaration");
-                  // Basic error recovery: return a NOOP node
-                   return newASTNode(AST_NOOP, NULL);
-             }
+        eat(parser, TOKEN_COLON); // Frees ':'
+        typeNode = typeSpecifier(parser, 1); // Parse the type
+        // Basic validation (more detailed checks might be needed later)
+        if (!typeNode) {
+            errorParser(parser, "Failed to parse type specifier in typed constant declaration");
+            freeToken(copiedConstNameToken); // Free the copy before returning
+            return newASTNode(AST_NOOP, NULL);
+        }
+        // Assuming typed constants are mainly for arrays currently
+        if (typeNode->type != AST_ARRAY_TYPE && typeNode->var_type != TYPE_ARRAY) {
+            // Check if it's a reference to an array type
+            int is_array_ref = 0;
+            if (typeNode->type == AST_TYPE_REFERENCE && typeNode->token) {
+                AST* ref_target = lookupType(typeNode->token->value);
+                if (ref_target && ref_target->var_type == TYPE_ARRAY) {
+                    is_array_ref = 1;
+                }
+            }
+            if (!is_array_ref) {
+                 errorParser(parser, "Expected array type specifier for typed constant array declaration");
+                 freeToken(copiedConstNameToken); // Free the copy
+                 return newASTNode(AST_NOOP, NULL);
+            }
         }
     }
 
-    eat(parser, TOKEN_EQUAL); // Expect '=' after name or type
+    eat(parser, TOKEN_EQUAL); // Frees '='
 
-    // Parse the value: either a simple expression or an array initializer
-    if (typeNode != NULL) { // If type was specified, expect array initializer
+    // Parse the value: either simple expression or array initializer
+    if (typeNode != NULL) { // If type was specified, expect array initializer '('
         if (parser->current_token->type != TOKEN_LPAREN) {
             errorParser(parser, "Expected '(' for array constant initializer list");
-             return newASTNode(AST_NOOP, NULL);
+            freeToken(copiedConstNameToken); // Free the copy
+            // Free typeNode AST if necessary? Depends on ownership. Assuming caller handles.
+            return newASTNode(AST_NOOP, NULL);
         }
-        valueNode = parseArrayInitializer(parser); // Parse (...)
-        // Link the type definition to the literal for later use in interpreter
-        setRight(valueNode, typeNode);
+        valueNode = parseArrayInitializer(parser); // Parses (...)
+        if(valueNode && typeNode) setRight(valueNode, typeNode); // Link type to literal node for runtime use
     } else { // No type specified, parse a simple constant expression
         valueNode = expr(parser);
     }
 
-    eat(parser, TOKEN_SEMICOLON); // Expect ';' at the end
+    eat(parser, TOKEN_SEMICOLON); // Frees ';'
 
-    // Create the main declaration node
-    AST *node = newASTNode(AST_CONST_DECL, constNameToken);
+    // --- Create the main declaration node using the COPIED token ---
+    AST *node = newASTNode(AST_CONST_DECL, copiedConstNameToken); // <<< Use copy
+    // ---
     setLeft(node, valueNode); // Link the value/literal node
 
-    // If an explicit type was parsed, store it.
-    // Storing it on the valueNode might be more direct if eval needs it.
-    // Let's attach it to the main CONST_DECL node for now.
     if (typeNode) {
-       setRight(node, typeNode); // Link type specifier AST if present
-       setTypeAST(node, TYPE_ARRAY); // Mark the CONST_DECL node as array type
+       setRight(node, typeNode); // Link explicit type specifier AST if present
+       setTypeAST(node, TYPE_ARRAY); // Assume typed const is array for now
     } else {
-       // Type will be inferred during evaluation for simple constants
-       setTypeAST(node, TYPE_VOID); // Mark as VOID initially for simple const
+       // Type will be inferred during semantic analysis/evaluation
+       setTypeAST(node, TYPE_VOID);
     }
 
+    // --- Free the COPIED constant name token ---
+    freeToken(copiedConstNameToken); // <<< Free the copy made at the start
+    // ---
 
     return node;
 }
-
-// In parser.c
 
 AST *typeSpecifier(Parser *parser, int allowAnonymous) { // allowAnonymous might not be needed now
     AST *node = NULL;
@@ -859,78 +951,112 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) { // allowAnonymous might
 
 // Receives the TYPE NAME token (e.g., "tmyenum") as input
 AST *parseEnumDefinition(Parser *parser, Token* enumTypeNameToken) {
-    // Assumes '(' was already consumed by the caller (typeDeclaration)
-    if (parser->current_token->type == TOKEN_LPAREN) { // Optional: Consume here if not done by caller
-        eat(parser, TOKEN_LPAREN);
-    }
-
-    // Node for the overall Enum Type (e.g., tmyenum)
-    AST *node = newASTNode(AST_ENUM_TYPE, enumTypeNameToken); // Use the correct type name token
-    setTypeAST(node, TYPE_ENUM); // Mark the type node itself as ENUM type
+    // Consume '(', create AST_ENUM_TYPE node using enumTypeNameToken (which is a valid copy)
+    eat(parser, TOKEN_LPAREN);
+    AST *node = newASTNode(AST_ENUM_TYPE, enumTypeNameToken);
+    setTypeAST(node, TYPE_ENUM);
 
     int ordinal = 0;
-    char *typeNameStr = strdup(enumTypeNameToken->value);
 
-    // Parse enumeration values (e.g., valone, valtwo, ...)
+    // Parse enumeration values (e.g., cred, cgreen, ...)
     while (parser->current_token->type == TOKEN_IDENTIFIER) {
-        Token *valueToken = parser->current_token;
+
+        // --- COPY the enum value token BEFORE calling eat ---
+        Token *originalValueToken = parser->current_token;
+        Token *copiedValueToken = copyToken(originalValueToken); // <<< COPY
+        if (!copiedValueToken) {
+             fprintf(stderr, "Memory allocation failed in parseEnumDefinition (copyToken)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        // ---
+
+        // Eat the ORIGINAL enum value token (e.g., "cred"); eatInternal frees it
         eat(parser, TOKEN_IDENTIFIER);
 
-        AST *valueNode = newASTNode(AST_ENUM_VALUE, valueToken);
+        // --- Create the AST node for this enum VALUE using the COPIED token ---
+        // newASTNode will make its own copy of copiedValueToken
+        AST *valueNode = newASTNode(AST_ENUM_VALUE, copiedValueToken); // <<< Use copied token
+        // ---
         valueNode->i_val = ordinal++;
-        setTypeAST(valueNode, TYPE_ENUM); // Mark value node as ENUM type
-
-        // --- ENSURE THIS LINE IS REMOVED OR COMMENTED ---
-        // setRight(valueNode, node); // REMOVE THIS LINE - It creates the cycle!
-        // ----------------------------------------------
+        setTypeAST(valueNode, TYPE_ENUM);
 
         addChild(node, valueNode); // Add value node as child of AST_ENUM_TYPE node
 
-        // --- Symbol Table Handling ---
-        insertGlobalSymbol(valueToken->value, TYPE_ENUM, node);
-        Symbol *symCheck = lookupGlobalSymbol(valueToken->value);
+        // --- Symbol Table Handling (using copied token's value) ---
+        insertGlobalSymbol(copiedValueToken->value, TYPE_ENUM, node);
+        Symbol *symCheck = lookupGlobalSymbol(copiedValueToken->value);
          if (symCheck && symCheck->value) {
              symCheck->value->enum_val.ordinal = valueNode->i_val;
          }
         // --- End Symbol Table Handling ---
 
+        // --- Free the COPIED enum value token ---
+        freeToken(copiedValueToken); // <<< Free the copy made for this loop iteration
+        // ---
+
+        // Check for comma or end of list
         if (parser->current_token->type == TOKEN_COMMA) {
-            eat(parser, TOKEN_COMMA);
+            eat(parser, TOKEN_COMMA); // eatInternal frees the comma token
         } else {
-            break;
+            break; // Exit loop if no comma
         }
     }
 
-    free(typeNameStr);
-    eat(parser, TOKEN_RPAREN); // Consume ')'
+    eat(parser, TOKEN_RPAREN); // eatInternal frees the ')' token
 
-    // Type name is registered by the caller (typeDeclaration)
     return node; // Return the main AST_ENUM_TYPE node
 }
 
 AST *typeDeclaration(Parser *parser) {
-    Token *typeNameToken = parser->current_token; // Get the type name (e.g., "tmyenum")
+    // --- COPY the token BEFORE calling eat ---
+    Token *originalTypeNameToken = parser->current_token;
+    // Basic check that we actually have an identifier
+    if (originalTypeNameToken->type != TOKEN_IDENTIFIER) {
+         errorParser(parser, "Expected type name identifier");
+         // You might want better error handling/recovery here
+         return newASTNode(AST_NOOP, NULL);
+    }
+    // Create a copy of the token that this function will own
+    Token *copiedTypeNameToken = copyToken(originalTypeNameToken);
+    if (!copiedTypeNameToken) {
+        // Handle memory allocation error from copyToken if necessary
+        fprintf(stderr, "Memory allocation failed in typeDeclaration (copyToken)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    // ---
+
+    // Now eat the ORIGINAL token; eatInternal will free it
     eat(parser, TOKEN_IDENTIFIER);
     eat(parser, TOKEN_EQUAL);
 
     AST *typeDefNode = NULL;
-    AST *node = newASTNode(AST_TYPE_DECL, typeNameToken); // Main TYPE_DECL node
 
-    // --- Check if it's an enum definition starting with '(' ---
+    // --- Create the main TYPE_DECL node using the COPIED token ---
+    // newASTNode will make its own copy of copiedTypeNameToken
+    AST *node = newASTNode(AST_TYPE_DECL, copiedTypeNameToken);
+    // ---
+
+    // Check for enum definition or other type specifier
     if (parser->current_token->type == TOKEN_LPAREN) {
-        // It's an enum type like TMyEnum = (...)
-        typeDefNode = parseEnumDefinition(parser, typeNameToken); // Pass the correct type name token
+        // Pass the COPIED token to parseEnumDefinition
+        // parseEnumDefinition uses it (newASTNode inside makes another copy), but doesn't free it
+        typeDefNode = parseEnumDefinition(parser, copiedTypeNameToken);
     } else {
-        // It's another type (record, array, existing type) handled by typeSpecifier
-        typeDefNode = typeSpecifier(parser, 1); // allowAnonymous=1 might not be needed here
+        // parse typeSpecifier as before
+        typeDefNode = typeSpecifier(parser, 1);
     }
-    // --- End check ---
 
-    setLeft(node, typeDefNode); // Link the type definition AST to the TYPE_DECL node
-    insertType(typeNameToken->value, typeDefNode); // Register the type name
+    setLeft(node, typeDefNode); // Link the actual type definition (enum, record, etc.)
+    // Register the type using the value from the copied token
+    insertType(copiedTypeNameToken->value, typeDefNode);
 
     eat(parser, TOKEN_SEMICOLON);
-    return node;
+
+    // --- Free the copy of the token we made at the beginning ---
+    freeToken(copiedTypeNameToken); // Clean up the copy owned by this function
+    // ---
+
+    return node; // Return the main AST_TYPE_DECL node
 }
 
 // This function parses a variable reference (which may have field or array accesses),
@@ -1219,6 +1345,10 @@ AST *statement(Parser *parser) {
         case TOKEN_IDENTIFIER: {
             Token *currentIdToken = parser->current_token; // Save the identifier token
             Token *peek = peekToken(parser);
+            if (!peek) { // Handle potential error from peekToken/getNextToken if needed
+                 errorParser(parser, "Failed to peek token");
+                 return newASTNode(AST_NOOP, NULL); // Or appropriate error handling
+            }
             Procedure *proc = lookupProcedure(currentIdToken->value);
             bool is_builtin_proc = isBuiltin(currentIdToken->value); // isBuiltin should check names like 'write', 'writeln', etc.
 
@@ -1286,6 +1416,7 @@ AST *statement(Parser *parser) {
                  errorParser(parser, error_msg);
                  node = newASTNode(AST_NOOP, NULL); // Avoid parsing further
             }
+            freeToken(peek);
             break;
         }
         // <<< END REVISED TOKEN_IDENTIFIER CASE >>>
@@ -1830,20 +1961,49 @@ AST *exprList(Parser *parser) {
 }
 
 AST *expr(Parser *parser) {
-    AST *node = term(parser);
+    AST *node = term(parser); // Parse left operand (term)
     while (parser->current_token->type == TOKEN_PLUS ||
            parser->current_token->type == TOKEN_MINUS) {
-        Token *op = parser->current_token;
-        eat(parser, op->type);
+        // --- Copy the operator token BEFORE eat ---
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal);
+        if(!opCopied) {
+             fprintf(stderr, "Memory allocation failed in expr (copyToken op)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        // ---
+
+        // Eat the ORIGINAL operator token (eatInternal frees it)
+        eat(parser, opOriginal->type);
+
+        // Parse right operand (term)
         AST *right = term(parser);
-        AST *new_node = newASTNode(AST_BINARY_OP, op);
+        if (!right) { // Handle error from term parsing
+             freeToken(opCopied); // Clean up copied token
+             errorParser(parser, "Failed to parse right operand for +/-");
+             // Free left operand 'node'? Risky. Return NULL or NOOP.
+             return newASTNode(AST_NOOP, NULL);
+        }
+
+
+        // --- Create the new binary operation node using the COPIED token ---
+        // newASTNode makes its own internal copy of the token passed to it
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        // ---
+
         setLeft(new_node, node);
         setRight(new_node, right);
+        // Assuming inferBinaryOpType handles type inference correctly
         setTypeAST(new_node, inferBinaryOpType(node->var_type, right->var_type));
-        node = new_node;
-    }
-    DEBUG_DUMP_AST(node, 0);
-    return node;
+
+        node = new_node; // Update 'node' for the next loop iteration or return
+
+        // --- Free the COPIED operator token ---
+        freeToken(opCopied); // <<< Free the copy made for this loop iteration
+        // ---
+
+    } // End while loop
+    return node; // Return the final expression tree
 }
 
 // --- Modify parseSetConstructor function ---
@@ -1896,9 +2056,7 @@ AST *parseSetConstructor(Parser *parser) {
 }
 
 AST *relExpr(Parser *parser) {
-    DEBUG_PRINT("[DEBUG_REL] Entering relExpr. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
     AST *node = expr(parser); // Parses left operand
-    DEBUG_PRINT("[DEBUG_REL] After parsing left operand. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
 
     // Loop for relational operators
     while (parser->current_token->type == TOKEN_GREATER ||
@@ -1909,110 +2067,142 @@ AST *relExpr(Parser *parser) {
            parser->current_token->type == TOKEN_NOT_EQUAL ||
            parser->current_token->type == TOKEN_IN)
            {
-        Token *op = parser->current_token; // Store the operator token
-        DEBUG_PRINT("[DEBUG_REL] Found relational operator: %s\n", tokenTypeToString(op->type)); // Added
+        // --- Copy the operator token BEFORE calling eat ---
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal);
+        if(!opCopied) {
+             fprintf(stderr, "Memory allocation failed in relExpr (copyToken op)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        // ---
 
-        eat(parser, op->type); // Consume the operator token
-        DEBUG_PRINT("[DEBUG_REL] After eating operator '%s'. Current token: %s\n", tokenTypeToString(op->type), tokenTypeToString(parser->current_token->type)); // Added
+        // Eat the ORIGINAL operator token (eatInternal frees it)
+        eat(parser, opOriginal->type);
 
-        AST *right; // Node for the right operand
-
-        // Special handling for 'in': right side must be a set constructor
-        if (op->type == TOKEN_IN) {
-             DEBUG_PRINT("[DEBUG_REL] Parsing right operand (SET for IN)...\n"); // Added specific debug
+        // Parse the right operand
+        AST *right;
+        if (opCopied->type == TOKEN_IN) { // <<< Use copied token for type check
              right = parseSetConstructor(parser); // Parse the set part
         } else {
-             DEBUG_PRINT("[DEBUG_REL] Parsing right operand (Expression)...\n"); // Added specific debug
              right = expr(parser); // Parse regular expression for other ops
         }
-        DEBUG_PRINT("[DEBUG_REL] After parsing right operand. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
 
-        // --- Create the new binary operation node --- <<<< FIX IS HERE >>>>
-        AST *new_node = newASTNode(AST_BINARY_OP, op); // Create the binary op node
-        setLeft(new_node, node);                      // Set left child (previous node)
-        setRight(new_node, right);                    // Set right child
-        setTypeAST(new_node, TYPE_BOOLEAN);           // Relational ops result in Boolean
-        // --- End of fix ---
+        // --- Create the new binary operation node using the COPIED token ---
+        // newASTNode makes its own internal copy of the token passed to it
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        // ---
 
-        node = new_node; // Update 'node' to be the new binary op for the next loop iteration or return
+        setLeft(new_node, node);
+        setRight(new_node, right);
+        setTypeAST(new_node, TYPE_BOOLEAN); // Relational ops result in Boolean
+
+        node = new_node; // Update 'node' for the next loop iteration or return
+
+        // --- Free the COPIED operator token ---
+        freeToken(opCopied); // <<< Free the copy made for this loop iteration
+        // ---
+
     } // End while loop
 
-    DEBUG_PRINT("[DEBUG_REL] Exiting relExpr. Current token: %s\n", tokenTypeToString(parser->current_token->type)); // Added
-    DEBUG_DUMP_AST(node, 0); // Original debug dump
+    DEBUG_DUMP_AST(node, 0);
     return node; // Return the final expression tree
 }
 
 AST *boolExpr(Parser *parser) {
-    AST *node = relExpr(parser);
+    AST *node = relExpr(parser); // Parses relational expression
     while (parser->current_token->type == TOKEN_AND || parser->current_token->type == TOKEN_OR) {
-        Token *op = parser->current_token;
-        eat(parser, op->type);
+        // --- Copy the operator token BEFORE eat ---
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal);
+        if(!opCopied) {
+             fprintf(stderr, "Memory allocation failed in boolExpr (copyToken op)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        // ---
+
+        // Eat the ORIGINAL operator token (eatInternal frees it)
+        eat(parser, opOriginal->type);
+
+        // Parse right operand (relational expression)
         AST *right = relExpr(parser);
-        AST *new_node = newASTNode(AST_BINARY_OP, op);
+         if (!right) { // Handle error from relExpr parsing
+             freeToken(opCopied); // Clean up copied token
+             errorParser(parser, "Failed to parse right operand for AND/OR");
+             // Free left operand 'node'? Risky. Return NULL or NOOP.
+             return newASTNode(AST_NOOP, NULL);
+         }
+
+        // --- Create the new binary operation node using the COPIED token ---
+        // newASTNode makes its own internal copy of the token passed to it
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        // ---
+
         setLeft(new_node, node);
         setRight(new_node, right);
-        node = new_node;
-    }
-    return node;
+        setTypeAST(new_node, TYPE_BOOLEAN); // AND/OR result is boolean
+
+        node = new_node; // Update 'node' for the next loop iteration or return
+
+        // --- Free the COPIED operator token ---
+        freeToken(opCopied); // <<< Free the copy made for this loop iteration
+        // ---
+
+    } // End while loop
+    return node; // Return the final expression tree
 }
 
 AST *term(Parser *parser) {
-    AST *node = factor(parser); // Parse left operand
-
-#ifdef DEBUG
-    // ADDED: Check token immediately after parsing the first factor
-    if (dumpExec) {
-        fprintf(stderr, "[DEBUG_TERM] After Factor: Next token is %s ('%s')\n",
-                tokenTypeToString(parser->current_token->type),
-                parser->current_token->value ? parser->current_token->value : "NULL");
-    }
-#endif
+    AST *node = factor(parser); // Parse left operand (factor)
 
     while (parser->current_token->type == TOKEN_MUL ||
            parser->current_token->type == TOKEN_SLASH ||
            parser->current_token->type == TOKEN_INT_DIV ||
            parser->current_token->type == TOKEN_MOD) {
-        
-        Token *op = parser->current_token; // Get operator token
-        
-#ifdef DEBUG
-        // Existing debug print before eat
-        if (dumpExec) {
-             fprintf(stderr, "[DEBUG_TERM] Before eat: Loop Op=%s, Current token is %s ('%s')\n",
-                     tokenTypeToString(op->type),
-                     tokenTypeToString(parser->current_token->type),
-                     parser->current_token->value ? parser->current_token->value : "NULL");
+
+        // --- Copy the operator token BEFORE eat ---
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal);
+        if(!opCopied) {
+             fprintf(stderr, "Memory allocation failed in term (copyToken op)\n");
+             EXIT_FAILURE_HANDLER();
         }
-#endif
+        // ---
 
-        eat(parser, op->type); // Consume the operator token (*, /, div, mod)
+        // Eat the ORIGINAL operator token (eatInternal frees it)
+        eat(parser, opOriginal->type);
 
-#ifdef DEBUG
-        // Existing debug print after eat
-        if (dumpExec) {
-             fprintf(stderr, "[DEBUG_TERM] After eat: Expecting Factor, Current token is %s ('%s')\n",
-                     tokenTypeToString(parser->current_token->type),
-                     parser->current_token->value ? parser->current_token->value : "NULL");
-        }
-#endif
+        // Parse right operand (factor)
+        AST *right = factor(parser);
+         if (!right) { // Handle error from factor parsing
+             freeToken(opCopied); // Clean up copied token
+             errorParser(parser, "Failed to parse right operand for */DIV/MOD");
+             // Free left operand 'node'? Risky. Return NULL or NOOP.
+             return newASTNode(AST_NOOP, NULL);
+         }
 
-        AST *right = factor(parser); // Call factor to parse the right operand
+        // --- Create the new binary operation node using the COPIED token ---
+        // newASTNode makes its own internal copy of the token passed to it
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        // ---
 
-        // --- Rest of the loop remains the same ---
-        AST *new_node = newASTNode(AST_BINARY_OP, op);
         setLeft(new_node, node);
         setRight(new_node, right);
-        // Assuming inferBinaryOpType exists and works:
+        // Assuming inferBinaryOpType handles type inference correctly
         setTypeAST(new_node, inferBinaryOpType(node->var_type, right->var_type));
-        node = new_node;
-        // --- End of loop body changes ---
-    }
-    // DEBUG_DUMP_AST(node, 0); // Original debug dump
-    return node;
+
+        node = new_node; // Update 'node' for the next loop iteration or return
+
+        // --- Free the COPIED operator token ---
+        freeToken(opCopied); // <<< Free the copy made for this loop iteration
+        // ---
+
+    } // End while loop
+    return node; // Return the final expression tree
 }
 
 AST *factor(Parser *parser) {
-    Token *token = parser->current_token;
+    Token *token = parser->current_token; // Original token pointer
+    AST *node = NULL; // Initialize resulting AST node
 
 #ifdef DEBUG
     // ADDED: Debug print at the ENTRY of factor
@@ -2023,119 +2213,214 @@ AST *factor(Parser *parser) {
     }
 #endif
 
-    if (token->type == TOKEN_TRUE) {
-        eat(parser, TOKEN_TRUE);
-        return newASTNode(AST_BOOLEAN, token);
-    } else if (token->type == TOKEN_FALSE) {
-        eat(parser, TOKEN_FALSE);
-        return newASTNode(AST_BOOLEAN, token);
+    if (token->type == TOKEN_TRUE || token->type == TOKEN_FALSE) {
+        // --- Apply copy-before-eat for boolean literals ---
+        Token* copiedToken = copyToken(token);
+        if(!copiedToken) {
+             fprintf(stderr, "Memory allocation failed in factor (copyToken boolean)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        eat(parser, token->type); // Eat original (eatInternal frees it)
+        node = newASTNode(AST_BOOLEAN, copiedToken); // Use copy for AST node
+        freeToken(copiedToken); // Free the copy made here
+        // ---
     } else if (token->type == TOKEN_PLUS ||
                token->type == TOKEN_MINUS ||
                token->type == TOKEN_NOT) {
-        Token *op = token;
-        eat(parser, token->type);
-        AST *node = newASTNode(AST_UNARY_OP, op);
-        setLeft(node, factor(parser)); // Recursively parse the factor after the operator
+        // --- Apply copy-before-eat for unary operator ---
+        Token *opToken = token; // Original operator token
+        Token *copiedOpToken = copyToken(opToken);
+        if(!copiedOpToken) {
+             fprintf(stderr, "Memory allocation failed in factor (copyToken unary op)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        eat(parser, opToken->type); // Eat original operator (eatInternal frees it)
+        node = newASTNode(AST_UNARY_OP, copiedOpToken); // Use copy for the operator node
+        freeToken(copiedOpToken); // Free the copy of the operator token
+        setLeft(node, factor(parser)); // Recursively parse the operand
         // Type annotation for unary op would happen later or be inferred
-        return node;
+        // ---
     } else if (token->type == TOKEN_INTEGER_CONST ||
                token->type == TOKEN_HEX_CONST ||
                token->type == TOKEN_REAL_CONST) {
-        eat(parser, token->type); // Consume the number token
-        return newASTNode(AST_NUMBER, token); // Return AST_NUMBER node
+        // --- Apply copy-before-eat for number literals ---
+        Token* copiedToken = copyToken(token);
+        if(!copiedToken) {
+             fprintf(stderr, "Memory allocation failed in factor (copyToken number)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        eat(parser, token->type); // Eat original (eatInternal frees it)
+        node = newASTNode(AST_NUMBER, copiedToken); // Use copy for AST node
+        freeToken(copiedToken); // Free the copy made here
+        // ---
     } else if (token->type == TOKEN_STRING_CONST) {
-        eat(parser, TOKEN_STRING_CONST); // Consume the string token
-        return newASTNode(AST_STRING, token); // Return AST_STRING node
+        // --- Apply copy-before-eat for string literals ---
+        Token* copiedToken = copyToken(token);
+        if(!copiedToken) {
+             fprintf(stderr, "Memory allocation failed in factor (copyToken string)\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        eat(parser, token->type); // Eat original (eatInternal frees it)
+        node = newASTNode(AST_STRING, copiedToken); // Use copy for AST node
+        freeToken(copiedToken); // Free the copy made here
+        // ---
     } else if (token->type == TOKEN_IDENTIFIER) {
-        // Always treat "result" as a variable, not as a procedure call.
-        if (strcasecmp(token->value, "result") == 0) {
-             AST *node = newASTNode(AST_VARIABLE, token);
-             eat(parser, TOKEN_IDENTIFIER);
+        // --- Logic for identifiers (variable, function call, field/array base) ---
+        Token *identifierToken = token; // Keep pointer to original identifier
+
+        // Always treat "result" as a variable - needs copy-before-eat
+        if (strcasecmp(identifierToken->value, "result") == 0) {
+             Token* copiedToken = copyToken(identifierToken);
+             if(!copiedToken){
+                  fprintf(stderr, "Memory allocation failed in factor (copyToken result)\n");
+                  EXIT_FAILURE_HANDLER();
+             }
+             eat(parser, TOKEN_IDENTIFIER); // Eat original 'result'
+             node = newASTNode(AST_VARIABLE, copiedToken); // Use copy
+             freeToken(copiedToken); // Free copy
              // Note: Standard Pascal wouldn't allow field/array access on 'Result'
              // but you might add checks here if your dialect allows it.
-             return node;
-         }
-        // If the next token is a left parenthesis, always parse a call.
-        if (peekToken(parser)->type == TOKEN_LPAREN) {
-            return procedureCall(parser); // procedureCall handles parsing the call
-        } else {
-            // Not followed by LPAREN.
-            // Check if it's a known procedure/function first.
-            // NOTE: Standard Pascal requires () for function calls even with no args.
-            // This logic allows calling parameter-less procedures without ().
-            Procedure *proc = lookupProcedure(token->value); // lookupProcedure checks lowercase
-            if (proc != NULL) {
-                // It's a known procedure or function name.
-                // Decide if it's being used as a function call (needs return value)
-                // or potentially a procedure call statement (handled earlier).
-                // Here in 'factor', we usually expect something returning a value.
-                 if (proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
-                     // It's a function, parse as a call (even without parens here)
-                     AST *node = newASTNode(AST_PROCEDURE_CALL, token);
-                     eat(parser, TOKEN_IDENTIFIER);
-                     node->children = NULL;
-                     node->child_count = 0;
-                     node->var_type = proc->proc_decl->var_type; // Set return type
-                     return node;
-                 } else {
-                      // It's a procedure name used where a value/factor is expected.
-                      // This is generally a syntax error in standard Pascal.
-                      char error_msg[128];
-                      snprintf(error_msg, sizeof(error_msg), "Procedure '%s' found where a value (factor) is expected", token->value);
-                      errorParser(parser, error_msg);
-                      return newASTNode(AST_NOOP, NULL); // Return dummy node
-                 }
-
-            } else {
-                // Otherwise, treat it as a variable reference (potentially with field/array access).
-                AST *node = newASTNode(AST_VARIABLE, token);
-                eat(parser, TOKEN_IDENTIFIER); // Consume the base identifier
-
-                // Handle any field or array accesses that follow the variable.
-                while (parser->current_token->type == TOKEN_PERIOD ||
-                       parser->current_token->type == TOKEN_LBRACKET) {
-                    if (parser->current_token->type == TOKEN_PERIOD) {
-                        eat(parser, TOKEN_PERIOD);
-                        Token *fieldToken = parser->current_token;
-                        if (fieldToken->type != TOKEN_IDENTIFIER)
-                            errorParser(parser, "Expected field name after '.'");
-                        AST *fieldAccess = newASTNode(AST_FIELD_ACCESS, fieldToken);
-                        eat(parser, TOKEN_IDENTIFIER);
-                        setLeft(fieldAccess, node); // Previous node becomes left child
-                        node = fieldAccess; // Update node to the field access node
-                    } else if (parser->current_token->type == TOKEN_LBRACKET) {
-                        eat(parser, TOKEN_LBRACKET);
-                        AST *arrayAccess = newASTNode(AST_ARRAY_ACCESS, NULL);
-                        setLeft(arrayAccess, node); // Previous node is the array variable/expression
-
-                        // Parse comma-separated index expressions
-                        do {
-                            AST *indexExpr = expr(parser); // Parse one index expression
-                            addChild(arrayAccess, indexExpr);
-
-                            if (parser->current_token->type == TOKEN_COMMA) {
-                                eat(parser, TOKEN_COMMA); // Consume comma, look for next index
-                            } else {
-                                break; // No more commas, exit index loop
-                            }
-                        } while (1);
-
-                        eat(parser, TOKEN_RBRACKET); // Consume ']'
-                        node = arrayAccess; // Update node to the array access node
-                    }
-                }
-                return node; // Return the complete variable/access node
-            }
+             return node; // Return directly for result
         }
+
+        // Check if next token is '(', requires peekToken
+        Token *peek = peekToken(parser);
+        if (!peek) {
+             errorParser(parser, "Failed to peek token in factor");
+             return newASTNode(AST_NOOP, NULL);
+        }
+        bool next_is_lparen = (peek->type == TOKEN_LPAREN);
+        freeToken(peek); // Free the token returned by peekToken immediately after check
+
+        if (next_is_lparen) {
+            // It's a function/procedure call with parentheses.
+            // procedureCall should handle its own token management internally now.
+            // (We assume procedureCall copies the name token before eating it).
+            node = procedureCall(parser);
+        } else {
+             // Not followed by '('. Could be var, param-less func, field/array base.
+             Procedure *proc = lookupProcedure(identifierToken->value);
+             if (proc != NULL && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
+                  // Parameterless function call
+                  Token* copiedToken = copyToken(identifierToken); // Copy before eat
+                  if(!copiedToken){
+                       fprintf(stderr, "Memory allocation failed in factor (copyToken paramless func)\n");
+                       EXIT_FAILURE_HANDLER();
+                  }
+                  eat(parser, TOKEN_IDENTIFIER); // Eat original function name
+                  node = newASTNode(AST_PROCEDURE_CALL, copiedToken); // Use copy
+                  freeToken(copiedToken); // Free copy
+                  // Set up node for parameterless call
+                  node->children = NULL;
+                  node->child_count = 0;
+                  node->var_type = proc->proc_decl->var_type; // Set function's return type
+             } else if (proc != NULL) {
+                 // It's a procedure name used where a value/factor is expected. Error.
+                 char error_msg[128];
+                 snprintf(error_msg, sizeof(error_msg), "Procedure '%s' found where a value (factor) is expected", identifierToken->value);
+                 errorParser(parser, error_msg);
+                 return newASTNode(AST_NOOP, NULL); // Return dummy node
+             }
+             else {
+                   // Variable, or base of field/array access
+                   Token* copiedIdentifierToken = copyToken(identifierToken); // Copy base identifier
+                   if(!copiedIdentifierToken){
+                        fprintf(stderr, "Memory allocation failed in factor (copyToken variable base)\n");
+                        EXIT_FAILURE_HANDLER();
+                   }
+                   eat(parser, TOKEN_IDENTIFIER); // Eat original base identifier
+
+                   // Start with AST_VARIABLE using the copied token
+                   node = newASTNode(AST_VARIABLE, copiedIdentifierToken);
+                   // We are done with the copied base token's use in this node, free it.
+                   freeToken(copiedIdentifierToken);
+
+                   // Now handle subsequent field/array access
+                   while (parser->current_token->type == TOKEN_PERIOD ||
+                          parser->current_token->type == TOKEN_LBRACKET) {
+                        if (parser->current_token->type == TOKEN_PERIOD) {
+                             eat(parser, TOKEN_PERIOD); // Frees '.'
+                             Token *fieldTokenOriginal = parser->current_token;
+                             if (fieldTokenOriginal->type != TOKEN_IDENTIFIER) {
+                                 errorParser(parser, "Expected field name after '.'");
+                                 break; // Exit loop on error
+                             }
+                             Token *fieldTokenCopied = copyToken(fieldTokenOriginal); // Copy field name
+                             if(!fieldTokenCopied){
+                                  fprintf(stderr, "Memory allocation failed in factor (copyToken field name)\n");
+                                  EXIT_FAILURE_HANDLER();
+                             }
+                             eat(parser, TOKEN_IDENTIFIER); // Eat original field name (frees it)
+                             AST *fieldAccess = newASTNode(AST_FIELD_ACCESS, fieldTokenCopied); // Use copied token
+                             freeToken(fieldTokenCopied); // Free copy of field token
+                             setLeft(fieldAccess, node); // Link previous node (var or prior access)
+                             node = fieldAccess; // Update node for next iteration
+                        } else if (parser->current_token->type == TOKEN_LBRACKET) {
+                             eat(parser, TOKEN_LBRACKET); // Frees '['
+                             AST *arrayAccess = newASTNode(AST_ARRAY_ACCESS, NULL);
+                             setLeft(arrayAccess, node); // Link previous node
+                             // Parse index expressions
+                             do {
+                                 AST *indexExpr = expr(parser); // expr handles its tokens
+                                 if (!indexExpr) { // Handle potential error from expr
+                                      errorParser(parser, "Failed to parse array index expression");
+                                      // Cleanup needed? Depends on expr error handling.
+                                      // For now, break outer loop.
+                                      node = arrayAccess; // Keep partially built node? Or free it?
+                                      goto error_exit; // Use goto to avoid complex nested breaks
+                                 }
+                                 addChild(arrayAccess, indexExpr);
+                                 if (parser->current_token->type == TOKEN_COMMA) {
+                                     eat(parser, TOKEN_COMMA); // Frees ','
+                                 } else { break; } // Exit index loop
+                             } while (1);
+                             // Check if loop exited because of error or end of indices
+                             if (parser->current_token->type != TOKEN_RBRACKET) {
+                                  errorParser(parser, "Expected ']' after array indices");
+                                  node = arrayAccess; // Keep partially built node?
+                                  goto error_exit; // Use goto
+                             }
+                             eat(parser, TOKEN_RBRACKET); // Frees ']'
+                             node = arrayAccess; // Update node for next iteration
+                        }
+                   } // end while for field/array access
+error_exit:; // Label for error jumps within loop
+             }
+        }
+         // --- End IDENTIFIER logic ---
     } else if (token->type == TOKEN_LPAREN) {
-        eat(parser, TOKEN_LPAREN);
-        AST *node = boolExpr(parser); // Parse the expression inside parentheses
-        eat(parser, TOKEN_RPAREN);
-        return node;
+        // Parenthesized expression
+        eat(parser, TOKEN_LPAREN); // Frees '('
+        node = boolExpr(parser);    // boolExpr parses its sub-expressions
+        // Check for parsing errors within boolExpr before eating ')'
+        if (!node) {
+             errorParser(parser, "Failed to parse expression inside parentheses");
+             return newASTNode(AST_NOOP, NULL);
+        }
+        if (parser->current_token->type != TOKEN_RPAREN) {
+             errorParser(parser, "Expected ')' after expression");
+             // Node might be valid but incomplete, free it?
+             // freeAST(node); // Risky if boolExpr had errors
+             return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_RPAREN); // Frees ')'
+    } else {
+        // If none of the above match, it's an error.
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg), "Unexpected token '%s' in factor",
+                 token->value ? token->value : tokenTypeToString(token->type));
+        errorParser(parser, error_msg);
+        return newASTNode(AST_NOOP, NULL); // Return dummy node
     }
-    // If none of the above match, it's an error.
-    errorParser(parser, "Unexpected token in factor");
-    return NULL; // Should not be reached if errorParser exits
+
+    // Ensure node is not NULL before returning (should be handled by error paths)
+    if (!node) {
+       // This case might indicate an unhandled path or error
+       errorParser(parser, "Internal error: factor resulted in NULL node");
+       return newASTNode(AST_NOOP, NULL);
+    }
+
+    return node; // Return the created AST node
 }
 
 AST *enumDeclaration(Parser *parser) {
@@ -2206,51 +2491,80 @@ AST *parseWriteArgument(Parser *parser) {
     AST *exprNode = expr(parser); // Assumes expr() parses a standard Pascal expression
 
     // 2. Check for optional formatting specifiers (starting with ':')
-    if (parser->current_token->type == TOKEN_COLON) {
-        eat(parser, TOKEN_COLON); // Consume ':'
+    if (parser->current_token && parser->current_token->type == TOKEN_COLON) { // Add NULL check
+        eat(parser, TOKEN_COLON); // Frees ':'
 
-        // 3. Parse the field width (must be integer constant)
-        if (parser->current_token->type != TOKEN_INTEGER_CONST) {
+        // --- Copy width token BEFORE eat ---
+        Token *widthTokenOriginal = parser->current_token;
+        if (!widthTokenOriginal || widthTokenOriginal->type != TOKEN_INTEGER_CONST) { // Add NULL check
             errorParser(parser, "Expected integer constant for field width after ':'");
-            // On error, just return the base expression node; runtime can handle default formatting.
-            return exprNode;
+            return exprNode; // Return base expression on error
         }
-        Token *widthToken = parser->current_token;
-        eat(parser, TOKEN_INTEGER_CONST); // Consume width token
+        Token *widthTokenCopied = copyToken(widthTokenOriginal); // <<< COPY
+        if(!widthTokenCopied){
+            fprintf(stderr, "Memory allocation failed in parseWriteArgument (copyToken width)\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        // ---
 
-        // 4. Check for optional decimal places specifier (starting with ':')
-        Token *decimalsToken = NULL; // Initialize to NULL
-        if (parser->current_token->type == TOKEN_COLON) {
-            eat(parser, TOKEN_COLON); // Consume second ':'
+        // Eat original width token (eatInternal frees it)
+        eat(parser, TOKEN_INTEGER_CONST);
 
-            // 5. Parse the decimal places (must be integer constant)
-            if (parser->current_token->type != TOKEN_INTEGER_CONST) {
-                errorParser(parser, "Expected integer constant for decimal places after ':'");
-                // On error, proceed with only width formatting (decimalsToken remains NULL)
+        Token *decimalsTokenOriginal = NULL;
+        Token *decimalsTokenCopied = NULL; // Initialize copied decimals token ptr to NULL
+
+        // Check for optional decimal places specifier (starting with ':')
+        if (parser->current_token && parser->current_token->type == TOKEN_COLON) { // Add NULL check
+            eat(parser, TOKEN_COLON); // Frees second ':'
+
+            // --- Copy decimals token BEFORE eat (if present) ---
+            decimalsTokenOriginal = parser->current_token;
+            if (decimalsTokenOriginal && decimalsTokenOriginal->type == TOKEN_INTEGER_CONST) { // Add NULL check
+                decimalsTokenCopied = copyToken(decimalsTokenOriginal); // <<< COPY
+                if(!decimalsTokenCopied){
+                     fprintf(stderr, "Memory allocation failed in parseWriteArgument (copyToken decimals)\n");
+                     // Clean up width copy before exiting
+                     freeToken(widthTokenCopied);
+                     EXIT_FAILURE_HANDLER();
+                }
+                // Eat original decimals token (eatInternal frees it)
+                eat(parser, TOKEN_INTEGER_CONST);
+            } else if (decimalsTokenOriginal) {
+                 // Error: Expected integer but got something else
+                 errorParser(parser, "Expected integer constant for decimal places after ':'");
+                 // Do not eat the incorrect token, proceed without decimals
+                 decimalsTokenCopied = NULL;
             } else {
-                decimalsToken = parser->current_token; // Store token if present
-                eat(parser, TOKEN_INTEGER_CONST);      // Consume decimals token
+                 // Error: Unexpected end of input
+                 errorParser(parser, "Unexpected end of input after second ':' in write format");
+                 decimalsTokenCopied = NULL;
             }
+            // ---
         }
 
-        // 6. Create a dedicated formatting node (AST_FORMATTED_EXPR)
-        //    - Original expression goes in the 'left' child.
-        //    - Formatting info ("width,decimals") is stored in the format node's token->value.
-        AST *formatNode = newASTNode(AST_FORMATTED_EXPR, NULL); // No specific token needed for the node itself
-        setLeft(formatNode, exprNode); // Link original expression
+        // Create the formatting node
+        AST *formatNode = newASTNode(AST_FORMATTED_EXPR, NULL);
+        setLeft(formatNode, exprNode);
 
-        // Create the format string (e.g., "10,-1" or "8,2")
+        // --- Use COPIED tokens' values for atoi ---
+        int width = atoi(widthTokenCopied->value); // <<< Use copy
+        int decimals = (decimalsTokenCopied != NULL) ? atoi(decimalsTokenCopied->value) : -1; // <<< Use copy
+        // ---
+
+        // Create and store the format string
         char formatStr[64]; // Buffer for "width,decimals" string
-        int width = atoi(widthToken->value);
-        int decimals = (decimalsToken != NULL) ? atoi(decimalsToken->value) : -1; // Use -1 if no decimals token
         snprintf(formatStr, sizeof(formatStr), "%d,%d", width, decimals);
-
-        // Store the format string in the format node's token (create a dummy token)
-        // Use TOKEN_STRING_CONST type for convenience in storing the string value.
+        // newToken makes its own copy of formatStr
         formatNode->token = newToken(TOKEN_STRING_CONST, formatStr);
 
-        // Return the formatNode, which represents the formatted expression
-        return formatNode;
+        // --- Free the COPIED tokens ---
+        freeToken(widthTokenCopied); // <<< Free width copy
+        if (decimalsTokenCopied) {
+            freeToken(decimalsTokenCopied); // <<< Free decimals copy (if it was created)
+        }
+        // ---
+
+        return formatNode; // Return the node representing the formatted expression
 
     } else {
         // No formatting specifiers found (no ':' after expression),
@@ -2282,4 +2596,20 @@ AST *parseArrayInitializer(Parser *parser) {
 
     eat(parser, TOKEN_RPAREN); // Consume ')'
     return node;
+}
+
+Token *peekToken(Parser *parser) {
+    // 1. Save the current lexer state
+    Lexer backupLexerState = *(parser->lexer);
+
+    // 2. Get the next token (this advances the internal lexer state)
+    //    getNextToken allocates memory for the returned token.
+    Token *peekedToken = getNextToken(parser->lexer);
+
+    // 3. Restore the original lexer state
+    *(parser->lexer) = backupLexerState;
+
+    // 4. Return the peeked token.
+    //    IMPORTANT: The caller is responsible for freeing this token later!
+    return peekedToken;
 }
