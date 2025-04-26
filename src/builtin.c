@@ -1251,22 +1251,49 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         lowerName[i] = tolower((unsigned char)lowerName[i]);
     }
 
+    // --- Create the initial token ---
     Token *token = newToken(TOKEN_IDENTIFIER, lowerName);
+    if (!token) { // Check if newToken failed
+        fprintf(stderr, "Memory allocation error creating token in registerBuiltinFunction\n");
+        free(lowerName);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Create the dummy AST node (newASTNode makes its own copy of the token) ---
     AST *dummy = newASTNode(declType, token);
+    if (!dummy) { // Check if newASTNode failed
+         fprintf(stderr, "Memory allocation error creating AST node in registerBuiltinFunction\n");
+         freeToken(token); // Free the token we created
+         free(lowerName);
+         EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Free the ORIGINAL token AFTER newASTNode has made its copy ---
+    freeToken(token);
+    // --- END FIX ---
+
+    // --- Rest of the function remains the same ---
     dummy->child_count = 0;
     dummy->child_capacity = 0;
     setLeft(dummy, NULL);
     setRight(dummy, NULL);
     setExtra(dummy, NULL);
 
+    // --- Logic to set return types based on function name ---
     if (strcmp(lowerName, "api_send") == 0) {
         AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "mstream"));
         setTypeAST(retTypeNode, TYPE_MEMORYSTREAM);
         setRight(dummy, retTypeNode);
+         // ---> ADDED: Also free the token created for the type name <---
+         freeToken(retTypeNode->token);
+         // ---> END ADDED <---
     } else if (strcmp(lowerName, "api_receive") == 0) {
         AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "string"));
         setTypeAST(retTypeNode, TYPE_STRING);
         setRight(dummy, retTypeNode);
+         // ---> ADDED: Also free the token created for the type name <---
+         freeToken(retTypeNode->token);
+         // ---> END ADDED <---
     } else if (strcmp(lowerName, "chr") == 0) {
         dummy->child_capacity = 1;
         dummy->children = malloc(sizeof(AST *));
@@ -1276,12 +1303,20 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         }
         AST *param = newASTNode(AST_VAR_DECL, NULL);
         setTypeAST(param, TYPE_INTEGER);
-        AST *var = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "_chr_arg"));
+        // ---> MODIFIED: Use a temporary token and free it <---
+        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_chr_arg");
+        AST *var = newASTNode(AST_VARIABLE, paramNameToken);
+        freeToken(paramNameToken); // Free the temp token
+        // ---> END MODIFIED <---
         addChild(param, var);
         dummy->children[0] = param;
         dummy->child_count = 1;
 
-        AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "char"));
+        // ---> MODIFIED: Use a temporary token and free it <---
+        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "char");
+        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+        freeToken(retTypeNameToken); // Free the temp token
+        // ---> END MODIFIED <---
         setTypeAST(retTypeNode, TYPE_CHAR);
         setRight(dummy, retTypeNode);
     } else if (strcmp(lowerName, "ord") == 0) {
@@ -1293,51 +1328,81 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         }
         AST *param = newASTNode(AST_VAR_DECL, NULL);
         setTypeAST(param, TYPE_CHAR);
-        AST *var = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "_ord_arg"));
+        // ---> MODIFIED: Use a temporary token and free it <---
+        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_ord_arg");
+        AST *var = newASTNode(AST_VARIABLE, paramNameToken);
+        freeToken(paramNameToken); // Free the temp token
+        // ---> END MODIFIED <---
         addChild(param, var);
         dummy->children[0] = param;
         dummy->child_count = 1;
 
-        AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "integer"));
+        // ---> MODIFIED: Use a temporary token and free it <---
+        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
+        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+        freeToken(retTypeNameToken); // Free the temp token
+        // ---> END MODIFIED <---
         setTypeAST(retTypeNode, TYPE_INTEGER);
         setRight(dummy, retTypeNode);
     } else if (strcmp(lowerName, "wherex") == 0) {
-        // No parameters needed (child_count already 0)
-        // Set return type to Integer
-        AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "integer"));
+        // ---> MODIFIED: Use a temporary token and free it <---
+        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
+        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+        freeToken(retTypeNameToken); // Free the temp token
+        // ---> END MODIFIED <---
         setTypeAST(retTypeNode, TYPE_INTEGER);
-        setRight(dummy, retTypeNode); // Assign return type node
-        dummy->var_type = TYPE_INTEGER; // Set type on the FUNCTION_DECL node itself
+        setRight(dummy, retTypeNode);
+        dummy->var_type = TYPE_INTEGER;
    } else if (strcmp(lowerName, "wherey") == 0) {
-        // No parameters needed
-        // Set return type to Integer
-        AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "integer"));
+        // ---> MODIFIED: Use a temporary token and free it <---
+        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
+        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+        freeToken(retTypeNameToken); // Free the temp token
+        // ---> END MODIFIED <---
         setTypeAST(retTypeNode, TYPE_INTEGER);
-        setRight(dummy, retTypeNode); // Assign return type node
-        dummy->var_type = TYPE_INTEGER; // Set type on the FUNCTION_DECL node itself
+        setRight(dummy, retTypeNode);
+        dummy->var_type = TYPE_INTEGER;
    } else if (strcasecmp(lowerName, "keypressed") == 0) {
-       AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "boolean"));
+       // ---> MODIFIED: Use a temporary token and free it <---
+       Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "boolean");
+       AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+       freeToken(retTypeNameToken); // Free the temp token
+       // ---> END MODIFIED <---
        setTypeAST(retTypeNode, TYPE_BOOLEAN);
-       setRight(dummy, retTypeNode); // Assign return type node
-       dummy->var_type = TYPE_BOOLEAN; // Set type on the FUNCTION_DECL node itself
+       setRight(dummy, retTypeNode);
+       dummy->var_type = TYPE_BOOLEAN;
   } else if (strcmp(lowerName, "inttostr") == 0) {
-      AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "string"));
+      // ---> MODIFIED: Use a temporary token and free it <---
+      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "string");
+      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+      freeToken(retTypeNameToken); // Free the temp token
+      // ---> END MODIFIED <---
       setTypeAST(retTypeNode, TYPE_STRING);
-      setRight(dummy, retTypeNode); // dummy is the AST_FUNCTION_DECL node
-      dummy->var_type = TYPE_STRING; // Set type on the FUNCTION_DECL node itself
-  } else if (strcasecmp(lowerName, "screencols") == 0) { // Use strcasecmp for consistency if needed
-      AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "integer"));
+      setRight(dummy, retTypeNode);
+      dummy->var_type = TYPE_STRING;
+  } else if (strcasecmp(lowerName, "screencols") == 0) {
+      // ---> MODIFIED: Use a temporary token and free it <---
+      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
+      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+      freeToken(retTypeNameToken); // Free the temp token
+      // ---> END MODIFIED <---
       setTypeAST(retTypeNode, TYPE_INTEGER);
-      setRight(dummy, retTypeNode); // Link type node as right child
-      dummy->var_type = TYPE_INTEGER; // Set function's return type
- } else if (strcasecmp(lowerName, "screenrows") == 0) { // Use strcasecmp for consistency if needed
-      AST *retTypeNode = newASTNode(AST_VARIABLE, newToken(TOKEN_IDENTIFIER, "integer"));
+      setRight(dummy, retTypeNode);
+      dummy->var_type = TYPE_INTEGER;
+ } else if (strcasecmp(lowerName, "screenrows") == 0) {
+      // ---> MODIFIED: Use a temporary token and free it <---
+      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
+      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+      freeToken(retTypeNameToken); // Free the temp token
+      // ---> END MODIFIED <---
       setTypeAST(retTypeNode, TYPE_INTEGER);
-      setRight(dummy, retTypeNode); // Link type node as right child
-      dummy->var_type = TYPE_INTEGER; // Set function's return type
+      setRight(dummy, retTypeNode);
+      dummy->var_type = TYPE_INTEGER;
  }
-    addProcedure(dummy);
-    free(lowerName); 
+    // --- End logic for setting return types ---
+
+    addProcedure(dummy); // Adds the AST node to the procedure table
+    free(lowerName);     // Free the lowercased name string
 }
 
 Value executeBuiltinParamcount(AST *node) {
