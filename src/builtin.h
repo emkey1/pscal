@@ -80,6 +80,7 @@ typedef enum {
 
 // The rest
 BuiltinRoutineType getBuiltinType(const char *name);
+void assignValueToLValue(AST *lvalueNode, Value newValue);
 
 
 #endif

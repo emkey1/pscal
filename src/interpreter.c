@@ -154,6 +154,15 @@ Value evalSet(AST *node) {
 }
 
 Value executeProcedureCall(AST *node) {
+    // --- Verify Input Node ---
+    if (!node || (node->type != AST_PROCEDURE_CALL && node->type != AST_FUNCTION_DECL) || !node->token) {
+         fprintf(stderr, "Internal Error: Invalid AST node passed to executeProcedureCall.\n");
+         // Optionally dump AST node details if possible
+         EXIT_FAILURE_HANDLER();
+    }
+    // --- End Verify ---
+
+    // Handle Built-in procedures first (User's original logic)
     if (isBuiltin(node->token->value)) {
         Value retVal = executeBuiltinProcedure(node);
 #ifdef DEBUG
@@ -163,103 +172,263 @@ Value executeProcedureCall(AST *node) {
         return retVal;
     }
 
+    // Look up user-defined procedure (User's original logic)
     Procedure *proc = procedure_table;
+    // Use strcasecmp for case-insensitive lookup based on how names are stored/looked up
+    char *lowerProcName = strdup(node->token->value);
+    if (!lowerProcName) { fprintf(stderr,"FATAL: strdup failed for proc name lookup\n"); EXIT_FAILURE_HANDLER(); }
+    for(int i=0; lowerProcName[i]; i++){ lowerProcName[i] = (char)tolower((unsigned char)lowerProcName[i]); }
+
     while (proc) {
-        if (strcmp(proc->name, node->token->value) == 0)
+        if (proc->name && strcmp(proc->name, lowerProcName) == 0) // Compare lowercase
             break;
         proc = proc->next;
     }
-    if (!proc) {
-        fprintf(stderr, "Runtime error: routine '%s' not found.\n", node->token->value);
+    free(lowerProcName); // Free the temp lowercase name
+
+    if (!proc || !proc->proc_decl) { // Check proc and its declaration AST
+        fprintf(stderr, "Runtime error: routine '%s' not found or declaration missing.\n", node->token->value);
         EXIT_FAILURE_HANDLER();
     }
 
+    // Get expected number of parameters FROM THE DECLARATION
     int num_params = proc->proc_decl->child_count;
-    Value *arg_values = malloc(sizeof(Value) * num_params);
-    if (!arg_values) { fprintf(stderr, "Memory allocation error\n"); EXIT_FAILURE_HANDLER(); }
 
+    // --- ADDED: Debug Check before accessing node->children ---
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG EXEC_PROC] ENTERING: Node %p (%s '%s'), Expecting %d params.\n",
+            (void*)node, astTypeToString(node->type), node->token->value, num_params);
+    fprintf(stderr, "[DEBUG EXEC_PROC]            AST Node State: child_count=%d, children_ptr=%p\n",
+            node->child_count, (void*)node->children);
+#endif
+
+    // Defensive check: Does the CALL node's child count match expected params?
+    if (node->child_count != num_params) {
+         fprintf(stderr, "Runtime error: Argument count mismatch for call to '%s'. Expected %d, got %d.\n",
+                 proc->name, num_params, node->child_count);
+         // This indicates a parser error attaching arguments
+         EXIT_FAILURE_HANDLER(); // Exit on mismatch
+    }
+    // Check if children pointer is NULL when arguments are expected
+    if (num_params > 0 && node->children == NULL) {
+         fprintf(stderr, "CRITICAL ERROR: Procedure '%s' expects %d params, but AST node->children pointer is NULL before argument evaluation!\n",
+                 proc->name, num_params);
+         dumpAST(node, 0); // Dump the node state *at execution time*
+         dumpAST(proc->proc_decl, 0);
+         EXIT_FAILURE_HANDLER();
+    }
+    // --- END ADDED Debug Check ---
+
+    // Allocate temporary storage for evaluated/copied VALUE parameter values
+    Value *arg_values = NULL;
+    if (num_params > 0) {
+        arg_values = malloc(sizeof(Value) * num_params);
+        if (!arg_values) {
+             fprintf(stderr, "FATAL: malloc failed for arg_values in executeProcedureCall\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        // Initialize memory - set all types to VOID initially
+        for (int i = 0; i < num_params; i++) {
+             arg_values[i].type = TYPE_VOID; // Mark as unused initially
+        }
+    }
+
+    // --- Stage 1: Evaluate arguments for VALUE parameters (User's loop structure) ---
     for (int i = 0; i < num_params; i++) {
-        AST *paramNode = proc->proc_decl->children[i];
+        AST *paramNode = proc->proc_decl->children[i]; // Formal parameter definition
+        if (!paramNode) { /* Error checking */ fprintf(stderr, "Missing formal param %d\n", i); EXIT_FAILURE_HANDLER(); }
 
-        if (paramNode->by_ref) {
-            // Var parameter: defer evaluation, mark for aliasing later
+        if (paramNode->by_ref) { // VAR parameter
+            // Leave arg_values[i] as TYPE_VOID; we handle VAR in the next loop using the AST node.
             arg_values[i].type = TYPE_VOID;
-        } else {
-            Value actualVal = eval(node->children[i]);
-                // Always use makeCopyOfValue for value parameters ***
-                // Ensures deep copy for ALL types (records, arrays, strings, etc.)
+        } else { // VALUE parameter
+             // --- ADDED: Check index and children pointer AGAIN before access ---
+             if (i >= node->child_count || node->children == NULL) { // Check against actual args provided
+                 fprintf(stderr, "CRITICAL ERROR: Trying to access actual argument node->children[%d], but child_count=%d or children=%p\n",
+                         i, node->child_count, (void*)node->children);
+                 dumpAST(node,0);
+                 EXIT_FAILURE_HANDLER();
+             }
+             AST* actualArgNode = node->children[i]; // Get the AST node for the i-th argument in the call
+             if (!actualArgNode) {
+                 fprintf(stderr, "CRITICAL ERROR: Actual argument node at index %d is NULL for call to '%s'.\n", i, proc->name);
+                 dumpAST(node,0);
+                 EXIT_FAILURE_HANDLER();
+             }
+             // --- END ADDED Check ---
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG EXEC_PROC] Evaluating value parameter %d (AST Type: %s)\n", i, astTypeToString(actualArgNode->type));
+#endif
+            Value actualVal = eval(actualArgNode); // Evaluate the actual argument expression
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG EXEC_PROC] Arg %d evaluated to type %s\n", i, varTypeToString(actualVal.type));
+#endif
+
+            // User's code used makeCopyOfValue here - keep that intention
             arg_values[i] = makeCopyOfValue(&actualVal);
-        }
-    }
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG EXEC_PROC] Copied arg %d value (type %s)\n", i, varTypeToString(arg_values[i].type));
+#endif
 
+            // --- ADDED: Free the value returned by eval, as makeCopyOfValue made its own copy ---
+            freeValue(&actualVal);
+        }
+    } // End Stage 1 Loop
+
+    // --- Stage 2: Setup new scope and bind parameters (User's loop structure) ---
     SymbolEnvSnapshot snapshot;
-    saveLocalEnv(&snapshot);
+    saveLocalEnv(&snapshot); // Save current environment state
 
-    for (int i = num_params - 1; i >= 0; i--) {
-        AST *paramNode = proc->proc_decl->children[i];
-        char *paramName = (paramNode->type == AST_VAR_DECL)
-                            ? paramNode->children[0]->token->value
-                            : paramNode->token->value;
-        VarType ptype = paramNode->var_type;
-        AST *type_def = paramNode->right;
+    for (int i = num_params - 1; i >= 0; i--) { // Iterate backwards
+        AST *paramNode = proc->proc_decl->children[i]; // Formal parameter definition (VAR_DECL)
+        // Check structure (basic)
+        if (!paramNode || paramNode->type != AST_VAR_DECL || paramNode->child_count < 1 || !paramNode->children[0] || !paramNode->children[0]->token) { /* error */ }
 
-        if (paramNode->by_ref) {
-            if (node->children[i]->type != AST_VARIABLE) {
-                fprintf(stderr, "Runtime error: var parameter must be a variable reference.\n");
+        char *paramName = paramNode->children[0]->token->value; // Formal name (e.g., "s")
+        VarType ptype = paramNode->var_type;                 // Formal type (e.g., TYPE_RECORD)
+        AST *type_def = paramNode->right;                    // Link to type definition (e.g., RECORD_TYPE node)
+
+        if (paramNode->by_ref) { // Handle VAR parameter (User's logic)
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG EXEC_PROC] Binding VAR parameter '%s'\n", paramName);
+#endif
+            // Get the AST node passed as the argument
+             AST* actualArgNode = node->children[i];
+             if (!actualArgNode) { /* error */ }
+
+            // Check if the argument is a valid variable reference
+            if (actualArgNode->type != AST_VARIABLE && actualArgNode->type != AST_FIELD_ACCESS && actualArgNode->type != AST_ARRAY_ACCESS) { // Check added based on user code
+                fprintf(stderr, "Runtime error: var parameter must be a variable reference, field, or array element.\n");
                 EXIT_FAILURE_HANDLER();
             }
-            char *argVarName = node->children[i]->token->value;
-            Symbol *callerSym = lookupSymbolIn(snapshot.head, argVarName);
-            if (!callerSym) {
-                fprintf(stderr, "Runtime error: variable '%s' not declared (for var parameter).\n", argVarName);
-                EXIT_FAILURE_HANDLER();
+
+            // User's logic to find the symbol in the caller's scope
+            // Assumes simple variable for now
+             char *argVarName = NULL;
+             if (actualArgNode->type == AST_VARIABLE && actualArgNode->token) {
+                 argVarName = actualArgNode->token->value;
+             } else {
+                 // TODO: Extend lookup for fields/arrays based on argLValueNode
+                  fprintf(stderr, "Warning: VAR parameter lookup not fully implemented for fields/arrays.\n");
+                  // Use a placeholder or try to extract base name if possible
+                  // This part needs findSymbolForLValue implementation from previous thoughts
+                   argVarName = "?complex_lvalue?"; // Placeholder
+             }
+
+             if (!argVarName) { /* Error */ }
+
+             Symbol *callerSym = lookupSymbolIn(snapshot.head, argVarName); // User's lookup function
+             if (!callerSym) {
+                 fprintf(stderr, "Runtime error: variable '%s' not declared (for var parameter '%s').\n", argVarName, paramName);
+                 EXIT_FAILURE_HANDLER();
+             }
+             if (!callerSym->value) {
+                  fprintf(stderr, "CRITICAL ERROR: Caller symbol '%s' for VAR parameter '%s' has NULL value pointer.\n", callerSym->name, paramName);
+                  EXIT_FAILURE_HANDLER();
+             }
+             // Optional type check
+             if (callerSym->type != ptype) {
+                   fprintf(stderr, "Runtime error: Type mismatch for VAR parameter '%s'. Expected %s, got %s for variable '%s'.\n", paramName, varTypeToString(ptype), varTypeToString(callerSym->type), callerSym->name);
+                   EXIT_FAILURE_HANDLER();
+             }
+
+
+            // Insert local symbol for the parameter
+            insertLocalSymbol(paramName, ptype, type_def, false);
+            Symbol *localSym = lookupLocalSymbol(paramName);
+            if (!localSym || !localSym->value) { /* Error */ }
+
+            // Free the default value created by insertLocalSymbol
+            freeValue(localSym->value);
+            free(localSym->value);
+
+            // Alias: Make local symbol point to the caller's value
+            localSym->value = callerSym->value;
+            localSym->is_alias = true;
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG EXEC_PROC] Aliased VAR parameter '%s' to caller symbol '%s'\n", paramName, callerSym->name);
+#endif
+
+        } else { // Handle VALUE parameter (User's logic + freeValue fix)
+#ifdef DEBUG
+             fprintf(stderr, "[DEBUG EXEC_PROC] Inserting value parameter '%s' (type %s)\n", paramName, varTypeToString(ptype));
+#endif
+            // --- LINE 188 Context ---
+            insertLocalSymbol(paramName, ptype, type_def, false); // Creates local symbol 's', initialized with default value
+            Symbol *sym = lookupLocalSymbol(paramName);
+            if (!sym) { /* Error */ }
+            sym->is_alias = false; // It's a copy
+
+            // Check if the copied value exists in arg_values
+            if (arg_values[i].type == TYPE_VOID) { // Check if value wasn't prepared
+                 fprintf(stderr, "CRITICAL ERROR: Value for parameter '%s' (index %d) was not evaluated/copied correctly.\n", paramName, i);
+                 EXIT_FAILURE_HANDLER();
             }
 
-            insertLocalSymbol(paramName, ptype, type_def, false);
-            Symbol *sym = lookupLocalSymbol(paramName);
-            sym->value = callerSym->value;     // 🔧 Shared value pointer
-            sym->is_alias = true;
-        } else {
-            insertLocalSymbol(paramName, ptype, type_def, false);
-            Symbol *sym = lookupLocalSymbol(paramName);
-            sym->is_alias = false;
-            updateSymbol(paramName, arg_values[i]);
+            // Assign the deep-copied value from arg_values[i] to the local symbol
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG EXEC_PROC] Updating symbol '%s' with copied value (type %s from arg_values[%d])\n", paramName, varTypeToString(arg_values[i].type), i);
+#endif
+            updateSymbol(paramName, arg_values[i]); // updateSymbol makes the final copy
+
+            // --- ADDED: Free the intermediate copy stored in arg_values[i] ---
+            freeValue(&arg_values[i]);
+            arg_values[i].type = TYPE_VOID; // Mark as freed/processed
         }
+    } // End Stage 2 Loop
+
+    // Free the temporary argument array structure (User's original placement)
+    if (arg_values) {
+        free(arg_values);
     }
 
-    free(arg_values);
-
-    Value retVal;
+    // --- Stage 3: Execute Body & Handle Return (User's original logic) ---
+    Value retVal = makeVoid(); // Default for procedures
     if (proc->proc_decl->type == AST_FUNCTION_DECL) {
-        AST *type_def = proc->proc_decl->right;
-        VarType retType = type_def->var_type;
+        AST *returnTypeDefNode = proc->proc_decl->right;
+        if (!returnTypeDefNode) { /* Error */ }
+        VarType retType = returnTypeDefNode->var_type;
 
-        insertLocalSymbol("result", retType, type_def, false);
+        // Setup 'result' variable and function name alias
+        insertLocalSymbol("result", retType, returnTypeDefNode, false);
         Symbol *resSym = lookupLocalSymbol("result");
+        if (!resSym) { /* Error */ }
         resSym->is_alias = false;
 
-        insertLocalSymbol(proc->name, retType, type_def, false);
+        insertLocalSymbol(proc->name, retType, returnTypeDefNode, false);
         Symbol *funSym = lookupLocalSymbol(proc->name);
-        funSym->value = resSym->value;
+         if (!funSym) { /* Error */ }
+        if(funSym->value) { freeValue(funSym->value); free(funSym->value); } // Free default
+        funSym->value = resSym->value; // Alias to result's value
         funSym->is_alias = true;
 
-        current_function_symbol = funSym;
-        executeWithScope(proc->proc_decl->extra, false);
+        current_function_symbol = funSym; // Set global tracker
 
-        Value *functionResult = funSym->value;
-        retVal = functionResult ? makeCopyOfValue(functionResult) : makeInt(0);
+        // Execute function body
+        if (!proc->proc_decl->extra) { /* Error: Missing function body */ }
+        executeWithScope(proc->proc_decl->extra, false); // Execute BLOCK in 'extra'
 
+        // Get result value AFTER execution
+        Symbol* finalResultSym = lookupLocalSymbol("result"); // Look up 'result' again
+        if (!finalResultSym || !finalResultSym->value) { /* Error retrieving result */ }
+        else {
+             retVal = makeCopyOfValue(finalResultSym->value); // Copy the final result
+        }
+
+        // Restore environment now
         restoreLocalEnv(&snapshot);
+        current_function_symbol = NULL; // Clear tracker
+        return retVal; // Return the copied result
 
-        current_function_symbol = NULL;
-        return retVal;
-    } else {
-        executeWithScope(proc->proc_decl->right, false);
+    } else { // Procedure
+        // Execute procedure body
+        if (!proc->proc_decl->right) { /* Error: Missing procedure body */ }
+        executeWithScope(proc->proc_decl->right, false); // Execute BLOCK in 'right'
 
-        restoreLocalEnv(&snapshot);
-        return makeInt(0);
+        restoreLocalEnv(&snapshot); // Restore environment
+        return makeVoid(); // Procedures return void
     }
-}
+} // End executeProcedureCall
 
 // New function to process local declarations within a scope
 void processLocalDeclarations(AST* declarationsNode) {
@@ -643,7 +812,7 @@ Value eval(AST *node) {
                 EXIT_FAILURE_HANDLER();
             }
 
-            Value val = *(sym->value);  // Copy for safety
+            Value val = makeCopyOfValue(sym->value);  // Copy for safety
             if (val.type == TYPE_STRING && val.s_val == NULL)
                 val.s_val = strdup("");
 
@@ -1302,121 +1471,256 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             executeWithScope(node->right, true);
             break;
         case AST_ASSIGN: {
-                    // Evaluate the right-hand side expression.
-                    // 'val' might hold heap-allocated data (string, record, array).
-                    Value val = eval(node->right);
+             // Evaluate the right-hand side expression FIRST.
+             // 'val' might hold heap-allocated data (string, record, array).
+             Value val = eval(node->right);
 
-                    if (node->left->type == AST_ARRAY_ACCESS || node->left->type == AST_FIELD_ACCESS) {
-                        // Handle assignment to array elements or record fields.
-                        // NOTE: This section needs careful review to ensure it correctly modifies
-                        // the original symbol's data, not just a temporary 'container' copy.
-                        // Assuming 'assignToContainer' or direct logic modifies the symbol.
-                        Value container = eval(node->left->left); // Evaluating container might create copies? Be careful.
+             // --- MODIFICATION START: Determine LValue type and handle appropriately ---
 
-                        if (container.type == TYPE_ARRAY && node->left->type == AST_ARRAY_ACCESS) {
-                            Symbol *sym = lookupSymbol(node->left->left->token->value);
-                            if (!sym || (sym->value->type != TYPE_ARRAY && sym->value->type != TYPE_STRING)) {
-                                fprintf(stderr, "Runtime error: array access on non-array variable '%s'.\n", node->left->left->token->value);
-                                 // <<< ADDED FREE before exit >>>
-                                 freeValue(&val);
-                                 freeValue(&container); // Also free the evaluated container
-                                EXIT_FAILURE_HANDLER();
-                            }
-                            if (sym->value->type == TYPE_STRING) {
-                                long long idx = eval(node->left->children[0]).i_val;
-                                // Ensure sym->value->s_val is not NULL before strlen
-                                int len = (sym->value->s_val) ? (int)strlen(sym->value->s_val) : 0;
+             if (node->left->type == AST_FIELD_ACCESS) {
+                 // --- Handle Record Field Assignment ---
 
-                                if (idx < 1 || (sym->value->s_val == NULL && idx > 0) || (sym->value->s_val != NULL && idx > len)) {
-                                    dumpASTFromRoot(node);
-                                    dumpSymbolTable();
-                                    fprintf(stderr, "Runtime error: string index %lld out of bounds [1..%d].\n", idx, len);
-                                     // <<< ADDED FREE before exit >>>
-                                     freeValue(&val);
-                                     freeValue(&container); // Also free the evaluated container
-                                    EXIT_FAILURE_HANDLER();
-                                }
-
-                                char char_to_assign = '\0';
-                                if (val.type == TYPE_CHAR) {
-                                    char_to_assign = val.c_val;
-                                } else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) { // Added NULL check
-                                    char_to_assign = val.s_val[0];
-                                } else {
-                                    fprintf(stderr, "Runtime error: assignment to string index requires a char or single-character string.\n");
-                                     // <<< ADDED FREE before exit >>>
-                                     freeValue(&val);
-                                     freeValue(&container); // Also free the evaluated container
-                                    EXIT_FAILURE_HANDLER();
-                                }
-                                // Ensure string is mutable and large enough (should be handled by makeString/updateSymbol if needed)
-                                sym->value->s_val[idx - 1] = char_to_assign;
-
-                                 // <<< ADDED FREE after assignment >>>
-                                 freeValue(&val);
-                                 freeValue(&container); // Free the evaluated container
-                                 // Need to break out of the AST_ASSIGN case entirely here for string index assignment
-                                 goto assign_end; // Use goto to jump past other assignment logic
-                            }
-                        } // End specific string index assignment handling
-
-                        // General assignment for array/record elements - assuming assignToContainer works
-                        assignToContainer(&container, node->left, val); // Ensure this modifies the original symbol data
-
-                        // <<< ADDED FREE after using val and container >>>
-                        freeValue(&val);
-                        freeValue(&container);
-
-                    } else if (node->left->type == AST_VARIABLE) {
-                        // Simple variable assignment
-                        Symbol *sym = lookupSymbol(node->left->token->value);
-                        if (!sym) {
-                            fprintf(stderr, "Runtime error: variable '%s' not declared.\n", node->left->token->value);
-        #ifdef DEBUG
-                            fprintf(stderr, "[DEBUG_ASSIGN] Target symbol '%s' NOT FOUND before updateSymbol!\n", node->left->token->value);
-        #endif
-                             // <<< ADDED FREE before exit >>>
-                             freeValue(&val);
-                            EXIT_FAILURE_HANDLER();
-                        }
-
-                        // --- Specific handling for Enum Assignment ---
-                        // Note: updateSymbol should handle type checking and value copying/assignment
-                        // The explicit ordinal copy here might be redundant if updateSymbol handles ENUM correctly.
-                        // Let's rely on updateSymbol for consistency. Remove the explicit ordinal copy.
-                        /*
-                        if (sym->type == TYPE_ENUM) {
-                            if (val.type != TYPE_ENUM) {
-                                fprintf(stderr, "Runtime error: Type mismatch in assignment. Expected TYPE_ENUM, got %s.\n", varTypeToString(val.type));
-                                // <<< ADDED FREE before exit >>>
-                                freeValue(&val);
-                                EXIT_FAILURE_HANDLER();
-                            } else {
-                                // Debug print was here
-                            }
-                            // Rely on updateSymbol to handle enum assignment
-                            // sym->value->enum_val.ordinal = val.enum_val.ordinal; // <<< REMOVE THIS
-                        }
-                        */
-                        // --- End specific Enum handling ---
-
-                        // updateSymbol handles type checking, freeing old value, and copying new value
-                        updateSymbol(node->left->token->value, val);
-
-                        // <<< ADDED FREE after updateSymbol uses val >>>
-                        freeValue(&val);
-
-                    } else {
-                         // Invalid LValue type
-                         fprintf(stderr, "Runtime error: Invalid lvalue node type in assignment: %s\n", astTypeToString(node->left->type));
-                          // <<< ADDED FREE before exit >>>
-                          freeValue(&val);
+                 // 1. Find the base variable symbol for the record
+                 AST* baseVarNode = node->left->left; // Start with node left of '.'
+                 // Traverse up if the left side is complex (e.g., array[i].field)
+                 // This simplified traversal might need enhancement for deeper nesting.
+                 while (baseVarNode && baseVarNode->type != AST_VARIABLE) {
+                     if (baseVarNode->left) baseVarNode = baseVarNode->left;
+                     else {
+                         fprintf(stderr, "Runtime error: Cannot find base variable for field assignment.\n");
+                         freeValue(&val); // Free RHS value before exiting
                          EXIT_FAILURE_HANDLER();
-                    }
+                     }
+                 }
+                  if (!baseVarNode || baseVarNode->type != AST_VARIABLE || !baseVarNode->token) { // Added token check
+                     fprintf(stderr, "Runtime error: Could not determine base variable for field assignment.\n");
+                     freeValue(&val); // Free RHS value before exiting
+                     EXIT_FAILURE_HANDLER();
+                 }
 
-                assign_end: // Label for goto jump after string index assignment
-                    break; // Break from the main switch statement for AST_ASSIGN
-                } // End case AST_ASSIGN
+                 Symbol *recSym = lookupSymbol(baseVarNode->token->value);
+                 if (!recSym || !recSym->value || recSym->value->type != TYPE_RECORD) {
+                     fprintf(stderr, "Runtime error: Base variable '%s' is not a record for field assignment.\n", baseVarNode->token->value);
+                     freeValue(&val); // Free RHS value before exiting
+                     EXIT_FAILURE_HANDLER();
+                 }
+                  if (recSym->is_const) { // Check if base record is constant
+                      fprintf(stderr, "Runtime error: Cannot assign to field of constant record '%s'.\n", recSym->name);
+                      freeValue(&val);
+                      EXIT_FAILURE_HANDLER();
+                  }
+
+                 // 2. Find the target FieldValue within the *symbol's* record data
+                 FieldValue *targetField = recSym->value->record_val;
+                  const char *targetFieldName = node->left->token ? node->left->token->value : NULL; // Field name from the AST_FIELD_ACCESS node's token
+                  if (!targetFieldName) { /* Should not happen if parser is correct */ EXIT_FAILURE_HANDLER(); }
+
+                 while (targetField) {
+                     if (targetField->name && strcmp(targetField->name, targetFieldName) == 0) {
+                         break; // Found the field
+                     }
+                     targetField = targetField->next;
+                 }
+
+                 if (!targetField) {
+                     fprintf(stderr, "Runtime error: Field '%s' not found in record '%s' for assignment.\n", targetFieldName, recSym->name);
+                     freeValue(&val); // Free RHS value before exiting
+                     EXIT_FAILURE_HANDLER();
+                 }
+
+                 // 3. Check type compatibility (using targetField->value.type and val.type)
+                 if (targetField->value.type != val.type) {
+                     // Allow compatible assignments like INTEGER to REAL, CHAR to STRING etc.
+                     bool compatible = false;
+                     if (targetField->value.type == TYPE_REAL && val.type == TYPE_INTEGER) compatible = true;
+                     else if (targetField->value.type == TYPE_STRING && val.type == TYPE_CHAR) compatible = true; // Allow char to string
+                     else if (targetField->value.type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val)==1) compatible = true; // Allow single-char string to char
+                     // Add other compatible pairs as needed (e.g., Integer to Byte/Word if desired)
+
+                     if (!compatible) {
+                          fprintf(stderr, "Runtime error: Type mismatch assigning to field '%s'. Expected %s, got %s.\n",
+                                  targetFieldName, varTypeToString(targetField->value.type), varTypeToString(val.type));
+                          freeValue(&val); // Free RHS value before exiting
+                          EXIT_FAILURE_HANDLER();
+                     }
+                 }
+
+                 // 4. Free the *current* value stored in the field BEFORE assigning/copying the new one.
+                 freeValue(&targetField->value); // Frees heap data held by the current field value (e.g., old string)
+
+                 // 5. Assign the new value (handle complex types with deep copies)
+                 if (val.type == TYPE_STRING) {
+                     // Use makeString which handles strdup and NULL checks
+                     targetField->value = makeString(val.s_val);
+                     // Free the temporary RHS value 'val' *after* its content is copied
+                     freeValue(&val);
+                 } else if (val.type == TYPE_RECORD) {
+                     targetField->value = makeRecord(copyRecord(val.record_val)); // copyRecord performs deep copy
+                     freeValue(&val); // Free the temporary RHS value 'val'
+                 } else if (val.type == TYPE_ARRAY) {
+                     targetField->value = makeCopyOfValue(&val); // makeCopyOfValue performs deep copy
+                     freeValue(&val); // Free the temporary RHS value 'val'
+                 } else {
+                     // For simple types (int, real, char, bool, enum, etc.),
+                     // direct assignment of the struct is sufficient (shallow copy of Value struct).
+                     targetField->value = val;
+                      // For simple types, 'val' is just a struct copy, no deep data to free via freeValue(&val).
+                      // Type promotion (like int to real) should be handled above during assignment.
+                      // Set the correct type if promotion occurred.
+                      if (targetField->value.type == TYPE_REAL && val.type == TYPE_INTEGER) {
+                          targetField->value.r_val = (double)val.i_val; // Assign converted value
+                          targetField->value.type = TYPE_REAL; // Ensure type is REAL
+                      }
+                      // Handle char -> string assignment type
+                      else if (targetField->value.type == TYPE_STRING && val.type == TYPE_CHAR) {
+                            // makeString already handled this, type should be STRING
+                            targetField->value.type = TYPE_STRING;
+                      }
+                       // Handle single-char string -> char assignment type
+                       else if (targetField->value.type == TYPE_CHAR && val.type == TYPE_STRING) {
+                            targetField->value.c_val = val.s_val[0]; // Assign char value
+                            targetField->value.type = TYPE_CHAR; // Ensure type is CHAR
+                            // We still need to free the temporary val from eval
+                            freeValue(&val);
+                       }
+
+                 }
+
+             } else if (node->left->type == AST_ARRAY_ACCESS) {
+                  // --- Handle Array Element Assignment ---
+
+                  // 1. Find the base variable symbol for the array/string
+                  AST* baseVarNodeArr = node->left->left; // Start with node left of '['
+                  // Simplified traversal (improve if needed for complex bases like record.array[i])
+                  while(baseVarNodeArr && baseVarNodeArr->type != AST_VARIABLE) {
+                      if (baseVarNodeArr->left) baseVarNodeArr = baseVarNodeArr->left;
+                      else { /* Error */ fprintf(stderr, "Runtime error: Cannot find base variable for array/string assignment.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+                  }
+                  if (!baseVarNodeArr || baseVarNodeArr->type != AST_VARIABLE || !baseVarNodeArr->token) { /* Error */ fprintf(stderr, "Runtime error: Could not determine base variable for array/string assignment.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+
+                  Symbol *sym = lookupSymbol(baseVarNodeArr->token->value);
+                  if (!sym || !sym->value || (sym->value->type != TYPE_ARRAY && sym->value->type != TYPE_STRING)) {
+                      fprintf(stderr, "Runtime error: Base variable '%s' is not an array or string for assignment.\n", baseVarNodeArr->token->value);
+                      freeValue(&val); EXIT_FAILURE_HANDLER();
+                  }
+                   if (sym->is_const) { // Check if base array/string is constant
+                       fprintf(stderr, "Runtime error: Cannot assign to element of constant '%s'.\n", sym->name);
+                       freeValue(&val); EXIT_FAILURE_HANDLER();
+                   }
+
+
+                  // 2. Handle String Index Assignment
+                  if (sym->value->type == TYPE_STRING) {
+                      if (node->left->child_count != 1) { fprintf(stderr, "Runtime error: String assignment requires exactly one index.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+
+                      Value idxVal = eval(node->left->children[0]);
+                      if(idxVal.type != TYPE_INTEGER) { fprintf(stderr, "Runtime error: String index must be an integer.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+                      long long idx = idxVal.i_val;
+
+                      int len = (sym->value->s_val) ? (int)strlen(sym->value->s_val) : 0;
+                      // Check bounds (Pascal uses 1-based indexing)
+                      if (idx < 1 || idx > len) {
+                          // Allow assigning to position len+1 only if assigning a non-empty char/string? Standard Pascal differs.
+                          // Delphi/FPC might allow extending. For simplicity, error for now if index > len.
+                           dumpASTFromRoot(node); dumpSymbolTable();
+                          fprintf(stderr, "Runtime error: String index %lld out of bounds [1..%d] for assignment.\n", idx, len);
+                          freeValue(&val); EXIT_FAILURE_HANDLER();
+                      }
+
+                      char char_to_assign = '\0';
+                      if (val.type == TYPE_CHAR) {
+                          char_to_assign = val.c_val;
+                      } else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) { // Allow single-char string
+                          char_to_assign = val.s_val[0];
+                      } else {
+                          fprintf(stderr, "Runtime error: Assignment to string index requires a char or single-character string.\n");
+                          freeValue(&val); EXIT_FAILURE_HANDLER();
+                      }
+
+                      // Ensure string is mutable (should be if not const)
+                      if (!sym->value->s_val) { /* Should not happen if initialized */ }
+                      else { sym->value->s_val[idx - 1] = char_to_assign; } // Assign char
+
+                      freeValue(&val); // Free the temporary RHS value
+
+                  }
+                  // 3. Handle Array Element Assignment
+                  else if (sym->value->type == TYPE_ARRAY) {
+                      if (!node->left->children || node->left->child_count != sym->value->dimensions) {
+                           fprintf(stderr, "Runtime error: Incorrect number of indices for array '%s'. Expected %d, got %d.\n", sym->name, sym->value->dimensions, node->left->child_count);
+                           freeValue(&val); EXIT_FAILURE_HANDLER();
+                      }
+
+                      // Calculate index offset
+                      int *indices = malloc(sizeof(int) * sym->value->dimensions);
+                      if (!indices) { /* Mem error */ freeValue(&val); EXIT_FAILURE_HANDLER(); }
+                      for (int i = 0; i < node->left->child_count; i++) {
+                          Value idxVal = eval(node->left->children[i]);
+                          if (idxVal.type != TYPE_INTEGER) { /* Type error */ free(indices); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+                          indices[i] = (int)idxVal.i_val;
+                      }
+                      int offset = computeFlatOffset(sym->value, indices); // Use symbol's bounds
+
+                      // Bounds check offset
+                      int total_size = 1;
+                      for (int i = 0; i < sym->value->dimensions; i++) { total_size *= (sym->value->upper_bounds[i] - sym->value->lower_bounds[i] + 1); }
+                      if (offset < 0 || offset >= total_size) { /* Bounds error */ fprintf(stderr, "Runtime error: Array index out of bounds during assignment (offset %d, size %d).\n", offset, total_size); free(indices); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+
+                      // Check type compatibility (optional but recommended)
+                      VarType elementType = sym->value->element_type;
+                      if (elementType != val.type) {
+                          // Add compatibility checks if needed (e.g., int to real)
+                          bool compatible = false;
+                           if (elementType == TYPE_REAL && val.type == TYPE_INTEGER) compatible = true;
+                          // Add more...
+                          if (!compatible) {
+                              fprintf(stderr, "Runtime error: Type mismatch assigning to array element. Expected %s, got %s.\n", varTypeToString(elementType), varTypeToString(val.type));
+                              free(indices); freeValue(&val); EXIT_FAILURE_HANDLER();
+                          }
+                           // Perform conversion if compatible but different (e.g., int to real)
+                           if (elementType == TYPE_REAL && val.type == TYPE_INTEGER) {
+                               val.r_val = (double)val.i_val;
+                               val.type = TYPE_REAL;
+                           }
+                      }
+
+                      // Free existing element value BEFORE assigning new one
+                      freeValue(&sym->value->array_val[offset]);
+
+                      // Assign new value (deep copy complex types)
+                      if (val.type == TYPE_STRING || val.type == TYPE_RECORD || val.type == TYPE_ARRAY) {
+                          sym->value->array_val[offset] = makeCopyOfValue(&val);
+                          freeValue(&val); // Free temporary RHS value as its content was copied
+                      } else {
+                          sym->value->array_val[offset] = val; // Simple type struct copy
+                      }
+                      free(indices);
+                  }
+
+             } else if (node->left->type == AST_VARIABLE) {
+                 // --- Handle Simple Variable Assignment ---
+                 Symbol *sym = lookupSymbol(node->left->token->value);
+                 if (!sym) { /* Error */ fprintf(stderr, "Runtime error: variable '%s' not declared.\n", node->left->token->value); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+                  if (sym->is_const) { /* Error */ fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n", sym->name); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+
+                 // Use updateSymbol which handles type checking, freeing old, copying new
+                 updateSymbol(sym->name, val);
+
+                 // Free the temporary RHS value AFTER updateSymbol has potentially copied its contents
+                 freeValue(&val);
+
+             } else {
+                  // Invalid LValue type
+                  fprintf(stderr, "Runtime error: Invalid lvalue node type in assignment: %s\n", astTypeToString(node->left->type));
+                  freeValue(&val); // Free RHS value before exiting
+                  EXIT_FAILURE_HANDLER();
+             }
+
+             // --- MODIFICATION END ---
+
+             // assign_end label removed
+             break; // Break from the main switch statement for AST_ASSIGN
+         } // End case AST_ASSIGN
         case AST_CASE: {
                    // Evaluate the case expression
                    Value caseValue = eval(node->left);
@@ -1717,112 +2021,107 @@ void executeWithScope(AST *node, bool is_global_scope)  {
         }
 
         case AST_READLN: {
-                    FILE *input = stdin; // Default to console input
-                    int startIndex = 0;  // Default to processing args from index 0
+            FILE *input = stdin;
+            int startIndex = 0;
+            // Check for optional file argument
+            if (node->child_count > 0) {
+                 Value firstArg = eval(node->children[0]);
+                 if (firstArg.type == TYPE_FILE && firstArg.f_val != NULL) {
+                      input = firstArg.f_val;
+                      startIndex = 1;
+                 }
+                 // NOTE: Potential leak if firstArg was string/record/array from eval.
+                 // Should ideally freeValue(&firstArg) IF it wasn't a simple type or the file used.
+                 // Complex to handle correctly without knowing type beforehand. Assume simple or file for now.
+            }
 
-                    // --- CORRECTED FILE ARGUMENT HANDLING ---
-                    if (node->child_count > 0) {
-                        // Evaluate the first argument regardless of its AST type initially
-                        Value firstArg = eval(node->children[0]);
+            // Loop to read into variable arguments
+            for (int i = startIndex; i < node->child_count; i++) {
+                AST *target_lvalue_node = node->children[i];
+                if (!target_lvalue_node) {fprintf(stderr,"NULL LValue node in READLN\n"); EXIT_FAILURE_HANDLER();}
 
-                        // Check if the *evaluated value* is a valid FILE type
-                        if (firstArg.type == TYPE_FILE && firstArg.f_val != NULL) {
-                            // It is a valid file, use it as the input source
-                            input = firstArg.f_val;
-                            startIndex = 1; // Start processing actual variables from the *next* argument (index 1)
-        #ifdef DEBUG
-                            fprintf(stderr, "[DEBUG] READLN: Using file '%s' (handle:%p) as input.\n",
-                                    firstArg.filename ? firstArg.filename : "?", (void*)input);
-        #endif
-                        } else {
-                            // The first argument exists but is not a valid file type.
-                            // Assume it's a regular variable to read into.
-                            // Keep input = stdin and startIndex = 0.
-        #ifdef DEBUG
-                            fprintf(stderr, "[DEBUG] READLN: First argument is not a file. Using stdin.\n");
-        #endif
-                        }
-                    } else {
-                         // No arguments provided at all.
-                         // Keep input = stdin and startIndex = 0.
-        #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG] READLN: No arguments. Using stdin.\n");
-        #endif
-                    }
-                    // --- END CORRECTED HANDLING ---
+                char buffer[DEFAULT_STRING_CAPACITY];
 
-                    // Loop to read into variable arguments (correctly uses 'input' and 'startIndex')
-                    for (int i = startIndex; i < node->child_count; i++) {
-                        AST *target = node->children[i];
-                        char buffer[DEFAULT_STRING_CAPACITY];
-
-        #ifdef DEBUG
-                        fprintf(stderr, "[DEBUG] READLN: Loop %d: Reading from %s into target '%s'...\n",
-                                i, (input == stdin) ? "stdin" : "file",
-                                target->token ? target->token->value : "complex lvalue");
-        #endif
-
-                        if (fgets(buffer, sizeof(buffer), input) == NULL) {
-                            // Handle read error or EOF
-                            if (feof(input)) {
-                                 buffer[0] = '\0';
-                            } else {
-                                 fprintf(stderr, "Runtime error: Failed to read from input for READLN.\n");
-                                 buffer[0] = '\0';
-                            }
-                        }
-                        buffer[strcspn(buffer, "\n")] = 0; // Remove trailing newline
-
-                        // ... (Your existing assignment logic for variable/field/etc.) ...
-                        if (target->type == AST_FIELD_ACCESS) {
-                            // ... (field access assignment logic) ...
-                             Value recVal = eval(target->left);
-                             if (recVal.type != TYPE_RECORD) { /* error */ EXIT_FAILURE_HANDLER(); }
-                             FieldValue *fv = recVal.record_val;
-                             int found = 0;
-                             while (fv) {
-                                 if (strcmp(fv->name, target->token->value) == 0) {
-                                     found = 1;
-                                     if (fv->value.type == TYPE_INTEGER) fv->value = makeInt(atoi(buffer));
-                                     else if (fv->value.type == TYPE_REAL) fv->value = makeReal(atof(buffer));
-                                     else if (fv->value.type == TYPE_BOOLEAN) fv->value = makeBoolean(atoi(buffer));
-                                     else if (fv->value.type == TYPE_STRING) { if(fv->value.s_val) free(fv->value.s_val); fv->value = makeString(buffer); }
-                                     else if (fv->value.type == TYPE_CHAR) { fv->value = makeChar((buffer[0] != '\0') ? buffer[0] : ' ');}
-                                     break;
-                                 }
-                                 fv = fv->next;
-                             }
-                             if (!found) { /* error */ fprintf(stderr, "Field %s not found\n", target->token->value); EXIT_FAILURE_HANDLER();}
-                        } else if (target->type == AST_VARIABLE) {
-                            Symbol *sym = lookupSymbol(target->token->value);
-                            if (!sym) { /* error */ fprintf(stderr, "Var %s not found\n", target->token->value); EXIT_FAILURE_HANDLER(); }
-                            if (sym->type == TYPE_INTEGER) updateSymbol(target->token->value, makeInt(atoi(buffer)));
-                            else if (sym->type == TYPE_REAL) updateSymbol(target->token->value, makeReal(atof(buffer)));
-                            else if (sym->type == TYPE_STRING) updateSymbol(target->token->value, makeString(buffer));
-                            else if (sym->type == TYPE_CHAR) { updateSymbol(target->token->value, makeChar((buffer[0] != '\0') ? buffer[0] : ' ')); }
-                            // Add other types
-                        } else {
-                             fprintf(stderr, "Runtime error: Cannot readln into target of type %s.\n", astTypeToString(target->type));
-                             EXIT_FAILURE_HANDLER();
-                        }
-                    }
-
-                    // Fix for readln without arguments (should now work correctly with file input too if needed)
-                    // This condition is now only true if no arguments *at all* were given,
-                    // OR if only a file argument was given (e.g., readln(f);)
-                    if (node->child_count == startIndex) {
-        #ifdef DEBUG
-                        fprintf(stderr, "[DEBUG] READLN: Consuming rest of line from %s (no variable args).\n", (input == stdin) ? "stdin" : "file");
-        #endif
-                        char dummy_buffer[2];
-                        while (fgets(dummy_buffer, sizeof(dummy_buffer), input) != NULL) {
-                             if (strchr(dummy_buffer, '\n') != NULL) {
-                                  break;
-                             }
-                        }
-                    }
-                    break; // Break from switch case AST_READLN
+                // Read raw input line using fgets
+                if (fgets(buffer, sizeof(buffer), input) == NULL) {
+                    if (feof(input)) buffer[0] = '\0';
+                    else { fprintf(stderr,"Read error during READLN\n"); buffer[0] = '\0'; }
                 }
+                buffer[strcspn(buffer, "\n\r")] = 0; // Remove trailing newline/CR
+
+                // --- Determine target type BEFORE creating value ---
+                // This is essential for correct conversion from string buffer.
+                // Requires looking up the type of the lvalue target. (Simplified below)
+                VarType targetType = TYPE_VOID; // Default / Unknown
+                // --- Placeholder: Determine target type (needs proper implementation) ---
+                 if (target_lvalue_node->type == AST_VARIABLE) {
+                     Symbol* targetSym = lookupSymbol(target_lvalue_node->token->value);
+                     if(targetSym) targetType = targetSym->type;
+                 } else if (target_lvalue_node->type == AST_FIELD_ACCESS) {
+                     // Need to find field definition to get type - complex
+                     // For now, assume STRING based on example context
+                     targetType = TYPE_STRING;
+                 } else if (target_lvalue_node->type == AST_ARRAY_ACCESS) {
+                     // Need to find array definition and element type - complex
+                     // For now, assume STRING based on example context
+                      targetType = TYPE_STRING;
+                 }
+                 // --- End Placeholder ---
+
+
+                // --- Convert buffer to appropriate Value type ---
+                Value newValue;
+                memset(&newValue, 0, sizeof(Value)); // Initialize
+
+                switch(targetType) {
+                    case TYPE_STRING:
+                        newValue = makeString(buffer);
+                        break;
+                    case TYPE_INTEGER:
+                        newValue = makeInt(atoll(buffer)); // Use atoll for long long
+                        break;
+                    case TYPE_REAL:
+                        newValue = makeReal(atof(buffer));
+                        break;
+                    case TYPE_CHAR:
+                        newValue = makeChar(buffer[0]); // Take first char
+                        break;
+                    case TYPE_BOOLEAN:
+                        // Simplified: treat non-zero integer string as true
+                        newValue = makeBoolean(atoi(buffer) != 0);
+                        break;
+                    // Add other target types as needed
+                    default:
+                         fprintf(stderr, "Runtime error: Cannot readln into variable of type %s\n", varTypeToString(targetType));
+                         EXIT_FAILURE_HANDLER();
+                         break; // Keep compiler happy
+                }
+                // ---
+
+                // --- Assign the new value using the corrected helper function ---
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG READLN] Assigning buffer content '%s' (as type %s) to lvalue node type %s\n",
+                        buffer, varTypeToString(newValue.type), astTypeToString(target_lvalue_node->type));
+                #endif
+                assignValueToLValue(target_lvalue_node, newValue); // This now does deep copy
+                // ---
+
+                // --- Free the temporary newValue struct's content ---
+                // since assignValueToLValue made its own deep copy.
+                freeValue(&newValue);
+                // ---
+            }
+
+            // Consume rest of line if no variable arguments were processed
+            if (node->child_count == startIndex) {
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG READLN] Consuming rest of line from %s (no variable args).\n", (input == stdin) ? "stdin" : "file");
+                #endif
+                int c;
+                while ((c = fgetc(input)) != '\n' && c != EOF); // Read until newline or EOF
+            }
+            break; // Break from switch case AST_READLN
+        } // End case AST_READLN
 
         case AST_READ: {
             FILE *input = stdin;

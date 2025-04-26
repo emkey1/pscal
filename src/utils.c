@@ -215,36 +215,77 @@ FieldValue *copyRecord(FieldValue *orig) {
     return new_head;
 }
 
-// Memory
 FieldValue *createEmptyRecord(AST *recordType) {
-    // Resolve type references
+    // Resolve type references if necessary
     if (recordType && recordType->type == AST_TYPE_REFERENCE) {
-        recordType = recordType->right;
+        recordType = recordType->right; // Follow the link
     }
 
-    FieldValue *head = NULL, **ptr = &head;
-    
+    // Check if we have a valid RECORD_TYPE node
     if (!recordType || recordType->type != AST_RECORD_TYPE) {
-        return NULL;  // Invalid record type
+        fprintf(stderr, "Error in createEmptyRecord: Invalid or NULL recordType node provided (Type: %s).\n",
+                recordType ? astTypeToString(recordType->type) : "NULL");
+        return NULL; // Return NULL explicitly on error
     }
 
-    for (int i = 0; i < recordType->child_count; i++) {
-        AST *fieldDecl = recordType->children[i];
-        VarType fieldType = fieldDecl->var_type;
-        AST *fieldTypeDef = fieldDecl->right;
+    FieldValue *head = NULL, **ptr = &head; // Use pointer-to-pointer for easy list building
 
+    // Iterate through the children of the RECORD_TYPE node (these should be VAR_DECLs for fields)
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST *fieldDecl = recordType->children[i]; // Should be VAR_DECL for the field group
+
+        // --- Robustness Check: Ensure fieldDecl is a valid VAR_DECL node ---
+        if (!fieldDecl) {
+             fprintf(stderr, "Warning: NULL field declaration node at index %d in createEmptyRecord.\n", i);
+             continue; // Skip this invalid entry
+        }
+        if (fieldDecl->type != AST_VAR_DECL) {
+             fprintf(stderr, "Warning: Expected VAR_DECL for field group at index %d in createEmptyRecord, found %s.\n",
+                     i, astTypeToString(fieldDecl->type));
+             continue; // Skip invalid entry
+        }
+        // ---
+
+        VarType fieldType = fieldDecl->var_type; // Get the type enum for the field(s)
+        AST *fieldTypeDef = fieldDecl->right; // Get the AST node defining the field's type
+
+        // Iterate through the children of the VAR_DECL (these are the VARIABLE nodes for field names)
         for (int j = 0; j < fieldDecl->child_count; j++) {
-            AST *varNode = fieldDecl->children[j];
+            AST *varNode = fieldDecl->children[j]; // Should be VARIABLE node for the field name
+
+            // --- Robustness Check: Ensure varNode and its token are valid ---
+            if (!varNode || varNode->type != AST_VARIABLE || !varNode->token || !varNode->token->value) {
+                 fprintf(stderr, "Warning: Invalid field variable node or token at index %d,%d in createEmptyRecord.\n", i, j);
+                 continue; // Skip this invalid field name
+            }
+            // ---
+
+            // Allocate memory for the FieldValue struct (holds name + value)
             FieldValue *fv = malloc(sizeof(FieldValue));
+            if (!fv) { // Check malloc
+                 fprintf(stderr, "FATAL: malloc failed for FieldValue in createEmptyRecord for field '%s'\n", varNode->token->value);
+                 // Hard to clean up partially built list, exiting is safest
+                 EXIT_FAILURE_HANDLER();
+            }
+
+            // Duplicate the field name
             fv->name = strdup(varNode->token->value);
-            fv->value = makeValueForType(fieldType, fieldTypeDef);
-            fv->next = NULL;
-            
+            if (!fv->name) { // Check strdup
+                 fprintf(stderr, "FATAL: strdup failed for FieldValue name in createEmptyRecord for field '%s'\n", varNode->token->value);
+                 free(fv); // Free the FieldValue struct itself
+                 EXIT_FAILURE_HANDLER();
+            }
+
+            // Recursively create the default value for this field's type
+            fv->value = makeValueForType(fieldType, fieldTypeDef); // Relies on makeValueForType checks
+            fv->next = NULL; // Initialize next pointer
+
+            // Link this new FieldValue struct into the list
             *ptr = fv;
-            ptr = &fv->next;
+            ptr = &fv->next; // Advance the tail pointer
         }
     }
-    return head;
+    return head; // Return the head of the linked list of fields
 }
 
 void freeFieldValue(FieldValue *fv) {
@@ -441,8 +482,9 @@ Value makeVoid(void) {
 
 Value makeValueForType(VarType type, AST *type_def) {
     Value v;
+    memset(&v, 0, sizeof(Value)); // Initialize struct to zero/NULL
     v.type = type;
-    
+
     switch(type) {
         case TYPE_INTEGER:
             v.i_val = 0;
@@ -452,36 +494,56 @@ Value makeValueForType(VarType type, AST *type_def) {
             break;
         case TYPE_STRING:
             v.s_val = strdup("");
-            v.max_length = -1;  // Default to dynamic string
+            if (!v.s_val) { // Check strdup
+                 fprintf(stderr, "FATAL: strdup(\"\") failed in makeValueForType\n");
+                 EXIT_FAILURE_HANDLER();
+            }
+            v.max_length = -1; // Default to dynamic string
             break;
         case TYPE_CHAR:
-            v.c_val = ' '; // Default char value
+            v.c_val = '\0'; // Default char value (null char)
             break;
         case TYPE_BOOLEAN:
-            v.i_val = 0;
+            v.i_val = 0; // false
             break;
         case TYPE_FILE:
             v.f_val = NULL;
             v.filename = NULL;
             break;
         case TYPE_RECORD:
+            // Resolve type references if necessary
             if (type_def && type_def->type == AST_TYPE_REFERENCE) {
-                type_def = type_def->right;
+                type_def = type_def->right; // Follow the link to the actual definition
             }
+            // Create the initial structure for the record fields
             v.record_val = createEmptyRecord(type_def);
+            // Check if createEmptyRecord failed (it returns NULL on error now)
+            if (!v.record_val && type_def != NULL && type_def->type == AST_RECORD_TYPE) {
+                 fprintf(stderr, "Error: createEmptyRecord returned NULL unexpectedly in makeValueForType.\n");
+                 // EXIT_FAILURE_HANDLER(); // Exit or allow NULL record_val? Allowing NULL for now.
+            }
             break;
         case TYPE_ARRAY:
+            // Initialize array fields to NULL/0 - actual allocation happens later if needed
             v.dimensions = 0;
             v.lower_bounds = NULL;
             v.upper_bounds = NULL;
             v.array_val = NULL;
+            v.element_type = TYPE_VOID; // Mark as uninitialized element type
+            v.element_type_def = NULL; // No definition link yet
             break;
         case TYPE_MEMORYSTREAM:
-            v.mstream = createMStream();
+            v.mstream = createMStream(); // Assumes createMStream handles its errors
             break;
         case TYPE_ENUM:
-            v.enum_val.enum_name = (type_def && type_def->token) ? strdup(type_def->token->value) : strdup("");
-            v.enum_val.ordinal = -1;  // Default to "unset"
+            // Initialize enum fields
+            v.enum_val.ordinal = 0; // Default to the first ordinal value (usually 0)
+            // Get the type name from the definition node if possible
+            v.enum_val.enum_name = (type_def && type_def->token && type_def->token->value) ? strdup(type_def->token->value) : strdup("<unknown_enum>");
+            if (!v.enum_val.enum_name) { // Check strdup
+                 fprintf(stderr, "FATAL: strdup failed for enum_name in makeValueForType\n");
+                 EXIT_FAILURE_HANDLER();
+            }
             break;
         case TYPE_BYTE:
             v.i_val = 0;
@@ -489,16 +551,20 @@ Value makeValueForType(VarType type, AST *type_def) {
         case TYPE_WORD:
             v.i_val = 0;
             break;
+        case TYPE_SET:
+            v.set_val.set_size = 0;
+            v.set_val.set_values = NULL;
+             break;
         case TYPE_VOID:
-            // No data to assign; leave everything zeroed
+            // No data to assign; memset already handled
             break;
         default:
-            fprintf(stderr, "Error creating default value for type %s\n", varTypeToString(type));
-            EXIT_FAILURE_HANDLER();
+            fprintf(stderr, "Error creating default value for unhandled type %s\n", varTypeToString(type));
+            // EXIT_FAILURE_HANDLER(); // Exit might be too harsh, allows program to continue potentially
+            break; // Ensure switch is exited
     }
     return v;
 }
-
 // Token
 /* Create a new token */
 Token *newToken(TokenType type, const char *value) {
@@ -617,16 +683,19 @@ void freeValue(Value *v) {
 
         case TYPE_STRING:
             if (v->s_val) {
-                // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Freeing string content '%s' at %p\n", v->s_val, (void*)v->s_val);
+                // Check if pointer seems valid before attempting to print content
+                // This is primarily to avoid crashing *in the debug print itself*
+                // if v->s_val points to garbage or already freed memory.
+                fprintf(stderr, "[DEBUG]   Attempting to free string content at %p (value was '%s')\n",
+                        (void*)v->s_val, v->s_val ? v->s_val : "<INVALID_PTR_OR_FREED>");
 #endif
-                // *** END DEBUG PRINT ***
+                // Original free logic
                 free(v->s_val);
                 v->s_val = NULL;
             } else {
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   String content is NULL\n");
+                fprintf(stderr, "[DEBUG]   String content pointer is NULL, nothing to free.\n");
 #endif
             }
             break;

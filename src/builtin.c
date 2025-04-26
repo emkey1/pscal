@@ -19,140 +19,145 @@ void assignValueToLValue(AST *lvalueNode, Value newValue) {
     }
 
     if (lvalueNode->type == AST_VARIABLE) {
-        // Simple variable assignment
-        Symbol *sym = lookupSymbol(lvalueNode->token->value); // Re-lookup symbol
-        if (!sym) {
-            fprintf(stderr, "Runtime error: Variable '%s' not found for assignment.\n", lvalueNode->token->value);
-            EXIT_FAILURE_HANDLER();
+        // Simple variable assignment - use updateSymbol which handles everything
+        if (!lvalueNode->token || !lvalueNode->token->value) {
+            fprintf(stderr, "Runtime error: Invalid AST_VARIABLE node in assignValueToLValue.\n"); EXIT_FAILURE_HANDLER();
         }
-         // Check type compatibility (INTEGER is expected for Inc/Dec)
-         if (sym->type != TYPE_INTEGER && sym->type != TYPE_ENUM && sym->type != TYPE_CHAR && sym->type != TYPE_BOOLEAN && sym->type != TYPE_BYTE && sym->type != TYPE_WORD) { // Allow related ordinal types
-             fprintf(stderr, "Runtime error: Type mismatch assigning to '%s'. Expected ordinal type, got %s during Inc/Dec.\n", sym->name, varTypeToString(newValue.type));
-             EXIT_FAILURE_HANDLER();
-         }
-        updateSymbol(sym->name, newValue); // Use existing updateSymbol
-    }
-    else if (lvalueNode->type == AST_FIELD_ACCESS) {
+        updateSymbol(lvalueNode->token->value, newValue);
+
+    } else if (lvalueNode->type == AST_FIELD_ACCESS) {
         // Record field assignment
-        // 1. Evaluate the base record structure (e.g., `newHead` from `newHead.x`)
-        //    We need the *original* symbol holding the record, not just eval(lvalueNode->left) which might be a copy.
-        //    This requires traversing up if the left side is complex, or assuming left is AST_VARIABLE for now.
+        // 1. Find the base record symbol
         AST* baseVarNode = lvalueNode->left;
-        while(baseVarNode && baseVarNode->type != AST_VARIABLE) {
-             // This is simplistic, might fail for nested records a[i].b.c
-             if (baseVarNode->left) {
-                  baseVarNode = baseVarNode->left;
-             } else {
-                  fprintf(stderr, "Runtime error: Cannot find base variable for field access in Inc/Dec.\n");
-                  dumpASTFromRoot(lvalueNode);
-                  EXIT_FAILURE_HANDLER();
-                  return; // Added return
-             }
+        while(baseVarNode && baseVarNode->type != AST_VARIABLE) { // Simple traversal - enhance if needed
+             if (baseVarNode->left) baseVarNode = baseVarNode->left;
+             else { fprintf(stderr,"Runtime error: Cannot find base var for field assign in assignValueToLValue\n"); EXIT_FAILURE_HANDLER(); }
         }
-         if (!baseVarNode || baseVarNode->type != AST_VARIABLE) {
-             fprintf(stderr, "Runtime error: Could not determine base variable for field access in Inc/Dec.\n");
-             dumpASTFromRoot(lvalueNode);
-              EXIT_FAILURE_HANDLER();
-             return; // Added return
-         }
+         if (!baseVarNode || baseVarNode->type != AST_VARIABLE || !baseVarNode->token) { fprintf(stderr,"Runtime error: Invalid base variable node for field assign in assignValueToLValue\n"); EXIT_FAILURE_HANDLER();}
+         Symbol *recSym = lookupSymbol(baseVarNode->token->value);
+         if (!recSym || !recSym->value || recSym->value->type != TYPE_RECORD) { fprintf(stderr,"Runtime error: Base variable '%s' is not a record in assignValueToLValue\n", baseVarNode->token ? baseVarNode->token->value : "?"); EXIT_FAILURE_HANDLER(); }
+         if (recSym->is_const) { fprintf(stderr,"Runtime error: Cannot assign to field of constant '%s'\n", recSym->name); EXIT_FAILURE_HANDLER(); }
 
-        Symbol *recSym = lookupSymbol(baseVarNode->token->value);
-        if (!recSym || recSym->value->type != TYPE_RECORD) {
-            fprintf(stderr, "Runtime error: Base variable '%s' is not a record for field assignment in Inc/Dec.\n", baseVarNode->token->value);
-            EXIT_FAILURE_HANDLER();
-             return; // Added return
-        }
-
-        // 2. Find the specific field within the *symbol's* record value
+        // 2. Find the specific field *within the symbol's actual value*
         FieldValue *field = recSym->value->record_val;
-        const char *targetFieldName = lvalueNode->token->value;
+        const char *targetFieldName = lvalueNode->token ? lvalueNode->token->value : NULL;
+        if (!targetFieldName) { fprintf(stderr,"Runtime error: Invalid FIELD_ACCESS node (missing token) in assignValueToLValue\n"); EXIT_FAILURE_HANDLER();}
         while (field) {
-            if (strcmp(field->name, targetFieldName) == 0) {
-                 // Check type compatibility
-                 if (field->value.type != TYPE_INTEGER && field->value.type != TYPE_ENUM && field->value.type != TYPE_CHAR && field->value.type != TYPE_BOOLEAN && field->value.type != TYPE_BYTE && field->value.type != TYPE_WORD) {
-                      fprintf(stderr, "Runtime error: Type mismatch assigning to field '%s'. Expected ordinal type, got %s during Inc/Dec.\n", targetFieldName, varTypeToString(newValue.type));
-                      EXIT_FAILURE_HANDLER();
+            if (field->name && strcmp(field->name, targetFieldName) == 0) {
+                 // Found the field to update
+
+                 // 3. Check type compatibility (optional but recommended)
+                 if (field->value.type != newValue.type) {
+                       bool compatible = false;
+                       if (field->value.type == TYPE_REAL && newValue.type == TYPE_INTEGER) compatible = true;
+                       else if (field->value.type == TYPE_STRING && newValue.type == TYPE_CHAR) compatible = true;
+                       // ... add others ...
+
+                       if (!compatible && typeWarn) {
+                           fprintf(stderr, "Warning: Type mismatch assigning to field '%s.%s'. Expected %s, got %s.\n",
+                                   recSym->name, targetFieldName, varTypeToString(field->value.type), varTypeToString(newValue.type));
+                       }
+                       // Perform promotion on newValue if needed
+                       if (field->value.type == TYPE_REAL && newValue.type == TYPE_INTEGER) {
+                           newValue.r_val = (double)newValue.i_val; newValue.type = TYPE_REAL;
+                       }
+                       // Add other necessary promotions here...
                  }
-                 // Assign the new value directly to the field within the symbol's record
-                 field->value = newValue; // Assuming integer value copy is sufficient
-                return;
+
+                 // 4. Free the *current* value stored in the field
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG ASSIGN_LVAL] Freeing old value for field '%s'\n", field->name);
+                 #endif
+                 freeValue(&field->value); // Frees heap data held by the current field value
+
+                 // 5. Assign a DEEP COPY of the newValue into the field
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG ASSIGN_LVAL] Assigning new value (type %s) to field '%s'\n", varTypeToString(newValue.type), field->name);
+                 #endif
+                 field->value = makeCopyOfValue(&newValue); // makeCopyOfValue performs deep copy
+
+                 return; // Assignment done
             }
             field = field->next;
         }
-        fprintf(stderr, "Runtime error: Field '%s' not found in record '%s' for assignment in Inc/Dec.\n", targetFieldName, recSym->name);
+        fprintf(stderr, "Runtime error: Field '%s' not found in record '%s' for assignment.\n", targetFieldName, recSym->name);
         EXIT_FAILURE_HANDLER();
 
-    }
-     else if (lvalueNode->type == AST_ARRAY_ACCESS) {
+    } else if (lvalueNode->type == AST_ARRAY_ACCESS) {
          // Array element assignment
-         // 1. Find the base array symbol
+         // 1. Find the base array/string symbol
          AST* baseVarNode = lvalueNode->left;
-         // Simplified traversal (like field access) - might need improvement for complex bases
-         while(baseVarNode && baseVarNode->type != AST_VARIABLE) {
-              if (baseVarNode->left) baseVarNode = baseVarNode->left;
-              else { /* Error */ fprintf(stderr,"Cannot find base var for array access\n"); EXIT_FAILURE_HANDLER(); return; }
-         }
-          if (!baseVarNode || baseVarNode->type != AST_VARIABLE) { /* Error */ fprintf(stderr,"Cannot find base var for array access\n"); EXIT_FAILURE_HANDLER(); return; }
-
+         while(baseVarNode && baseVarNode->type != AST_VARIABLE) { /* traversal */ if (baseVarNode->left) baseVarNode=baseVarNode->left; else { /* error */ } }
+         if (!baseVarNode || baseVarNode->type != AST_VARIABLE || !baseVarNode->token) { /* Error */ }
          Symbol *arrSym = lookupSymbol(baseVarNode->token->value);
-         if (!arrSym || (arrSym->value->type != TYPE_ARRAY && arrSym->value->type != TYPE_STRING)) { // Allow string indexing too
-             fprintf(stderr, "Runtime error: Base variable '%s' is not an array/string for assignment in Inc/Dec.\n", baseVarNode->token->value);
-             EXIT_FAILURE_HANDLER();
-             return; // Added return
-         }
+         if (!arrSym || !arrSym->value || (arrSym->value->type != TYPE_ARRAY && arrSym->value->type != TYPE_STRING)) { /* Error */ }
+         if (arrSym->is_const) { /* Error */ }
 
-         // Handle string indexing separately (Inc/Dec likely invalid here, but check)
+         // Handle string element assignment
          if (arrSym->value->type == TYPE_STRING) {
-              fprintf(stderr, "Runtime error: Cannot use Inc/Dec on string elements.\n");
-              EXIT_FAILURE_HANDLER();
-              return; // Added return
-         }
+              if (lvalueNode->child_count != 1) { fprintf(stderr, "Runtime error: String assignment requires exactly one index\n"); EXIT_FAILURE_HANDLER(); }
+              if (newValue.type != TYPE_CHAR && !(newValue.type == TYPE_STRING && newValue.s_val && strlen(newValue.s_val)==1) ) {
+                    fprintf(stderr, "Runtime error: Assignment to string index requires char or single-char string.\n"); EXIT_FAILURE_HANDLER();
+              }
+              Value indexVal = eval(lvalueNode->children[0]);
+              if(indexVal.type != TYPE_INTEGER) { fprintf(stderr, "Runtime error: String index must be an integer.\n"); EXIT_FAILURE_HANDLER(); }
+              long long idx = indexVal.i_val;
+              int len = arrSym->value->s_val ? strlen(arrSym->value->s_val) : 0;
+              if (idx < 1 || idx > len) { fprintf(stderr, "Runtime error: String index %lld out of bounds [1..%d] for assignment.\n", idx, len); EXIT_FAILURE_HANDLER(); }
 
-         // 2. Evaluate indices
-         if (lvalueNode->child_count != arrSym->value->dimensions) {
-              fprintf(stderr, "Runtime error: Incorrect number of indices for array '%s' in Inc/Dec. Expected %d, got %d.\n", arrSym->name, arrSym->value->dimensions, lvalueNode->child_count);
-              EXIT_FAILURE_HANDLER();
-               return; // Added return
+              char char_to_assign = (newValue.type == TYPE_CHAR) ? newValue.c_val : newValue.s_val[0];
+               if (!arrSym->value->s_val) { /* Should not happen */ } else { arrSym->value->s_val[idx - 1] = char_to_assign; }
          }
-         int *indices = malloc(sizeof(int) * arrSym->value->dimensions);
-         if (!indices) { /* Mem error */ EXIT_FAILURE_HANDLER(); return; } // Added return
-         for (int i = 0; i < lvalueNode->child_count; i++) {
-             Value idxVal = eval(lvalueNode->children[i]);
-             if (idxVal.type != TYPE_INTEGER) { /* Type error */ free(indices); EXIT_FAILURE_HANDLER(); return; } // Added return
-             indices[i] = (int)idxVal.i_val;
-         }
+         // Handle array element assignment
+         else if (arrSym->value->type == TYPE_ARRAY) {
+             if (!arrSym->value->array_val) { fprintf(stderr, "Runtime error: Array '%s' not initialized before assignment.\n", arrSym->name); EXIT_FAILURE_HANDLER(); }
+             if (lvalueNode->child_count != arrSym->value->dimensions) { fprintf(stderr, "Runtime error: Incorrect number of indices for array '%s'.\n", arrSym->name); EXIT_FAILURE_HANDLER(); }
 
-         // 3. Calculate flat offset
-         int offset = computeFlatOffset(arrSym->value, indices);
+             // Calculate indices and offset
+             int *indices = malloc(sizeof(int) * arrSym->value->dimensions);
+             if (!indices) { fprintf(stderr,"FATAL: Malloc failed for indices array\n"); EXIT_FAILURE_HANDLER(); }
+             for (int i = 0; i < lvalueNode->child_count; i++) {
+                  Value idxVal = eval(lvalueNode->children[i]);
+                  if (idxVal.type != TYPE_INTEGER) { fprintf(stderr,"Runtime error: Array index must be integer\n"); free(indices); EXIT_FAILURE_HANDLER(); }
+                  indices[i] = (int)idxVal.i_val;
+             }
+             int offset = computeFlatOffset(arrSym->value, indices);
+             // Bounds check offset... (You need to calculate total_size based on bounds)
+             int total_size = 1;
+             for(int d=0; d<arrSym->value->dimensions; ++d) total_size *= (arrSym->value->upper_bounds[d] - arrSym->value->lower_bounds[d] + 1);
+             if (offset < 0 || offset >= total_size) { fprintf(stderr, "Runtime error: Array index out of bounds (offset %d, size %d).\n", offset, total_size); free(indices); EXIT_FAILURE_HANDLER(); }
 
-          // Bounds check for offset (copied from eval array access)
-         int total_size = 1;
-         for (int i = 0; i < arrSym->value->dimensions; i++) {
-             total_size *= (arrSym->value->upper_bounds[i] - arrSym->value->lower_bounds[i] + 1);
-         }
-         if (offset < 0 || offset >= total_size) {
-             fprintf(stderr, "Runtime error: Array index out of bounds during Inc/Dec assignment (offset %d, size %d).\n", offset, total_size);
+             // Check type compatibility
+             VarType elementType = arrSym->value->element_type;
+             if (elementType != newValue.type) {
+                  // Add compatibility checks/promotions for newValue if needed
+                   bool compatible = false;
+                   if(elementType == TYPE_REAL && newValue.type == TYPE_INTEGER) compatible = true;
+                   // ... other compatible types ...
+                   if(!compatible && typeWarn) { fprintf(stderr, "Warning: Type mismatch assigning to array '%s' element.\n", arrSym->name); }
+                   // Perform promotion if necessary
+                   if (elementType == TYPE_REAL && newValue.type == TYPE_INTEGER) { newValue.r_val = (double)newValue.i_val; newValue.type = TYPE_REAL; }
+             }
+
+             // Find target element
+             Value *targetElement = &(arrSym->value->array_val[offset]);
+
+             // Free existing element value
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG ASSIGN_LVAL] Freeing old value for array element at offset %d\n", offset);
+             #endif
+             freeValue(targetElement);
+
+             // Assign deep copy of new value
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG ASSIGN_LVAL] Assigning new value (type %s) to array element at offset %d\n", varTypeToString(newValue.type), offset);
+             #endif
+             *targetElement = makeCopyOfValue(&newValue);
+
              free(indices);
-             EXIT_FAILURE_HANDLER();
-              return; // Added return
          }
-
-
-         // 4. Assign new value to the element in the *symbol's* array
-         Value *targetElement = &(arrSym->value->array_val[offset]);
-          // Check type compatibility
-         if (targetElement->type != TYPE_INTEGER && targetElement->type != TYPE_ENUM && targetElement->type != TYPE_CHAR && targetElement->type != TYPE_BOOLEAN && targetElement->type != TYPE_BYTE && targetElement->type != TYPE_WORD) {
-             fprintf(stderr, "Runtime error: Type mismatch assigning to array element of type %s during Inc/Dec.\n", varTypeToString(targetElement->type));
-             free(indices);
-             EXIT_FAILURE_HANDLER();
-              return; // Added return
-         }
-         *targetElement = newValue; // Assuming integer value copy is sufficient
-
-         free(indices);
-     }
-    else {
-        fprintf(stderr, "Runtime error: Cannot apply Inc/Dec to the given expression type (%s).\n", astTypeToString(lvalueNode->type));
+    } else {
+        fprintf(stderr, "Runtime error: Cannot assign to the given expression type (%s).\n", astTypeToString(lvalueNode->type));
         EXIT_FAILURE_HANDLER();
     }
 }

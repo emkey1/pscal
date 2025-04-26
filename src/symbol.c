@@ -166,8 +166,10 @@ fprintf(stderr, "[DEBUG_UPDATE_CHECK] Called updateSymbol for: '%s'. Symbol foun
               (sym->type == TYPE_BOOLEAN && val.type == TYPE_INTEGER) || // Added Boolean/Int check
               (sym->type == TYPE_CHAR && val.type == TYPE_INTEGER))) { // Added Char/Int check
             // Print only if types are truly incompatible according to your rules
+#ifdef DEBUG
             fprintf(stderr, "Debug: Type conversion warning for '%s': expected %s, got %s\n",
                     name, varTypeToString(sym->type), varTypeToString(val.type));
+#endif
         }
     }
 
@@ -628,107 +630,151 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
 #endif
 }
 
+// src/symbol.c (Complete and Corrected)
+
 Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is_variable_declaration) {
-    // First, check for an existing local symbol
+    // First, check for an existing local symbol (case-insensitive check)
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG] insertLocalSymbol: Checking for existing local symbol named '%s'\n", name);
+    fprintf(stderr, "[DEBUG] insertLocalSymbol: Checking for existing local symbol named '%s'\n", name ? name : "<NULL_NAME>");
 #endif
     Symbol *existing = localSymbols;
     while (existing) {
-        // --- Add Diagnostic Check ---
-         if (existing->name == NULL) {
+        if (existing->name == NULL) {
              fprintf(stderr, "CRITICAL ERROR in insertLocalSymbol: Encountered symbol node with NULL name in local list!\n");
              EXIT_FAILURE_HANDLER();
-         }
-        // --- End Diagnostic Check ---
-        if (strcasecmp(existing->name, name) == 0) { // Case-insensitive check is appropriate here
+        }
+        // Use strcasecmp for case-insensitive comparison if needed, or strcmp for case-sensitive
+        if (strcasecmp(existing->name, name) == 0) {
 #ifdef DEBUG
-            // Updated debug message
             fprintf(stderr, "[DEBUG] insertLocalSymbol: Symbol '%s' already exists in local scope, returning existing.\n", name);
 #endif
-            // *** FIX: Return the existing symbol instead of void ***
+            // If symbol exists, maybe update its type/value or return?
+            // Current behavior: Return existing. Decide if re-declaration is an error.
             return existing;
         }
         existing = existing->next;
     }
 
-    // Create a new symbol in local scope (do NOT check global symbols; local overshadows global)
+    // Create a new symbol if it doesn't exist locally
     Symbol *sym = malloc(sizeof(Symbol));
-    if (!sym) {
-        fprintf(stderr, "Memory allocation error in insertLocalSymbol\n");
+    if (!sym) { // Check malloc for Symbol struct
+        fprintf(stderr, "FATAL: malloc failed for Symbol struct in insertLocalSymbol for '%s'\n", name ? name : "<NULL_NAME>");
         EXIT_FAILURE_HANDLER();
     }
 
 #ifdef DEBUG
-    // Modified debug print to include the new flag
-    fprintf(stderr, "[DEBUG] insertLocalSymbol('%s', type=%s, is_var_decl=%d)\n", name, varTypeToString(type), is_variable_declaration);
+    fprintf(stderr, "[DEBUG] insertLocalSymbol('%s', type=%s, is_var_decl=%d)\n", name ? name : "<NULL_NAME>", varTypeToString(type), is_variable_declaration);
 #endif
 
-    // Use strdup for the name to ensure it's heap-allocated and modifiable locally
-    char *lowerName = strdup(name);
-    if (!lowerName) {
-        fprintf(stderr, "Memory allocation error (strdup) in insertLocalSymbol\n");
-        free(sym); // Free the allocated symbol struct
+    // Duplicate and lowercase the name for consistent storage/lookup
+    char *lowerName = name ? strdup(name) : NULL;
+    if (name && !lowerName) { // Check strdup for name
+        fprintf(stderr, "FATAL: strdup failed for name in insertLocalSymbol for '%s'\n", name);
+        free(sym); // Free partially allocated symbol
         EXIT_FAILURE_HANDLER();
     }
-    // Convert to lower case for case-insensitive lookups if needed elsewhere,
-    // but store the original case potentially, or be consistent.
-    // Sticking with lowerName based on previous logic shown.
-    for (int i = 0; lowerName[i]; i++) {
-        lowerName[i] = (char)tolower((unsigned char)lowerName[i]);
+    if (lowerName) {
+        for (int i = 0; lowerName[i]; i++) {
+            lowerName[i] = (char)tolower((unsigned char)lowerName[i]);
+        }
     }
-    sym->name = lowerName; // Assign the duplicated and lowercased name
+    sym->name = lowerName; // Store the processed name
+
+    // Assign type information
     sym->type = type;
-    sym->type_def = type_def;
-    sym->value = malloc(sizeof(Value)); // Allocate storage for the Value struct
-    if (!sym->value) {
-        fprintf(stderr, "Memory allocation error (Value struct) in insertLocalSymbol\n");
-        free(sym->name);
+    sym->type_def = type_def; // Store link to the AST type definition node
+
+    // Allocate the Value struct
+    sym->value = malloc(sizeof(Value));
+    if (!sym->value) { // Check malloc for Value struct
+        fprintf(stderr, "FATAL: malloc failed for Value struct in insertLocalSymbol for '%s'\n", sym->name ? sym->name : "<NULL_NAME>");
+        if (sym->name) free(sym->name);
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
-    *sym->value = makeValueForType(type, type_def); // Initialize value contents
 
-    sym->is_alias = false; // Default, might be changed later for var params/func results
-    sym->is_local_var = is_variable_declaration; // <-- SET THE FLAG HERE
+    // Initialize the Value struct based on its type using makeValueForType
+    // makeValueForType should handle its own internal allocations and checks
+    *sym->value = makeValueForType(type, type_def);
 
-    // Handle fixed-length strings (ensure type_def and right child are valid)
-    if (type == TYPE_STRING && type_def != NULL && type_def->type == AST_TYPE_DECL && type_def->right != NULL && type_def->right->type == AST_STRING && type_def->right->children[0] != NULL)
-    {
-        // Assuming the length is in the first child of the AST_STRING_TYPE_DEF node
-        AST* lenNode = type_def->right->children[0];
-        Value lenVal = eval(lenNode); // Evaluate the length expression
-        if (lenVal.type == TYPE_INTEGER && lenVal.i_val > 0) {
-            sym->value->max_length = (int)lenVal.i_val;
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG] Set fixed string length for '%s' to %d\n", name, sym->value->max_length);
-            #endif
-             // Initialize the string value to empty but allocated for fixed length
-            if(sym->value->s_val) free(sym->value->s_val); // Free initial "" from makeValueForType
-            sym->value->s_val = calloc(sym->value->max_length + 1, 1); // Allocate fixed size + null
-             if (!sym->value->s_val) {
-                 fprintf(stderr, "Memory allocation error (fixed string) in insertLocalSymbol\n");
-                 // Clean up allocated name and symbol struct
-                 free(sym->name);
-                 free(sym);
-                 EXIT_FAILURE_HANDLER();
-             }
+    // Set flags for the symbol
+    sym->is_alias = false; // Default, change later for VAR parameters etc.
+    sym->is_local_var = is_variable_declaration; // Mark if it's a VAR decl or parameter
+    sym->is_const = false; // Local symbols are not const by default
 
+    // *** Handling for Fixed-Length Strings (Integrated from original file content) ***
+    // Note: This logic assumes a specific AST structure for fixed strings.
+    // It checks if the type is STRING and if a type_def AST node is provided
+    // that allows extracting a length.
+    if (type == TYPE_STRING && type_def != NULL) {
+        AST* actualTypeDef = type_def;
+        // Resolve reference if needed
+        if (actualTypeDef->type == AST_TYPE_REFERENCE) {
+            actualTypeDef = actualTypeDef->right; // Assuming right points to the actual definition
+        }
+
+        // Check if the actual type definition indicates a fixed length
+        // This depends heavily on how typeSpecifier parses 'string[len]'
+        // Assuming the AST_VARIABLE node for 'string' might have the length node in its 'right' child
+        if (actualTypeDef && actualTypeDef->type == AST_VARIABLE && strcasecmp(actualTypeDef->token->value, "string") == 0 && actualTypeDef->right != NULL)
+        {
+            AST* lenNode = actualTypeDef->right; // The node representing the length
+            Value lenVal; // Need a temporary Value struct to hold evaluation result
+
+            // Evaluate the length expression - CAUTION: Calling eval during parsing/symbol insertion can be risky
+            // if the expression isn't guaranteed to be a simple constant.
+            // A safer approach might be to resolve this during a later semantic pass.
+            // For now, assuming it works for constant integer lengths:
+            // lenVal = eval(lenNode); // <<< Original call - commented out due to risk
+            
+            // SAFER ALTERNATIVE: Assume length node is AST_NUMBER with integer const
+            if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
+                lenVal = makeInt(atoll(lenNode->token->value)); // Use atoll for long long
+            } else {
+                // If it's not a simple integer constant, treat length as invalid for now
+                 fprintf(stderr, "Warning: Fixed string length for '%s' is not a simple integer constant. Treating as dynamic.\n", name);
+                 lenVal = makeInt(0); // Indicate invalid length
+            }
+
+
+            if (lenVal.type == TYPE_INTEGER && lenVal.i_val > 0) {
+                sym->value->max_length = (int)lenVal.i_val; // Store fixed length
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG] insertLocalSymbol: Set fixed string length for '%s' to %d\n", name, sym->value->max_length);
+#endif
+                // Re-allocate buffer for fixed size + null terminator
+                if(sym->value->s_val) free(sym->value->s_val); // Free initial "" from makeValueForType
+                sym->value->s_val = calloc(sym->value->max_length + 1, 1); // Use calloc for zero-init
+                if (!sym->value->s_val) { // Check calloc
+                    fprintf(stderr, "FATAL: calloc failed for fixed string buffer in insertLocalSymbol for '%s'\n", name);
+                    if(sym->name) free(sym->name);
+                    free(sym->value); // Free Value struct
+                    free(sym); // Free Symbol struct
+                    EXIT_FAILURE_HANDLER();
+                }
+            } else {
+                 // Warning already printed if not a simple integer const
+                 if (lenVal.type != TYPE_INTEGER || lenVal.i_val <= 0) {
+                      fprintf(stderr, "Warning: Invalid fixed string length specification (value <= 0 or not integer) for '%s'. Treating as dynamic.\n", name);
+                 }
+                 sym->value->max_length = 0; // Treat as dynamic if length is invalid
+                 // Keep the dynamically allocated "" from makeValueForType
+            }
         } else {
-             fprintf(stderr, "Warning: Invalid fixed string length specification for '%s'.\n", name);
-             sym->value->max_length = 0; // Treat as dynamic if length is invalid
+            sym->value->max_length = 0; // Not a fixed-length string declaration
         }
     } else {
-         sym->value->max_length = 0; // Default for dynamic strings or other types
+         sym->value->max_length = 0; // Default for non-string types
     }
+    // *** End Fixed-Length String Handling ***
 
-
-    // Link into the head of the local symbol list
+    // Link the new symbol into the head of the local symbol list
     sym->next = localSymbols;
     localSymbols = sym;
 
     return sym; // Return the newly created symbol
 }
+
 Procedure *getProcedureTable(void) {
     return procedure_table;
 }

@@ -1127,23 +1127,36 @@ AST *varDeclaration(Parser *parser, bool isGlobal) {
 }
 
 AST *functionDeclaration(Parser *parser, bool in_interface) {
-    eat(parser, TOKEN_FUNCTION);
-    Token *funcName = parser->current_token;
+    eat(parser, TOKEN_FUNCTION); // Consume FUNCTION keyword
+
+    Token *funcNameOriginal = parser->current_token;
+    if (funcNameOriginal->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Expected function name identifier");
+        return newASTNode(AST_NOOP, NULL); // Error recovery
+    }
+    Token *funcNameCopied = copyToken(funcNameOriginal); // <<< COPY
+    if (!funcNameCopied) {
+        fprintf(stderr, "Memory allocation failed in functionDeclaration (copyToken name)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Eat the ORIGINAL identifier token (eatInternal frees it)
     eat(parser, TOKEN_IDENTIFIER);
-    AST *node = newASTNode(AST_FUNCTION_DECL, funcName);
+
+    // newASTNode makes its own internal copy of funcNameCopied
+    AST *node = newASTNode(AST_FUNCTION_DECL, funcNameCopied);
 
     // Parse parameters if present (Unchanged)
     if (parser->current_token->type == TOKEN_LPAREN) {
         eat(parser, TOKEN_LPAREN);
         AST *params = paramList(parser);
         eat(parser, TOKEN_RPAREN);
-        // Transfer parameter children safely
+        // Transfer parameter children safely (Your existing logic here)
         if (params && params->child_count > 0) {
             node->children = params->children;
             node->child_count = params->child_count;
-            params->children = NULL; // Prevent double free by params node
+            params->children = NULL;
             params->child_count = 0;
-             // Update parent pointers
              for (int i = 0; i < node->child_count; i++) {
                  if (node->children[i]) node->children[i]->parent = node;
              }
@@ -1151,9 +1164,9 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
              node->children = NULL;
              node->child_count = 0;
         }
-        if (params) free(params); // Free the temporary compound node from paramList
+        if (params) free(params);
     } else {
-         node->children = NULL; // Ensure these are NULL if no params
+         node->children = NULL;
          node->child_count = 0;
     }
 
@@ -1163,98 +1176,167 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
     setRight(node, returnType); // Return type node is stored in 'right'
     node->var_type = returnType->var_type; // Set function's return type early
 
-    // Handle interface vs implementation (Unchanged 'if' part)
+    // Handle interface vs implementation (Your existing logic here)
     if (in_interface) {
         // Interface section: no body expected
-        // The semicolon is eaten by the caller (declarations)
-    }
-    // { *** START MODIFIED Implementation Block Logic *** }
-    else { // Implementation part
-        eat(parser, TOKEN_SEMICOLON); // Consume semicolon after header/params/return type
-
-        // Call 'declarations' to parse CONST, TYPE, VAR, nested PROC/FUNC sections
-        // Pass 'false' because these are local to the implementation
+    } else { // Implementation part
+        eat(parser, TOKEN_SEMICOLON);
         AST *local_declarations = declarations(parser, false);
-
-        // After declarations, parse the main BEGIN..END body
         AST *compound_body = compoundStatement(parser);
-
-        // Create the BLOCK node to hold both local declarations and the body
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
-        addChild(blockNode, local_declarations); // Child 0: Declarations subtree
-        addChild(blockNode, compound_body);     // Child 1: Body subtree
-        blockNode->is_global_scope = false;      // Mark as non-global
-
-        // Attach the blockNode to the FUNCTION_DECL node
-        // Functions store the block in 'extra' because 'right' holds the return type
-        setExtra(node, blockNode);
+        addChild(blockNode, local_declarations);
+        addChild(blockNode, compound_body);
+        blockNode->is_global_scope = false;
+        setExtra(node, blockNode); // Function block goes in 'extra'
     }
-    // { *** END MODIFIED Implementation Block Logic *** }
+
+    // --- MODIFICATION START: Free the copied token ---
+    freeToken(funcNameCopied); // <<< Free the copy made at the start
+    // --- END MODIFICATION ---
+
 
     DEBUG_DUMP_AST(node, 0); // Original debug dump
     return node;
 } // End of functionDeclaration
 
 AST *paramList(Parser *parser) {
-    AST *compound = newASTNode(AST_COMPOUND, NULL);
+    AST *compound = newASTNode(AST_COMPOUND, NULL); // Final list of parameter AST_VAR_DECL nodes
+
     // Loop until we see the closing parenthesis.
     while (parser->current_token->type != TOKEN_RPAREN) {
         int byRef = 0;
-        // Check for pass-by-reference keyword.
-        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) { // <<< CHECK FOR TOKEN_OUT
+        // Check for pass-by-reference keyword (VAR or OUT).
+        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) {
             byRef = 1;
             eat(parser, parser->current_token->type); // Eat either VAR or OUT
         }
-        // Parse one or more identifiers separated by commas.
+
+        // Temporary group node to hold comma-separated names of the *same* type.
+        // This group node itself isn't added to the final AST list.
         AST *group = newASTNode(AST_VAR_DECL, NULL);
-        // Parse the first identifier.
-        AST *id_node = newASTNode(AST_VARIABLE, parser->current_token);
-        eat(parser, TOKEN_IDENTIFIER);
-        addChild(group, id_node);
-        while (parser->current_token->type == TOKEN_COMMA) {
-            eat(parser, TOKEN_COMMA);
-            id_node = newASTNode(AST_VARIABLE, parser->current_token);
+        // Parse one or more identifiers separated by commas for this type group.
+        while (1) {
+            // --- Make a copy of the identifier token for the new AST node ---
+            Token* originalIdToken = parser->current_token;
+            if (originalIdToken->type != TOKEN_IDENTIFIER) {
+                errorParser(parser, "Expected identifier in parameter list");
+                freeAST(group); // Clean up temp group
+                freeAST(compound); // Clean up compound list being built
+                return NULL; // Indicate error
+            }
+            Token* copiedIdToken = copyToken(originalIdToken);
+            if (!copiedIdToken) {
+                 fprintf(stderr, "Memory allocation failed for token copy in paramList\n");
+                 freeAST(group); freeAST(compound);
+                 EXIT_FAILURE_HANDLER();
+             }
+            // ---
+
+            // Eat the ORIGINAL identifier token (eatInternal frees it)
             eat(parser, TOKEN_IDENTIFIER);
-            addChild(group, id_node);
+
+            // Add a new AST_VARIABLE node using the copied token to the temporary group
+            // This node will be freed when 'group' is freed later.
+            AST *id_node = newASTNode(AST_VARIABLE, copiedIdToken);
+            addChild(group, id_node); // addChild sets parent pointer within the group
+
+            // --- Free the copied token, as newASTNode made its own copy ---
+            freeToken(copiedIdToken);
+            // ---
+
+            // Check if another identifier follows (comma separation)
+            if (parser->current_token->type == TOKEN_COMMA) {
+                eat(parser, TOKEN_COMMA); // Consume comma, loop for next name
+            } else {
+                break; // No comma, this group of names is done
+            }
+        } // End while(1) for parsing identifiers in a group
+
+        // Expect a colon and then the type specifier for this group.
+        eat(parser, TOKEN_COLON); // Consume ':'
+        // Parse the type definition node (e.g., RECORD_TYPE, VARIABLE for basic types, etc.)
+        // typeSpecifier returns the AST node defining the type (e.g., AST_RECORD_TYPE, AST_VARIABLE for 'integer')
+        AST *typeNode = typeSpecifier(parser, 1); // Allow anonymous types (like record) here
+        if (!typeNode) { // Handle error from typeSpecifier
+            errorParser(parser, "Failed to parse type specifier in parameter list");
+            freeAST(group); freeAST(compound);
+            return NULL; // Indicate error
         }
-        // Expect a colon and then a type specifier.
-        eat(parser, TOKEN_COLON);
-        AST *typeNode = typeSpecifier(parser, 0);
-        setRight(group, typeNode);
+
+        // Apply the parsed type info (just the VarType enum) to the temporary group node.
+        // This isn't strictly necessary as the group node is temporary, but good for consistency.
         setTypeAST(group, typeNode->var_type);
 
-        // For each identifier in this group, create a separate parameter declaration.
+        // Now, create the *actual* parameter declaration nodes (AST_VAR_DECL)
+        // for each identifier collected in the temporary 'group' node.
         for (int i = 0; i < group->child_count; i++) {
+            // Create the final AST node (AST_VAR_DECL) that will be added to the procedure's parameter list
             AST *param_decl = newASTNode(AST_VAR_DECL, NULL);
-            param_decl->child_count = 1;
+            param_decl->child_count = 1;      // Each param_decl has one child: the variable name node
             param_decl->child_capacity = 1;
             param_decl->children = malloc(sizeof(AST *));
             if (!param_decl->children) {
-                fprintf(stderr, "Memory allocation error in param_list\n");
-                EXIT_FAILURE_HANDLER();
+                 fprintf(stderr, "Memory allocation error for param_decl children\n");
+                 // Need more robust cleanup here
+                 freeAST(typeNode); freeAST(group); freeAST(compound); freeAST(param_decl);
+                 EXIT_FAILURE_HANDLER();
+             }
+
+            // Create the AST_VARIABLE node for the parameter name ('s') using the token from the group.
+            // We need to make a fresh copy of the token for this new node.
+            Token* nameTokenCopy = copyToken(group->children[i]->token);
+             if (!nameTokenCopy) {
+                  fprintf(stderr, "Memory allocation failed copying parameter name token\n");
+                  // Cleanup...
+                  EXIT_FAILURE_HANDLER();
+             }
+            param_decl->children[0] = newASTNode(AST_VARIABLE, nameTokenCopy);
+            freeToken(nameTokenCopy); // Free the copy used by newASTNode
+
+            // *** Explicitly set the parent pointer for the child VARIABLE node ***
+            if (param_decl->children[0]) {
+                param_decl->children[0]->parent = param_decl; // <<< Parent pointer fix
+            } else {
+                 errorParser(parser, "Failed to create variable node for parameter name");
+                 // Cleanup...
+                 EXIT_FAILURE_HANDLER();
             }
-            param_decl->children[0] = newASTNode(AST_VARIABLE, group->children[i]->token);
+
+            // Copy the type enum (e.g., TYPE_RECORD) and by-reference flag
             param_decl->var_type = group->var_type;
             param_decl->by_ref = byRef;
+
+            // Link the VAR_DECL node to the actual Type Definition node parsed earlier
+            // This is crucial for the interpreter/compiler to know the structure of the type.
+            setRight(param_decl, typeNode); // Links VAR_DECL to RECORD_TYPE, etc.
+
+            // Add the completed parameter declaration node to the compound list returned by this function
             addChild(compound, param_decl);
         }
-        // Clean up the temporary group node.
-        free(group->children);
-        free(group);
-        // If there’s a semicolon, consume it and continue; otherwise, break out.
-        if (parser->current_token->type == TOKEN_SEMICOLON)
-            eat(parser, TOKEN_SEMICOLON);
-        else
+
+        // Clean up the temporary group node and its children (the AST_VARIABLE nodes within it).
+        // Do not free typeNode here, as it's now referenced by the param_decl nodes via their 'right' pointer.
+        // freeAST should handle the children (AST_VARIABLE nodes) recursively.
+        freeAST(group);
+
+        // After processing a parameter group (name:type), check for a separator (;) or the end ')'.
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON); // Consume semicolon, continue loop for next parameter group
+        } else if (parser->current_token->type != TOKEN_RPAREN) {
+            // If it's not a semicolon and not the closing parenthesis, it's an error.
+            errorParser(parser, "Expected ';' or ')' after parameter declaration");
+            // Need robust cleanup if erroring out here
+            freeAST(typeNode); freeAST(compound);
+            return NULL;
+        } else {
+            // Found RPAREN, the loop condition will handle exiting.
             break;
-    }
-    DEBUG_DUMP_AST(compound, 0);
-    return compound;
-}
+        }
+    } // End while != RPAREN
 
-
-// file: pscal/parser.c
-
-// ... (other functions remain the same) ...
+    // No need for debug dump here, let caller dump if needed
+    return compound; // Return the compound list of final param_decl nodes
+} // End paramList()
 
 AST *compoundStatement(Parser *parser) {
     eat(parser, TOKEN_BEGIN);
@@ -1332,160 +1414,233 @@ AST *compoundStatement(Parser *parser) {
 }
 
 AST *statement(Parser *parser) {
-    AST *node = NULL;
+    AST *node = NULL; // Initialize node
+
     switch (parser->current_token->type) {
-        case TOKEN_CASE:
-            node = caseStatement(parser);
-            break;
-        case TOKEN_BREAK: // <<< ADD THIS CASE
-            eat(parser, TOKEN_BREAK);
-            node = newASTNode(AST_BREAK, NULL); // Create a specific AST node
-            // Break doesn't need children, left, right, or extra nodes.
-            break;
-        case TOKEN_IDENTIFIER: {
-            Token *currentIdToken = parser->current_token; // Save the identifier token
-            Token *peek = peekToken(parser);
-            if (!peek) { // Handle potential error from peekToken/getNextToken if needed
-                 errorParser(parser, "Failed to peek token");
-                 return newASTNode(AST_NOOP, NULL); // Or appropriate error handling
-            }
-            Procedure *proc = lookupProcedure(currentIdToken->value);
-            bool is_builtin_proc = isBuiltin(currentIdToken->value); // isBuiltin should check names like 'write', 'writeln', etc.
-
-            // --- Handle specific built-ins first if they are parsed as IDENTIFIER ---
-            // This covers non-standard syntax where keywords might be treated as identifiers.
-            if (strcasecmp(currentIdToken->value, "write") == 0) {
-                node = writeStatement(parser); // Delegate fully to writeStatement
-            } else if (strcasecmp(currentIdToken->value, "writeln") == 0) {
-                node = writelnStatement(parser); // Delegate fully to writelnStatement
-            } else if (strcasecmp(currentIdToken->value, "read") == 0) {
-                 node = readStatement(parser);
-            } else if (strcasecmp(currentIdToken->value, "readln") == 0) {
-                 node = readlnStatement(parser);
-            }
-            // --- End specific built-in handling ---
-
-            // --- Handle explicit procedure call with parentheses ---
-            else if (peek->type == TOKEN_LPAREN) {
-                node = procedureCall(parser); // procedureCall consumes IDENTIFIER and args
-            }
-            // --- Handle assignment ---
-            else if (peek->type == TOKEN_ASSIGN ||
-                     peek->type == TOKEN_LBRACKET || // Could be array element assignment: arr[i] := ...
-                     peek->type == TOKEN_PERIOD)    // Could be record field assignment: rec.fld := ...
-            {
-                 // It looks like an assignment statement starting with an identifier.
-                 // Let assignmentStatement handle parsing the lvalue and expression.
-                node = assignmentStatement(parser);
-            }
-             // --- Handle known parameter-less procedures (built-in or user-defined) ---
-             else if (proc != NULL && proc->proc_decl->child_count == 0 && proc->proc_decl->type != AST_FUNCTION_DECL) {
-                 node = newASTNode(AST_PROCEDURE_CALL, currentIdToken);
-                 eat(parser, TOKEN_IDENTIFIER); // Consume the procedure name identifier
-                 node->child_count = 0;
-             }
-             // --- Handle other known built-ins that might be called without parens (e.g., randomize) ---
-             // Note: Builtins requiring args (like inc/dec) generally need explicit calls or keywords.
-             else if (is_builtin_proc) {
-                  // Example: Check for randomize, halt (no args)
-                  if (strcasecmp(currentIdToken->value, "randomize") == 0 ||
-                      strcasecmp(currentIdToken->value, "halt") == 0) {
-                      node = newASTNode(AST_PROCEDURE_CALL, currentIdToken);
-                      eat(parser, TOKEN_IDENTIFIER);
-                      node->child_count = 0;
-                  } else {
-                       // Builtin exists but isn't handled above (maybe needs args or different context?)
-                       // Treat as error or simple variable access for now.
-                       char error_msg[128];
-                       snprintf(error_msg, sizeof(error_msg), "Ambiguous use of identifier '%s' as statement", currentIdToken->value);
-                       errorParser(parser, error_msg);
-                       // Fallback (optional): node = lvalue(parser);
-                       node = newASTNode(AST_NOOP, NULL); // Avoid parsing if ambiguous
-                  }
-             }
-            // --- Fallback: Assume it's a variable/field access (or undeclared identifier) ---
-            // This path is taken if it's not an explicit call, assignment, or known parameterless proc.
-            else {
-                 // It might be an undeclared identifier, or a variable access used as a statement (invalid Pascal).
-                 // Parse it as an lvalue to consume the identifier (and potential indices/fields).
-                 // The semantic analysis phase would later flag this as an error if it's not valid.
-                 // node = lvalue(parser); // Parse as variable access
-                 // Or signal error immediately:
-                 char error_msg[128];
-                 snprintf(error_msg, sizeof(error_msg), "Identifier '%s' cannot start a statement here", currentIdToken->value);
-                 errorParser(parser, error_msg);
-                 node = newASTNode(AST_NOOP, NULL); // Avoid parsing further
-            }
-            freeToken(peek);
-            break;
-        }
-        // <<< END REVISED TOKEN_IDENTIFIER CASE >>>
-
-        case TOKEN_LPAREN: {
-            // An expression used as a statement, likely a function call like func(x);
-            node = expr(parser); // expr should handle parsing the call correctly
-            break;
-        }
         case TOKEN_BEGIN:
+            // Compound statement (BEGIN ... END)
             node = compoundStatement(parser);
-            break;
+            // compoundStatement handles its own END token.
+            break; // No semicolon needed after END
+
+        case TOKEN_IDENTIFIER: {
+            // Could be assignment or procedure call.
+            AST *lval_or_proc_id = lvalue(parser); // Parses identifier and potential .field or [index]
+
+            if (!lval_or_proc_id) { // Handle potential error from lvalue
+                errorParser(parser, "Failed to parse lvalue starting with identifier.");
+                node = newASTNode(AST_NOOP, NULL); // Error recovery node
+                // Attempt to recover? Maybe eat the problematic token sequence? Difficult.
+                break; // Exit case
+            }
+
+            if (parser->current_token->type == TOKEN_ASSIGN) {
+                // --- Assignment Statement ---
+                node = assignmentStatement(parser, lval_or_proc_id); // assignmentStatement handles := and RHS
+                // Semicolon separator handled by compoundStatement loop
+
+            } else if (parser->current_token->type == TOKEN_LPAREN && lval_or_proc_id->type == AST_VARIABLE) {
+                // --- Procedure/Function Call WITH Arguments ---
+                // Convert the AST_VARIABLE node returned by lvalue() to AST_PROCEDURE_CALL.
+                lval_or_proc_id->type = AST_PROCEDURE_CALL; // Change type
+
+                eat(parser, TOKEN_LPAREN); // Consume '('
+
+                // Check if there are arguments inside the parentheses
+                if (parser->current_token->type != TOKEN_RPAREN) {
+                    AST* args = exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
+
+                    // --- Start: Correct Argument Transfer Logic ---
+                    if (args && args->type == AST_COMPOUND && args->child_count > 0) {
+                        // Arguments were parsed successfully into the 'args' compound node.
+                        // Transfer the array of children AST nodes and the count.
+#ifdef DEBUG
+                        fprintf(stderr, "[DEBUG PARSER STMT] Transferring %d children from args %p (%p) to proc_call %p\n",
+                                args->child_count, (void*)args, (void*)args->children, (void*)lval_or_proc_id);
+#endif
+
+                        lval_or_proc_id->children = args->children; // PROC_CALL node now points to the children array
+                        lval_or_proc_id->child_count = args->child_count; // Update count
+
+                        // Nullify the pointers in the temporary 'args' node
+                        // so that freeAST(args) doesn't free the children array we just transferred.
+                        args->children = NULL;
+                        args->child_count = 0;
+
+                        // Set the parent pointer for each transferred argument node
+                        // so they correctly point back to the PROCEDURE_CALL node.
+                        for(int i=0; i < lval_or_proc_id->child_count; i++){
+                            if(lval_or_proc_id->children[i]) {
+                                lval_or_proc_id->children[i]->parent = lval_or_proc_id;
+                            }
+                        }
+#ifdef DEBUG
+                        fprintf(stderr, "[DEBUG PARSER STMT] After transfer: proc_call %p has child_count=%d, children_ptr=%p\n",
+                                (void*)lval_or_proc_id, lval_or_proc_id->child_count, (void*)lval_or_proc_id->children);
+#endif
+
+                    } else if (args) {
+                        // This case handles if exprList returned non-compound (shouldn't happen) or empty compound.
+                        // Assign NULL/0 to be safe.
+                        lval_or_proc_id->children = NULL;
+                        lval_or_proc_id->child_count = 0;
+#ifdef DEBUG
+                        fprintf(stderr, "[DEBUG PARSER STMT] Args node existed but was empty or not compound\n");
+#endif
+                        // We still need to free the 'args' node below.
+
+                    } else { // args was NULL (error during exprList parsing)
+                        lval_or_proc_id->children = NULL;
+                        lval_or_proc_id->child_count = 0;
+#ifdef DEBUG
+                         fprintf(stderr, "[DEBUG PARSER STMT] exprList returned NULL, setting proc_call children to NULL\n");
+#endif
+                         // If exprList failed, it should have called errorParser already.
+                    }
+
+                    // Free the temporary COMPOUND wrapper node returned by exprList (if it existed).
+                    // Use freeAST, not free.
+                    if (args) {
+#ifdef DEBUG
+                         fprintf(stderr, "[DEBUG PARSER STMT] Freeing args wrapper node %p\n", (void*)args);
+#endif
+                         freeAST(args);
+                    }
+                            // --- End: Correct Argument Transfer Logic ---
+
+                } else { // Empty argument list '()'
+                    lval_or_proc_id->children = NULL;
+                    lval_or_proc_id->child_count = 0;
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG PARSER STMT] Empty argument list '()': proc_call %p has child_count=0\n", (void*)lval_or_proc_id);
+#endif
+                }
+
+                eat(parser, TOKEN_RPAREN); // Consume ')'
+                node = lval_or_proc_id; // Use the modified node as the statement result
+                // Semicolon separator handled by compoundStatement loop
+
+            } else if (lval_or_proc_id->type == AST_VARIABLE) {
+                 // --- Parameter-less Procedure Call ---
+                 // (e.g., ClrScr;)
+                Token* procNameToken = copyToken(lval_or_proc_id->token);
+                if (!procNameToken) { /* Malloc error */ freeAST(lval_or_proc_id); EXIT_FAILURE_HANDLER(); }
+
+                AST *procCallNode = newASTNode(AST_PROCEDURE_CALL, procNameToken);
+                if (!procCallNode) { /* Malloc error */ freeToken(procNameToken); freeAST(lval_or_proc_id); EXIT_FAILURE_HANDLER(); }
+
+                procCallNode->children = NULL; // No arguments
+                procCallNode->child_count = 0;
+
+                freeToken(procNameToken); // Free the copy passed to newASTNode
+                freeAST(lval_or_proc_id); // Free the temporary AST_VARIABLE node created by lvalue()
+                node = procCallNode; // Use the new PROC_CALL node as the statement result
+                // Semicolon separator handled by compoundStatement loop
+
+            } else {
+                // --- Error: Invalid Statement ---
+                // If lval_or_proc_id is FIELD_ACCESS or ARRAY_ACCESS, it cannot stand alone.
+                char error_msg[150];
+                snprintf(error_msg, sizeof(error_msg),
+                         "Expression starting with '%s' cannot be used as a statement here (followed by '%s')",
+                         lval_or_proc_id->token ? lval_or_proc_id->token->value : "<complex_lvalue>",
+                         tokenTypeToString(parser->current_token->type));
+                errorParser(parser, error_msg);
+                freeAST(lval_or_proc_id); // Free the invalid lvalue node
+                node = newASTNode(AST_NOOP, NULL); // Return NOOP for error recovery
+            }
+
+             // --- ADD DEBUG PRINT JUST BEFORE LEAVING CASE ---
+             if(node && (node->type == AST_PROCEDURE_CALL || node->type == AST_ASSIGN)) {
+#ifdef DEBUG
+                  fprintf(stderr, "[DEBUG PARSER STMT] Leaving TOKEN_IDENTIFIER case, node %p: type=%s, child_count=%d, children_ptr=%p\n",
+                         (void*)node, astTypeToString(node->type), node->child_count, (void*)node->children);
+#endif
+             }
+             // ---
+
+            break; // End case TOKEN_IDENTIFIER
+        } // End brace for case TOKEN_IDENTIFIER
+        // --- Cases for specific statement keywords ---
         case TOKEN_IF:
-            node = ifStatement(parser); // Handles the full IF..THEN..[ELSE..] structure
+            node = ifStatement(parser);
+            // IF handles its structure internally.
             break;
         case TOKEN_WHILE:
             node = whileStatement(parser);
-            break;
-        case TOKEN_REPEAT:
-            node = repeatStatement(parser);
+            // WHILE handles its structure internally.
             break;
         case TOKEN_FOR:
             node = forStatement(parser);
+            // FOR handles its structure internally.
             break;
-        // --- Use explicit TOKEN types for built-ins ---
-        case TOKEN_WRITELN:
-            node = writelnStatement(parser);
+        case TOKEN_REPEAT:
+            node = repeatStatement(parser);
+            // REPEAT handles its structure internally.
+            break;
+        case TOKEN_CASE:
+            node = caseStatement(parser);
+            // CASE handles its structure internally.
             break;
         case TOKEN_WRITE:
-            node = writeStatement(parser);
+            node = writeStatement(parser); // Parses WRITE (...)
+            // *** Semicolon check REMOVED from here ***
             break;
-        case TOKEN_READLN:
-            node = readlnStatement(parser);
+        case TOKEN_WRITELN:
+            node = writelnStatement(parser); // Parses WRITELN (...)
+            // *** Semicolon check REMOVED from here ***
             break;
         case TOKEN_READ:
-            node = readStatement(parser);
+             node = readStatement(parser); // Parses READ (...)
+             // *** Semicolon check REMOVED from here ***
+             break;
+        case TOKEN_READLN:
+             node = readlnStatement(parser); // Parses READLN (...)
+             // *** Semicolon check REMOVED from here ***
+             break;
+        case TOKEN_BREAK:
+            eat(parser, TOKEN_BREAK); // Consume BREAK keyword
+            node = newASTNode(AST_BREAK, NULL);
+            // *** Semicolon check REMOVED from here ***
             break;
-        // --- End explicit TOKEN types ---
+
+        case TOKEN_SEMICOLON: // Empty statement ';'
+            eat(parser, TOKEN_SEMICOLON);
+            node = newASTNode(AST_NOOP, NULL); // Represent as NOOP
+            break; // No semicolon needed after an empty statement
+
         default:
-            // If the token cannot start any known statement type
+            // Error for unexpected token starting a statement.
+            errorParser(parser, "Unexpected token starting statement");
             node = newASTNode(AST_NOOP, NULL);
-             // DO NOT consume the token here; let the caller (compoundStatement) handle errors
-             // related to unexpected tokens between statements.
-#ifdef DEBUG
-            DEBUG_PRINT("Unexpected token %s found in statement()\n", tokenTypeToString(parser->current_token->type));
-#endif
-            break;
-    }
+            break; // Exit switch
+    } // End switch
+
     #ifdef DEBUG
-    if (dumpExec && node) debugAST(node, 0);
+    if (dumpExec && node) debugAST(node, 0); // Optional debug dump
     #endif
     return node;
-}
-AST *assignmentStatement(Parser *parser) {
-    // The current token is the start of the left-hand side (identifier, array access start, etc.)
-    AST *left = lvalue(parser);  // Use lvalue() to parse variable, field access, array access
-    // After lvalue returns, current_token should be ASSIGN
+} // End statement()
+
+// Parameter renamed to parsedLValue
+AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
+    // Line causing the error is removed.
+
+    // Current token should be ASSIGN (this check might need adjustment
+    // depending on where the caller consumes the lvalue)
     eat(parser, TOKEN_ASSIGN);
     AST *right = boolExpr(parser); // Parse the right-hand side expression
     AST *node = newASTNode(AST_ASSIGN, NULL);
-    setLeft(node, left);
+
+    // Use the parameter directly
+    setLeft(node, parsedLValue);
     setRight(node, right);
+
     #ifdef DEBUG
     if (dumpExec) debugAST(node, 0);
     #endif
     return node;
 }
-
-// In pscal/parser.c
 
 AST *procedureCall(Parser *parser) {
     AST *node = newASTNode(AST_PROCEDURE_CALL, parser->current_token); // node is the new parent
