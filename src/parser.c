@@ -596,9 +596,115 @@ AST *buildProgramAST(Parser *main_parser) {
 
         // Link units (assuming linkUnit/unitParser handle their own memory)
         // Add error handling around findUnitFile, fopen, etc. if needed
-        for (int i = 0; i < listSize(unit_list); i++) {
-            // ... (existing linkUnit logic - ensure it handles errors) ...
-        }
+        // In src/parser.c -> buildProgramAST() -> within the 'if (uses_clause)' block
+
+                     // --- Start: Process and Link Units from 'uses' list ---
+                     for (int i = 0; i < listSize(unit_list); i++) {
+                         char *unit_name = listGet(unit_list, i);
+         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG USES] Processing unit '%s'...\n", unit_name);
+         #endif
+                         // Attempt to find the unit source file
+                         char *unit_path = findUnitFile(unit_name); // Assumes findUnitFile returns allocated string or NULL
+
+                         if (unit_path == NULL) {
+                             // Use errorParser for consistency
+                             char error_msg[256];
+                             snprintf(error_msg, sizeof(error_msg), "Unit '%s' specified in USES clause not found.", unit_name);
+                             errorParser(main_parser, error_msg); // errorParser should exit
+                             // Clean up potentially partially built AST? Very complex. Exit for now.
+                             // If errorParser doesn't exit, ensure cleanup happens here.
+                              if(unit_list) freeList(unit_list); // Free list contents
+                              if(uses_clause) freeAST(uses_clause); // Free uses node
+                              // Free other potentially allocated nodes like prog_name_node etc.
+                              freeToken(copiedProgToken); // Free program token copy
+                             return NULL; // Indicate failure
+                         }
+
+         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG USES] Found unit '%s' at path: %s\n", unit_name, unit_path);
+         #endif
+
+                         // --- Parse the found unit file ---
+                         // 1. Read the unit file content
+                         FILE *unit_file = fopen(unit_path, "r");
+                         if (!unit_file) {
+                              char error_msg[512];
+                              snprintf(error_msg, sizeof(error_msg), "Could not open unit file '%s' for unit '%s'", unit_path, unit_name);
+                              perror(error_msg); // Print system error message too
+                              free(unit_path); // Free path returned by findUnitFile
+                              // Cleanup...
+                              EXIT_FAILURE_HANDLER(); // Exit on file open error
+                              return NULL;
+                         }
+                         fseek(unit_file, 0, SEEK_END);
+                         long unit_fsize = ftell(unit_file);
+                         rewind(unit_file);
+                         char *unit_source = malloc(unit_fsize + 1);
+                         if (!unit_source) {
+                             fprintf(stderr, "Memory allocation error reading unit '%s'\n", unit_name);
+                             fclose(unit_file);
+                             free(unit_path);
+                             // Cleanup...
+                             EXIT_FAILURE_HANDLER();
+                              return NULL;
+                         }
+                         fread(unit_source, 1, unit_fsize, unit_file);
+                         unit_source[unit_fsize] = '\0';
+                         fclose(unit_file);
+                         // ---
+
+                         // 2. Initialize a new lexer and parser for the unit source
+                         Lexer unit_lexer;
+                         initLexer(&unit_lexer, unit_source);
+                         Parser unit_parser; // <<< CHANGE: Use a separate parser instance
+                         unit_parser.lexer = &unit_lexer;
+                         unit_parser.current_token = getNextToken(&unit_lexer); // Initialize the first token
+
+                         // 3. Parse the unit recursively (use unitParser)
+                         // Pass recursion depth (start at 1 for first level units)
+         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG USES] Calling unitParser for '%s'...\n", unit_name);
+         #endif
+                         AST *unit_ast = unitParser(&unit_parser, 1); // <<< Pass unit_parser, start depth 1
+                         if (!unit_ast) {
+                             // unitParser should have reported an error via errorParser
+                             fprintf(stderr, "Error: Failed to parse unit '%s'.\n", unit_name);
+                             free(unit_source);
+                             free(unit_path);
+                             // Cleanup...
+                             EXIT_FAILURE_HANDLER();
+                              return NULL;
+                         }
+         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG USES] Finished parsing unit '%s'. AST node: %p\n", unit_name, (void*)unit_ast);
+         #endif
+                         // ---
+
+                         // 4. Link symbols from the unit's interface into the global scope
+                         //    (Requires buildUnitSymbolTable and linkUnit functions)
+         #ifdef DEBUG
+                          fprintf(stderr, "[DEBUG USES] Building symbol table for unit '%s'...\n", unit_name);
+         #endif
+                          // Build the symbol table from the interface part (assuming child[0] is interface decls)
+                          // Note: buildUnitSymbolTable might need access to the Type Table if units define types
+                          // Assuming unit_ast->children[0] holds the INTERFACE declarations compound node
+                          Symbol* unitSymTable = buildUnitSymbolTable(unit_ast->children[0]);
+                          unit_ast->symbol_table = unitSymTable; // Attach symbol table to unit AST node
+         #ifdef DEBUG
+                          fprintf(stderr, "[DEBUG USES] Linking unit '%s'...\n", unit_name);
+         #endif
+                         linkUnit(unit_ast, 1); // <<< Call linkUnit with the parsed unit AST
+
+                         // 5. Cleanup resources for this unit
+                         free(unit_source);
+                         free(unit_path);
+                         // Do NOT free unit_ast here if its symbols/types are now linked globally
+                         // Memory management of shared AST nodes (like type definitions) needs care.
+                         // If linkUnit copies necessary info, freeAST(unit_ast) might be okay. Assume not for now.
+
+                     } // End for loop processing unit_list
+                     // --- End: Process and Link Units ---
     }
 
     // Parse the main block
@@ -1424,143 +1530,144 @@ AST *statement(Parser *parser) {
             break; // No semicolon needed after END
 
         case TOKEN_IDENTIFIER: {
-            // Could be assignment or procedure call.
-            AST *lval_or_proc_id = lvalue(parser); // Parses identifier and potential .field or [index]
+                    // Could be assignment or procedure call.
+                    AST *lval_or_proc_id = lvalue(parser); // Parses identifier and potential .field or [index]
 
-            if (!lval_or_proc_id) { // Handle potential error from lvalue
-                errorParser(parser, "Failed to parse lvalue starting with identifier.");
-                node = newASTNode(AST_NOOP, NULL); // Error recovery node
-                // Attempt to recover? Maybe eat the problematic token sequence? Difficult.
-                break; // Exit case
-            }
+                    // Add check if lvalue parsing failed
+                    if (!lval_or_proc_id) {
+                         // lvalue should call errorParser internally if it fails syntactically
+                         // If it returns NULL for other reasons, that's an issue.
+                         fprintf(stderr, "Error: lvalue() returned NULL unexpectedly after identifier.\n");
+                         node = newASTNode(AST_NOOP, NULL); // Error recovery node
+                         break; // Exit case
+                    }
 
-            if (parser->current_token->type == TOKEN_ASSIGN) {
-                // --- Assignment Statement ---
-                node = assignmentStatement(parser, lval_or_proc_id); // assignmentStatement handles := and RHS
-                // Semicolon separator handled by compoundStatement loop
+                    // Check what token comes *after* the parsed lvalue
+                    if (parser->current_token->type == TOKEN_ASSIGN) {
+                        // --- Assignment Statement ---
+                        node = assignmentStatement(parser, lval_or_proc_id); // assignmentStatement handles := and RHS
+                        // Semicolon separator handled by compoundStatement loop
 
-            } else if (parser->current_token->type == TOKEN_LPAREN && lval_or_proc_id->type == AST_VARIABLE) {
-                // --- Procedure/Function Call WITH Arguments ---
-                // Convert the AST_VARIABLE node returned by lvalue() to AST_PROCEDURE_CALL.
-                lval_or_proc_id->type = AST_PROCEDURE_CALL; // Change type
+                    } else if (parser->current_token->type == TOKEN_LPAREN && lval_or_proc_id->type == AST_VARIABLE) {
+                        // --- Procedure/Function Call WITH Arguments (...) ---
+                         // Convert the AST_VARIABLE node returned by lvalue() to AST_PROCEDURE_CALL.
+                        lval_or_proc_id->type = AST_PROCEDURE_CALL;
 
-                eat(parser, TOKEN_LPAREN); // Consume '('
+                        eat(parser, TOKEN_LPAREN); // Consume '('
 
-                // Check if there are arguments inside the parentheses
-                if (parser->current_token->type != TOKEN_RPAREN) {
-                    AST* args = exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
+                        // Check if there are arguments inside the parentheses
+                        if (parser->current_token->type != TOKEN_RPAREN) {
+                            AST* args = exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
 
-                    // --- Start: Correct Argument Transfer Logic ---
-                    if (args && args->type == AST_COMPOUND && args->child_count > 0) {
-                        // Arguments were parsed successfully into the 'args' compound node.
-                        // Transfer the array of children AST nodes and the count.
-#ifdef DEBUG
-                        fprintf(stderr, "[DEBUG PARSER STMT] Transferring %d children from args %p (%p) to proc_call %p\n",
-                                args->child_count, (void*)args, (void*)args->children, (void*)lval_or_proc_id);
-#endif
+                            // --- Start: CORRECTED/COMPLETE Argument Transfer Logic ---
+                            if (args && args->type == AST_COMPOUND && args->child_count > 0) {
+                                // Arguments were parsed successfully into the 'args' compound node.
+                                #ifdef DEBUG
+                                fprintf(stderr, "[DEBUG PARSER STMT] Transferring %d children from args %p (%p) to proc_call %p\n",
+                                        args->child_count, (void*)args, (void*)args->children, (void*)lval_or_proc_id);
+                                #endif
 
-                        lval_or_proc_id->children = args->children; // PROC_CALL node now points to the children array
-                        lval_or_proc_id->child_count = args->child_count; // Update count
+                                // Transfer the array of children AST nodes and the count.
+                                lval_or_proc_id->children = args->children; // PROC_CALL node now points to the children array
+                                lval_or_proc_id->child_count = args->child_count; // Update count
 
-                        // Nullify the pointers in the temporary 'args' node
-                        // so that freeAST(args) doesn't free the children array we just transferred.
-                        args->children = NULL;
-                        args->child_count = 0;
+                                // Nullify the pointers in the temporary 'args' node
+                                // so that freeAST(args) doesn't free the children array we just transferred.
+                                args->children = NULL;
+                                args->child_count = 0;
 
-                        // Set the parent pointer for each transferred argument node
-                        // so they correctly point back to the PROCEDURE_CALL node.
-                        for(int i=0; i < lval_or_proc_id->child_count; i++){
-                            if(lval_or_proc_id->children[i]) {
-                                lval_or_proc_id->children[i]->parent = lval_or_proc_id;
+                                // Set the parent pointer for each transferred argument node
+                                // so they correctly point back to the PROCEDURE_CALL node.
+                                for(int i=0; i < lval_or_proc_id->child_count; i++){
+                                    if(lval_or_proc_id->children[i]) {
+                                        lval_or_proc_id->children[i]->parent = lval_or_proc_id;
+                                    }
+                                }
+                                #ifdef DEBUG
+                                fprintf(stderr, "[DEBUG PARSER STMT] After transfer: proc_call %p has child_count=%d, children_ptr=%p\n",
+                                        (void*)lval_or_proc_id, lval_or_proc_id->child_count, (void*)lval_or_proc_id->children);
+                                #endif
+
+                            } else if (args) {
+                                // This case handles if exprList returned non-compound (shouldn't happen) or empty compound.
+                                lval_or_proc_id->children = NULL;
+                                lval_or_proc_id->child_count = 0;
+                                #ifdef DEBUG
+                                fprintf(stderr, "[DEBUG PARSER STMT] Args node existed but was empty or not compound\n");
+                                #endif
+                                // We still need to free the 'args' node below.
+                            } else { // args was NULL (error during exprList parsing)
+                                lval_or_proc_id->children = NULL;
+                                lval_or_proc_id->child_count = 0;
+                                #ifdef DEBUG
+                                fprintf(stderr, "[DEBUG PARSER STMT] exprList returned NULL, setting proc_call children to NULL\n");
+                                #endif
+                                // If exprList failed, it should have called errorParser already.
                             }
+
+                            // Free the temporary COMPOUND wrapper node returned by exprList (if it existed).
+                            // Use freeAST, not free.
+                            if (args) {
+                                #ifdef DEBUG
+                                 fprintf(stderr, "[DEBUG PARSER STMT] Freeing args wrapper node %p\n", (void*)args);
+                                #endif
+                                 freeAST(args); // <<< USE freeAST here
+                            }
+                            // --- End: CORRECTED/COMPLETE Argument Transfer Logic ---
+
+                        } else { // Empty argument list '()'
+                            lval_or_proc_id->children = NULL;
+                            lval_or_proc_id->child_count = 0;
+                             #ifdef DEBUG
+                             fprintf(stderr, "[DEBUG PARSER STMT] Empty argument list '()': proc_call %p has child_count=0\n", (void*)lval_or_proc_id);
+                             #endif
                         }
-#ifdef DEBUG
-                        fprintf(stderr, "[DEBUG PARSER STMT] After transfer: proc_call %p has child_count=%d, children_ptr=%p\n",
-                                (void*)lval_or_proc_id, lval_or_proc_id->child_count, (void*)lval_or_proc_id->children);
-#endif
 
-                    } else if (args) {
-                        // This case handles if exprList returned non-compound (shouldn't happen) or empty compound.
-                        // Assign NULL/0 to be safe.
-                        lval_or_proc_id->children = NULL;
-                        lval_or_proc_id->child_count = 0;
-#ifdef DEBUG
-                        fprintf(stderr, "[DEBUG PARSER STMT] Args node existed but was empty or not compound\n");
-#endif
-                        // We still need to free the 'args' node below.
+                        eat(parser, TOKEN_RPAREN); // Consume ')'
+                        node = lval_or_proc_id; // Use the modified node as the statement result
+                        // Semicolon separator handled by compoundStatement loop
 
-                    } else { // args was NULL (error during exprList parsing)
-                        lval_or_proc_id->children = NULL;
-                        lval_or_proc_id->child_count = 0;
-#ifdef DEBUG
-                         fprintf(stderr, "[DEBUG PARSER STMT] exprList returned NULL, setting proc_call children to NULL\n");
-#endif
-                         // If exprList failed, it should have called errorParser already.
+                    } else if (lval_or_proc_id->type == AST_VARIABLE) {
+                         // --- Parameter-less Procedure Call ---
+                         // (e.g., ClrScr;) Correctly identified if not followed by LPAREN or ASSIGN.
+                        Token* procNameToken = copyToken(lval_or_proc_id->token);
+                        if (!procNameToken) { /* Malloc error */ freeAST(lval_or_proc_id); EXIT_FAILURE_HANDLER(); }
+
+                        AST *procCallNode = newASTNode(AST_PROCEDURE_CALL, procNameToken);
+                        if (!procCallNode) { /* Malloc error */ freeToken(procNameToken); freeAST(lval_or_proc_id); EXIT_FAILURE_HANDLER(); }
+
+                        procCallNode->children = NULL; // No arguments
+                        procCallNode->child_count = 0;
+
+                        freeToken(procNameToken); // Free the copy passed to newASTNode
+                        freeAST(lval_or_proc_id); // Free the temporary AST_VARIABLE node created by lvalue()
+                        node = procCallNode; // Use the new PROC_CALL node as the statement result
+                        // Semicolon separator handled by compoundStatement loop
+
+                    } else {
+                        // --- Error: Invalid Statement ---
+                        // If lval_or_proc_id is FIELD_ACCESS or ARRAY_ACCESS, it cannot stand alone.
+                        char error_msg[150];
+                        snprintf(error_msg, sizeof(error_msg),
+                                 "Expression starting with '%s' cannot be used as a statement here (followed by '%s')",
+                                 lval_or_proc_id->token ? lval_or_proc_id->token->value : "<complex_lvalue>",
+                                 tokenTypeToString(parser->current_token->type));
+                        errorParser(parser, error_msg);
+                        freeAST(lval_or_proc_id); // Free the invalid lvalue node
+                        node = newASTNode(AST_NOOP, NULL); // Return NOOP for error recovery
                     }
 
-                    // Free the temporary COMPOUND wrapper node returned by exprList (if it existed).
-                    // Use freeAST, not free.
-                    if (args) {
-#ifdef DEBUG
-                         fprintf(stderr, "[DEBUG PARSER STMT] Freeing args wrapper node %p\n", (void*)args);
-#endif
-                         freeAST(args);
-                    }
-                            // --- End: Correct Argument Transfer Logic ---
+                     // --- Debug print just before leaving case ---
+                     #ifdef DEBUG
+                     if(node && (node->type == AST_PROCEDURE_CALL || node->type == AST_ASSIGN)) {
+                          fprintf(stderr, "[DEBUG PARSER STMT] Leaving TOKEN_IDENTIFIER case, node %p: type=%s, child_count=%d, children_ptr=%p\n",
+                                 (void*)node, astTypeToString(node->type), node->child_count, (void*)node->children);
+                     }
+                     #endif
+                     // ---
 
-                } else { // Empty argument list '()'
-                    lval_or_proc_id->children = NULL;
-                    lval_or_proc_id->child_count = 0;
-#ifdef DEBUG
-                    fprintf(stderr, "[DEBUG PARSER STMT] Empty argument list '()': proc_call %p has child_count=0\n", (void*)lval_or_proc_id);
-#endif
-                }
-
-                eat(parser, TOKEN_RPAREN); // Consume ')'
-                node = lval_or_proc_id; // Use the modified node as the statement result
-                // Semicolon separator handled by compoundStatement loop
-
-            } else if (lval_or_proc_id->type == AST_VARIABLE) {
-                 // --- Parameter-less Procedure Call ---
-                 // (e.g., ClrScr;)
-                Token* procNameToken = copyToken(lval_or_proc_id->token);
-                if (!procNameToken) { /* Malloc error */ freeAST(lval_or_proc_id); EXIT_FAILURE_HANDLER(); }
-
-                AST *procCallNode = newASTNode(AST_PROCEDURE_CALL, procNameToken);
-                if (!procCallNode) { /* Malloc error */ freeToken(procNameToken); freeAST(lval_or_proc_id); EXIT_FAILURE_HANDLER(); }
-
-                procCallNode->children = NULL; // No arguments
-                procCallNode->child_count = 0;
-
-                freeToken(procNameToken); // Free the copy passed to newASTNode
-                freeAST(lval_or_proc_id); // Free the temporary AST_VARIABLE node created by lvalue()
-                node = procCallNode; // Use the new PROC_CALL node as the statement result
-                // Semicolon separator handled by compoundStatement loop
-
-            } else {
-                // --- Error: Invalid Statement ---
-                // If lval_or_proc_id is FIELD_ACCESS or ARRAY_ACCESS, it cannot stand alone.
-                char error_msg[150];
-                snprintf(error_msg, sizeof(error_msg),
-                         "Expression starting with '%s' cannot be used as a statement here (followed by '%s')",
-                         lval_or_proc_id->token ? lval_or_proc_id->token->value : "<complex_lvalue>",
-                         tokenTypeToString(parser->current_token->type));
-                errorParser(parser, error_msg);
-                freeAST(lval_or_proc_id); // Free the invalid lvalue node
-                node = newASTNode(AST_NOOP, NULL); // Return NOOP for error recovery
-            }
-
-             // --- ADD DEBUG PRINT JUST BEFORE LEAVING CASE ---
-             if(node && (node->type == AST_PROCEDURE_CALL || node->type == AST_ASSIGN)) {
-#ifdef DEBUG
-                  fprintf(stderr, "[DEBUG PARSER STMT] Leaving TOKEN_IDENTIFIER case, node %p: type=%s, child_count=%d, children_ptr=%p\n",
-                         (void*)node, astTypeToString(node->type), node->child_count, (void*)node->children);
-#endif
-             }
-             // ---
-
-            break; // End case TOKEN_IDENTIFIER
-        } // End brace for case TOKEN_IDENTIFIER
+                    break; // End case TOKEN_IDENTIFIER
+                } // End brace for case TOKEN_IDENTIFIER
         // --- Cases for specific statement keywords ---
         case TOKEN_IF:
             node = ifStatement(parser);
