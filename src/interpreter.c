@@ -1968,68 +1968,78 @@ void executeWithScope(AST *node, bool is_global_scope)  {
 
         case AST_WRITE:
         case AST_WRITELN: {
-            FILE *output = stdout;
-            int startIndex = 0;
-            // --- Check for File Argument ---
-            // Be cautious here. If the first arg is a file, eval might return a simple FILE type.
-            // If the first arg is intended to be printed, eval might return a complex type.
-            // We need robust checking or make assumptions. Assuming file check is intended:
-            if (node->child_count > 0) {
-                 // Evaluate only if it's potentially a file variable
-                 if (node->children[0]->type == AST_VARIABLE) { // Simple check
-                     Symbol* sym = lookupSymbol(node->children[0]->token->value);
-                     if (sym && sym->type == TYPE_FILE) {
-                         Value fileVal = eval(node->children[0]); // Evaluate the file variable
-                         if (fileVal.type == TYPE_FILE) { // Double-check eval result
-                              if (fileVal.f_val != NULL) {
-                                  output = fileVal.f_val;
-                                  startIndex = 1;
-                              } else {
-                                  fprintf(stderr, "Runtime Warning: File variable passed to write(ln) is not open.\n");
-                                  // Continue writing to stdout or error? Assuming stdout for now.
-                              }
-                         }
-                         // No freeValue needed for fileVal here, as it's just a file pointer/handle.
-                     }
+             FILE *output = stdout;
+             int startIndex = 0;
+             // --- Check for File Argument ---
+             if (node->child_count > 0) {
+                  if (node->children[0]->type == AST_VARIABLE) {
+                      Symbol* sym = lookupSymbol(node->children[0]->token->value);
+                      if (sym && sym->type == TYPE_FILE) {
+                          Value fileVal = eval(node->children[0]);
+                          if (fileVal.type == TYPE_FILE) {
+                               if (fileVal.f_val != NULL) {
+                                   output = fileVal.f_val;
+                                   startIndex = 1;
+                               } else {
+                                   fprintf(stderr, "Runtime Warning: File variable passed to write(ln) is not open.\n");
+                               }
+                          }
+                      }
+                  }
+             } // End file argument check
+
+             // --- Loop through arguments to print ---
+             for (int i = startIndex; i < node->child_count; i++) {
+                 // --- Get the argument node itself ---
+                 AST *argNode = node->children[i];
+                 if (!argNode) { // Safety check
+                     fprintf(stderr, "Error: NULL argument node in write/writeln.\n");
+                     continue;
                  }
-            } // End file argument check
+                 // ---
 
-            // --- Loop through arguments to print ---
-            for (int i = startIndex; i < node->child_count; i++) {
-                Value val = eval(node->children[i]); // Evaluate the argument to print
+                 Value val = eval(argNode); // Evaluate the argument node
 
-                // --- Existing printing logic ---
-                if (node->children[i]->type == AST_FORMATTED_EXPR) { // Check the ARG node type, not the evaluated value type
-                    // ... (your existing formatted print logic using val) ...
-                } else {
-                     // ... (your existing unformatted print logic using val) ...
+                 // --- CORRECTED Check: Check the ARGUMENT node's type ---
+                 if (argNode->type == AST_FORMATTED_EXPR) {
+                      // We already evaluated it, and 'eval' returned the formatted string.
+                      // So, just print the string contained in 'val'.
+                      if (val.type == TYPE_STRING) { // Should always be true here
+                          fprintf(output, "%s", val.s_val ? val.s_val : "");
+                      } else {
+                          // Should not happen if eval(AST_FORMATTED_EXPR) works correctly
+                          fprintf(output, "[formatted_eval_error]");
+                      }
+                 } else {
+                      // Original logic for non-formatted values
                       if (val.type == TYPE_INTEGER)
-                        fprintf(output, "%lld", val.i_val);
-                    else if (val.type == TYPE_REAL)
-                        fprintf(output, "%f", val.r_val);
-                    else if (val.type == TYPE_BOOLEAN)
-                        fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
-                    else if (val.type == TYPE_STRING)
-                        fprintf(output, "%s", val.s_val ? val.s_val : ""); // Handle null string
-                    else if (val.type == TYPE_CHAR)
-                        fputc(val.c_val, output);
-                    else if (val.type == TYPE_RECORD)
-                        fprintf(output, "[record]");
-                    // Add cases for ENUM, ARRAY, SET etc. if needed
-                    else fprintf(output, "[unprintable]");
-                }
-                // --- END Existing printing logic ---
+                         fprintf(output, "%lld", val.i_val);
+                      else if (val.type == TYPE_REAL)
+                          fprintf(output, "%f", val.r_val); // Default float format
+                      else if (val.type == TYPE_BOOLEAN)
+                         fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
+                      else if (val.type == TYPE_STRING)
+                         fprintf(output, "%s", val.s_val ? val.s_val : ""); // Handle null string
+                      else if (val.type == TYPE_CHAR)
+                         fputc(val.c_val, output);
+                      else if (val.type == TYPE_RECORD)
+                         fprintf(output, "[record]");
+                      // Add cases for ENUM, ARRAY, SET etc. if needed
+                       else if (val.type == TYPE_ENUM) // Example for Enum
+                          fprintf(output, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "<enum>"); // Adjust as needed
+                      else fprintf(output, "[unprintable]");
+                 }
+                 // --- END CORRECTED Check ---
 
-                // --- ADDED: Free the evaluated value ---
-                freeValue(&val);
-                // --- END ADDITION ---
-            } // End loop
+                 freeValue(&val); // Free the evaluated value
+             } // End loop
 
-            if (node->type == AST_WRITELN)
-                fprintf(output, "\n");
-            fflush(output); // Force the output buffer to be written
-            break;
-        } // End case AST_WRITE/AST_WRITELN
+             if (node->type == AST_WRITELN)
+                 fprintf(output, "\n");
+             fflush(output); // Force the output buffer to be written
+             break;
+         } // End case AST_WRITE/AST_WRITELN
+            
         case AST_READLN: {
             FILE *input = stdin;
             int startIndex = 0;
