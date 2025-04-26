@@ -563,6 +563,12 @@ Symbol *lookupSymbolIn(Symbol *env, const char *name) {
 }
 
 void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
+    if (!name || name[0] == '\0') {
+        fprintf(stderr, "[ERROR] Attempted to insert global symbol with invalid name.\n");
+        // Optionally dump call stack or more context if possible in debug mode
+        return; // Or EXIT_FAILURE_HANDLER(); depending on desired strictness
+    }
+    
     if (lookupGlobalSymbol(name)) {
         fprintf(stderr, "[ERROR] Duplicate global symbol '%s'\n", name);
         return;
@@ -575,6 +581,7 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     new_symbol->name = strdup(name);
     new_symbol->type = type;
     new_symbol->is_alias = false;
+    new_symbol->is_const = false;
     new_symbol->is_local_var = false;
     new_symbol->next = NULL;
     new_symbol->value = calloc(1, sizeof(Value)); // calloc zero-initializes
