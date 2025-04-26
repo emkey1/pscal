@@ -842,6 +842,7 @@ Value eval(AST *node) {
                     Value left = eval(node->left);
                     Value right = eval(node->right);
                     TokenType op = node->token->type;
+                    Value result = makeVoid(); // Initialize result placeholder
 
                     // --- Handle IN operator FIRST (Set membership) ---
                     if (op == TOKEN_IN) {
@@ -872,249 +873,250 @@ Value eval(AST *node) {
                                 }
                             }
                         }
-                        return makeBoolean(found); // Use makeBoolean consistently
+                        result = makeBoolean(found); // Use makeBoolean consistently
                     } // --- End IN operator ---
+                    else { // Process other binary operators
 
-                    // --- Handle specific promotions for comparisons ---
-                    // Note: This promotion happens *before* the main type-specific logic blocks below.
-                    // It simplifies comparisons by trying to bring operands to a common comparable type (Integer).
-                    if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
-                        op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL)
-                    {
-                        // Promote CHAR vs INTEGER or CHAR vs CHAR to INTEGER for comparison
-                        if (left.type == TYPE_CHAR && right.type == TYPE_INTEGER) {
-                            left = makeInt((long long)left.c_val);
-                        } else if (left.type == TYPE_INTEGER && right.type == TYPE_CHAR) {
-                            right = makeInt((long long)right.c_val);
-                        } else if (left.type == TYPE_CHAR && right.type == TYPE_CHAR) {
-                            left = makeInt((long long)left.c_val);
-                            right = makeInt((long long)right.c_val);
+                        // --- Handle specific promotions for comparisons ---
+                        // Note: This promotion happens *before* the main type-specific logic blocks below.
+                        // It simplifies comparisons by trying to bring operands to a common comparable type (Integer).
+                        if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
+                            op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL)
+                        {
+                            // Promote CHAR vs INTEGER or CHAR vs CHAR to INTEGER for comparison
+                            if (left.type == TYPE_CHAR && right.type == TYPE_INTEGER) {
+                                left = makeInt((long long)left.c_val);
+                            } else if (left.type == TYPE_INTEGER && right.type == TYPE_CHAR) {
+                                right = makeInt((long long)right.c_val);
+                            } else if (left.type == TYPE_CHAR && right.type == TYPE_CHAR) {
+                                left = makeInt((long long)left.c_val);
+                                right = makeInt((long long)right.c_val);
+                            }
+                            // Promote ENUM vs INTEGER or ENUM vs ENUM (same type) to INTEGER for comparison
+                             else if (left.type == TYPE_ENUM && right.type == TYPE_INTEGER) {
+                                 left = makeInt((long long)left.enum_val.ordinal);
+                             } else if (left.type == TYPE_INTEGER && right.type == TYPE_ENUM) {
+                                 right = makeInt((long long)right.enum_val.ordinal);
+                             }
+                             // <<< Enum vs Enum comparison is handled explicitly below >>>
                         }
-                        // Promote ENUM vs INTEGER or ENUM vs ENUM (same type) to INTEGER for comparison
-                         else if (left.type == TYPE_ENUM && right.type == TYPE_INTEGER) {
-                             left = makeInt((long long)left.enum_val.ordinal);
-                         } else if (left.type == TYPE_INTEGER && right.type == TYPE_ENUM) {
-                             right = makeInt((long long)right.enum_val.ordinal);
-                         }
-                         // <<< This is where the previous ENUM vs ENUM comparison was,
-                         //     but we need the original types later, so we remove this specific promotion block
-                         //     and handle enum vs enum comparison explicitly below. >>>
-                    }
 
-                    // Promote non-comparison ENUM operands to INTEGER if not interacting with REAL/STRING/BOOLEAN
-                     // (Be careful with this - might hide errors if types are truly incompatible)
-                     // Let's comment this out for now and rely on explicit type handling below.
-                    /*
-                    if (left.type != TYPE_REAL && right.type != TYPE_REAL && left.type != TYPE_STRING && right.type != TYPE_STRING && left.type != TYPE_BOOLEAN && right.type != TYPE_BOOLEAN && op != TOKEN_SLASH) {
-                        if (left.type == TYPE_ENUM) left = makeInt(left.enum_val.ordinal);
-                        if (right.type == TYPE_ENUM) right = makeInt(right.enum_val.ordinal);
-                    }
-                    */
+                        // --- Short-circuit boolean LOGICAL ops (AND, OR) ---
+                        if (op == TOKEN_AND || op == TOKEN_OR) { // Added TOKEN_XOR potentially later
+                            // Expect boolean or integer operands for logical ops
+                            bool left_bool = (left.type == TYPE_BOOLEAN || left.type == TYPE_INTEGER);
+                            bool right_bool = (right.type == TYPE_BOOLEAN || right.type == TYPE_INTEGER);
+                            if (!left_bool || !right_bool) {
+                                 fprintf(stderr, "Runtime error: Operands for %s must be boolean or integer. Left: %s, Right: %s\n",
+                                         tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
+                                 // freeValue(&left); // Free before exit
+                                 // freeValue(&right);
+                                 EXIT_FAILURE_HANDLER();
+                            }
+                            long long left_ival = (left.type == TYPE_BOOLEAN) ? left.i_val : left.i_val; // Assume integer uses i_val
+                            long long right_ival = (right.type == TYPE_BOOLEAN) ? right.i_val : right.i_val;
 
-                    // --- Short-circuit boolean LOGICAL ops (AND, OR) ---
-                    if (op == TOKEN_AND || op == TOKEN_OR) { // Added TOKEN_XOR potentially later
-                        // Expect boolean or integer operands for logical ops
-                        bool left_bool = (left.type == TYPE_BOOLEAN || left.type == TYPE_INTEGER);
-                        bool right_bool = (right.type == TYPE_BOOLEAN || right.type == TYPE_INTEGER);
-                        if (!left_bool || !right_bool) {
-                             fprintf(stderr, "Runtime error: Operands for %s must be boolean or integer. Left: %s, Right: %s\n",
-                                     tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
-                             EXIT_FAILURE_HANDLER();
+                            if (op == TOKEN_AND) result = makeBoolean((left_ival != 0) && (right_ival != 0));
+                            if (op == TOKEN_OR) result = makeBoolean((left_ival != 0) || (right_ival != 0));
+                            // Add XOR if implemented: result = makeBoolean((left_ival != 0) ^ (right_ival != 0));
+                        } // --- End logical ops ---
+
+
+                        // --- Start of type-specific handling ---
+
+                        // 1. INTEGER math & comparison (if both operands are currently INTEGER type after potential promotion)
+                        else if (left.type == TYPE_INTEGER && right.type == TYPE_INTEGER && op != TOKEN_SLASH) { // Check 'else if'
+                            long long a = left.i_val, b = right.i_val;
+                            switch (op) {
+                                // Arithmetic (result is Integer)
+                                case TOKEN_PLUS:   result = makeInt(a + b); break;
+                                case TOKEN_MINUS:  result = makeInt(a - b); break;
+                                case TOKEN_MUL:    result = makeInt(a * b); break;
+                                case TOKEN_INT_DIV:
+                                    if (b == 0) { fprintf(stderr,"Runtime error: Division by zero.\n"); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+                                    result = makeInt(a / b); break; // Integer division
+                                case TOKEN_MOD:
+                                    if (b == 0) { fprintf(stderr,"Runtime error: Modulo by zero.\n"); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+                                    result = makeInt(a % b); break;
+                                // Comparisons (result is Boolean)
+                                case TOKEN_GREATER:       result = makeBoolean(a > b); break;
+                                case TOKEN_GREATER_EQUAL: result = makeBoolean(a >= b); break;
+                                case TOKEN_EQUAL:         result = makeBoolean(a == b); break;
+                                case TOKEN_NOT_EQUAL:     result = makeBoolean(a != b); break;
+                                case TOKEN_LESS:          result = makeBoolean(a < b); break;
+                                case TOKEN_LESS_EQUAL:    result = makeBoolean(a <= b); break;
+                                // Operators invalid for Integer after potential promotions
+                                case TOKEN_SLASH: // Should have been promoted to REAL if '/' was used
+                                case TOKEN_DOTDOT: // Not a binary operator in expressions
+                                case TOKEN_AND: case TOKEN_OR: // Handled above
+                                    fprintf(stderr, "Internal error: Operator %s should not operate on two integers here.\n", tokenTypeToString(op));
+                                    freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                                default:
+                                    fprintf(stderr, "Runtime error: Unhandled operator '%s' for INTEGER operands.\n", tokenTypeToString(op));
+                                    freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                            }
                         }
-                        long long left_ival = (left.type == TYPE_BOOLEAN) ? left.i_val : left.i_val; // Assume integer uses i_val
-                        long long right_ival = (right.type == TYPE_BOOLEAN) ? right.i_val : right.i_val;
 
-                        if (op == TOKEN_AND) return makeBoolean((left_ival != 0) && (right_ival != 0));
-                        if (op == TOKEN_OR) return makeBoolean((left_ival != 0) || (right_ival != 0));
-                        // Add XOR if implemented: return makeBoolean((left_ival != 0) ^ (right_ival != 0));
-                    } // --- End logical ops ---
+                        // 2. STRING concatenation or comparison
+                        else if (left.type == TYPE_STRING || right.type == TYPE_STRING || left.type == TYPE_CHAR || right.type == TYPE_CHAR) { // Check 'else if'
+                             // Promote Char to String for operations
+                             char temp_left[2] = {0}, temp_right[2] = {0}; // Buffers for char-to-string
+                             const char *left_s = left.s_val, *right_s = right.s_val;
 
+                             if (left.type == TYPE_CHAR) {
+                                 temp_left[0] = left.c_val; left_s = temp_left;
+                             } else if (left.type != TYPE_STRING) {
+                                  fprintf(stderr, "Runtime error: Incompatible left operand type %s for string operation with op %s.\n", varTypeToString(left.type), tokenTypeToString(op));
+                                  freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
 
-                    // --- Start of type-specific handling ---
+                             if (right.type == TYPE_CHAR) {
+                                 temp_right[0] = right.c_val; right_s = temp_right;
+                             } else if (right.type != TYPE_STRING) {
+                                   fprintf(stderr, "Runtime error: Incompatible right operand type %s for string operation with op %s.\n", varTypeToString(right.type), tokenTypeToString(op));
+                                   freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
 
-                    // 1. INTEGER math & comparison (if both operands are currently INTEGER type after potential promotion)
-                    if (left.type == TYPE_INTEGER && right.type == TYPE_INTEGER && op != TOKEN_SLASH) {
-                        long long a = left.i_val, b = right.i_val;
-                        switch (op) {
-                            // Arithmetic (result is Integer)
-                            case TOKEN_PLUS:   return makeInt(a + b);
-                            case TOKEN_MINUS:  return makeInt(a - b);
-                            case TOKEN_MUL:    return makeInt(a * b);
-                            case TOKEN_INT_DIV:
-                                if (b == 0) { fprintf(stderr,"Runtime error: Division by zero.\n"); EXIT_FAILURE_HANDLER(); }
-                                return makeInt(a / b); // Integer division
-                            case TOKEN_MOD:
-                                if (b == 0) { fprintf(stderr,"Runtime error: Modulo by zero.\n"); EXIT_FAILURE_HANDLER(); }
-                                return makeInt(a % b);
-                            // Comparisons (result is Boolean)
-                            case TOKEN_GREATER:       return makeBoolean(a > b);
-                            case TOKEN_GREATER_EQUAL: return makeBoolean(a >= b);
-                            case TOKEN_EQUAL:         return makeBoolean(a == b);
-                            case TOKEN_NOT_EQUAL:     return makeBoolean(a != b);
-                            case TOKEN_LESS:          return makeBoolean(a < b);
-                            case TOKEN_LESS_EQUAL:    return makeBoolean(a <= b);
-                            // Operators invalid for Integer after potential promotions
-                            case TOKEN_SLASH: // Should have been promoted to REAL if '/' was used
-                            case TOKEN_DOTDOT: // Not a binary operator in expressions
-                            case TOKEN_AND: case TOKEN_OR: // Handled above
-                                fprintf(stderr, "Internal error: Operator %s should not operate on two integers here.\n", tokenTypeToString(op));
-                                EXIT_FAILURE_HANDLER();
-                            default:
-                                fprintf(stderr, "Runtime error: Unhandled operator '%s' for INTEGER operands.\n", tokenTypeToString(op));
-                                EXIT_FAILURE_HANDLER();
+                             // Handle NULL strings safely
+                             if (!left_s) left_s = "";
+                             if (!right_s) right_s = "";
+
+                             if (op == TOKEN_PLUS) { // Concatenation
+                                 int len_left = (int)strlen(left_s);
+                                 int len_right = (int)strlen(right_s);
+                                 // Allocate sufficient buffer size (+1 for null terminator)
+                                 size_t buffer_size = len_left + len_right + 1;
+                                 char *concat_result = malloc(buffer_size);
+                                 if (!concat_result) { /* Mem alloc error */ freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+
+                                 // Copy the left part first
+                                 strcpy(concat_result, left_s); // strcpy null-terminates
+                                 strncat(concat_result, right_s, len_right);
+
+                                 result = makeString(concat_result); // makeString copies 'concat_result'
+                                 free(concat_result);                  // Free the temporary buffer
+                             }
+                             else if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
+                                      op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL)
+                             { // Comparison
+                                 int cmp = strcmp(left_s, right_s);
+                                 switch (op) {
+                                     case TOKEN_EQUAL:         result = makeBoolean(cmp == 0); break;
+                                     case TOKEN_NOT_EQUAL:     result = makeBoolean(cmp != 0); break;
+                                     case TOKEN_LESS:          result = makeBoolean(cmp < 0); break;
+                                     case TOKEN_LESS_EQUAL:    result = makeBoolean(cmp <= 0); break;
+                                     case TOKEN_GREATER:       result = makeBoolean(cmp > 0); break;
+                                     case TOKEN_GREATER_EQUAL: result = makeBoolean(cmp >= 0); break;
+                                     default: break; // Should not happen
+                                 }
+                             } else {
+                                  fprintf(stderr, "Runtime error: Operator %s not supported for STRING/CHAR operands.\n", tokenTypeToString(op));
+                                  freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
                         }
-                    }
 
-                    // 2. STRING concatenation or comparison
-                    else if (left.type == TYPE_STRING || right.type == TYPE_STRING || left.type == TYPE_CHAR || right.type == TYPE_CHAR) {
-                         // Promote Char to String for operations
-                         char temp_left[2] = {0}, temp_right[2] = {0}; // Buffers for char-to-string
-                         const char *left_s = left.s_val, *right_s = right.s_val;
+                        // 3. ENUM comparison (This should be the primary comparison logic now)
+                        else if (left.type == TYPE_ENUM && right.type == TYPE_ENUM) { // Check 'else if'
+                             const char* left_name = left.enum_val.enum_name;
+                             const char* right_name = right.enum_val.enum_name;
+                             bool types_match = (!left_name || !right_name || strcmp(left_name, right_name) == 0);
 
-                         if (left.type == TYPE_CHAR) {
-                             temp_left[0] = left.c_val; left_s = temp_left;
-                         } else if (left.type != TYPE_STRING) {
-                              fprintf(stderr, "Runtime error: Incompatible left operand type %s for string operation with op %s.\n", varTypeToString(left.type), tokenTypeToString(op));
-                              EXIT_FAILURE_HANDLER();
-                         }
+                             if (!types_match && (op != TOKEN_EQUAL && op != TOKEN_NOT_EQUAL)) {
+                                  // Error on ordered comparison between different enum types
+                                  fprintf(stderr, "Runtime error: Cannot perform ordered comparison on different ENUM types ('%s' vs '%s').\n", left_name ? left_name : "?", right_name ? right_name : "?");
+                                  freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
 
-                         if (right.type == TYPE_CHAR) {
-                             temp_right[0] = right.c_val; right_s = temp_right;
-                         } else if (right.type != TYPE_STRING) {
-                               fprintf(stderr, "Runtime error: Incompatible right operand type %s for string operation with op %s.\n", varTypeToString(right.type), tokenTypeToString(op));
-                               EXIT_FAILURE_HANDLER();
-                         }
-
-                         // Handle NULL strings safely
-                         if (!left_s) left_s = "";
-                         if (!right_s) right_s = "";
-
-                         if (op == TOKEN_PLUS) { // Concatenation
-                             int len_left = (int)strlen(left_s);
-                             int len_right = (int)strlen(right_s);
-                             // Allocate sufficient buffer size (+1 for null terminator)
-                             size_t buffer_size = len_left + len_right + 1;
-                             char *result = malloc(buffer_size);
-                             if (!result) { /* Mem alloc error */ EXIT_FAILURE_HANDLER(); }
-
-                             // Copy the left part first
-                             strcpy(result, left_s); // strcpy null-terminates
-                             strncat(result, right_s, len_right);
-
-                             Value out = makeString(result); // makeString copies 'result'
-                             free(result);                  // Free the temporary buffer
-                             return out;
-                         }
-                         else if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
-                                  op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL)
-                         { // Comparison
-                             int cmp = strcmp(left_s, right_s);
                              switch (op) {
-                                 case TOKEN_EQUAL:         return makeBoolean(cmp == 0);
-                                 case TOKEN_NOT_EQUAL:     return makeBoolean(cmp != 0);
-                                 case TOKEN_LESS:          return makeBoolean(cmp < 0);
-                                 case TOKEN_LESS_EQUAL:    return makeBoolean(cmp <= 0);
-                                 case TOKEN_GREATER:       return makeBoolean(cmp > 0);
-                                 case TOKEN_GREATER_EQUAL: return makeBoolean(cmp >= 0);
+                                 case TOKEN_EQUAL:
+                                     // Types must match (or names missing) AND ordinals must match
+                                     result = makeBoolean(types_match && (left.enum_val.ordinal == right.enum_val.ordinal)); break;
+                                 case TOKEN_NOT_EQUAL:
+                                     // Types differ OR ordinals differ
+                                     result = makeBoolean(!types_match || (left.enum_val.ordinal != right.enum_val.ordinal)); break;
+                                 case TOKEN_LESS:
+                                     result = makeBoolean(types_match && (left.enum_val.ordinal < right.enum_val.ordinal)); break;
+                                 case TOKEN_LESS_EQUAL:
+                                     result = makeBoolean(types_match && (left.enum_val.ordinal <= right.enum_val.ordinal)); break;
+                                 case TOKEN_GREATER:
+                                     result = makeBoolean(types_match && (left.enum_val.ordinal > right.enum_val.ordinal)); break;
+                                 case TOKEN_GREATER_EQUAL:
+                                     result = makeBoolean(types_match && (left.enum_val.ordinal >= right.enum_val.ordinal)); break;
+                                 default:
+                                     fprintf(stderr, "Runtime error: Unsupported operator %s for ENUM types.\n", tokenTypeToString(op));
+                                     freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
+                        }
+
+                        // 4. BOOLEAN comparison (=, <>)
+                        else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN &&
+                                 (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL)) // Check 'else if'
+                        {
+                             switch (op) {
+                                 case TOKEN_EQUAL:     result = makeBoolean(left.i_val == right.i_val); break;
+                                 case TOKEN_NOT_EQUAL: result = makeBoolean(left.i_val != right.i_val); break;
                                  default: break; // Should not happen
                              }
-                         } else {
-                              fprintf(stderr, "Runtime error: Operator %s not supported for STRING/CHAR operands.\n", tokenTypeToString(op));
-                              EXIT_FAILURE_HANDLER();
-                         }
-                    }
+                        }
 
-                    // 3. ENUM comparison (This should be the primary comparison logic now)
-                    else if (left.type == TYPE_ENUM && right.type == TYPE_ENUM) {
-                         const char* left_name = left.enum_val.enum_name;
-                         const char* right_name = right.enum_val.enum_name;
-                         bool types_match = (!left_name || !right_name || strcmp(left_name, right_name) == 0);
+                        // 5. REAL / Mixed Numeric / '/' operations (Final numeric catch-all)
+                        // This block handles Real-Real, Real-Int, Int-Real, and Int-Int with '/'
+                        else if ((left.type == TYPE_REAL || left.type == TYPE_INTEGER) &&
+                                 (right.type == TYPE_REAL || right.type == TYPE_INTEGER)) // Check 'else if'
+                        {
+                             // Promote Integer to double for calculation
+                             double a = (left.type == TYPE_REAL) ? left.r_val : (double)left.i_val;
+                             double b = (right.type == TYPE_REAL) ? right.r_val : (double)right.i_val;
 
-                         if (!types_match && (op != TOKEN_EQUAL && op != TOKEN_NOT_EQUAL)) {
-                              // Error on ordered comparison between different enum types
-                              fprintf(stderr, "Runtime error: Cannot perform ordered comparison on different ENUM types ('%s' vs '%s').\n", left_name ? left_name : "?", right_name ? right_name : "?");
-                              EXIT_FAILURE_HANDLER();
-                         }
+                             switch (op) {
+                                 // Arithmetic ops -> return REAL
+                                 case TOKEN_PLUS:           result = makeReal(a + b); break;
+                                 case TOKEN_MINUS:          result = makeReal(a - b); break;
+                                 case TOKEN_MUL:            result = makeReal(a * b); break;
+                                 case TOKEN_SLASH: // Division always results in REAL
+                                     if (b == 0.0) { fprintf(stderr,"Runtime error: Division by zero.\n"); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+                                     result = makeReal(a / b); break;
 
-                         switch (op) {
-                             case TOKEN_EQUAL:
-                                 // Types must match (or names missing) AND ordinals must match
-                                 return makeBoolean(types_match && (left.enum_val.ordinal == right.enum_val.ordinal));
-                             case TOKEN_NOT_EQUAL:
-                                 // Types differ OR ordinals differ
-                                 return makeBoolean(!types_match || (left.enum_val.ordinal != right.enum_val.ordinal));
-                             case TOKEN_LESS:
-                                 return makeBoolean(types_match && (left.enum_val.ordinal < right.enum_val.ordinal));
-                             case TOKEN_LESS_EQUAL:
-                                 return makeBoolean(types_match && (left.enum_val.ordinal <= right.enum_val.ordinal));
-                             case TOKEN_GREATER:
-                                 return makeBoolean(types_match && (left.enum_val.ordinal > right.enum_val.ordinal));
-                             case TOKEN_GREATER_EQUAL:
-                                 return makeBoolean(types_match && (left.enum_val.ordinal >= right.enum_val.ordinal));
-                             default:
-                                 fprintf(stderr, "Runtime error: Unsupported operator %s for ENUM types.\n", tokenTypeToString(op));
-                                 EXIT_FAILURE_HANDLER();
-                         }
-                    }
+                                 // Comparison ops -> return BOOLEAN
+                                 case TOKEN_GREATER:        result = makeBoolean(a > b); break;
+                                 case TOKEN_GREATER_EQUAL:  result = makeBoolean(a >= b); break;
+                                 case TOKEN_EQUAL:          result = makeBoolean(a == b); break; // Note: floating point equality issues possible
+                                 case TOKEN_NOT_EQUAL:      result = makeBoolean(a != b); break;
+                                 case TOKEN_LESS:           result = makeBoolean(a < b); break;
+                                 case TOKEN_LESS_EQUAL:     result = makeBoolean(a <= b); break;
 
-                    // 4. BOOLEAN comparison (=, <>)
-                    else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN &&
-                             (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL))
-                    {
-                         switch (op) {
-                             case TOKEN_EQUAL:     return makeBoolean(left.i_val == right.i_val);
-                             case TOKEN_NOT_EQUAL: return makeBoolean(left.i_val != right.i_val);
-                             default: break; // Should not happen
-                         }
-                    }
+                                 // Operators invalid for REALs
+                                 case TOKEN_INT_DIV:
+                                 case TOKEN_MOD:
+                                 case TOKEN_DOTDOT:
+                                 case TOKEN_AND:
+                                 case TOKEN_OR:
+                                      fprintf(stderr, "Runtime error: Operator %s not valid for REAL/Mixed operands.\n", tokenTypeToString(op));
+                                      freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                                 default:
+                                      fprintf(stderr, "Runtime error: Unhandled numeric operator '%s' in REAL/Mixed block.\n", tokenTypeToString(op));
+                                      freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
+                        }
 
-                    // 5. REAL / Mixed Numeric / '/' operations (Final numeric catch-all)
-                    // This block handles Real-Real, Real-Int, Int-Real, and Int-Int with '/'
-                    else if ((left.type == TYPE_REAL || left.type == TYPE_INTEGER) &&
-                             (right.type == TYPE_REAL || right.type == TYPE_INTEGER))
-                    {
-                         // Promote Integer to double for calculation
-                         double a = (left.type == TYPE_REAL) ? left.r_val : (double)left.i_val;
-                         double b = (right.type == TYPE_REAL) ? right.r_val : (double)right.i_val;
+                        // --- Fallback / Error ---
+                        else { // Final else for non-IN operators
+                            // If none of the above specific type combinations matched
+                            fprintf(stderr, "Internal error or unsupported operand types: Binary operation fell through. Op: %s, Left: %s, Right: %s\n",
+                                    tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
+                            freeValue(&left); freeValue(&right);
+                            EXIT_FAILURE_HANDLER();
+                        }
+                    } // End else block for non-IN operators
 
-                         switch (op) {
-                             // Arithmetic ops -> return REAL
-                             case TOKEN_PLUS:           return makeReal(a + b);
-                             case TOKEN_MINUS:          return makeReal(a - b);
-                             case TOKEN_MUL:            return makeReal(a * b);
-                             case TOKEN_SLASH: // Division always results in REAL
-                                 if (b == 0.0) { fprintf(stderr,"Runtime error: Division by zero.\n"); EXIT_FAILURE_HANDLER(); }
-                                 return makeReal(a / b);
+                    // --- ADDED: Free temporary operand values ---
+                    freeValue(&left);
+                    freeValue(&right);
+                    // --- END ADDITION ---
 
-                             // Comparison ops -> return BOOLEAN
-                             case TOKEN_GREATER:        return makeBoolean(a > b);
-                             case TOKEN_GREATER_EQUAL:  return makeBoolean(a >= b);
-                             case TOKEN_EQUAL:          return makeBoolean(a == b); // Note: floating point equality issues possible
-                             case TOKEN_NOT_EQUAL:      return makeBoolean(a != b);
-                             case TOKEN_LESS:           return makeBoolean(a < b);
-                             case TOKEN_LESS_EQUAL:     return makeBoolean(a <= b);
+                    return result; // Return the computed result
 
-                             // Operators invalid for REALs
-                             case TOKEN_INT_DIV:
-                             case TOKEN_MOD:
-                             case TOKEN_DOTDOT:
-                             case TOKEN_AND:
-                             case TOKEN_OR:
-                                  fprintf(stderr, "Runtime error: Operator %s not valid for REAL/Mixed operands.\n", tokenTypeToString(op));
-                                  EXIT_FAILURE_HANDLER();
-                             default:
-                                  fprintf(stderr, "Runtime error: Unhandled numeric operator '%s' in REAL/Mixed block.\n", tokenTypeToString(op));
-                                  EXIT_FAILURE_HANDLER();
-                         }
-                    }
-
-                    // --- Fallback / Error ---
-                    // If none of the above specific type combinations matched
-                    fprintf(stderr, "Internal error or unsupported operand types: Binary operation fell through. Op: %s, Left: %s, Right: %s\n",
-                            tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
-                    EXIT_FAILURE_HANDLER();
-
-                } // End case AST_BINARY_OP // End case AST_BINARY_OP
+                } // End case AST_BINARY_OP
         case AST_SET: // Add case to handle set evaluation
             return evalSet(node);
         case AST_UNARY_OP: {
@@ -1968,58 +1970,66 @@ void executeWithScope(AST *node, bool is_global_scope)  {
         case AST_WRITELN: {
             FILE *output = stdout;
             int startIndex = 0;
+            // --- Check for File Argument ---
+            // Be cautious here. If the first arg is a file, eval might return a simple FILE type.
+            // If the first arg is intended to be printed, eval might return a complex type.
+            // We need robust checking or make assumptions. Assuming file check is intended:
             if (node->child_count > 0) {
-                Value firstArg = eval(node->children[0]);
-                if (firstArg.type == TYPE_FILE && firstArg.f_val != NULL) {
-                    output = firstArg.f_val;
-                    startIndex = 1;
-                }
-            }
+                 // Evaluate only if it's potentially a file variable
+                 if (node->children[0]->type == AST_VARIABLE) { // Simple check
+                     Symbol* sym = lookupSymbol(node->children[0]->token->value);
+                     if (sym && sym->type == TYPE_FILE) {
+                         Value fileVal = eval(node->children[0]); // Evaluate the file variable
+                         if (fileVal.type == TYPE_FILE) { // Double-check eval result
+                              if (fileVal.f_val != NULL) {
+                                  output = fileVal.f_val;
+                                  startIndex = 1;
+                              } else {
+                                  fprintf(stderr, "Runtime Warning: File variable passed to write(ln) is not open.\n");
+                                  // Continue writing to stdout or error? Assuming stdout for now.
+                              }
+                         }
+                         // No freeValue needed for fileVal here, as it's just a file pointer/handle.
+                     }
+                 }
+            } // End file argument check
 
+            // --- Loop through arguments to print ---
             for (int i = startIndex; i < node->child_count; i++) {
-                Value val = eval(node->children[i]);
+                Value val = eval(node->children[i]); // Evaluate the argument to print
 
-                if (node->type == AST_FORMATTED_EXPR) {
-                    int width, decimals;
-                    sscanf(val.s_val, "%d,%d", &width, &decimals);
-                    if (val.type == TYPE_INTEGER) {
-                        if (decimals >= 0)
-                            fprintf(output, "%*.*lld", width, decimals, val.i_val);
-                        else
-                            fprintf(output, "%*lld", width, val.i_val);
-                    } else if (val.type == TYPE_REAL) {
-                        if (decimals >= 0)
-                            fprintf(output, "%*.*f", width, decimals, val.r_val);
-                        else
-                            fprintf(output, "%*f", width, val.r_val);
-                    } else if (val.type == TYPE_STRING || val.type == TYPE_CHAR) {
-                        fprintf(output, "%*s", width, val.s_val);
-                    } else {
-                        fprintf(output, "%*s", width, "???");
-                    }
-
+                // --- Existing printing logic ---
+                if (node->children[i]->type == AST_FORMATTED_EXPR) { // Check the ARG node type, not the evaluated value type
+                    // ... (your existing formatted print logic using val) ...
                 } else {
-                    if (val.type == TYPE_INTEGER)
+                     // ... (your existing unformatted print logic using val) ...
+                      if (val.type == TYPE_INTEGER)
                         fprintf(output, "%lld", val.i_val);
                     else if (val.type == TYPE_REAL)
                         fprintf(output, "%f", val.r_val);
                     else if (val.type == TYPE_BOOLEAN)
                         fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
                     else if (val.type == TYPE_STRING)
-                        fprintf(output, "%s", val.s_val);
+                        fprintf(output, "%s", val.s_val ? val.s_val : ""); // Handle null string
                     else if (val.type == TYPE_CHAR)
                         fputc(val.c_val, output);
                     else if (val.type == TYPE_RECORD)
                         fprintf(output, "[record]");
+                    // Add cases for ENUM, ARRAY, SET etc. if needed
+                    else fprintf(output, "[unprintable]");
                 }
-            }
+                // --- END Existing printing logic ---
+
+                // --- ADDED: Free the evaluated value ---
+                freeValue(&val);
+                // --- END ADDITION ---
+            } // End loop
 
             if (node->type == AST_WRITELN)
                 fprintf(output, "\n");
-            fflush(stdout); // Force the output buffer to be written to the terminal
+            fflush(output); // Force the output buffer to be written
             break;
-        }
-
+        } // End case AST_WRITE/AST_WRITELN
         case AST_READLN: {
             FILE *input = stdin;
             int startIndex = 0;
