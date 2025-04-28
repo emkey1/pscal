@@ -18,7 +18,6 @@
 int gParamCount = 0;
 char **gParamValues = NULL;
 
-
 List *inserted_global_names = NULL;
 
 void initSymbolSystem(void) {
@@ -29,8 +28,8 @@ void initSymbolSystem(void) {
  * execute_with_ast_dump - Dumps the full AST to a file then executes the program.
  *
  * Parameters:
- *   program_ast  - Pointer to the root of the AST for the parsed program.
- *   program_name - Name of the Pascal program (used to build the dump filename).
+ * program_ast  - Pointer to the root of the AST for the parsed program.
+ * program_name - Name of the Pascal program (used to build the dump filename).
  *
  * The dump file will be created at /tmp/pscal/[program_name].[pid]. The directory
  * is created if it doesn't exist.
@@ -76,8 +75,8 @@ void executeWithASTDump(AST *program_ast, const char *program_name) {
  * runProgram - Common routine to register built-ins, parse, and execute the program.
  *
  * Parameters:
- *   source      - The Pascal source code to run.
- *   programName - The program name (used for dump filename, etc.).
+ * source      - The Pascal source code to run.
+ * programName - The program name (used for dump filename, etc.).
  *
  * Returns EXIT_SUCCESS on success.
  */
@@ -137,7 +136,7 @@ int runProgram(const char *source, const char *programName) {
     parser.lexer = &lexer;
     parser.current_token = getNextToken(&lexer);
     AST *GlobalAST = buildProgramAST(&parser);
-    annotateTypes(GlobalAST, NULL, GlobalAST); 
+    annotateTypes(GlobalAST, NULL, GlobalAST);
     //dumpAST(GlobalAST, 0);
     //return(0);
     GlobalASTRoot = GlobalAST;
@@ -175,16 +174,16 @@ if (verifyASTLinks(GlobalAST, NULL)) { // Initial call expects NULL parent for t
     dumpSymbolTable();
 #endif
 
-    freeProcedureTable(); // Existing
+    freeProcedureTable(); // Original position
 
      // --- Free the main AST Tree FIRST ---
-     freeAST(GlobalAST); // Now uncommented
+     freeAST(GlobalAST); // Original position
 
      // --- Free the shared AST nodes stored in the type table ---
-     freeTypeTableASTNodes(); // <<< ADDED CALL
+     freeTypeTableASTNodes(); // Original position
 
      // --- Free the type table linked list itself ---
-     freeTypeTable(); // Existing
+     freeTypeTable(); // Original position
 
      return EXIT_SUCCESS;
 }
@@ -193,9 +192,9 @@ if (verifyASTLinks(GlobalAST, NULL)) { // Initial call expects NULL parent for t
 /* Debug mode: If a filename is specified on the command line, read the file;
    otherwise, if debug_source is non-empty, use that; if neither, print usage info and exit. */
 int main(int argc, char *argv[]) {
-    
+
     initSymbolSystem();
-    
+
     char *source = NULL;
     const char *programName = "debug_program";
     const char *debug_source =

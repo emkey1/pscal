@@ -37,84 +37,121 @@ void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const 
 AST *parseWriteArgument(Parser *parser);
 
 AST *declarations(Parser *parser, bool in_interface) {
-    AST *node = newASTNode(AST_COMPOUND, NULL);
+    AST *node = newASTNode(AST_COMPOUND, NULL); // Main compound for all declarations in this scope
 
     while (1) {
+        // --- CONST ---
         if (parser->current_token->type == TOKEN_CONST) {
             eat(parser, TOKEN_CONST);
             while (parser->current_token->type == TOKEN_IDENTIFIER) {
                 AST *constDecl = constDeclaration(parser); // Parses Name = Value;
-                addChild(node, constDecl); // Add AST node as before
+                if (!constDecl || constDecl->type == AST_NOOP) { /* Handle error from constDeclaration */ break; }
+                addChild(node, constDecl);
 
-                Value constVal = eval(constDecl->left); // Evaluate the constant's value expression
-
-                // --- MODIFICATION START ---
-                // Insert the symbol but DO NOT call updateSymbol afterwards for constants
-                insertGlobalSymbol(constDecl->token->value, constVal.type, constDecl->right); // Pass type definition if available (constDecl->right)
-
-                // Get the newly inserted symbol
-                Symbol *sym = lookupGlobalSymbol(constDecl->token->value);
-                if (sym && sym->value) {
-                    // Free the default value allocated by insertGlobalSymbol
-                    // (Be careful if insertGlobalSymbol changes to not allocate)
-                     if (!sym->is_alias) { // Only free if not an alias
-                          freeValue(sym->value); // Free the contents of the default value
-                     }
-                    // Assign the evaluated constant value directly (deep copy)
-                    *sym->value = makeCopyOfValue(&constVal);
-                    // Set the is_const flag
-                    sym->is_const = true;
-                     #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG_PARSER] Set is_const=TRUE for global constant '%s'\n", sym->name);
-                     #endif
-                } else {
-                     fprintf(stderr, "Parser error: Failed to find or allocate value for global constant '%s'\n", constDecl->token->value);
-                     // Handle error appropriately
-                }
-                // Free the temporary value obtained from eval
-                freeValue(&constVal);
-                // --- MODIFICATION END ---
-
-                // Original updateSymbol call removed:
-                // updateSymbol(constDecl->token->value, constVal); // *** REMOVE THIS LINE ***
+                // Logic to evaluate and insert const symbol (existing correct logic)
+                if (constDecl->left) { // Ensure there is a value node to evaluate
+                     Value constVal = eval(constDecl->left);
+                     insertGlobalSymbol(constDecl->token->value, constVal.type, constDecl->right);
+                     Symbol *sym = lookupGlobalSymbol(constDecl->token->value);
+                     if (sym && sym->value) {
+                         if (!sym->is_alias) freeValue(sym->value);
+                         *sym->value = makeCopyOfValue(&constVal);
+                         sym->is_const = true;
+                         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG_PARSER] Set is_const=TRUE for global constant '%s'\n", sym->name);
+                         #endif
+                     } else { /* Handle error */ }
+                     freeValue(&constVal);
+                } else { /* Handle constDecl without a value node? Error? */ }
             }
         }
+        // --- TYPE ---
         else if (parser->current_token->type == TOKEN_TYPE) {
             eat(parser, TOKEN_TYPE);
             while (parser->current_token->type == TOKEN_IDENTIFIER) {
                 AST *typeDecl = typeDeclaration(parser);
+                 if (!typeDecl || typeDecl->type == AST_NOOP) { /* Handle error */ break; }
                 addChild(node, typeDecl);
-                insertType(typeDecl->token->value, typeDecl->left);
+                // insertType needs the actual definition (left child of TYPE_DECL)
+                if (typeDecl->left) insertType(typeDecl->token->value, typeDecl->left);
+                else { /* Handle error: TYPE decl missing definition */ }
             }
         }
+        // --- VAR ---
         else if (parser->current_token->type == TOKEN_VAR) {
             eat(parser, TOKEN_VAR);
-            while (parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *vdecl = varDeclaration(parser, true);
-                addChild(node, vdecl);
-                eat(parser, TOKEN_SEMICOLON);
-            }
+            while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) { // Check token exists
+                AST *vdecl_result = varDeclaration(parser, false); // isGlobal flag seems unused?
+                if (!vdecl_result || vdecl_result->type == AST_NOOP) {
+                     // varDeclaration should call errorParser on failure
+                     // If it returns NULL/NOOP without erroring, that's an issue.
+                     // Assume error was handled, break loop.
+                     break;
+                }
+
+                // --- Refined logic to add VAR_DECL nodes to the main compound 'node' ---
+                if (vdecl_result->type == AST_COMPOUND) {
+                    // Transfer children from the compound returned by varDeclaration
+                    while (vdecl_result->child_count > 0) {
+                         AST* child_to_transfer = vdecl_result->children[--vdecl_result->child_count];
+                         vdecl_result->children[vdecl_result->child_count] = NULL; // Nullify in source
+                         if (child_to_transfer) {
+                             addChild(node, child_to_transfer); // Adds child to 'node', sets parent
+                         }
+                    }
+                    // Free the now empty compound wrapper (struct + NULL children array)
+                    freeAST(vdecl_result);
+                } else if (vdecl_result->type == AST_VAR_DECL) {
+                     // varDeclaration returned a single VAR_DECL node
+                     addChild(node, vdecl_result); // Add single VAR_DECL to 'node'
+                } else {
+                     // Should not happen if varDeclaration works correctly
+                     char err_msg[100];
+                     snprintf(err_msg, sizeof(err_msg), "Unexpected node type %s returned by varDeclaration", astTypeToString(vdecl_result->type));
+                     errorParser(parser, err_msg);
+                     freeAST(vdecl_result); // Free the unexpected node
+                     break;
+                }
+                // --- End refined logic ---
+
+                 // Ensure semicolon follows the var declaration group
+                 if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+                     eat(parser, TOKEN_SEMICOLON);
+                 } else {
+                      errorParser(parser, "Expected semicolon after var declaration");
+                      break; // Exit the inner while loop
+                 }
+            } // end while (parsing var groups for this VAR keyword)
         }
+        // --- PROCEDURE/FUNCTION ---
         else if (parser->current_token->type == TOKEN_PROCEDURE ||
-                parser->current_token->type == TOKEN_FUNCTION) {
+                 parser->current_token->type == TOKEN_FUNCTION) {
             AST *decl = (parser->current_token->type == TOKEN_PROCEDURE)
                         ? procedureDeclaration(parser, in_interface)
                         : functionDeclaration(parser, in_interface);
+             if (!decl || decl->type == AST_NOOP) { /* Handle error */ break; }
             addChild(node, decl);
-            addProcedure(decl);
-            eat(parser, TOKEN_SEMICOLON);
-        } else if (parser->current_token->type == TOKEN_ENUM) {
-            AST *enumDecl = enumDeclaration(parser);
-            addChild(node, enumDecl);
-            insertType(enumDecl->token->value, enumDecl->left);
+            addProcedure(decl); // Assumes addProcedure handles potential errors/duplicates
+             // Ensure semicolon follows proc/func declaration
+             if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+                 eat(parser, TOKEN_SEMICOLON);
+             } else {
+                  // In interface section, semicolon might be optional if it's the last item before IMPLEMENTATION
+                  // In implementation, it should generally be required before next decl or BEGIN/END.
+                  // Add stricter checking if needed based on context (in_interface). For now, allow missing.
+                  // errorParser(parser, "Expected semicolon after procedure/function declaration");
+                  // break;
+             }
         }
+        // --- ENUM (If handled separately, otherwise part of TYPE) ---
+        // else if (parser->current_token->type == TOKEN_ENUM) { ... } // Assuming handled within TYPE
+        // --- Exit loop ---
         else {
-            // Exit loop if none of the declaration handlers match
-            break;
+            break; // Exit loop if no more declaration keywords found
         }
-    }
+    } // End while(1)
 
-    return node;
+    return node; // Returns the compound node containing all declarations for this scope
 }
 
 void eatInternal(Parser *parser, TokenType type) {
@@ -1079,7 +1116,12 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) { // allowAnonymous might
             // Create a reference node pointing to the actual definition
             node = newASTNode(AST_TYPE_REFERENCE, typeToken);
             setTypeAST(node, userType->var_type); // Copy VarType (e.g., TYPE_RECORD, TYPE_ENUM) from definition
-            setRight(node, userType); // Link reference node to the actual type definition node
+
+            // --- MODIFICATION START: Link without changing parent ---
+            // setRight(node, userType); // <<<< REMOVE THIS LINE
+            node->right = userType;     // <<<< ADD THIS LINE (Direct assignment, preserves original parent of userType)
+            // --- MODIFICATION END ---
+
             eat(parser, TOKEN_IDENTIFIER); // Consume the type name identifier
         }
     }
@@ -1229,39 +1271,78 @@ AST *variable(Parser *parser) {
     return node;
 }
 
-AST *varDeclaration(Parser *parser, bool isGlobal) {
-    AST *node = newASTNode(AST_VAR_DECL, NULL);
+AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */) {
+    AST *groupNode = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
 
-    // Parse variable list
+    // 1. Parse variable list into groupNode children
     while (parser->current_token->type == TOKEN_IDENTIFIER) {
-        AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
-        eat(parser, TOKEN_IDENTIFIER);
-        addChild(node, varNode);
+        Token* originalVarToken = parser->current_token;
+        Token* copiedVarToken = copyToken(originalVarToken);
+        if (!copiedVarToken) { /* Malloc error */ freeAST(groupNode); EXIT_FAILURE_HANDLER(); }
+        eat(parser, TOKEN_IDENTIFIER); // Frees original token
+
+        AST *varNode = newASTNode(AST_VARIABLE, copiedVarToken);
+        if (!varNode) { /* Malloc error */ freeToken(copiedVarToken); freeAST(groupNode); EXIT_FAILURE_HANDLER(); }
+        addChild(groupNode, varNode); // Sets varNode->parent = groupNode
+        freeToken(copiedVarToken); // Free the parser's temporary copy
 
         if (parser->current_token->type == TOKEN_COMMA) {
             eat(parser, TOKEN_COMMA);
-        } else {
-            break;
-        }
+        } else { break; }
     }
 
     eat(parser, TOKEN_COLON);
-    AST *typeNode = typeSpecifier(parser, 0);
-    setTypeAST(node, typeNode->var_type);
-    setRight(node, typeNode);
+    // 2. Parse the type specifier ONCE for the group
+    AST *originalTypeNode = typeSpecifier(parser, 0);
+    if (!originalTypeNode) { /* error handling */ freeAST(groupNode); return NULL; }
 
-    // Preserve enum info in AST metadata, if applicable
-    if (typeNode->type == AST_TYPE_REFERENCE) {
-        AST *actualType = lookupType(typeNode->token->value);
-        if (actualType && actualType->type == AST_ENUM_TYPE) {
-            // Mark this declaration as using an enum type
-            node->var_type = TYPE_ENUM;
-            // Optionally, store the enum name somewhere if useful later
-            // (e.g., in a custom field if your AST supports it)
+    AST *finalCompoundNode = newASTNode(AST_COMPOUND, NULL);
+
+    // 3. Create final VAR_DECL nodes, creating COPIES of type nodes for each
+    for (int i = 0; i < groupNode->child_count; ++i) {
+        AST *var_decl_node = newASTNode(AST_VAR_DECL, NULL);
+        if (!var_decl_node) { /* Malloc check */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
+        var_decl_node->var_type = originalTypeNode->var_type;
+
+        // Transfer the name node (AST_VARIABLE) from groupNode
+        var_decl_node->child_count = 1;
+        var_decl_node->child_capacity = 1;
+        var_decl_node->children = malloc(sizeof(AST*));
+        if (!var_decl_node->children) { /* error handling */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(var_decl_node); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
+
+        var_decl_node->children[0] = groupNode->children[i]; // Transfer pointer
+        groupNode->children[i] = NULL; // Nullify in groupNode
+        if (var_decl_node->children[0]) {
+             var_decl_node->children[0]->parent = var_decl_node; // Set parent
         }
+
+        // --- Create a DEEP COPY of the typeNode using copyAST ---
+        AST* typeNodeCopy = copyAST(originalTypeNode);
+        if (!typeNodeCopy) { /* error handling */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(var_decl_node); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
+        setRight(var_decl_node, typeNodeCopy); // Link VAR_DECL to the UNIQUE copy
+        // ---
+
+        addChild(finalCompoundNode, var_decl_node);
     }
 
-    return node;
+    // --- Free the ORIGINAL typeNode returned by typeSpecifier ---
+    freeAST(originalTypeNode);
+
+    // Free the temporary groupNode (its children pointers were nulled out)
+    freeAST(groupNode);
+
+    // Return single node or compound node
+    if (finalCompoundNode->child_count == 1) {
+         AST* single_var_decl = finalCompoundNode->children[0];
+         single_var_decl->parent = NULL;
+         free(finalCompoundNode->children);
+         finalCompoundNode->children = NULL;
+         finalCompoundNode->child_count = 0;
+         free(finalCompoundNode);
+         return single_var_decl;
+    }
+
+    return finalCompoundNode; // Return compound node containing multiple VAR_DECLs
 }
 
 AST *functionDeclaration(Parser *parser, bool in_interface) {
@@ -1338,143 +1419,74 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
 } // End of functionDeclaration
 
 AST *paramList(Parser *parser) {
-    AST *compound = newASTNode(AST_COMPOUND, NULL); // Final list of parameter AST_VAR_DECL nodes
-
-    // Loop until we see the closing parenthesis.
+    AST *compound = newASTNode(AST_COMPOUND, NULL);
     while (parser->current_token->type != TOKEN_RPAREN) {
         int byRef = 0;
-        // Check for pass-by-reference keyword (VAR or OUT).
         if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) {
             byRef = 1;
-            eat(parser, parser->current_token->type); // Eat either VAR or OUT
+            eat(parser, parser->current_token->type);
         }
 
-        // Temporary group node to hold comma-separated names of the *same* type.
-        // This group node itself isn't added to the final AST list.
-        AST *group = newASTNode(AST_VAR_DECL, NULL);
-        // Parse one or more identifiers separated by commas for this type group.
-        while (1) {
-            // --- Make a copy of the identifier token for the new AST node ---
+        AST *group = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
+        while (1) { // Parse identifier names into group->children
             Token* originalIdToken = parser->current_token;
-            if (originalIdToken->type != TOKEN_IDENTIFIER) {
-                errorParser(parser, "Expected identifier in parameter list");
-                freeAST(group); // Clean up temp group
-                freeAST(compound); // Clean up compound list being built
-                return NULL; // Indicate error
-            }
+            if (originalIdToken->type != TOKEN_IDENTIFIER) { errorParser(parser, "Expected identifier in parameter list"); freeAST(group); freeAST(compound); return NULL; }
             Token* copiedIdToken = copyToken(originalIdToken);
-            if (!copiedIdToken) {
-                 fprintf(stderr, "Memory allocation failed for token copy in paramList\n");
-                 freeAST(group); freeAST(compound);
-                 EXIT_FAILURE_HANDLER();
-             }
-            // ---
-
-            // Eat the ORIGINAL identifier token (eatInternal frees it)
-            eat(parser, TOKEN_IDENTIFIER);
-
-            // Add a new AST_VARIABLE node using the copied token to the temporary group
-            // This node will be freed when 'group' is freed later.
+            if (!copiedIdToken) { fprintf(stderr, "Memory allocation failed for token copy in paramList\n"); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
+            eat(parser, TOKEN_IDENTIFIER); // Frees original token
             AST *id_node = newASTNode(AST_VARIABLE, copiedIdToken);
-            addChild(group, id_node); // addChild sets parent pointer within the group
-
-            // --- Free the copied token, as newASTNode made its own copy ---
-            freeToken(copiedIdToken);
-            // ---
-
-            // Check if another identifier follows (comma separation)
-            if (parser->current_token->type == TOKEN_COMMA) {
-                eat(parser, TOKEN_COMMA); // Consume comma, loop for next name
-            } else {
-                break; // No comma, this group of names is done
-            }
-        } // End while(1) for parsing identifiers in a group
-
-        // Expect a colon and then the type specifier for this group.
-        eat(parser, TOKEN_COLON); // Consume ':'
-        // Parse the type definition node (e.g., RECORD_TYPE, VARIABLE for basic types, etc.)
-        // typeSpecifier returns the AST node defining the type (e.g., AST_RECORD_TYPE, AST_VARIABLE for 'integer')
-        AST *typeNode = typeSpecifier(parser, 1); // Allow anonymous types (like record) here
-        if (!typeNode) { // Handle error from typeSpecifier
-            errorParser(parser, "Failed to parse type specifier in parameter list");
-            freeAST(group); freeAST(compound);
-            return NULL; // Indicate error
+            if (!id_node) { fprintf(stderr, "Memory allocation failed for id_node in paramList\n"); freeToken(copiedIdToken); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
+            addChild(group, id_node); // Sets id_node->parent = group
+            freeToken(copiedIdToken); // Frees the parser's temporary copy
+            if (parser->current_token->type == TOKEN_COMMA) { eat(parser, TOKEN_COMMA); }
+            else { break; }
         }
 
-        // Apply the parsed type info (just the VarType enum) to the temporary group node.
-        // This isn't strictly necessary as the group node is temporary, but good for consistency.
-        setTypeAST(group, typeNode->var_type);
+        eat(parser, TOKEN_COLON);
+        AST *originalTypeNode = typeSpecifier(parser, 1); // Parse type ONCE
+        if (!originalTypeNode) { errorParser(parser, "Failed to parse type specifier in parameter list"); freeAST(group); freeAST(compound); return NULL; }
 
-        // Now, create the *actual* parameter declaration nodes (AST_VAR_DECL)
-        // for each identifier collected in the temporary 'group' node.
+        setTypeAST(group, originalTypeNode->var_type); // Optional: set type on temp group
+
         for (int i = 0; i < group->child_count; i++) {
-            // Create the final AST node (AST_VAR_DECL) that will be added to the procedure's parameter list
             AST *param_decl = newASTNode(AST_VAR_DECL, NULL);
-            param_decl->child_count = 1;      // Each param_decl has one child: the variable name node
+            if (!param_decl) { /* Malloc Check */ freeAST(originalTypeNode); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
+            param_decl->child_count = 1;
             param_decl->child_capacity = 1;
             param_decl->children = malloc(sizeof(AST *));
-            if (!param_decl->children) {
-                 fprintf(stderr, "Memory allocation error for param_decl children\n");
-                 // Need more robust cleanup here
-                 freeAST(typeNode); freeAST(group); freeAST(compound); freeAST(param_decl);
-                 EXIT_FAILURE_HANDLER();
-             }
+            if (!param_decl->children) { /* Malloc Check */ freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
 
-            // Create the AST_VARIABLE node for the parameter name ('s') using the token from the group.
-            // We need to make a fresh copy of the token for this new node.
             Token* nameTokenCopy = copyToken(group->children[i]->token);
-             if (!nameTokenCopy) {
-                  fprintf(stderr, "Memory allocation failed copying parameter name token\n");
-                  // Cleanup...
-                  EXIT_FAILURE_HANDLER();
-             }
+            if (!nameTokenCopy) { /* Malloc Check */ freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
             param_decl->children[0] = newASTNode(AST_VARIABLE, nameTokenCopy);
-            freeToken(nameTokenCopy); // Free the copy used by newASTNode
+            if (!param_decl->children[0]) { /* Malloc check */ freeToken(nameTokenCopy); freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
+            freeToken(nameTokenCopy);
+            param_decl->children[0]->parent = param_decl;
 
-            // *** Explicitly set the parent pointer for the child VARIABLE node ***
-            if (param_decl->children[0]) {
-                param_decl->children[0]->parent = param_decl; // <<< Parent pointer fix
-            } else {
-                 errorParser(parser, "Failed to create variable node for parameter name");
-                 // Cleanup...
-                 EXIT_FAILURE_HANDLER();
-            }
-
-            // Copy the type enum (e.g., TYPE_RECORD) and by-reference flag
-            param_decl->var_type = group->var_type;
+            param_decl->var_type = originalTypeNode->var_type;
             param_decl->by_ref = byRef;
 
-            // Link the VAR_DECL node to the actual Type Definition node parsed earlier
-            // This is crucial for the interpreter/compiler to know the structure of the type.
-            setRight(param_decl, typeNode); // Links VAR_DECL to RECORD_TYPE, etc.
+            // --- Use copyAST for the type node ---
+            AST* typeNodeCopy = copyAST(originalTypeNode);
+            if (!typeNodeCopy) { fprintf(stderr, "Memory allocation failed copying type node in paramList\n"); freeAST(group); freeAST(compound); freeAST(param_decl); freeAST(originalTypeNode); EXIT_FAILURE_HANDLER(); }
+            setRight(param_decl, typeNodeCopy); // Link VAR_DECL to the UNIQUE copy
+            // ---
 
-            // Add the completed parameter declaration node to the compound list returned by this function
             addChild(compound, param_decl);
         }
 
-        // Clean up the temporary group node and its children (the AST_VARIABLE nodes within it).
-        // Do not free typeNode here, as it's now referenced by the param_decl nodes via their 'right' pointer.
-        // freeAST should handle the children (AST_VARIABLE nodes) recursively.
-        freeAST(group);
+        // --- Free the ORIGINAL typeNode returned by typeSpecifier ---
+        freeAST(originalTypeNode); // <<< Free the node returned by typeSpecifier
 
-        // After processing a parameter group (name:type), check for a separator (;) or the end ')'.
+        freeAST(group); // Free temp name group
+
         if (parser->current_token->type == TOKEN_SEMICOLON) {
-            eat(parser, TOKEN_SEMICOLON); // Consume semicolon, continue loop for next parameter group
-        } else if (parser->current_token->type != TOKEN_RPAREN) {
-            // If it's not a semicolon and not the closing parenthesis, it's an error.
-            errorParser(parser, "Expected ';' or ')' after parameter declaration");
-            // Need robust cleanup if erroring out here
-            freeAST(typeNode); freeAST(compound);
-            return NULL;
-        } else {
-            // Found RPAREN, the loop condition will handle exiting.
-            break;
-        }
-    } // End while != RPAREN
-
-    // No need for debug dump here, let caller dump if needed
-    return compound; // Return the compound list of final param_decl nodes
-} // End paramList()
+            eat(parser, TOKEN_SEMICOLON);
+        } else if (parser->current_token->type != TOKEN_RPAREN) { errorParser(parser, "Expected ';' or ')' after parameter declaration"); freeAST(compound); return NULL; }
+        else { break; }
+    }
+    return compound;
+}
 
 AST* compoundStatement(Parser *parser) {
     eat(parser, TOKEN_BEGIN);
