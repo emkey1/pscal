@@ -577,6 +577,7 @@ Value executeBuiltinReadKey(AST *node) {
  //   if (tcflush(STDIN_FILENO, TCOFLUSH) < 0) {
   //      perror("ReadKey Warning: tcflush(TCOFLUSH) failed");
  //   }
+    tcdrain(STDOUT_FILENO);
 
     // --- Read a single character using read() ---
     errno = 0; // Clear errno before read

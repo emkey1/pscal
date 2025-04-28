@@ -34,4 +34,5 @@ void setTypeAST(AST *node, VarType type);
 void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode);
 AST *copyAST(AST *node);
 bool verifyASTLinks(AST *node, AST *expectedParent);
+void freeTypeTableASTNodes(void);
 #endif // AST_H

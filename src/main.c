@@ -175,11 +175,18 @@ if (verifyASTLinks(GlobalAST, NULL)) { // Initial call expects NULL parent for t
     dumpSymbolTable();
 #endif
 
-    freeProcedureTable();
-    freeTypeTable();
-    //freeAST(GlobalAST);  // Uncomment if free_ast() is stable.
-    
-    return EXIT_SUCCESS;
+    freeProcedureTable(); // Existing
+
+     // --- Free the main AST Tree FIRST ---
+     freeAST(GlobalAST); // Now uncommented
+
+     // --- Free the shared AST nodes stored in the type table ---
+     freeTypeTableASTNodes(); // <<< ADDED CALL
+
+     // --- Free the type table linked list itself ---
+     freeTypeTable(); // Existing
+
+     return EXIT_SUCCESS;
 }
 
 #ifdef DEBUG

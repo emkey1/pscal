@@ -103,6 +103,8 @@ void setExtra(AST *parent, AST *child) {
 
 void freeAST(AST *node) {
     if (!node) return;
+    
+    bool skip_right_free = (node->type == AST_TYPE_REFERENCE); // We'll skip AST_TYPE_REFERENCE nodes as they are multi linked
 
     // --- Print Node address and Type BEFORE processing ---
 #ifdef DEBUG
@@ -126,11 +128,18 @@ void freeAST(AST *node) {
 
     // 2. Recurse Right
     if (node->right) {
+        if (!skip_right_free) { // Only free if NOT a type reference
 #ifdef DEBUG
-        fprintf(stderr, "[DEBUG]  - Recursing Right from Node %p into Node %p (Type: %s)\n",
-                (void*)node, (void*)node->right, astTypeToString(node->right->type));
+            fprintf(stderr, "[DEBUG]  - Recursing Right from Node %p (%s) into Node %p (%s)\n",
+                    (void*)node, astTypeToString(node->type), (void*)node->right, astTypeToString(node->right->type));
 #endif
-        freeAST(node->right);
+            freeAST(node->right);
+        } else {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG]  - Skipping freeAST(node->right) for TYPE_REFERENCE node %p\n", (void*)node);
+#endif
+        }
+        // Always null out the pointer
         node->right = NULL;
     }
 
@@ -779,4 +788,28 @@ bool verifyASTLinks(AST *node, AST *expectedParent) {
     }
 
     return links_ok;
+}
+
+void freeTypeTableASTNodes(void) {
+     TypeEntry *entry = type_table; // Get head of global type list
+     #ifdef DEBUG
+     fprintf(stderr, "[DEBUG] freeTypeTableASTNodes: Starting cleanup of type definition ASTs.\n");
+     #endif
+     while (entry) {
+         // IMPORTANT: Only free the AST node here. The TypeEntry struct itself
+         // and its name are freed by freeTypeTable() called separately.
+         if (entry->typeAST) {
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG]  - Freeing AST for type '%s' at %p\n",
+                     entry->name ? entry->name : "?", (void*)entry->typeAST);
+             #endif
+             freeAST(entry->typeAST); // Recursively free the actual type definition AST
+             entry->typeAST = NULL; // Avoid potential dangling pointer issues
+         }
+         entry = entry->next;
+     }
+     #ifdef DEBUG
+     fprintf(stderr, "[DEBUG] freeTypeTableASTNodes: Finished cleanup.\n");
+     #endif
+     // The type_table linked list struct itself is freed by the existing freeTypeTable() call.
 }

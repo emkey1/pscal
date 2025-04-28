@@ -235,62 +235,94 @@ AST *lvalue(Parser *parser) {
 
 // Update in src/parser.c's parse_array_type function
 
+// src/parser.c (Modified parseArrayType function)
+
 AST *parseArrayType(Parser *parser) {
     eat(parser, TOKEN_ARRAY);
     eat(parser, TOKEN_LBRACKET);
 
-    AST *indexList = newASTNode(AST_COMPOUND, NULL);
+    AST *indexList = newASTNode(AST_COMPOUND, NULL); // Temporary holder
 
-    // Parse first subrange as a binary operation
-    AST *lowerExpr = expr(parser);
-    if (parser->current_token->type != TOKEN_DOTDOT) {
-        errorParser(parser, "Expected DOTDOT in array index range");
-    }
-    eat(parser, TOKEN_DOTDOT);
-    AST *upperExpr = expr(parser);
-
-    // Create a new subrange node
-    AST *indexType = newASTNode(AST_SUBRANGE, NULL);
-    setLeft(indexType, lowerExpr);
-    setRight(indexType, upperExpr);
-
-    addChild(indexList, indexType);
-
-    // Check for additional subranges separated by commas
-    while (parser->current_token->type == TOKEN_COMMA) {
-        eat(parser, TOKEN_COMMA);
-
+    // Parse comma-separated index subranges (Existing logic)
+    while (1) {
         AST *lowerExpr = expr(parser);
+        // --- Add error checking for lowerExpr ---
+        if (!lowerExpr) {
+             errorParser(parser, "Failed to parse lower bound in array index range");
+             freeAST(indexList); // Clean up temp node
+             return NULL; // Indicate error
+        }
+        // ---
         if (parser->current_token->type != TOKEN_DOTDOT) {
             errorParser(parser, "Expected DOTDOT in array index range");
+            freeAST(lowerExpr); // Clean up parsed expression
+            freeAST(indexList); // Clean up temp node
+            return NULL; // Indicate error
         }
         eat(parser, TOKEN_DOTDOT);
         AST *upperExpr = expr(parser);
+        if (!upperExpr) { // Handle error from expr
+            errorParser(parser, "Failed to parse upper bound in array index range");
+            freeAST(lowerExpr); freeAST(indexList);
+            return NULL;
+        }
 
         AST *indexType = newASTNode(AST_SUBRANGE, NULL);
-        setLeft(indexType, lowerExpr);
-        setRight(indexType, upperExpr);
+        setLeft(indexType, lowerExpr);  // setLeft sets parent pointer of lowerExpr
+        setRight(indexType, upperExpr); // setRight sets parent pointer of upperExpr
+        addChild(indexList, indexType); // addChild sets parent pointer of indexType to indexList (temp)
 
-        addChild(indexList, indexType);
+        if (parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
     }
 
     eat(parser, TOKEN_RBRACKET);
-
-    if (parser->current_token->type != TOKEN_OF) {
-        errorParser(parser, "Expected 'of' keyword in array type declaration");
-    }
-    
     eat(parser, TOKEN_OF);
-    
     AST *elemType = typeSpecifier(parser, 1);
+    if (!elemType) { // Handle error from typeSpecifier
+       errorParser(parser, "Failed to parse element type in array declaration");
+        freeAST(indexList); // Clean up temp node and its children
+        return NULL;
+    }
 
-    // Create the array type node
+    // Create the final array type node
     AST *node = newASTNode(AST_ARRAY_TYPE, NULL);
-    node->children = indexList->children;
-    node->child_count = indexList->child_count;
-    free(indexList); // Free temporary compound node
+    setTypeAST(node, TYPE_ARRAY); // Set type early
 
-    setRight(node, elemType);
+    // --- Transfer children AND Update Parent Pointers ---
+    if (indexList->child_count > 0) {
+        node->children = indexList->children; // Transfer array pointer
+        node->child_count = indexList->child_count;
+        node->child_capacity = indexList->child_capacity; // Copy capacity too
+
+        // *** ADDED: Update parent pointers of transferred children ***
+        for (int i = 0; i < node->child_count; ++i) {
+            if (node->children[i]) {
+                node->children[i]->parent = node; // Point child back to the final ARRAY_TYPE node
+            }
+        }
+
+        // Nullify pointers in temporary node before freeing it
+        indexList->children = NULL;
+        indexList->child_count = 0;
+        indexList->child_capacity = 0;
+    } else {
+        // Ensure node has NULL children if indexList was empty
+        node->children = NULL;
+        node->child_count = 0;
+        node->child_capacity = 0;
+    }
+    // --- End Transfer Logic ---
+
+    // free(indexList) was incorrect - use freeAST to potentially free grandchild data if needed,
+    // but since children are transferred, we only need to free the struct itself.
+    // Let's stick with free() as the children array pointer was nulled out.
+    free(indexList); // Free *only* the temporary compound node struct
+
+    setRight(node, elemType); // Link element type (sets parent pointer of elemType)
 
     return node;
 }
@@ -1444,9 +1476,9 @@ AST *paramList(Parser *parser) {
     return compound; // Return the compound list of final param_decl nodes
 } // End paramList()
 
-AST *compoundStatement(Parser *parser) {
+AST* compoundStatement(Parser *parser) {
     eat(parser, TOKEN_BEGIN);
-    AST *node = newASTNode(AST_COMPOUND, NULL);
+    AST *node = newASTNode(AST_COMPOUND, NULL); // Assuming AST_COMPOUND is correct type
 
     while (1) { // Loop until explicitly broken or END is consumed
         // Skip any optional leading/multiple semicolons
@@ -1458,64 +1490,74 @@ AST *compoundStatement(Parser *parser) {
         if (parser->current_token->type == TOKEN_END) {
             break; // Found the end of this compound statement
         }
-        // Also check for program end '.' which might terminate a block early
         if (parser->current_token->type == TOKEN_PERIOD) {
-             // Let the caller handle the period
              break;
         }
 
         // Parse one statement within the block
         AST *stmt = statement(parser);
         if (!stmt) {
-             // Handle parsing errors from statement() if necessary
+             break; // Stop processing compound block if a statement failed
         } else {
              addChild(node, stmt);
         }
 
         // Now, determine if we expect a semicolon separator or the end of the block
         if (parser->current_token->type == TOKEN_SEMICOLON) {
-            // Found a semicolon, consume it and expect more statements or END
             eat(parser, TOKEN_SEMICOLON);
-             // Handle case like BEGIN statement; END -> check again for END after eating semicolon
              if (parser->current_token->type == TOKEN_END) {
                  break;
              }
              if (parser->current_token->type == TOKEN_PERIOD) {
-                  break; // Let caller handle program end
+                 break;
              }
-             // Otherwise, loop continues to find next statement after skipping more semicolons
 
         } else if (parser->current_token->type == TOKEN_END) {
-            // Found END immediately after a statement (optional semicolon skipped)
-            break; // Exit the loop, END will be consumed below
+            break;
         } else if (parser->current_token->type == TOKEN_PERIOD) {
-             // Found program end immediately after a statement
-             break; // Let caller handle program end
+             break;
         }
          else {
-            // <<< START REMOVED BLOCK >>>
-            // The previous 'if (parser->current_token->type == TOKEN_ELSE)' block
-            // that caused the premature break is removed from here.
-            // <<< END REMOVED BLOCK >>>
+            // --- CORRECTED DEBUG PRINT HERE ---
+            #ifdef DEBUG
+            fprintf(stderr, "\n[DEBUG_ERROR] In compoundStatement loop after parsing a statement.\n");
+            // *** Access line/column via parser->lexer ***
+            fprintf(stderr, "[DEBUG_ERROR] Expected SEMICOLON or END, but found Token Type: %d (%s), Value: '%s' at Line %d, Col %d\n\n",
+                    parser->current_token->type,
+                    tokenTypeToString(parser->current_token->type),
+                    parser->current_token->value ? parser->current_token->value : "NULL",
+                    parser->lexer->line,  // <-- Use parser->lexer->line
+                    parser->lexer->column // <-- Use parser->lexer->column
+                   );
+            fflush(stderr);
+            #endif
+            // --- END CORRECTED DEBUG PRINT ---
 
-            // If it's not SEMICOLON, END, or PERIOD, then it's genuinely an unexpected token.
+            // --- Original Error Reporting ---
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg),
                      "Expected semicolon or END after statement in compound block (found token: %s)",
-                     tokenTypeToString(parser->current_token->type)); // Report the actual found token
+                     tokenTypeToString(parser->current_token->type));
             errorParser(parser, error_msg);
+            // --- End Original Error Reporting ---
+
             break; // Exit loop on error
         }
     } // End while(1)
 
     // After the loop, consume the END token (unless it was program end '.')
     if (parser->current_token->type != TOKEN_PERIOD) {
-         eat(parser, TOKEN_END);
+       if (parser->current_token->type == TOKEN_END) {
+          eat(parser, TOKEN_END);
+       } else {
+           char error_msg[128];
+           // *** Also update error location here if needed ***
+           snprintf(error_msg, sizeof(error_msg), "Expected END or '.', but found %s at Line %d Col %d",
+                    tokenTypeToString(parser->current_token->type),
+                    parser->lexer->line, parser->lexer->column); // Use lexer location
+           errorParser(parser, error_msg);
+       }
     }
-
-    #ifdef DEBUG // Keep debug dump if helpful
-    if (dumpExec) debugAST(node, 0);
-    #endif
     return node;
 }
 
