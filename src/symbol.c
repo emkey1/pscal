@@ -97,7 +97,7 @@ void updateSymbol(const char *name, Value val) {
     Symbol *sym = lookupSymbol(name);
     
 #ifdef DEBUG
-fprintf(stderr, "[DEBUG_UPDATE_CHECK] Called updateSymbol for: '%s'. Symbol found: %p. is_const: %d. Incoming value type: %s\n",
+    fprintf(stderr, "[DEBUG_UPDATE_CHECK] Called updateSymbol for: '%s'. Symbol found: %p. is_const: %d. Incoming value type: %s\n",
         name,
         (void*)sym,
         sym ? sym->is_const : -1, // Print is_const status if sym found

@@ -772,6 +772,7 @@ void freeValue(Value *v) {
     // Optionally mark type as VOID after freeing contents?
     // v->type = TYPE_VOID;
 }
+
 static void dumpSymbol(Symbol *sym) {
     if (!sym) return;
 

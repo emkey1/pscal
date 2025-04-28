@@ -8,51 +8,59 @@
 
 AST *GlobalASTRoot = NULL;  // Declare global AST root
 
-// Inside pscal/interpreter.c
+// In interpreter.c
 void popLocalEnv(void) {
     Symbol *sym = localSymbols;
-    
-#ifdef DEBUG
+    #ifdef DEBUG
     fprintf(stderr, "[DEBUG] Popping local env (localSymbols=%p)\n", (void*)sym);
-#endif
+    #endif
     while (sym) {
         Symbol *next = sym->next;
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG]   Processing local symbol '%s' at %p (is_alias=%d, is_local_var=%d)\n", // Added is_local_var
-                sym->name ? sym->name : "NULL", (void*)sym, sym->is_alias, sym->is_local_var); // Added is_local_var
-#endif
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG]   Processing local symbol '%s' at %p (is_alias=%d, is_local_var=%d)\n",
+                sym->name ? sym->name : "NULL", (void*)sym, sym->is_alias, sym->is_local_var);
+        #endif
 
-        // *** FIX: Only free Value if it's NOT an alias AND NOT a standard local variable ***
-        if (sym->value && !sym->is_alias && !sym->is_local_var) {
-#ifdef DEBUG
-             fprintf(stderr, "[DEBUG]     Freeing Value* at %p for non-alias, non-local symbol '%s'\n", (void*)sym->value, sym->name ? sym->name : "NULL");
-#endif
-             freeValue(sym->value);
-             free(sym->value); // Free the Value struct itself
-             sym->value = NULL; // Prevent dangling pointer in Symbol struct
-        } else if (sym->value && (sym->is_alias || sym->is_local_var)) { // Log why it's skipped
-#ifdef DEBUG
-             fprintf(stderr, "[DEBUG]     Skipping freeValue for symbol '%s' (value=%p, alias=%d, local=%d)\n",
-                     sym->name ? sym->name : "NULL", (void*)sym->value, sym->is_alias, sym->is_local_var);
-#endif
+        if (sym->value) {
+            if (sym->is_alias) {
+                // Aliased value - DO NOT free content or Value struct
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG]   Skipping free for ALIAS symbol '%s'\n", sym->name ? sym->name : "NULL");
+                #endif
+            } else {
+                // Not an alias - value belongs to this symbol scope (includes local vars AND value params)
+                // Free the HEAP DATA managed *by* the Value struct
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG]   Calling freeValue for non-alias symbol '%s' (value=%p, is_local_var=%d)\n", sym->name ? sym->name : "NULL", (void*)sym->value, sym->is_local_var);
+                #endif
+                freeValue(sym->value); // Frees string, record fields, array elements etc.
+
+                // Free the Value struct ITSELF allocated by insertLocalSymbol
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG]   Freeing Value struct itself at %p for non-alias symbol '%s'\n", (void*)sym->value, sym->name ? sym->name : "NULL");
+                #endif
+                free(sym->value);      // <<< FIX: Free the Value struct for non-aliases >>>
+                sym->value = NULL;     // Prevent dangling pointer in Symbol struct
+            }
         }
-        // ... (free name, free symbol struct) ...
-         if (sym->name) {
-#ifdef DEBUG
+
+        // Free symbol name and struct itself (always do this for locals)
+        if (sym->name) {
+            #ifdef DEBUG
             fprintf(stderr, "[DEBUG]     Freeing name '%s' at %p\n", sym->name, (void*)sym->name);
-#endif
+            #endif
             free(sym->name);
         }
 #ifdef DEBUG
-        fprintf(stderr, "[DEBUG]     Freeing Symbol* at %p\n", (void*)sym);
+        fprintf(stderr, "[DEBUG]     Freeing Symbol* struct at %p\n", (void*)sym);
 #endif
         free(sym); // Free the Symbol struct itself
         sym = next;
     }
     localSymbols = NULL;
-#ifdef DEBUG
+    #ifdef DEBUG
     fprintf(stderr, "[DEBUG] Finished popping local env\n");
-#endif
+    #endif
 }
 
 // Add this structure to snapshot and restore local environment safely
