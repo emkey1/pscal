@@ -88,6 +88,8 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_OF:            return "OF";
         case TOKEN_AND:           return "AND";
         case TOKEN_OR:            return "OR";
+        case TOKEN_SHL:           return "SHL";
+        case TOKEN_SHR:           return "SHR";     
         case TOKEN_TRUE:          return "TRUE";
         case TOKEN_FALSE:         return "FALSE";
         case TOKEN_NOT:           return "NOT";

@@ -35,4 +35,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode);
 AST *copyAST(AST *node);
 bool verifyASTLinks(AST *node, AST *expectedParent);
 void freeTypeTableASTNodes(void);
+AST* findDeclarationInScope(const char* varName, AST* currentScopeNode); // Defined in original ast.c
+AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode); // Defined in original ast.c
+VarType getBuiltinReturnType(const char* name);
 #endif // AST_H

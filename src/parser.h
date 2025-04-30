@@ -49,8 +49,6 @@ AST *readStatement(Parser *parser);
 AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
-AST *relExpr(Parser *parser);
-AST *boolExpr(Parser *parser);
 AST *term(Parser *parser);
 AST *factor(Parser *parser);
 AST *unitParser(Parser *parser, int recursion_depth);
@@ -64,6 +62,13 @@ void insertType(const char *name, AST *typeAST);
 void eatInternal(Parser *parser, TokenType type);
 AST *parseArrayInitializer(Parser *parser);
 Token *peekToken(Parser *parser);
+
+AST *expression(Parser *parser);        // New top-level expression parser
+AST *simpleExpression(Parser *parser);  // Handles additive ops
+AST *term(Parser *parser);              // Handles multiplicative ops (modified)
+AST *factor(Parser *parser);            // Handles primaries, NOT, parens (modified)
+AST *parseSetConstructor(Parser *parser);
+AST *parseWriteArguments(Parser *parser);
 
 #ifdef DEBUG
 

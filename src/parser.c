@@ -213,154 +213,62 @@ AST *parseWriteArguments(Parser *parser) {
     return argList;
 }
 
-// lvalue() parses a variable reference without interpreting a following '(' as a call.
+// lvalue: Parses variable.field[index] etc. Calls expression for index.
 AST *lvalue(Parser *parser) {
-    // Assume the current token is an identifier.
     Token *token = parser->current_token;
-    if (token->type != TOKEN_IDENTIFIER) {
-         errorParser(parser, "Expected identifier at start of lvalue");
-         return newASTNode(AST_NOOP, NULL); // Return dummy node on error
+    // Check for NULL token added for robustness
+    if (!token || token->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Expected identifier at start of lvalue");
+        return newASTNode(AST_NOOP, NULL);
     }
+    AST *node = newASTNode(AST_VARIABLE, token); // Uses copy
+    eat(parser, TOKEN_IDENTIFIER); // Consumes original identifier
 
-    AST *node = newASTNode(AST_VARIABLE, token);
-    eat(parser, TOKEN_IDENTIFIER); // Consume the base identifier
-
-    // Allow subsequent field accesses (.) and array accesses ([])
-    while (parser->current_token->type == TOKEN_PERIOD ||
-           parser->current_token->type == TOKEN_LBRACKET) {
-
+    while (parser->current_token && (parser->current_token->type == TOKEN_PERIOD || parser->current_token->type == TOKEN_LBRACKET)) {
         if (parser->current_token->type == TOKEN_PERIOD) {
-            eat(parser, TOKEN_PERIOD); // Consume '.'
-            Token *fieldToken = parser->current_token;
-            if (fieldToken->type != TOKEN_IDENTIFIER) {
-                errorParser(parser, "Expected field name after '.'");
-                 // Cleanup potentially partially built node? For now, just break/return.
-                 return node; // Return partially built node on error
-            }
-            AST *fieldAccess = newASTNode(AST_FIELD_ACCESS, fieldToken);
-            eat(parser, TOKEN_IDENTIFIER); // Consume field identifier
-            setLeft(fieldAccess, node); // Previous node becomes left child
-            // Type annotation happens later
-            node = fieldAccess; // Update node to the field access node
-        }
-        else if (parser->current_token->type == TOKEN_LBRACKET) {
-            eat(parser, TOKEN_LBRACKET); // Consume '['
-            AST *arrayAccess = newASTNode(AST_ARRAY_ACCESS, NULL); // No specific token for array access itself
-            setLeft(arrayAccess, node); // Previous node is the array variable/expression
-
-            // Parse comma-separated index expressions
+            eat(parser, TOKEN_PERIOD); Token *field = copyToken(parser->current_token);
+            if(!field || field->type != TOKEN_IDENTIFIER){errorParser(parser,"Expected field name"); if(field)freeToken(field); return node;} // Return partial node
+            eat(parser,TOKEN_IDENTIFIER); AST *fa=newASTNode(AST_FIELD_ACCESS,field); freeToken(field);
+            setLeft(fa,node); node=fa;
+        } else { // LBRACKET
+            eat(parser, TOKEN_LBRACKET); AST *aa=newASTNode(AST_ARRAY_ACCESS,NULL); setLeft(aa,node);
             do {
-                AST *indexExpr = expr(parser); // Parse one index expression
-                addChild(arrayAccess, indexExpr);
-
-                if (parser->current_token->type == TOKEN_COMMA) {
-                    eat(parser, TOKEN_COMMA); // Consume comma, look for next index
-                } else {
-                    break; // No more commas, exit index loop
-                }
-            } while (1);
-
-            eat(parser, TOKEN_RBRACKET); // Consume ']'
-            // Type annotation happens later
-            node = arrayAccess; // Update node to the array access node
+                AST *idx=expression(parser); // <<< Use expression() for index
+                if(!idx || idx->type == AST_NOOP){errorParser(parser,"Bad index expression"); freeAST(aa); return node;} // Propagate error, free partial access node
+                addChild(aa,idx);
+                if(parser->current_token && parser->current_token->type==TOKEN_COMMA)eat(parser,TOKEN_COMMA);
+                else break;
+            } while(1);
+            if(!parser->current_token || parser->current_token->type != TOKEN_RBRACKET){errorParser(parser,"Expected ']' after array indices"); return node;} // Return partial node
+            eat(parser,TOKEN_RBRACKET);
+            node=aa;
         }
     }
-    // After loop, node points to the complete lvalue AST
     return node;
 }
 
-
-// Update in src/parser.c's parse_array_type function
-
-// src/parser.c (Modified parseArrayType function)
-
+// parseArrayType: Calls expression for bounds
 AST *parseArrayType(Parser *parser) {
-    eat(parser, TOKEN_ARRAY);
-    eat(parser, TOKEN_LBRACKET);
-
-    AST *indexList = newASTNode(AST_COMPOUND, NULL); // Temporary holder
-
-    // Parse comma-separated index subranges (Existing logic)
+    eat(parser, TOKEN_ARRAY); if(!parser->current_token || parser->current_token->type != TOKEN_LBRACKET){errorParser(parser,"Exp ["); return NULL;} eat(parser, TOKEN_LBRACKET);
+    AST *indexList = newASTNode(AST_COMPOUND, NULL);
     while (1) {
-        AST *lowerExpr = expr(parser);
-        // --- Add error checking for lowerExpr ---
-        if (!lowerExpr) {
-             errorParser(parser, "Failed to parse lower bound in array index range");
-             freeAST(indexList); // Clean up temp node
-             return NULL; // Indicate error
-        }
-        // ---
-        if (parser->current_token->type != TOKEN_DOTDOT) {
-            errorParser(parser, "Expected DOTDOT in array index range");
-            freeAST(lowerExpr); // Clean up parsed expression
-            freeAST(indexList); // Clean up temp node
-            return NULL; // Indicate error
-        }
-        eat(parser, TOKEN_DOTDOT);
-        AST *upperExpr = expr(parser);
-        if (!upperExpr) { // Handle error from expr
-            errorParser(parser, "Failed to parse upper bound in array index range");
-            freeAST(lowerExpr); freeAST(indexList);
-            return NULL;
-        }
-
-        AST *indexType = newASTNode(AST_SUBRANGE, NULL);
-        setLeft(indexType, lowerExpr);  // setLeft sets parent pointer of lowerExpr
-        setRight(indexType, upperExpr); // setRight sets parent pointer of upperExpr
-        addChild(indexList, indexType); // addChild sets parent pointer of indexType to indexList (temp)
-
-        if (parser->current_token->type == TOKEN_COMMA) {
-            eat(parser, TOKEN_COMMA);
-        } else {
-            break;
-        }
+        AST *lower = expression(parser); // <<< Use expression()
+        if (!lower || lower->type == AST_NOOP) { errorParser(parser, "Bad lower bound"); freeAST(indexList); return NULL; }
+        if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) { errorParser(parser, "Expected .."); freeAST(lower); freeAST(indexList); return NULL; } eat(parser, TOKEN_DOTDOT);
+        AST *upper = expression(parser); // <<< Use expression()
+        if (!upper || upper->type == AST_NOOP) { errorParser(parser, "Bad upper bound"); freeAST(lower); freeAST(indexList); return NULL; }
+        AST *range = newASTNode(AST_SUBRANGE, NULL); setLeft(range, lower); setRight(range, upper); addChild(indexList, range);
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA);
+        else break;
     }
-
-    eat(parser, TOKEN_RBRACKET);
-    eat(parser, TOKEN_OF);
-    AST *elemType = typeSpecifier(parser, 1);
-    if (!elemType) { // Handle error from typeSpecifier
-       errorParser(parser, "Failed to parse element type in array declaration");
-        freeAST(indexList); // Clean up temp node and its children
-        return NULL;
-    }
-
-    // Create the final array type node
-    AST *node = newASTNode(AST_ARRAY_TYPE, NULL);
-    setTypeAST(node, TYPE_ARRAY); // Set type early
-
-    // --- Transfer children AND Update Parent Pointers ---
-    if (indexList->child_count > 0) {
-        node->children = indexList->children; // Transfer array pointer
-        node->child_count = indexList->child_count;
-        node->child_capacity = indexList->child_capacity; // Copy capacity too
-
-        // *** ADDED: Update parent pointers of transferred children ***
-        for (int i = 0; i < node->child_count; ++i) {
-            if (node->children[i]) {
-                node->children[i]->parent = node; // Point child back to the final ARRAY_TYPE node
-            }
-        }
-
-        // Nullify pointers in temporary node before freeing it
-        indexList->children = NULL;
-        indexList->child_count = 0;
-        indexList->child_capacity = 0;
-    } else {
-        // Ensure node has NULL children if indexList was empty
-        node->children = NULL;
-        node->child_count = 0;
-        node->child_capacity = 0;
-    }
-    // --- End Transfer Logic ---
-
-    // free(indexList) was incorrect - use freeAST to potentially free grandchild data if needed,
-    // but since children are transferred, we only need to free the struct itself.
-    // Let's stick with free() as the children array pointer was nulled out.
-    free(indexList); // Free *only* the temporary compound node struct
-
-    setRight(node, elemType); // Link element type (sets parent pointer of elemType)
-
+    if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) { errorParser(parser,"Exp ]"); freeAST(indexList); return NULL; } eat(parser, TOKEN_RBRACKET);
+    if (!parser->current_token || parser->current_token->type != TOKEN_OF) { errorParser(parser,"Exp OF"); freeAST(indexList); return NULL; } eat(parser, TOKEN_OF);
+    AST *elemType = typeSpecifier(parser, 1); if (!elemType || elemType->type == AST_NOOP) { errorParser(parser, "Bad element type"); freeAST(indexList); return NULL; }
+    AST *node = newASTNode(AST_ARRAY_TYPE, NULL); setTypeAST(node, TYPE_ARRAY);
+    // Transfer children safely (keep existing logic)
+    if (indexList->child_count > 0) { node->children=indexList->children; node->child_count=indexList->child_count; node->child_capacity=indexList->child_capacity; for(int i=0;i<node->child_count;++i)if(node->children[i])node->children[i]->parent=node; indexList->children=NULL; indexList->child_count=0; indexList->child_capacity=0; } else { node->children=NULL; node->child_count=0; node->child_capacity=0; }
+    free(indexList); // Free temp compound struct
+    setRight(node, elemType);
     return node;
 }
 
@@ -904,226 +812,163 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
     return node;
 }
 
+// constDeclaration: Calls expression or parseArrayInitializer
 AST *constDeclaration(Parser *parser) {
-    // --- Copy the constant name token BEFORE calling eat ---
-    Token *originalConstNameToken = parser->current_token;
-    if (originalConstNameToken->type != TOKEN_IDENTIFIER) {
-        errorParser(parser, "Expected identifier for constant name");
-        return newASTNode(AST_NOOP, NULL);
+    Token* cn = copyToken(parser->current_token); if(!cn||cn->type!=TOKEN_IDENTIFIER){errorParser(parser,"Exp const name"); return NULL;} eat(parser,TOKEN_IDENTIFIER);
+    AST* type_node=NULL, *val_node=NULL;
+    if(parser->current_token && parser->current_token->type == TOKEN_COLON){eat(parser,TOKEN_COLON); type_node=typeSpecifier(parser,1); if(!type_node){errorParser(parser,"Invalid type"); freeToken(cn); return NULL;} /*...array check...*/ }
+    if(!parser->current_token || parser->current_token->type!=TOKEN_EQUAL){errorParser(parser,"Exp ="); freeToken(cn); if(type_node)freeAST(type_node); return NULL;} eat(parser,TOKEN_EQUAL);
+    if(type_node){ // Typed constant (array)
+        if(!parser->current_token || parser->current_token->type!=TOKEN_LPAREN){errorParser(parser,"Exp ("); freeToken(cn); freeAST(type_node); return NULL;}
+        val_node = parseArrayInitializer(parser); // <<< Uses expression internally
+        if(!val_node){errorParser(parser,"Bad array init"); freeToken(cn); freeAST(type_node); return NULL;}
+        if(type_node)setRight(val_node,type_node); // Link type info
+    } else { // Simple constant
+        val_node = expression(parser); // <<< Use expression()
+        if(!val_node || val_node->type == AST_NOOP){errorParser(parser,"Exp const value"); freeToken(cn); return NULL;}
     }
-    Token *copiedConstNameToken = copyToken(originalConstNameToken); // <<< COPY
-    if (!copiedConstNameToken) {
-        fprintf(stderr, "Memory allocation failed in constDeclaration (copyToken name)\n");
-        EXIT_FAILURE_HANDLER();
-    }
-    // ---
-
-    // Eat the ORIGINAL constant name token (eatInternal frees it)
-    eat(parser, TOKEN_IDENTIFIER);
-
-    AST *typeNode = NULL; // For typed constants (Pascal extension)
-    AST *valueNode = NULL;
-
-    // Check for optional type specifier (Pascal extension for typed constants)
-    if (parser->current_token->type == TOKEN_COLON) {
-        eat(parser, TOKEN_COLON); // Frees ':'
-        typeNode = typeSpecifier(parser, 1); // Parse the type
-        // Basic validation (more detailed checks might be needed later)
-        if (!typeNode) {
-            errorParser(parser, "Failed to parse type specifier in typed constant declaration");
-            freeToken(copiedConstNameToken); // Free the copy before returning
-            return newASTNode(AST_NOOP, NULL);
-        }
-        // Assuming typed constants are mainly for arrays currently
-        if (typeNode->type != AST_ARRAY_TYPE && typeNode->var_type != TYPE_ARRAY) {
-            // Check if it's a reference to an array type
-            int is_array_ref = 0;
-            if (typeNode->type == AST_TYPE_REFERENCE && typeNode->token) {
-                AST* ref_target = lookupType(typeNode->token->value);
-                if (ref_target && ref_target->var_type == TYPE_ARRAY) {
-                    is_array_ref = 1;
-                }
-            }
-            if (!is_array_ref) {
-                 errorParser(parser, "Expected array type specifier for typed constant array declaration");
-                 freeToken(copiedConstNameToken); // Free the copy
-                 return newASTNode(AST_NOOP, NULL);
-            }
-        }
-    }
-
-    eat(parser, TOKEN_EQUAL); // Frees '='
-
-    // Parse the value: either simple expression or array initializer
-    if (typeNode != NULL) { // If type was specified, expect array initializer '('
-        if (parser->current_token->type != TOKEN_LPAREN) {
-            errorParser(parser, "Expected '(' for array constant initializer list");
-            freeToken(copiedConstNameToken); // Free the copy
-            // Free typeNode AST if necessary? Depends on ownership. Assuming caller handles.
-            return newASTNode(AST_NOOP, NULL);
-        }
-        valueNode = parseArrayInitializer(parser); // Parses (...)
-        if(valueNode && typeNode) setRight(valueNode, typeNode); // Link type to literal node for runtime use
-    } else { // No type specified, parse a simple constant expression
-        valueNode = expr(parser);
-    }
-
-    eat(parser, TOKEN_SEMICOLON); // Frees ';'
-
-    // --- Create the main declaration node using the COPIED token ---
-    AST *node = newASTNode(AST_CONST_DECL, copiedConstNameToken); // <<< Use copy
-    // ---
-    setLeft(node, valueNode); // Link the value/literal node
-
-    if (typeNode) {
-       setRight(node, typeNode); // Link explicit type specifier AST if present
-       setTypeAST(node, TYPE_ARRAY); // Assume typed const is array for now
-    } else {
-       // Type will be inferred during semantic analysis/evaluation
-       setTypeAST(node, TYPE_VOID);
-    }
-
-    // --- Free the COPIED constant name token ---
-    freeToken(copiedConstNameToken); // <<< Free the copy made at the start
-    // ---
-
+    if(!parser->current_token || parser->current_token->type!=TOKEN_SEMICOLON){errorParser(parser,"Exp ;"); freeToken(cn); if(type_node)freeAST(type_node); freeAST(val_node); return NULL;} eat(parser,TOKEN_SEMICOLON);
+    AST* node = newASTNode(AST_CONST_DECL, cn); freeToken(cn); setLeft(node,val_node);
+    if(type_node){setRight(node,type_node); setTypeAST(node,TYPE_ARRAY);} else {setTypeAST(node,TYPE_VOID);} // Type inferred later for simple const
     return node;
 }
+// typeSpecifier: Calls expression for string length
+// Replace the existing typeSpecifier function with this one
 
-AST *typeSpecifier(Parser *parser, int allowAnonymous) { // allowAnonymous might not be needed now
+AST *typeSpecifier(Parser *parser, int allowAnonymous) {
     AST *node = NULL;
     Token *typeToken = parser->current_token; // Store current token at the start
 
-    if (parser->current_token->type == TOKEN_RECORD) {
-        node = newASTNode(AST_RECORD_TYPE, typeToken); // Use RECORD token
-        eat(parser, TOKEN_RECORD);
+    if (!typeToken) {
+        errorParser(parser, "Unexpected end of input in typeSpecifier");
+        return NULL; // Return NULL on error
+    }
 
-        while (parser->current_token->type == TOKEN_IDENTIFIER) {
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG typeSpecifier] Entry: Token Type=%s, Value='%s'\n",
+            tokenTypeToString(typeToken->type), typeToken->value ? typeToken->value : "NULL");
+    #endif
+
+    if (typeToken->type == TOKEN_RECORD) {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG typeSpecifier] Detected RECORD\n");
+        #endif
+        // --- Keep existing RECORD parsing logic ---
+        node = newASTNode(AST_RECORD_TYPE, typeToken); eat(parser, TOKEN_RECORD);
+        while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
             AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
+            while (1) { if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) { errorParser(parser,"Expected field identifier"); freeAST(fieldDecl); return node; } AST *varNode = newASTNode(AST_VARIABLE, parser->current_token); eat(parser, TOKEN_IDENTIFIER); addChild(fieldDecl, varNode); if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA); else break; }
+            if (!parser->current_token || parser->current_token->type != TOKEN_COLON) { errorParser(parser,"Expected :"); freeAST(fieldDecl); return node; } eat(parser, TOKEN_COLON);
+            AST *fieldType = typeSpecifier(parser, 1); if (!fieldType || fieldType->type == AST_NOOP) { errorParser(parser,"Bad field type"); freeAST(fieldDecl); return node; }
+            setTypeAST(fieldDecl, fieldType->var_type); setRight(fieldDecl, fieldType); addChild(node, fieldDecl);
+            if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) { eat(parser, TOKEN_SEMICOLON); if (parser->current_token && parser->current_token->type == TOKEN_END) break; }
+            else if (!parser->current_token || parser->current_token->type != TOKEN_END) { errorParser(parser, "Expected ; or END in record"); break; }
+        }
+        if (!parser->current_token || parser->current_token->type != TOKEN_END) { errorParser(parser,"Expected END for record"); return node; } eat(parser, TOKEN_END); setTypeAST(node, TYPE_RECORD);
+        // --- End RECORD logic ---
+    }
+    else if (typeToken->type == TOKEN_ARRAY) {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG typeSpecifier] Detected ARRAY\n");
+        #endif
+        // --- Keep existing ARRAY parsing logic ---
+        node = parseArrayType(parser); // Calls expression internally
+        if(node) setTypeAST(node, TYPE_ARRAY); // Set type if parse succeeded
+        // --- End ARRAY logic ---
+    }
+    else if (typeToken->type == TOKEN_IDENTIFIER) {
+        char *typeName = typeToken->value;
+        char *typeNameCopy = strdup(typeName); // <<< FIX: Copy the type name string
+        if (!typeNameCopy) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
 
-            // Parse potentially comma-separated list of field names for this type
-            while (1) {
-                AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
-                eat(parser, TOKEN_IDENTIFIER);
-                addChild(fieldDecl, varNode);
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG typeSpecifier] Detected IDENTIFIER: '%s'\n", typeNameCopy);
+        #endif
 
-                if (parser->current_token->type == TOKEN_COMMA) {
-                    eat(parser, TOKEN_COMMA);
-                } else {
-                    break;
+        // --- Check for STRING type first ---
+        if (strcasecmp(typeNameCopy, "string") == 0) {
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG typeSpecifier] Matched basic type: STRING\n");
+            #endif
+            node = newASTNode(AST_VARIABLE, typeToken); // Uses copy of original 'string' token
+            setTypeAST(node, TYPE_STRING);
+            eat(parser, TOKEN_IDENTIFIER); // Consume 'string' identifier
+            // Check for fixed-length string specifier: string[length]
+            if (parser->current_token && parser->current_token->type == TOKEN_LBRACKET) {
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG typeSpecifier] Parsing fixed string length...\n");
+                 #endif
+                eat(parser, TOKEN_LBRACKET);
+                AST *lengthNode = expression(parser); // Parse the length expression
+                if(!lengthNode || lengthNode->type == AST_NOOP) { errorParser(parser,"Bad string len expression"); free(typeNameCopy); return node;} // Cleanup copy on error
+                if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) { errorParser(parser,"Expected ] after string length"); free(typeNameCopy); return node;}
+                eat(parser, TOKEN_RBRACKET);
+                setRight(node, lengthNode); // Attach length expression node
+            }
+        }
+        // --- Check other basic types ---
+        else {
+            VarType basicType = TYPE_VOID;
+            if (strcasecmp(typeNameCopy, "integer") == 0 || strcasecmp(typeNameCopy, "longint") == 0 || strcasecmp(typeNameCopy, "cardinal") == 0) basicType = TYPE_INTEGER;
+            else if (strcasecmp(typeNameCopy, "real") == 0) basicType = TYPE_REAL;
+            else if (strcasecmp(typeNameCopy, "char") == 0) basicType = TYPE_CHAR;
+            else if (strcasecmp(typeNameCopy, "byte") == 0) basicType = TYPE_BYTE;
+            else if (strcasecmp(typeNameCopy, "word") == 0) basicType = TYPE_WORD;
+            else if (strcasecmp(typeNameCopy, "boolean") == 0) basicType = TYPE_BOOLEAN;
+            else if (strcasecmp(typeNameCopy, "file") == 0 || strcasecmp(typeNameCopy, "text") == 0) basicType = TYPE_FILE;
+            else if (strcasecmp(typeNameCopy, "mstream") == 0) basicType = TYPE_MEMORYSTREAM;
+
+            if (basicType != TYPE_VOID) {
+                // Matched a basic type identifier
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG typeSpecifier] Matched basic type: %s\n", varTypeToString(basicType));
+                #endif
+                node = newASTNode(AST_VARIABLE, typeToken); // Uses copy of original token
+                setTypeAST(node, basicType);
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG typeSpecifier] BEFORE eat for basic type '%s'\n", typeNameCopy); // Use copy
+                #endif
+                eat(parser, TOKEN_IDENTIFIER); // <<< CONSUME THE IDENTIFIER
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG typeSpecifier] AFTER eat for basic type '%s'. Next token: %s\n",
+                        typeNameCopy, // <<< FIX: Use the copied string here
+                        tokenTypeToString(parser->current_token ? parser->current_token->type : TOKEN_EOF)); // Check for NULL token
+                #endif
+            } else {
+                // Assume it's a user-defined type reference
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG typeSpecifier] Assuming user-defined type reference: '%s'\n", typeNameCopy); // Use copy
+                #endif
+                AST *userType = lookupType(typeNameCopy); // Look up using copy
+                if (!userType) {
+                    char err_msg[128]; snprintf(err_msg, sizeof(err_msg), "Undefined type '%s'", typeNameCopy); // Use copy
+                    errorParser(parser, err_msg);
+                    free(typeNameCopy); // Free copy before returning
+                    return NULL; // Error recovery
                 }
+                node = newASTNode(AST_TYPE_REFERENCE, typeToken); // Uses copy of original token
+                setTypeAST(node, userType->var_type); // Copy VarType from definition
+                node->right = userType; // Direct link to the definition AST
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG typeSpecifier] BEFORE eat for user type '%s'\n", typeNameCopy); // Use copy
+                #endif
+                eat(parser, TOKEN_IDENTIFIER); // <<< CONSUME THE IDENTIFIER
+                #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG typeSpecifier] AFTER eat for user type '%s'. Next token: %s\n",
+                        typeNameCopy, // <<< FIX: Use the copied string here
+                        tokenTypeToString(parser->current_token ? parser->current_token->type : TOKEN_EOF)); // Check for NULL token
+                #endif
             }
-
-            eat(parser, TOKEN_COLON);
-            AST *fieldType = typeSpecifier(parser, 1); // Allow anonymous types within records
-            // Set the type and definition link for the field declaration group
-            setTypeAST(fieldDecl, fieldType->var_type);
-            setRight(fieldDecl, fieldType); // Link VAR_DECL to the type definition used
-            addChild(node, fieldDecl); // Add this field group to the record type node
-
-            // Fields are separated by semicolons
-            if (parser->current_token->type == TOKEN_SEMICOLON) {
-                eat(parser, TOKEN_SEMICOLON);
-                 // Check if END follows semicolon, if so, break loop
-                 if (parser->current_token->type == TOKEN_END) {
-                     break;
-                 }
-            } else if (parser->current_token->type != TOKEN_END) {
-                // If it's not a semicolon and not END, it's an error
-                errorParser(parser, "Expected semicolon or END in record declaration");
-                // Consider breaking or returning error node
-                break;
-            }
-            // If END is next, the outer loop condition will handle it
-        } // End while (parsing fields)
-
-        eat(parser, TOKEN_END); // Consume END of record
-        setTypeAST(node, TYPE_RECORD); // Mark the main node as RECORD type
+        }
+        free(typeNameCopy); // <<< FIX: Free the copied type name string
+    } else {
+        errorParser(parser, "Expected type identifier, ARRAY, or RECORD");
+        return NULL; // Return NULL on error
     }
-    // --- Enum parsing block removed from here ---
-    else if (parser->current_token->type == TOKEN_ARRAY) {
-        node = parseArrayType(parser); // Delegate to array parsing function
-        setTypeAST(node, TYPE_ARRAY);
-    }
-    else if (strcasecmp(parser->current_token->value, "string") == 0) {
-        node = newASTNode(AST_VARIABLE, typeToken); // Use 'string' token
-        setTypeAST(node, TYPE_STRING);
-        eat(parser, TOKEN_IDENTIFIER); // Consume 'string' identifier
-        // Check for fixed-length string specifier: string[length]
-        if (parser->current_token->type == TOKEN_LBRACKET) {
-            eat(parser, TOKEN_LBRACKET);
-            // The length expression should evaluate to an integer constant ideally
-            AST *lengthNode = expr(parser); // Parse the length expression
-             // Semantic analysis should later verify this is a constant integer > 0
-            eat(parser, TOKEN_RBRACKET);
-            setRight(node, lengthNode); // Attach length expression node
-        }
-    }
-    else { // Handle basic types (integer, real, etc.) and user-defined type references
-        char *typeName = typeToken->value; // Get the identifier string
 
-        if (strcasecmp(typeName, "integer") == 0 ||
-            strcasecmp(typeName, "longint") == 0 || // Treat synonyms as INTEGER
-            strcasecmp(typeName, "cardinal") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken); // Node represents the type name
-            setTypeAST(node, TYPE_INTEGER);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "real") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_REAL);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "char") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_CHAR);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "byte") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_BYTE);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "word") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_WORD);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "boolean") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_BOOLEAN);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "file") == 0 || // Treat file and text as FILE type
-                 strcasecmp(typeName, "text") == 0) {
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_FILE);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else if (strcasecmp(typeName, "mstream") == 0) { // If you have this type
-            node = newASTNode(AST_VARIABLE, typeToken);
-            setTypeAST(node, TYPE_MEMORYSTREAM);
-            eat(parser, TOKEN_IDENTIFIER);
-        }
-        else { // Assume it's a user-defined type reference
-            AST *userType = lookupType(typeName); // Look up in the type table
-            if (!userType) {
-                // This happens if a type is used before it's declared (or is misspelled)
-                fprintf(stderr, "Parser Error at Line %d, Col %d: Undefined type '%s'\n",
-                        parser->lexer->line, parser->lexer->column, typeName);
-                EXIT_FAILURE_HANDLER(); // Or other error handling
-            }
-            // Create a reference node pointing to the actual definition
-            node = newASTNode(AST_TYPE_REFERENCE, typeToken);
-            setTypeAST(node, userType->var_type); // Copy VarType (e.g., TYPE_RECORD, TYPE_ENUM) from definition
-
-            // --- MODIFICATION START: Link without changing parent ---
-            // setRight(node, userType); // <<<< REMOVE THIS LINE
-            node->right = userType;     // <<<< ADD THIS LINE (Direct assignment, preserves original parent of userType)
-            // --- MODIFICATION END ---
-
-            eat(parser, TOKEN_IDENTIFIER); // Consume the type name identifier
-        }
+    if (!node) { // Should not happen if logic above is correct
+        errorParser(parser, "Internal error: typeSpecifier failed to create node");
+        return newASTNode(AST_NOOP, NULL);
     }
 
     return node; // Return the created type specifier node
@@ -1239,35 +1084,13 @@ AST *typeDeclaration(Parser *parser) {
     return node; // Return the main AST_TYPE_DECL node
 }
 
-// This function parses a variable reference (which may have field or array accesses),
-// but it does not interpret a following '(' as a procedure call.
+// variable: Simple variable parsing (e.g., for param list names) - No changes needed here usually
 AST *variable(Parser *parser) {
-    // The current token should be an identifier.
     Token *token = parser->current_token;
-    AST *node = newASTNode(AST_VARIABLE, token);
+    if (!token || token->type != TOKEN_IDENTIFIER){errorParser(parser,"Expected var name"); return NULL;}
+    AST* node = newASTNode(AST_VARIABLE, token); // Uses copy
     eat(parser, TOKEN_IDENTIFIER);
-    // Now allow field and array accesses.
-    while (parser->current_token->type == TOKEN_PERIOD ||
-           parser->current_token->type == TOKEN_LBRACKET) {
-        if (parser->current_token->type == TOKEN_PERIOD) {
-            eat(parser, TOKEN_PERIOD);
-            Token *fieldToken = parser->current_token;
-            if (fieldToken->type != TOKEN_IDENTIFIER)
-                errorParser(parser, "Expected field name after '.'");
-            AST *fieldAccess = newASTNode(AST_FIELD_ACCESS, fieldToken);
-            eat(parser, TOKEN_IDENTIFIER);
-            setLeft(fieldAccess, node);
-            node = fieldAccess;
-        } else if (parser->current_token->type == TOKEN_LBRACKET) {
-            eat(parser, TOKEN_LBRACKET);
-            AST *indexExpr = expr(parser);
-            eat(parser, TOKEN_RBRACKET);
-            AST *arrayAccess = newASTNode(AST_ARRAY_ACCESS, NULL);
-            setLeft(arrayAccess, node);
-            addChild(arrayAccess, indexExpr);
-            node = arrayAccess;
-        }
-    }
+    // Does NOT parse field/array access
     return node;
 }
 
@@ -1301,7 +1124,7 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
     // 3. Create final VAR_DECL nodes, creating COPIES of type nodes for each
     for (int i = 0; i < groupNode->child_count; ++i) {
         AST *var_decl_node = newASTNode(AST_VAR_DECL, NULL);
-        if (!var_decl_node) { /* Malloc check */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
+        if (!var_decl_node) { /* Malloc check */ freeAST(groupNode); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
         var_decl_node->var_type = originalTypeNode->var_type;
 
         // Transfer the name node (AST_VARIABLE) from groupNode
@@ -1784,959 +1607,226 @@ AST *statement(Parser *parser) {
 } // End statement()
 
 // Parameter renamed to parsedLValue
+// assignmentStatement: Calls expression
 AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
-    // Line causing the error is removed.
-
-    // Current token should be ASSIGN (this check might need adjustment
-    // depending on where the caller consumes the lvalue)
-    eat(parser, TOKEN_ASSIGN);
-    AST *right = boolExpr(parser); // Parse the right-hand side expression
-    AST *node = newASTNode(AST_ASSIGN, NULL);
-
-    // Use the parameter directly
-    setLeft(node, parsedLValue);
-    setRight(node, right);
-
-    #ifdef DEBUG
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node;
+    if(!parser->current_token || parser->current_token->type!=TOKEN_ASSIGN){errorParser(parser,"Expected :="); return newASTNode(AST_NOOP,NULL);} eat(parser,TOKEN_ASSIGN);
+    AST* r=expression(parser); // <<< Use expression()
+    if(!r || r->type == AST_NOOP){errorParser(parser,"Expected expression after :="); return newASTNode(AST_NOOP,NULL);}
+    AST* n=newASTNode(AST_ASSIGN,NULL); setLeft(n,parsedLValue); setRight(n,r);
+    return n;
 }
 
+// procedureCall: Calls exprList (which calls expression)
 AST *procedureCall(Parser *parser) {
-    AST *node = newASTNode(AST_PROCEDURE_CALL, parser->current_token); // node is the new parent
-    eat(parser, TOKEN_IDENTIFIER);
-
-    // Handle argument list if present
-    if (parser->current_token->type == TOKEN_LPAREN) {
-        eat(parser, TOKEN_LPAREN);
-        AST *args = exprList(parser); // exprList returns a temporary AST_COMPOUND
-        eat(parser, TOKEN_RPAREN);
-
-        // Check if exprList actually returned arguments
-        if (args && args->child_count > 0) {
-            // Transfer children array and count
-            node->children = args->children;
-            node->child_count = args->child_count;
-
-            // Nullify in temporary node to prevent double free issues
-            args->children = NULL; // <<< ADD THIS
-            args->child_count = 0;  // <<< ADD THIS
-
-            // Update parent pointers of transferred children
-            for (int i = 0; i < node->child_count; i++) {
-                if (node->children[i]) {
-                    node->children[i]->parent = node; // <<< ADD THIS LOOP
-                }
-            }
-        } else {
-            // No arguments returned, ensure node reflects this
-            node->children = NULL;
-            node->child_count = 0;
-        }
-
-        // Free the temporary args compound node structure itself
-        if (args) {
-             free(args); // <<< ADD THIS FREE CALL
-        }
-
-    } else {
-        // No parentheses, so no arguments
-        node->children = NULL;
-        node->child_count = 0;
-    }
-
-    #ifdef DEBUG
-    if (dumpExec) debugAST(node, 0);
-    #endif
+    // Assumes current token is the procedure identifier
+    AST *node = newASTNode(AST_PROCEDURE_CALL, parser->current_token); eat(parser,TOKEN_IDENTIFIER);
+    if(parser->current_token && parser->current_token->type==TOKEN_LPAREN){
+        eat(parser,TOKEN_LPAREN); AST* args=NULL;
+        if(parser->current_token && parser->current_token->type!=TOKEN_RPAREN) args=exprList(parser); // <<< exprList uses expression()
+        if(!args && parser->current_token && parser->current_token->type != TOKEN_RPAREN){errorParser(parser,"Bad arg list"); return node;} // Error if exprList failed
+        if(!parser->current_token || parser->current_token->type != TOKEN_RPAREN){errorParser(parser,"Exp )"); return node;} eat(parser,TOKEN_RPAREN);
+        // Argument transfer logic (keep existing)
+        if(args && args->child_count>0){node->children=args->children;node->child_count=args->child_count; node->child_capacity=args->child_capacity; args->children=NULL;args->child_count=0; args->child_capacity=0; for(int i=0;i<node->child_count;i++)if(node->children[i])node->children[i]->parent=node;}
+        else {node->children=NULL;node->child_count=0; node->child_capacity=0;}
+        if(args)freeAST(args); // Use freeAST
+    } else {node->children=NULL;node->child_count=0; node->child_capacity=0;}
     return node;
 }
 
 AST *ifStatement(Parser *parser) {
-    eat(parser, TOKEN_IF);
-    AST *condition = boolExpr(parser);
-    eat(parser, TOKEN_THEN);
-
-    DEBUG_PRINT("[DEBUG] ifStatement: Parsing THEN branch...\n"); // Existing or add
-    AST *then_branch = statement(parser); // Parses the statement after THEN
-    DEBUG_PRINT("[DEBUG] ifStatement: FINISHED parsing THEN branch.\n"); // Existing or add
-
-    AST *node = newASTNode(AST_IF, NULL);
-    setLeft(node, condition);
-    setRight(node, then_branch);
-
-    // <<< --- ADD THIS DEBUG BLOCK --- >>>
-    #ifdef DEBUG
-    if (dumpExec) { // Ensure debug flag is checked
-        fprintf(stderr, "[DEBUG] ifStatement: After THEN branch, current token is: %s ('%s') at Line %d, Col %d\n",
-                 tokenTypeToString(parser->current_token->type),
-                 parser->current_token->value ? parser->current_token->value : "NULL",
-                 parser->lexer->line, parser->lexer->column);
-    }
-    #endif
-    // <<< --- END ADDED DEBUG BLOCK --- >>>
-
-    // Check for ELSE part
-    if (parser->current_token->type == TOKEN_ELSE) {
-         #ifdef DEBUG
-         if (dumpExec) fprintf(stderr, "[DEBUG] ifStatement: Found ELSE token. Parsing ELSE branch...\n"); // Add/ensure this
-         #endif
-        eat(parser, TOKEN_ELSE);           // Consumes ELSE
-        AST *else_branch = statement(parser); // Parses the statement after ELSE
-         #ifdef DEBUG
-         if (dumpExec) fprintf(stderr, "[DEBUG] ifStatement: FINISHED parsing ELSE branch.\n"); // Add/ensure this
-         #endif
-        setExtra(node, else_branch);
-    } else {
-         #ifdef DEBUG
-         if (dumpExec) fprintf(stderr, "[DEBUG] ifStatement: NO ELSE token found after THEN branch.\n"); // Add/ensure this
-         #endif
-    }
-
-    #ifdef DEBUG
-    if (dumpExec) fprintf(stderr, "[DEBUG] ifStatement: Returning IF node.\n"); // Add/ensure this
-    #endif
-
-    #ifdef DEBUG // Keep existing dump if helpful
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node;
+    eat(parser,TOKEN_IF); AST* c=expression(parser); // <<< Use expression()
+    if(!c || c->type==AST_NOOP){errorParser(parser,"Exp cond"); return NULL;}
+    if(!parser->current_token || parser->current_token->type!=TOKEN_THEN){errorParser(parser,"Exp THEN"); freeAST(c); return NULL;} eat(parser,TOKEN_THEN);
+    AST* t=statement(parser); if(!t || t->type==AST_NOOP){errorParser(parser,"Exp THEN stmt"); freeAST(c); return NULL;}
+    AST* n=newASTNode(AST_IF,NULL); setLeft(n,c); setRight(n,t);
+    if(parser->current_token && parser->current_token->type==TOKEN_ELSE){eat(parser,TOKEN_ELSE); AST* e=statement(parser); if(!e){errorParser(parser,"Exp ELSE stmt");} setExtra(n,e);}
+    return n;
 }
-
-// ... rest of parser.c ...
 
 AST *whileStatement(Parser *parser) {
-    eat(parser, TOKEN_WHILE);
-    AST *condition = boolExpr(parser);
-    eat(parser, TOKEN_DO);
-    AST *body = statement(parser);
-    AST *node = newASTNode(AST_WHILE, NULL);
-    setLeft(node, condition);
-    setRight(node, body);
-    DEBUG_DUMP_AST(node, 0);
-    return node;
+    eat(parser,TOKEN_WHILE); AST* c=expression(parser); // <<< Use expression()
+    if(!c || c->type==AST_NOOP){errorParser(parser,"Exp cond"); return NULL;}
+    if(!parser->current_token || parser->current_token->type!=TOKEN_DO){errorParser(parser,"Exp DO"); freeAST(c); return NULL;} eat(parser,TOKEN_DO);
+    AST* b=statement(parser); if(!b || b->type==AST_NOOP){errorParser(parser,"Exp DO stmt"); freeAST(c); return NULL;}
+    AST* n=newASTNode(AST_WHILE,NULL); setLeft(n,c); setRight(n,b); return n;
 }
 
+// parseCaseLabels: Calls expression
 AST *parseCaseLabels(Parser *parser) {
     AST *labels = newASTNode(AST_COMPOUND, NULL);
     while (1) {
         AST *label = NULL;
-        AST *start = expr(parser);
-
-        if (parser->current_token->type == TOKEN_DOTDOT) {
+        AST *start = expression(parser); // <<< Use expression()
+        if (!start || start->type == AST_NOOP) { errorParser(parser, "Exp expr for case label"); break; }
+        if (parser->current_token && parser->current_token->type == TOKEN_DOTDOT) {
             eat(parser, TOKEN_DOTDOT);
-            AST *end = expr(parser);
-            label = newASTNode(AST_SUBRANGE, NULL);
-            setLeft(label, start);
-            setRight(label, end);
-        } else {
-            label = start;
-        }
-
+            AST *end = expression(parser); // <<< Use expression()
+            if (!end || end->type == AST_NOOP) { errorParser(parser, "Exp expr after .."); freeAST(start); break; }
+            label = newASTNode(AST_SUBRANGE, NULL); setLeft(label, start); setRight(label, end);
+        } else { label = start; } // Single label
         addChild(labels, label);
-
-        if (parser->current_token->type == TOKEN_COMMA) {
-            eat(parser, TOKEN_COMMA);
-        } else {
-            break;
-        }
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA);
+        else break;
     }
-
-    if (labels->child_count == 1) {
-        AST *single = labels->children[0];
-        single->parent = NULL;
-        free(labels->children);
-        free(labels);
-        return single;
-    }
-
+    if (labels->child_count == 1) { AST *s=labels->children[0]; s->parent=NULL; free(labels->children); free(labels); return s;} // Simplify
+    else if (labels->child_count == 0) { freeAST(labels); return newASTNode(AST_NOOP, NULL);} // Handle empty
     return labels;
 }
 
-
 AST *caseStatement(Parser *parser) {
-    eat(parser, TOKEN_CASE);
-    AST *caseExpr = expr(parser);
-    AST *node = newASTNode(AST_CASE, NULL);
-    setLeft(node, caseExpr);
-    eat(parser, TOKEN_OF);
-    while ((parser->current_token->type != TOKEN_ELSE) &&
-           (parser->current_token->type != TOKEN_END)) {
-        AST *branch = newASTNode(AST_CASE_BRANCH, NULL);
-        setLeft(branch, parseCaseLabels(parser));
-        eat(parser, TOKEN_COLON);
-        setRight(branch, statement(parser));
-        addChild(node, branch);
-        if (parser->current_token->type == TOKEN_SEMICOLON) {
-            eat(parser, TOKEN_SEMICOLON);
-        } else {
-            break;
-        }
+    eat(parser,TOKEN_CASE); AST* ce=expression(parser); // <<< Use expression()
+    if(!ce || ce->type==AST_NOOP){errorParser(parser,"Exp CASE expr"); return NULL;}
+    AST* n=newASTNode(AST_CASE,NULL); setLeft(n,ce);
+    if(!parser->current_token || parser->current_token->type!=TOKEN_OF){errorParser(parser,"Exp OF"); return n;} eat(parser,TOKEN_OF);
+    while(parser->current_token && parser->current_token->type!=TOKEN_ELSE && parser->current_token->type!=TOKEN_END){
+        AST* br=newASTNode(AST_CASE_BRANCH,NULL);
+        AST* lbls = parseCaseLabels(parser); // <<< Calls expression() internally
+        if(!lbls || lbls->type==AST_NOOP){errorParser(parser,"Bad case labels"); freeAST(br); break;} setLeft(br,lbls);
+        if(!parser->current_token || parser->current_token->type!=TOKEN_COLON){errorParser(parser,"Exp :"); freeAST(br); break;} eat(parser,TOKEN_COLON);
+        AST* stmt = statement(parser); if(!stmt || stmt->type==AST_NOOP){errorParser(parser,"Exp stmt after :"); freeAST(br); break;} setRight(br,stmt); addChild(n,br);
+        if(parser->current_token && parser->current_token->type==TOKEN_SEMICOLON)eat(parser,TOKEN_SEMICOLON);
+        else break;
     }
-    if (parser->current_token->type == TOKEN_ELSE) {
-        eat(parser, TOKEN_ELSE);
-        setExtra(node, statement(parser));
-        if (parser->current_token->type == TOKEN_SEMICOLON) {
-            eat(parser, TOKEN_SEMICOLON);
-        }
-    }
-    eat(parser, TOKEN_END);
-    return node;
+    if(parser->current_token && parser->current_token->type==TOKEN_ELSE){eat(parser,TOKEN_ELSE); AST* elsestmt = statement(parser); if(!elsestmt){errorParser(parser,"Exp ELSE stmt");} setExtra(n,elsestmt); if(parser->current_token && parser->current_token->type==TOKEN_SEMICOLON)eat(parser,TOKEN_SEMICOLON);}
+    if(!parser->current_token || parser->current_token->type!=TOKEN_END){errorParser(parser,"Exp END"); return n;} eat(parser,TOKEN_END); return n;
 }
 
-// In src/parser.c
-
 AST *repeatStatement(Parser *parser) {
-    eat(parser, TOKEN_REPEAT); // Consume REPEAT
-    AST *body = newASTNode(AST_COMPOUND, NULL);
-
-    // Loop until the UNTIL token is encountered and consumed
-    while (1) {
-        // Check for UNTIL *before* parsing a statement
-        if (parser->current_token->type == TOKEN_UNTIL) {
-            break; // Exit the loop, UNTIL will be consumed below
-        }
-
-        // Skip any optional empty statements (just semicolons)
-        // This prevents calling statement() when it's just a separator
-        while (parser->current_token->type == TOKEN_SEMICOLON) {
-            eat(parser, TOKEN_SEMICOLON);
-            // Check for UNTIL immediately after a semicolon
-            if (parser->current_token->type == TOKEN_UNTIL) {
-                 goto end_loop; // Use goto to break outer loop cleanly
-            }
-        }
-        // Check again for UNTIL after potentially skipping semicolons
-        if (parser->current_token->type == TOKEN_UNTIL) {
-            break;
-        }
-
-        // Parse one statement
-        AST *stmt = statement(parser);
-        if (stmt && stmt->type != AST_NOOP) {
-             addChild(body, stmt);
-        } else if (!stmt) {
-            // statement() should ideally signal errors via errorParser
-            // If it returns NULL without erroring, something is wrong.
-            errorParser(parser, "Failed to parse statement within REPEAT loop");
-            break; // Exit loop on error
-        }
-        // Note: We intentionally DO NOT error on AST_NOOP here,
-        // as statement() might return that for a valid empty statement ';',
-        // which the semicolon skipping loop at the top should handle on the next iteration.
-
-        // After parsing a statement, check if the next token is UNTIL.
-        // If not UNTIL, it *should* ideally be a semicolon if more statements follow,
-        // but standard Pascal allows omitting the semicolon before UNTIL.
-        // So, we only consume a semicolon if it's present.
-        if (parser->current_token->type == TOKEN_SEMICOLON) {
-             eat(parser, TOKEN_SEMICOLON);
-        }
-        // If the token after the statement is neither UNTIL nor SEMICOLON,
-        // it implies a syntax error *within* the statement list or structure.
-        // For example, `if ... end else ... end UNTIL` is valid, the token after
-        // the first `end` is `else`. `statement()` should handle parsing the full `if/else`.
-        // If `statement()` completed successfully, but the next token isn't UNTIL or ;,
-        // it indicates a potential issue. However, directly erroring here might be too strict.
-        // Let the main loop condition `while(1)` and the check at the start handle finding UNTIL.
-
-    } // End while(1)
-
-end_loop: // Label for goto
-
-    // Current token must be UNTIL now
-    eat(parser, TOKEN_UNTIL);
-
-    // Parse the condition expression AFTER consuming UNTIL
-    AST *condition = boolExpr(parser);
-
-    // Create the REPEAT node
-    AST *node = newASTNode(AST_REPEAT, NULL);
-    setLeft(node, body);
-    setRight(node, condition);
-    DEBUG_DUMP_AST(node, 0);
-    return node;
+    eat(parser,TOKEN_REPEAT); AST* b=newASTNode(AST_COMPOUND,NULL);
+    while(1){
+        if(!parser->current_token){errorParser(parser,"EOF in REPEAT"); break;}
+        if(parser->current_token->type==TOKEN_UNTIL) break;
+        while(parser->current_token && parser->current_token->type==TOKEN_SEMICOLON) eat(parser,TOKEN_SEMICOLON);
+        if(!parser->current_token || parser->current_token->type==TOKEN_UNTIL) break;
+        AST* s=statement(parser); if(s&&s->type!=AST_NOOP)addChild(b,s); else if(!s){errorParser(parser,"Bad REPEAT stmt"); break;}
+        if(parser->current_token && parser->current_token->type==TOKEN_SEMICOLON) eat(parser,TOKEN_SEMICOLON);
+        else if(!parser->current_token || parser->current_token->type!=TOKEN_UNTIL){/*Allow missing semi*/}
+    }
+    if(!parser->current_token || parser->current_token->type!=TOKEN_UNTIL){errorParser(parser,"Exp UNTIL"); return b;} eat(parser,TOKEN_UNTIL);
+    AST* c=expression(parser); // <<< Use expression()
+    if(!c || c->type == AST_NOOP){errorParser(parser,"Exp UNTIL cond"); freeAST(b); return NULL;}
+    AST* n=newASTNode(AST_REPEAT,NULL); setLeft(n,b); setRight(n,c); return n;
 }
 
 AST *forStatement(Parser *parser) {
-    eat(parser, TOKEN_FOR);
-    // Parse the loop variable identifier FIRST
-    Token *loopVarToken = parser->current_token;
-    if (loopVarToken->type != TOKEN_IDENTIFIER) {
-         errorParser(parser, "Expected identifier for loop variable");
-         return newASTNode(AST_NOOP, NULL); // Error recovery
-    }
-    AST *loopVarNode = newASTNode(AST_VARIABLE, loopVarToken);
-    eat(parser, TOKEN_IDENTIFIER); // Consume loop variable identifier
-
-    // Now parse the rest: := start [to|downto] end do body
-    eat(parser, TOKEN_ASSIGN);
-    AST *start_expr = expr(parser);
-    TokenType direction = parser->current_token->type;
-    if (direction == TOKEN_TO)
-        eat(parser, TOKEN_TO);
-    else if (direction == TOKEN_DOWNTO)
-        eat(parser, TOKEN_DOWNTO);
-    else
-        errorParser(parser, "Expected TO or DOWNTO in for statement");
-    AST *end_expr = expr(parser);
-    eat(parser, TOKEN_DO);
-    AST *body = statement(parser);
-
-    // Create the FOR node (use NULL for token, it's structural)
-    ASTNodeType for_type = (direction == TOKEN_TO) ? AST_FOR_TO : AST_FOR_DOWNTO;
-    // ---> THE KEY FIX IS HERE <---
-    AST *node = newASTNode(for_type, NULL); // <<< Ensure NULL token for FOR node
-    // ----------------------------
-
-    // Assign components to the correct places
-    setLeft(node, start_expr);   // Start expression
-    setRight(node, end_expr);    // End expression
-    setExtra(node, body);        // Loop body
-    addChild(node, loopVarNode); // <<< Store loop variable node in children[0]
-
-    #ifdef DEBUG // Keep debug dump if helpful
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node;
+    eat(parser,TOKEN_FOR); Token* lvt=copyToken(parser->current_token); if(!lvt||lvt->type!=TOKEN_IDENTIFIER){errorParser(parser,"Exp loop var"); return NULL;} eat(parser,TOKEN_IDENTIFIER);
+    AST* lvn=newASTNode(AST_VARIABLE,lvt); // Loop var node created with copy
+    if(!parser->current_token||parser->current_token->type!=TOKEN_ASSIGN){errorParser(parser,"Exp :="); freeToken(lvt); freeAST(lvn); return NULL;} eat(parser,TOKEN_ASSIGN);
+    AST* se=expression(parser); // <<< Use expression() for start
+    if(!se || se->type == AST_NOOP){errorParser(parser,"Exp start expr"); freeToken(lvt); freeAST(lvn); return NULL;}
+    TokenType dir=parser->current_token? parser->current_token->type : TOKEN_UNKNOWN; // Check NULL
+    if(dir!=TOKEN_TO && dir!=TOKEN_DOWNTO){errorParser(parser,"Exp TO/DOWNTO"); freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;} eat(parser,dir);
+    AST* ee=expression(parser); // <<< Use expression() for end
+    if(!ee || ee->type == AST_NOOP){errorParser(parser,"Exp end expr"); freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;}
+    if(!parser->current_token||parser->current_token->type!=TOKEN_DO){errorParser(parser,"Exp DO"); freeToken(lvt); freeAST(lvn); freeAST(se); freeAST(ee); return NULL;} eat(parser,TOKEN_DO);
+    AST* bd=statement(parser); if(!bd || bd->type == AST_NOOP){errorParser(parser,"Exp body"); freeToken(lvt); freeAST(lvn); freeAST(se); freeAST(ee); return NULL;}
+    ASTNodeType ft=(dir==TOKEN_TO)?AST_FOR_TO:AST_FOR_DOWNTO; AST* n=newASTNode(ft,NULL);
+    setLeft(n,se); setRight(n,ee); setExtra(n,bd); addChild(n,lvn); // Loop var is child[0]
+    freeToken(lvt); // Free the original copy used for lvn
+    return n;
 }
 
 AST *writelnStatement(Parser *parser) {
-    if (parser->current_token->type == TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value, "writeln") == 0) {
-        eat(parser, TOKEN_IDENTIFIER);
-    } else {
-        eat(parser, TOKEN_WRITELN);
-    }
-    AST *args = parseWriteArguments(parser);
-    AST *node = newASTNode(AST_WRITELN, NULL);
-    if (args) {
-        node->children = args->children;
-        node->child_count = args->child_count;
-        args->children = NULL;
-        args->child_count = 0;
-        // Update parent pointers of transferred children to point to the new parent (the writeln node)
-        for (int i = 0; i < node->child_count; i++) {
-            if (node->children[i]) { // Safety check for NULL child
-                node->children[i]->parent = node; // <<< UPDATE PARENT POINTER
-            }
-        }
-        free(args);
-    } else {
-        node->children = NULL;
-        node->child_count = 0;
-    }
-    #ifdef DEBUG
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node;
+    // Allow calling writeln as identifier for compatibility if needed, otherwise use keyword
+    if(parser->current_token && parser->current_token->type==TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value,"writeln")==0)eat(parser,TOKEN_IDENTIFIER);
+    else eat(parser,TOKEN_WRITELN);
+    AST* args=parseWriteArguments(parser); // Calls parseWriteArgument -> expression
+    AST* n=newASTNode(AST_WRITELN,NULL);
+    if(args){ // Transfer children safely
+        n->children=args->children; n->child_count=args->child_count; n->child_capacity=args->child_capacity;
+        args->children=NULL; args->child_count=0; args->child_capacity=0;
+        for(int i=0;i<n->child_count;i++)if(n->children[i])n->children[i]->parent=n;
+        free(args); // Free the compound wrapper struct
+    } else { n->children=NULL;n->child_count=0; n->child_capacity=0; }
+    return n;
 }
 
 AST *writeStatement(Parser *parser) {
-    // Expects current token to be TOKEN_WRITE (or IDENTIFIER 'write' if handled in statement)
-    if (parser->current_token->type == TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value, "write") == 0) {
-        eat(parser, TOKEN_IDENTIFIER); // Consume identifier 'write'
-    } else {
-        eat(parser, TOKEN_WRITE); // Consume keyword WRITE
-    }
-
-    AST *args = parseWriteArguments(parser); // Parse arguments (handles parentheses)
-    AST *node = newASTNode(AST_WRITE, NULL);
-
-    // Assign children from args node safely
-    if (args) {
-        node->children = args->children;
-        node->child_count = args->child_count;
-        args->children = NULL; // Prevent double free by args node
-        args->child_count = 0;
-        // Update parent pointers of transferred children to point to the new parent (the writeln node)
-        for (int i = 0; i < node->child_count; i++) {
-            if (node->children[i]) { // Safety check for NULL child
-                node->children[i]->parent = node; // <<< UPDATE PARENT POINTER
-            }
-        }
-        free(args); // Free the temporary args compound node structure
-    } else {
-        node->children = NULL;
-        node->child_count = 0;
-    }
-
-    #ifdef DEBUG
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node; // Return the fully formed WRITE node
+    if(parser->current_token && parser->current_token->type==TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value,"write")==0)eat(parser,TOKEN_IDENTIFIER);
+    else eat(parser,TOKEN_WRITE);
+    AST* args=parseWriteArguments(parser); // Calls parseWriteArgument -> expression
+    AST* n=newASTNode(AST_WRITE,NULL);
+    if(args){ // Transfer children safely
+        n->children=args->children; n->child_count=args->child_count; n->child_capacity=args->child_capacity;
+        args->children=NULL; args->child_count=0; args->child_capacity=0;
+        for(int i=0;i<n->child_count;i++)if(n->children[i])n->children[i]->parent=n;
+        free(args);
+    } else { n->children=NULL;n->child_count=0; n->child_capacity=0; }
+    return n;
 }
 
 AST *readStatement(Parser *parser) {
-     if (parser->current_token->type == TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value, "read") == 0) {
-        eat(parser, TOKEN_IDENTIFIER);
-    } else {
-        eat(parser, TOKEN_READ);
-    }
-    AST *node = newASTNode(AST_READ, NULL);
-    AST *args = NULL; // Assume no args initially
-
-    // Standard Pascal requires parentheses for read arguments
-    if (parser->current_token->type == TOKEN_LPAREN) {
-        eat(parser, TOKEN_LPAREN);
-        // exprList parses comma-separated expressions (should be variables for read)
-        // Need semantic check later to ensure args are assignable lvalues.
-        args = exprList(parser);
-        eat(parser, TOKEN_RPAREN);
-    } else {
-         // No parentheses = no arguments (standard behavior)
-         args = newASTNode(AST_COMPOUND, NULL);
-         args->child_count = 0;
-    }
-
-     // Assign children safely
-     if (args) {
-        node->children = args->children;
-        node->child_count = args->child_count;
-        args->children = NULL;
-        args->child_count = 0;
-        // Update parent pointers of transferred children to point to the new parent (the writeln node)
-        for (int i = 0; i < node->child_count; i++) {
-            if (node->children[i]) { // Safety check for NULL child
-                node->children[i]->parent = node; // <<< UPDATE PARENT POINTER
-            }
-        }
-         
+    if(parser->current_token && parser->current_token->type==TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value,"read")==0)eat(parser,TOKEN_IDENTIFIER);
+    else eat(parser,TOKEN_READ);
+    AST* n=newASTNode(AST_READ,NULL); AST* args=NULL;
+    if(parser->current_token && parser->current_token->type==TOKEN_LPAREN){
+        eat(parser,TOKEN_LPAREN);
+        args=exprList(parser); // <<< exprList calls expression
+        if(!args || args->type==AST_NOOP){errorParser(parser,"Bad read args"); return n;}
+        if(!parser->current_token || parser->current_token->type!=TOKEN_RPAREN){errorParser(parser,"Exp )"); return n;} eat(parser,TOKEN_RPAREN);
+    } else {args=newASTNode(AST_COMPOUND,NULL); args->child_count=0; args->child_capacity=0;} // No args if no parens
+    if(args){ // Transfer children
+        n->children=args->children; n->child_count=args->child_count; n->child_capacity=args->child_capacity;
+        args->children=NULL; args->child_count=0; args->child_capacity=0;
+        for(int i=0;i<n->child_count;i++)if(n->children[i])n->children[i]->parent=n;
         free(args);
-    } else {
-        node->children = NULL;
-        node->child_count = 0;
-    }
-
-    #ifdef DEBUG
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node;
+    } else {n->children=NULL;n->child_count=0; n->child_capacity=0;}
+    return n;
 }
 
 AST *readlnStatement(Parser *parser) {
-     if (parser->current_token->type == TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value, "readln") == 0) {
-        eat(parser, TOKEN_IDENTIFIER);
-    } else {
-        eat(parser, TOKEN_READLN);
-    }
-    AST *node = newASTNode(AST_READLN, NULL);
-     AST *args = NULL;
-    // Parentheses are optional for readln; if present, they contain arguments.
-    if (parser->current_token->type == TOKEN_LPAREN) {
-        eat(parser, TOKEN_LPAREN);
-        // Readln can have zero arguments inside parentheses
-        if (parser->current_token->type != TOKEN_RPAREN) {
-             args = exprList(parser); // Parse arguments if present
-        } else {
-             args = newASTNode(AST_COMPOUND, NULL); // Empty arg list inside ()
-             args->child_count = 0;
-        }
-        eat(parser, TOKEN_RPAREN);
-    } else {
-         // No parentheses = no arguments
-         args = newASTNode(AST_COMPOUND, NULL);
-         args->child_count = 0;
-    }
-
-     // Assign children safely
-     if (args) {
-        node->children = args->children;
-        node->child_count = args->child_count;
-        args->children = NULL;
-        args->child_count = 0;
-        // Update parent pointers of transferred children to point to the new parent (the writeln node)
-        for (int i = 0; i < node->child_count; i++) {
-            if (node->children[i]) { // Safety check for NULL child
-                node->children[i]->parent = node; // <<< UPDATE PARENT POINTER
-            }
-        }
+    if(parser->current_token && parser->current_token->type==TOKEN_IDENTIFIER && strcasecmp(parser->current_token->value,"readln")==0)eat(parser,TOKEN_IDENTIFIER);
+    else eat(parser,TOKEN_READLN);
+    AST* n=newASTNode(AST_READLN,NULL); AST* args=NULL;
+    if(parser->current_token && parser->current_token->type==TOKEN_LPAREN){ // Optional parens
+        eat(parser,TOKEN_LPAREN);
+        if(parser->current_token && parser->current_token->type!=TOKEN_RPAREN) args=exprList(parser); // <<< exprList calls expression
+        else {args=newASTNode(AST_COMPOUND,NULL); args->child_count=0; args->child_capacity=0;} // Empty list inside ()
+        if(!args || args->type==AST_NOOP){errorParser(parser,"Bad readln args"); return n;} // Error check
+        if(!parser->current_token || parser->current_token->type!=TOKEN_RPAREN){errorParser(parser,"Exp )"); return n;} eat(parser,TOKEN_RPAREN);
+    } else {args=newASTNode(AST_COMPOUND,NULL); args->child_count=0; args->child_capacity=0;} // No args if no parens
+    if(args){ // Transfer children
+        n->children=args->children; n->child_count=args->child_count; n->child_capacity=args->child_capacity;
+        args->children=NULL; args->child_count=0; args->child_capacity=0;
+        for(int i=0;i<n->child_count;i++)if(n->children[i])n->children[i]->parent=n;
         free(args);
-    } else {
-        node->children = NULL;
-        node->child_count = 0;
-    }
-
-    #ifdef DEBUG
-    if (dumpExec) debugAST(node, 0);
-    #endif
-    return node;
+    } else {n->children=NULL;n->child_count=0; n->child_capacity=0;}
+    return n;
 }
-
-
+// exprList: Calls expression
 AST *exprList(Parser *parser) {
-    AST *node = newASTNode(AST_COMPOUND, NULL);
-    AST *arg = expr(parser);
-    addChild(node, arg);
-    while (parser->current_token->type == TOKEN_COMMA) {
-        eat(parser, TOKEN_COMMA);
-        arg = expr(parser);
-        addChild(node, arg);
+    AST *node=newASTNode(AST_COMPOUND,NULL);
+    AST *arg=expression(parser); // <<< Use expression()
+    if(!arg||arg->type==AST_NOOP){errorParser(parser,"Expected expression in list"); freeAST(node); return NULL;} // Check result
+    addChild(node,arg);
+    while(parser->current_token && parser->current_token->type==TOKEN_COMMA){
+        eat(parser,TOKEN_COMMA);
+        arg=expression(parser); // <<< Use expression()
+        if(!arg||arg->type==AST_NOOP){errorParser(parser,"Expected expression after comma"); return node;} // Return partial list
+        addChild(node,arg);
     }
-    DEBUG_DUMP_AST(node, 0);
     return node;
-}
-
-AST *expr(Parser *parser) {
-    AST *node = term(parser); // Parse left operand (term)
-    while (parser->current_token->type == TOKEN_PLUS ||
-           parser->current_token->type == TOKEN_MINUS) {
-        // --- Copy the operator token BEFORE eat ---
-        Token *opOriginal = parser->current_token;
-        Token *opCopied = copyToken(opOriginal);
-        if(!opCopied) {
-             fprintf(stderr, "Memory allocation failed in expr (copyToken op)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        // ---
-
-        // Eat the ORIGINAL operator token (eatInternal frees it)
-        eat(parser, opOriginal->type);
-
-        // Parse right operand (term)
-        AST *right = term(parser);
-        if (!right) { // Handle error from term parsing
-             freeToken(opCopied); // Clean up copied token
-             errorParser(parser, "Failed to parse right operand for +/-");
-             // Free left operand 'node'? Risky. Return NULL or NOOP.
-             return newASTNode(AST_NOOP, NULL);
-        }
-
-
-        // --- Create the new binary operation node using the COPIED token ---
-        // newASTNode makes its own internal copy of the token passed to it
-        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
-        // ---
-
-        setLeft(new_node, node);
-        setRight(new_node, right);
-        // Assuming inferBinaryOpType handles type inference correctly
-        setTypeAST(new_node, inferBinaryOpType(node->var_type, right->var_type));
-
-        node = new_node; // Update 'node' for the next loop iteration or return
-
-        // --- Free the COPIED operator token ---
-        freeToken(opCopied); // <<< Free the copy made for this loop iteration
-        // ---
-
-    } // End while loop
-    return node; // Return the final expression tree
 }
 
 // --- Modify parseSetConstructor function ---
 AST *parseSetConstructor(Parser *parser) {
-    eat(parser, TOKEN_LBRACKET);
-    AST *setNode = newASTNode(AST_SET, NULL);
-    setTypeAST(setNode, TYPE_SET);
-
-    if (parser->current_token->type != TOKEN_RBRACKET) {
-        while (1) {
-            AST *element = expr(parser); // Parse element or range start
-
-            // --- Modification Start: Relax parser validation slightly ---
-            // Basic check: Allow numbers or string literals (runtime will check length)
-            bool element_syntax_ok = (element->type == AST_NUMBER || element->type == AST_STRING);
-
-
-            if (parser->current_token->type == TOKEN_DOTDOT) { // Range
-                eat(parser, TOKEN_DOTDOT);
-                AST *rangeEnd = expr(parser);
-                bool end_syntax_ok = (rangeEnd->type == AST_NUMBER || rangeEnd->type == AST_STRING);
-
-                if (!element_syntax_ok || !end_syntax_ok) {
-                     // Simplified parser error - runtime handles detailed type/length check
-                     errorParser(parser, "Set range elements must be constants of ordinal types (e.g., integer or char literal)");
-                 }
-
-                AST *rangeNode = newASTNode(AST_SUBRANGE, NULL);
-                setLeft(rangeNode, element);
-                setRight(rangeNode, rangeEnd);
-                addChild(setNode, rangeNode);
-            } else { // Single element
-                if (!element_syntax_ok) {
-                     // Simplified parser error - runtime handles detailed type/length check
-                     errorParser(parser, "Set elements must be constants of an ordinal type (e.g., integer or char literal)");
-                 }
-                 addChild(setNode, element);
-            }
-            // --- Modification End ---
-
-            if (parser->current_token->type == TOKEN_COMMA) {
-                eat(parser, TOKEN_COMMA);
-            } else {
-                break;
-            }
+    if(!parser->current_token || parser->current_token->type != TOKEN_LBRACKET){errorParser(parser,"Exp ["); return NULL;} eat(parser, TOKEN_LBRACKET);
+    AST *sn=newASTNode(AST_SET,NULL); setTypeAST(sn,TYPE_SET);
+    if(parser->current_token && parser->current_token->type!=TOKEN_RBRACKET){
+        while(1){
+            AST* el=expression(parser); // <<< Use expression()
+            if(!el||el->type==AST_NOOP){errorParser(parser,"Bad set elem"); break;}
+            // Runtime checks ordinal compatibility
+            if(parser->current_token && parser->current_token->type==TOKEN_DOTDOT){
+                eat(parser,TOKEN_DOTDOT); AST* re=expression(parser); // <<< Use expression()
+                if(!re||re->type==AST_NOOP){errorParser(parser,"Bad range end"); freeAST(el); break;}
+                // Runtime checks compatibility
+                AST* rn=newASTNode(AST_SUBRANGE,NULL); setLeft(rn,el); setRight(rn,re); addChild(sn,rn);
+            } else { addChild(sn,el); } // Single element
+            if(parser->current_token && parser->current_token->type==TOKEN_COMMA)eat(parser,TOKEN_COMMA); else break;
         }
     }
-    eat(parser, TOKEN_RBRACKET);
-    return setNode;
-}
-
-AST *relExpr(Parser *parser) {
-    AST *node = expr(parser); // Parses left operand
-
-    // Loop for relational operators
-    while (parser->current_token->type == TOKEN_GREATER ||
-           parser->current_token->type == TOKEN_GREATER_EQUAL ||
-           parser->current_token->type == TOKEN_EQUAL ||
-           parser->current_token->type == TOKEN_LESS ||
-           parser->current_token->type == TOKEN_LESS_EQUAL ||
-           parser->current_token->type == TOKEN_NOT_EQUAL ||
-           parser->current_token->type == TOKEN_IN)
-           {
-        // --- Copy the operator token BEFORE calling eat ---
-        Token *opOriginal = parser->current_token;
-        Token *opCopied = copyToken(opOriginal);
-        if(!opCopied) {
-             fprintf(stderr, "Memory allocation failed in relExpr (copyToken op)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        // ---
-
-        // Eat the ORIGINAL operator token (eatInternal frees it)
-        eat(parser, opOriginal->type);
-
-        // Parse the right operand
-        AST *right;
-        if (opCopied->type == TOKEN_IN) { // <<< Use copied token for type check
-             right = parseSetConstructor(parser); // Parse the set part
-        } else {
-             right = expr(parser); // Parse regular expression for other ops
-        }
-
-        // --- Create the new binary operation node using the COPIED token ---
-        // newASTNode makes its own internal copy of the token passed to it
-        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
-        // ---
-
-        setLeft(new_node, node);
-        setRight(new_node, right);
-        setTypeAST(new_node, TYPE_BOOLEAN); // Relational ops result in Boolean
-
-        node = new_node; // Update 'node' for the next loop iteration or return
-
-        // --- Free the COPIED operator token ---
-        freeToken(opCopied); // <<< Free the copy made for this loop iteration
-        // ---
-
-    } // End while loop
-
-    DEBUG_DUMP_AST(node, 0);
-    return node; // Return the final expression tree
-}
-
-AST *boolExpr(Parser *parser) {
-    AST *node = relExpr(parser); // Parses relational expression
-    while (parser->current_token->type == TOKEN_AND || parser->current_token->type == TOKEN_OR) {
-        // --- Copy the operator token BEFORE eat ---
-        Token *opOriginal = parser->current_token;
-        Token *opCopied = copyToken(opOriginal);
-        if(!opCopied) {
-             fprintf(stderr, "Memory allocation failed in boolExpr (copyToken op)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        // ---
-
-        // Eat the ORIGINAL operator token (eatInternal frees it)
-        eat(parser, opOriginal->type);
-
-        // Parse right operand (relational expression)
-        AST *right = relExpr(parser);
-         if (!right) { // Handle error from relExpr parsing
-             freeToken(opCopied); // Clean up copied token
-             errorParser(parser, "Failed to parse right operand for AND/OR");
-             // Free left operand 'node'? Risky. Return NULL or NOOP.
-             return newASTNode(AST_NOOP, NULL);
-         }
-
-        // --- Create the new binary operation node using the COPIED token ---
-        // newASTNode makes its own internal copy of the token passed to it
-        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
-        // ---
-
-        setLeft(new_node, node);
-        setRight(new_node, right);
-        setTypeAST(new_node, TYPE_BOOLEAN); // AND/OR result is boolean
-
-        node = new_node; // Update 'node' for the next loop iteration or return
-
-        // --- Free the COPIED operator token ---
-        freeToken(opCopied); // <<< Free the copy made for this loop iteration
-        // ---
-
-    } // End while loop
-    return node; // Return the final expression tree
-}
-
-AST *term(Parser *parser) {
-    AST *node = factor(parser); // Parse left operand (factor)
-
-    while (parser->current_token->type == TOKEN_MUL ||
-           parser->current_token->type == TOKEN_SLASH ||
-           parser->current_token->type == TOKEN_INT_DIV ||
-           parser->current_token->type == TOKEN_MOD) {
-
-        // --- Copy the operator token BEFORE eat ---
-        Token *opOriginal = parser->current_token;
-        Token *opCopied = copyToken(opOriginal);
-        if(!opCopied) {
-             fprintf(stderr, "Memory allocation failed in term (copyToken op)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        // ---
-
-        // Eat the ORIGINAL operator token (eatInternal frees it)
-        eat(parser, opOriginal->type);
-
-        // Parse right operand (factor)
-        AST *right = factor(parser);
-         if (!right) { // Handle error from factor parsing
-             freeToken(opCopied); // Clean up copied token
-             errorParser(parser, "Failed to parse right operand for */DIV/MOD");
-             // Free left operand 'node'? Risky. Return NULL or NOOP.
-             return newASTNode(AST_NOOP, NULL);
-         }
-
-        // --- Create the new binary operation node using the COPIED token ---
-        // newASTNode makes its own internal copy of the token passed to it
-        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
-        // ---
-
-        setLeft(new_node, node);
-        setRight(new_node, right);
-        // Assuming inferBinaryOpType handles type inference correctly
-        setTypeAST(new_node, inferBinaryOpType(node->var_type, right->var_type));
-
-        node = new_node; // Update 'node' for the next loop iteration or return
-
-        // --- Free the COPIED operator token ---
-        freeToken(opCopied); // <<< Free the copy made for this loop iteration
-        // ---
-
-    } // End while loop
-    return node; // Return the final expression tree
-}
-
-AST *factor(Parser *parser) {
-    Token *token = parser->current_token; // Original token pointer
-    AST *node = NULL; // Initialize resulting AST node
-
-#ifdef DEBUG
-    // ADDED: Debug print at the ENTRY of factor
-    if (dumpExec) { // Check dumpExec flag
-        fprintf(stderr, "[DEBUG_FACTOR] Entry: Current token is %s ('%s')\n",
-                tokenTypeToString(token->type),
-                token->value ? token->value : "NULL");
-    }
-#endif
-
-    if (token->type == TOKEN_TRUE || token->type == TOKEN_FALSE) {
-        // --- Apply copy-before-eat for boolean literals ---
-        Token* copiedToken = copyToken(token);
-        if(!copiedToken) {
-             fprintf(stderr, "Memory allocation failed in factor (copyToken boolean)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        eat(parser, token->type); // Eat original (eatInternal frees it)
-        node = newASTNode(AST_BOOLEAN, copiedToken); // Use copy for AST node
-        freeToken(copiedToken); // Free the copy made here
-        // ---
-    } else if (token->type == TOKEN_PLUS ||
-               token->type == TOKEN_MINUS ||
-               token->type == TOKEN_NOT) {
-        // --- Apply copy-before-eat for unary operator ---
-        Token *opToken = token; // Original operator token
-        Token *copiedOpToken = copyToken(opToken);
-        if(!copiedOpToken) {
-             fprintf(stderr, "Memory allocation failed in factor (copyToken unary op)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        eat(parser, opToken->type); // Eat original operator (eatInternal frees it)
-        node = newASTNode(AST_UNARY_OP, copiedOpToken); // Use copy for the operator node
-        freeToken(copiedOpToken); // Free the copy of the operator token
-        setLeft(node, factor(parser)); // Recursively parse the operand
-        // Type annotation for unary op would happen later or be inferred
-        // ---
-    } else if (token->type == TOKEN_INTEGER_CONST ||
-               token->type == TOKEN_HEX_CONST ||
-               token->type == TOKEN_REAL_CONST) {
-        // --- Apply copy-before-eat for number literals ---
-        Token* copiedToken = copyToken(token);
-        if(!copiedToken) {
-             fprintf(stderr, "Memory allocation failed in factor (copyToken number)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        eat(parser, token->type); // Eat original (eatInternal frees it)
-        node = newASTNode(AST_NUMBER, copiedToken); // Use copy for AST node
-        freeToken(copiedToken); // Free the copy made here
-        // ---
-    } else if (token->type == TOKEN_STRING_CONST) {
-        // --- Apply copy-before-eat for string literals ---
-        Token* copiedToken = copyToken(token);
-        if(!copiedToken) {
-             fprintf(stderr, "Memory allocation failed in factor (copyToken string)\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        eat(parser, token->type); // Eat original (eatInternal frees it)
-        node = newASTNode(AST_STRING, copiedToken); // Use copy for AST node
-        freeToken(copiedToken); // Free the copy made here
-        // ---
-    } else if (token->type == TOKEN_IDENTIFIER) {
-        // --- Logic for identifiers (variable, function call, field/array base) ---
-        Token *identifierToken = token; // Keep pointer to original identifier
-
-        // Always treat "result" as a variable - needs copy-before-eat
-        if (strcasecmp(identifierToken->value, "result") == 0) {
-             Token* copiedToken = copyToken(identifierToken);
-             if(!copiedToken){
-                  fprintf(stderr, "Memory allocation failed in factor (copyToken result)\n");
-                  EXIT_FAILURE_HANDLER();
-             }
-             eat(parser, TOKEN_IDENTIFIER); // Eat original 'result'
-             node = newASTNode(AST_VARIABLE, copiedToken); // Use copy
-             freeToken(copiedToken); // Free copy
-             // Note: Standard Pascal wouldn't allow field/array access on 'Result'
-             // but you might add checks here if your dialect allows it.
-             return node; // Return directly for result
-        }
-
-        // Check if next token is '(', requires peekToken
-        Token *peek = peekToken(parser);
-        if (!peek) {
-             errorParser(parser, "Failed to peek token in factor");
-             return newASTNode(AST_NOOP, NULL);
-        }
-        bool next_is_lparen = (peek->type == TOKEN_LPAREN);
-        freeToken(peek); // Free the token returned by peekToken immediately after check
-
-        if (next_is_lparen) {
-            // It's a function/procedure call with parentheses.
-            // procedureCall should handle its own token management internally now.
-            // (We assume procedureCall copies the name token before eating it).
-            node = procedureCall(parser);
-        } else {
-             // Not followed by '('. Could be var, param-less func, field/array base.
-             Procedure *proc = lookupProcedure(identifierToken->value);
-             if (proc != NULL && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
-                  // Parameterless function call
-                  Token* copiedToken = copyToken(identifierToken); // Copy before eat
-                  if(!copiedToken){
-                       fprintf(stderr, "Memory allocation failed in factor (copyToken paramless func)\n");
-                       EXIT_FAILURE_HANDLER();
-                  }
-                  eat(parser, TOKEN_IDENTIFIER); // Eat original function name
-                  node = newASTNode(AST_PROCEDURE_CALL, copiedToken); // Use copy
-                  freeToken(copiedToken); // Free copy
-                  // Set up node for parameterless call
-                  node->children = NULL;
-                  node->child_count = 0;
-                  node->var_type = proc->proc_decl->var_type; // Set function's return type
-             } else if (proc != NULL) {
-                 // It's a procedure name used where a value/factor is expected. Error.
-                 char error_msg[128];
-                 snprintf(error_msg, sizeof(error_msg), "Procedure '%s' found where a value (factor) is expected", identifierToken->value);
-                 errorParser(parser, error_msg);
-                 return newASTNode(AST_NOOP, NULL); // Return dummy node
-             }
-             else {
-                   // Variable, or base of field/array access
-                   Token* copiedIdentifierToken = copyToken(identifierToken); // Copy base identifier
-                   if(!copiedIdentifierToken){
-                        fprintf(stderr, "Memory allocation failed in factor (copyToken variable base)\n");
-                        EXIT_FAILURE_HANDLER();
-                   }
-                   eat(parser, TOKEN_IDENTIFIER); // Eat original base identifier
-
-                   // Start with AST_VARIABLE using the copied token
-                   node = newASTNode(AST_VARIABLE, copiedIdentifierToken);
-                   // We are done with the copied base token's use in this node, free it.
-                   freeToken(copiedIdentifierToken);
-
-                   // Now handle subsequent field/array access
-                   while (parser->current_token->type == TOKEN_PERIOD ||
-                          parser->current_token->type == TOKEN_LBRACKET) {
-                        if (parser->current_token->type == TOKEN_PERIOD) {
-                             eat(parser, TOKEN_PERIOD); // Frees '.'
-                             Token *fieldTokenOriginal = parser->current_token;
-                             if (fieldTokenOriginal->type != TOKEN_IDENTIFIER) {
-                                 errorParser(parser, "Expected field name after '.'");
-                                 break; // Exit loop on error
-                             }
-                             Token *fieldTokenCopied = copyToken(fieldTokenOriginal); // Copy field name
-                             if(!fieldTokenCopied){
-                                  fprintf(stderr, "Memory allocation failed in factor (copyToken field name)\n");
-                                  EXIT_FAILURE_HANDLER();
-                             }
-                             eat(parser, TOKEN_IDENTIFIER); // Eat original field name (frees it)
-                             AST *fieldAccess = newASTNode(AST_FIELD_ACCESS, fieldTokenCopied); // Use copied token
-                             freeToken(fieldTokenCopied); // Free copy of field token
-                             setLeft(fieldAccess, node); // Link previous node (var or prior access)
-                             node = fieldAccess; // Update node for next iteration
-                        } else if (parser->current_token->type == TOKEN_LBRACKET) {
-                             eat(parser, TOKEN_LBRACKET); // Frees '['
-                             AST *arrayAccess = newASTNode(AST_ARRAY_ACCESS, NULL);
-                             setLeft(arrayAccess, node); // Link previous node
-                             // Parse index expressions
-                             do {
-                                 AST *indexExpr = expr(parser); // expr handles its tokens
-                                 if (!indexExpr) { // Handle potential error from expr
-                                      errorParser(parser, "Failed to parse array index expression");
-                                      // Cleanup needed? Depends on expr error handling.
-                                      // For now, break outer loop.
-                                      node = arrayAccess; // Keep partially built node? Or free it?
-                                      goto error_exit; // Use goto to avoid complex nested breaks
-                                 }
-                                 addChild(arrayAccess, indexExpr);
-                                 if (parser->current_token->type == TOKEN_COMMA) {
-                                     eat(parser, TOKEN_COMMA); // Frees ','
-                                 } else { break; } // Exit index loop
-                             } while (1);
-                             // Check if loop exited because of error or end of indices
-                             if (parser->current_token->type != TOKEN_RBRACKET) {
-                                  errorParser(parser, "Expected ']' after array indices");
-                                  node = arrayAccess; // Keep partially built node?
-                                  goto error_exit; // Use goto
-                             }
-                             eat(parser, TOKEN_RBRACKET); // Frees ']'
-                             node = arrayAccess; // Update node for next iteration
-                        }
-                   } // end while for field/array access
-error_exit:; // Label for error jumps within loop
-             }
-        }
-         // --- End IDENTIFIER logic ---
-    } else if (token->type == TOKEN_LPAREN) {
-        // Parenthesized expression
-        eat(parser, TOKEN_LPAREN); // Frees '('
-        node = boolExpr(parser);    // boolExpr parses its sub-expressions
-        // Check for parsing errors within boolExpr before eating ')'
-        if (!node) {
-             errorParser(parser, "Failed to parse expression inside parentheses");
-             return newASTNode(AST_NOOP, NULL);
-        }
-        if (parser->current_token->type != TOKEN_RPAREN) {
-             errorParser(parser, "Expected ')' after expression");
-             // Node might be valid but incomplete, free it?
-             // freeAST(node); // Risky if boolExpr had errors
-             return newASTNode(AST_NOOP, NULL);
-        }
-        eat(parser, TOKEN_RPAREN); // Frees ')'
-    } else {
-        // If none of the above match, it's an error.
-        char error_msg[128];
-        snprintf(error_msg, sizeof(error_msg), "Unexpected token '%s' in factor",
-                 token->value ? token->value : tokenTypeToString(token->type));
-        errorParser(parser, error_msg);
-        return newASTNode(AST_NOOP, NULL); // Return dummy node
-    }
-
-    // Ensure node is not NULL before returning (should be handled by error paths)
-    if (!node) {
-       // This case might indicate an unhandled path or error
-       errorParser(parser, "Internal error: factor resulted in NULL node");
-       return newASTNode(AST_NOOP, NULL);
-    }
-
-    return node; // Return the created AST node
+    if(!parser->current_token || parser->current_token->type!=TOKEN_RBRACKET){errorParser(parser,"Exp ]"); return sn;} eat(parser,TOKEN_RBRACKET); return sn;
 }
 
 AST *enumDeclaration(Parser *parser) {
@@ -2803,115 +1893,41 @@ AST *enumDeclaration(Parser *parser) {
 // Parses an expression possibly followed by formatting specifiers.
 // Syntax: <expression> [ : <fieldWidth> [ : <decimalPlaces> ] ]
 AST *parseWriteArgument(Parser *parser) {
-    // 1. Parse the main expression to be printed
-    AST *exprNode = expr(parser); // Assumes expr() parses a standard Pascal expression
+    AST *exprNode = expression(parser); // <<< Use expression()
+    if (!exprNode || exprNode->type == AST_NOOP) { errorParser(parser, "Expected expression in write argument"); return newASTNode(AST_NOOP, NULL); }
 
-    // 2. Check for optional formatting specifiers (starting with ':')
-    if (parser->current_token && parser->current_token->type == TOKEN_COLON) { // Add NULL check
-        eat(parser, TOKEN_COLON); // Frees ':'
-
-        // --- Copy width token BEFORE eat ---
-        Token *widthTokenOriginal = parser->current_token;
-        if (!widthTokenOriginal || widthTokenOriginal->type != TOKEN_INTEGER_CONST) { // Add NULL check
-            errorParser(parser, "Expected integer constant for field width after ':'");
-            return exprNode; // Return base expression on error
+    if (parser->current_token && parser->current_token->type == TOKEN_COLON) {
+        eat(parser, TOKEN_COLON); Token *widthTok = copyToken(parser->current_token);
+        if(!widthTok || widthTok->type != TOKEN_INTEGER_CONST){errorParser(parser,"Expected integer constant for field width"); if(widthTok)freeToken(widthTok); return exprNode;}
+        eat(parser,TOKEN_INTEGER_CONST);
+        Token *precTok = NULL;
+        if(parser->current_token && parser->current_token->type==TOKEN_COLON){
+             eat(parser,TOKEN_COLON); precTok=copyToken(parser->current_token);
+             if(!precTok || precTok->type != TOKEN_INTEGER_CONST){errorParser(parser,"Expected integer constant for decimal places"); if(precTok)freeToken(precTok); precTok=NULL;}
+             else eat(parser,TOKEN_INTEGER_CONST);
         }
-        Token *widthTokenCopied = copyToken(widthTokenOriginal); // <<< COPY
-        if(!widthTokenCopied){
-            fprintf(stderr, "Memory allocation failed in parseWriteArgument (copyToken width)\n");
-            EXIT_FAILURE_HANDLER();
-        }
-        // ---
-
-        // Eat original width token (eatInternal frees it)
-        eat(parser, TOKEN_INTEGER_CONST);
-
-        Token *decimalsTokenOriginal = NULL;
-        Token *decimalsTokenCopied = NULL; // Initialize copied decimals token ptr to NULL
-
-        // Check for optional decimal places specifier (starting with ':')
-        if (parser->current_token && parser->current_token->type == TOKEN_COLON) { // Add NULL check
-            eat(parser, TOKEN_COLON); // Frees second ':'
-
-            // --- Copy decimals token BEFORE eat (if present) ---
-            decimalsTokenOriginal = parser->current_token;
-            if (decimalsTokenOriginal && decimalsTokenOriginal->type == TOKEN_INTEGER_CONST) { // Add NULL check
-                decimalsTokenCopied = copyToken(decimalsTokenOriginal); // <<< COPY
-                if(!decimalsTokenCopied){
-                     fprintf(stderr, "Memory allocation failed in parseWriteArgument (copyToken decimals)\n");
-                     // Clean up width copy before exiting
-                     freeToken(widthTokenCopied);
-                     EXIT_FAILURE_HANDLER();
-                }
-                // Eat original decimals token (eatInternal frees it)
-                eat(parser, TOKEN_INTEGER_CONST);
-            } else if (decimalsTokenOriginal) {
-                 // Error: Expected integer but got something else
-                 errorParser(parser, "Expected integer constant for decimal places after ':'");
-                 // Do not eat the incorrect token, proceed without decimals
-                 decimalsTokenCopied = NULL;
-            } else {
-                 // Error: Unexpected end of input
-                 errorParser(parser, "Unexpected end of input after second ':' in write format");
-                 decimalsTokenCopied = NULL;
-            }
-            // ---
-        }
-
-        // Create the formatting node
-        AST *formatNode = newASTNode(AST_FORMATTED_EXPR, NULL);
-        setLeft(formatNode, exprNode);
-
-        // --- Use COPIED tokens' values for atoi ---
-        int width = atoi(widthTokenCopied->value); // <<< Use copy
-        int decimals = (decimalsTokenCopied != NULL) ? atoi(decimalsTokenCopied->value) : -1; // <<< Use copy
-        // ---
-
-        // Create and store the format string
-        char formatStr[64]; // Buffer for "width,decimals" string
-        snprintf(formatStr, sizeof(formatStr), "%d,%d", width, decimals);
-        // newToken makes its own copy of formatStr
-        formatNode->token = newToken(TOKEN_STRING_CONST, formatStr);
-
-        // --- Free the COPIED tokens ---
-        freeToken(widthTokenCopied); // <<< Free width copy
-        if (decimalsTokenCopied) {
-            freeToken(decimalsTokenCopied); // <<< Free decimals copy (if it was created)
-        }
-        // ---
-
-        return formatNode; // Return the node representing the formatted expression
-
+        AST *fmt = newASTNode(AST_FORMATTED_EXPR,NULL); setLeft(fmt,exprNode);
+        int w=atoi(widthTok->value); int p=(precTok)?atoi(precTok->value):-1;
+        char fs[32]; snprintf(fs,sizeof(fs),"%d,%d",w,p);
+        fmt->token=newToken(TOKEN_STRING_CONST,fs); // Stores "width,precision"
+        freeToken(widthTok); if(precTok)freeToken(precTok);
+        return fmt;
     } else {
-        // No formatting specifiers found (no ':' after expression),
-        // return the plain expression node.
-        return exprNode;
+        return exprNode; // No formatting
     }
 }
 
 AST *parseArrayInitializer(Parser *parser) {
-    eat(parser, TOKEN_LPAREN); // Consume '('
-    AST *node = newASTNode(AST_ARRAY_LITERAL, NULL);
-    setTypeAST(node, TYPE_ARRAY); // Mark the literal node itself as array type
-
-    if (parser->current_token->type != TOKEN_RPAREN) { // Check for non-empty list
-        while (1) {
-            // Parse one element expression. IMPORTANT: These should evaluate
-            // to constants during interpretation for a const declaration.
-            // The parser itself just ensures valid expression syntax here.
-            AST *elementExpr = expr(parser);
-            addChild(node, elementExpr);
-
-            if (parser->current_token->type == TOKEN_COMMA) {
-                eat(parser, TOKEN_COMMA);
-            } else {
-                break; // Exit loop if no comma follows
-            }
+    if(!parser->current_token || parser->current_token->type!=TOKEN_LPAREN){errorParser(parser,"Exp ("); return NULL;} eat(parser, TOKEN_LPAREN);
+    AST *n=newASTNode(AST_ARRAY_LITERAL,NULL); setTypeAST(n,TYPE_ARRAY);
+    if(parser->current_token && parser->current_token->type!=TOKEN_RPAREN){
+        while(1){
+            AST* el=expression(parser); // <<< Use expression()
+            if(!el || el->type==AST_NOOP){errorParser(parser,"Bad array init expr"); break;} addChild(n,el);
+            if(parser->current_token && parser->current_token->type==TOKEN_COMMA)eat(parser,TOKEN_COMMA); else break;
         }
     }
-
-    eat(parser, TOKEN_RPAREN); // Consume ')'
-    return node;
+    if(!parser->current_token || parser->current_token->type!=TOKEN_RPAREN){errorParser(parser,"Exp )"); return n;} eat(parser,TOKEN_RPAREN); return n;
 }
 
 Token *peekToken(Parser *parser) {
@@ -2929,3 +1945,210 @@ Token *peekToken(Parser *parser) {
     //    IMPORTANT: The caller is responsible for freeing this token later!
     return peekedToken;
 }
+
+AST *expression(Parser *parser) {
+    AST *node = simpleExpression(parser);
+    // Check for NULL or NOOP returned from simpleExpression
+    if (!node || node->type == AST_NOOP) {
+        // Error should have been reported by simpleExpression or below
+        // Return NOOP to signify failure at this level
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    // Check for a relational operator
+    while (parser->current_token && (
+           parser->current_token->type == TOKEN_GREATER || parser->current_token->type == TOKEN_GREATER_EQUAL ||
+           parser->current_token->type == TOKEN_EQUAL || parser->current_token->type == TOKEN_LESS ||
+           parser->current_token->type == TOKEN_LESS_EQUAL || parser->current_token->type == TOKEN_NOT_EQUAL ||
+           parser->current_token->type == TOKEN_IN))
+    {
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal); // Copy token before eating
+        if(!opCopied) { /* Malloc error */ EXIT_FAILURE_HANDLER(); } // Check copy result
+        eat(parser, opOriginal->type); // Eat original token
+
+        AST *right;
+        if (opCopied->type == TOKEN_IN) {
+             right = parseSetConstructor(parser); // Expects set literal '[...]'
+             if (!right || right->type == AST_NOOP) {
+                 // parseSetConstructor should report errors
+                 // errorParser(parser, "Expected set literal after IN"); // Already reported
+                 freeToken(opCopied); if(node) freeAST(node); return newASTNode(AST_NOOP, NULL); // Cleanup
+             }
+        } else {
+            right = simpleExpression(parser); // Parse RHS simple expression
+            if (!right || right->type == AST_NOOP) {
+                // simpleExpression should report errors
+                // errorParser(parser, "Failed to parse right operand for relational operator"); // Already reported
+                freeToken(opCopied); if(node) freeAST(node); return newASTNode(AST_NOOP, NULL); // Cleanup
+            }
+        }
+
+        // Create binary operation node using the copied token
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        freeToken(opCopied); // Free the copied token now
+
+        setLeft(new_node, node); // Link existing node as left child
+        setRight(new_node, right); // Link new RHS as right child
+        setTypeAST(new_node, TYPE_BOOLEAN); // Relational ops result in Boolean
+        node = new_node; // Update main node pointer
+
+        // Standard Pascal does not chain relational operators like a = b = c
+        // If followed by AND/OR, that's handled at a different precedence level.
+        break; // Exit loop after processing one relational operator
+    }
+    return node;
+}
+
+// simpleExpression: Parses terms combined with additive operators (+, -, OR, XOR).
+// simpleExpression ::= [ sign ] term { additive_op term }
+AST *simpleExpression(Parser *parser) {
+    AST *node = NULL;
+    Token *signToken = NULL; // To store copied leading sign
+
+    // Handle optional leading sign (+ or -)
+    if (parser->current_token && (parser->current_token->type == TOKEN_PLUS || parser->current_token->type == TOKEN_MINUS)) {
+        signToken = copyToken(parser->current_token); // Copy token before eating
+        if(!signToken){EXIT_FAILURE_HANDLER();}
+        eat(parser, parser->current_token->type); // Eat original sign token
+    }
+
+    // Parse the first term
+    node = term(parser);
+    if (!node || node->type == AST_NOOP) {
+        // term should have reported error
+        if(signToken) freeToken(signToken); // Free sign token if unused
+        return newASTNode(AST_NOOP, NULL); // Propagate error
+    }
+
+    // Apply leading sign if present by creating a unary op node
+    if (signToken) {
+        AST *unaryNode = newASTNode(AST_UNARY_OP, signToken); // Use copied sign token
+        freeToken(signToken); // Free the copied sign token now
+        setLeft(unaryNode, node); // Link term as child
+        setTypeAST(unaryNode, node->var_type); // Tentative type, eval fixes if needed
+        node = unaryNode; // Update main node pointer
+    }
+
+    // Loop for additive operators (+, -, OR) - Add XOR later if needed
+    while (parser->current_token && (
+           parser->current_token->type == TOKEN_PLUS || parser->current_token->type == TOKEN_MINUS ||
+           parser->current_token->type == TOKEN_OR /* || TOKEN_XOR */ ))
+    {
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal); // Copy token before eating
+        if (!opCopied) { EXIT_FAILURE_HANDLER(); }
+        eat(parser, opOriginal->type); // Eat original op token
+
+        AST *right = term(parser); // Parse the next term
+        if (!right || right->type == AST_NOOP) {
+            // term should have reported error
+            // errorParser(parser, "Expected term after additive operator"); // Already reported
+            freeToken(opCopied); return node; // Return partially built tree on error
+        }
+
+        // Create binary op node using copied token
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        freeToken(opCopied); // Free copied token
+
+        setLeft(new_node, node); // Link previous tree as left
+        setRight(new_node, right); // Link new term as right
+        // Infer type (eval will do final checks)
+        setTypeAST(new_node, inferBinaryOpType(node->var_type, right->var_type));
+        node = new_node; // Update main node pointer
+    }
+    return node;
+}
+
+// term: Parses factors combined with multiplicative operators (*, /, DIV, MOD, AND, SHL, SHR).
+// term ::= factor { multiplicative_op factor }
+AST *term(Parser *parser) {
+    AST *node = factor(parser);
+    if (!node || node->type == AST_NOOP) {
+       // factor should have reported error
+       return newASTNode(AST_NOOP, NULL); // Propagate error
+    }
+
+    // Loop for multiplicative operators
+    while (parser->current_token && (
+           parser->current_token->type == TOKEN_MUL || parser->current_token->type == TOKEN_SLASH ||
+           parser->current_token->type == TOKEN_INT_DIV || parser->current_token->type == TOKEN_MOD ||
+           parser->current_token->type == TOKEN_AND || parser->current_token->type == TOKEN_SHL ||
+           parser->current_token->type == TOKEN_SHR))
+    {
+        Token *opOriginal = parser->current_token;
+        Token *opCopied = copyToken(opOriginal); // Copy token before eating
+        if (!opCopied) { EXIT_FAILURE_HANDLER(); }
+        eat(parser, opOriginal->type); // Eat original op token
+
+        AST *right = factor(parser); // Parse the next factor
+        if (!right || right->type == AST_NOOP) {
+            // factor should have reported error
+            // errorParser(parser, "Expected factor after multiplicative operator"); // Already reported
+            freeToken(opCopied); return node; // Return partially built tree
+        }
+
+        // Create binary op node using copied token
+        AST *new_node = newASTNode(AST_BINARY_OP, opCopied);
+        freeToken(opCopied); // Free copied token
+
+        setLeft(new_node, node); // Link previous tree as left
+        setRight(new_node, right); // Link new factor as right
+        // Infer type (eval will do final checks)
+        setTypeAST(new_node, inferBinaryOpType(node->var_type, right->var_type));
+        node = new_node; // Update main node pointer
+    }
+    return node;
+}
+
+// factor: Parses literals, variables, function calls, NOT, parenthesized expressions, set constructors.
+// factor ::= literal | variable | function_call | '(' expression ')' | NOT factor | '[' set_elements ']'
+AST *factor(Parser *parser) {
+    Token *token = parser->current_token;
+    AST *node = NULL;
+    if (!token) { errorParser(parser, "Unexpected end of input in factor"); return newASTNode(AST_NOOP, NULL); }
+
+    #ifdef DEBUG
+    // Optional: Add logging if needed
+    // if (dumpExec) fprintf(stderr, "[DEBUG_FACTOR] Entry: Token %s ('%s')\n", tokenTypeToString(token->type), token->value ? token->value : "NULL");
+    #endif
+
+    if (token->type == TOKEN_TRUE || token->type == TOKEN_FALSE) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_BOOLEAN, c); freeToken(c); setTypeAST(node, TYPE_BOOLEAN); }
+    else if (token->type == TOKEN_NOT) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_UNARY_OP, c); freeToken(c); AST* op = factor(parser); if(!op || op->type == AST_NOOP){ errorParser(parser,"Exp operand after NOT"); return node;} setLeft(node, op); setTypeAST(node, TYPE_BOOLEAN); }
+    else if (token->type == TOKEN_PLUS || token->type == TOKEN_MINUS) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_UNARY_OP, c); freeToken(c); AST* op = factor(parser); if(!op || op->type == AST_NOOP){ errorParser(parser,"Exp operand after unary +/-"); return node;} setLeft(node, op); setTypeAST(node, op->var_type); } // Type check later
+    else if (token->type == TOKEN_INTEGER_CONST || token->type == TOKEN_HEX_CONST || token->type == TOKEN_REAL_CONST) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_NUMBER, c); freeToken(c); setTypeAST(node, (node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER); }
+    else if (token->type == TOKEN_STRING_CONST) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_STRING, c); freeToken(c); setTypeAST(node, TYPE_STRING); }
+    else if (token->type == TOKEN_IDENTIFIER) {
+        node = lvalue(parser); // Parses var[.field[index]] etc. *without* consuming lparen for calls
+        if (!node || node->type == AST_NOOP) return newASTNode(AST_NOOP, NULL); // Propagate error
+        // Check if it's actually a function call
+        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN && node->type == AST_VARIABLE) {
+             node->type = AST_PROCEDURE_CALL; eat(parser, TOKEN_LPAREN);
+             if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+                 AST* args = exprList(parser); // exprList calls expression
+                 if (!args || args->type == AST_NOOP) { errorParser(parser,"Bad arg list"); return node; } // Return partial node on arg error
+                 if (args->type == AST_COMPOUND && args->child_count > 0) { node->children = args->children; node->child_count = args->child_count; node->child_capacity=args->child_capacity; args->children = NULL; args->child_count = 0; args->child_capacity=0; for(int i=0; i < node->child_count; i++){ if(node->children[i]) node->children[i]->parent = node; } }
+                 else { node->children = NULL; node->child_count = 0; node->child_capacity=0;}
+                 if(args) freeAST(args); // Use freeAST
+             } else { node->children = NULL; node->child_count = 0; node->child_capacity=0;}
+             if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) { errorParser(parser,"Expected ) after args"); return node;} eat(parser, TOKEN_RPAREN);
+             // Function return type is annotated later
+        } else if (node->type == AST_VARIABLE) { // Could be var, enum const, or param-less func
+             Procedure *proc = lookupProcedure(node->token->value);
+             if (proc != NULL && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
+                 node->type = AST_PROCEDURE_CALL; node->children = NULL; node->child_count = 0; node->child_capacity=0;
+                 // Set return type early if possible
+                 if (proc->proc_decl->right) node->var_type = proc->proc_decl->right->var_type; else node->var_type = TYPE_VOID;
+             } else if (proc != NULL) { // Procedure used as factor
+                  char error_msg[128]; snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", node->token->value); errorParser(parser, error_msg); return newASTNode(AST_NOOP, NULL);
+             }
+        }
+    } else if (token->type == TOKEN_LPAREN) { eat(parser, TOKEN_LPAREN); node = expression(parser); if (!node || node->type == AST_NOOP) { /* error reported below */ return newASTNode(AST_NOOP, NULL);} if(!parser->current_token || parser->current_token->type != TOKEN_RPAREN){errorParser(parser,"Expected )"); return node;} eat(parser, TOKEN_RPAREN); }
+    else if (token->type == TOKEN_LBRACKET) { node = parseSetConstructor(parser); if (!node || node->type == AST_NOOP) { /* error reported below */ return newASTNode(AST_NOOP, NULL); } setTypeAST(node, TYPE_SET); }
+    else { errorParser(parser, "Unexpected token in factor"); return newASTNode(AST_NOOP, NULL); }
+
+    if (!node) { errorParser(parser, "Internal error: factor resulted in NULL node"); return newASTNode(AST_NOOP, NULL); }
+    return node;
+}
+
+

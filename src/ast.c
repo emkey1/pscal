@@ -394,68 +394,71 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
 void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
     if (!node) return;
 
-    AST *childScopeNode = currentScopeNode;
+    AST *childScopeNode = currentScopeNode; // Scope for children is same unless node defines a new one
+    // If the current node defines a new scope (procedure/function), update childScopeNode
     if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
         childScopeNode = node;
     }
 
-    // Post-order Traversal
+    // --- Pre-order Traversal for Scope ---
+    // Set scope information *before* processing children if this node defines scope
+    if (node->type == AST_BLOCK) {
+        // Determine if this block is global based on its parent (PROGRAM)
+        // Note: This relies on parent pointers being set correctly during parsing.
+        node->is_global_scope = (node->parent && node->parent->type == AST_PROGRAM);
+        // Pass the scope defining node (PROC/FUNC/PROGRAM) down
+        // childScopeNode was already set above based on PROC/FUNC. For PROGRAM's block,
+        // the currentScopeNode passed in should be the PROGRAM node itself.
+    }
+
+    // --- Recursive Calls (Post-order Traversal for Type Annotation) ---
+    // Annotate children first so their types are known when processing the parent
     if (node->left) annotateTypes(node->left, childScopeNode, globalProgramNode);
     if (node->right) annotateTypes(node->right, childScopeNode, globalProgramNode);
     if (node->extra) annotateTypes(node->extra, childScopeNode, globalProgramNode);
     for (int i = 0; i < node->child_count; ++i) {
-         if(node->children && node->children[i]) {
+         if(node->children && node->children[i]) { // Safety check
               annotateTypes(node->children[i], childScopeNode, globalProgramNode);
          }
     }
 
-    // Set Type for Current Node
-    switch(node->type) {
-        // Literals
-        case AST_NUMBER: node->var_type = (node->token && node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER; break;
-        case AST_STRING: node->var_type = TYPE_STRING; break;
-        case AST_BOOLEAN: node->var_type = TYPE_BOOLEAN; break;
-        case AST_ENUM_VALUE: node->var_type = TYPE_ENUM; break;
-        case AST_SET: node->var_type = TYPE_SET; break;
-        case AST_ARRAY_LITERAL: node->var_type = TYPE_ARRAY; break;
+    // --- Set Type for Current Node ---
+    // Only set type if it hasn't been set correctly by the parser already (e.g., for declarations)
+    if (node->var_type == TYPE_VOID || node->var_type == 0 ) { // Check against default/uninitialized
+        switch(node->type) {
+            // Literals
+            case AST_NUMBER: node->var_type = (node->token && node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER; break;
+            case AST_STRING: node->var_type = TYPE_STRING; break;
+            case AST_BOOLEAN: node->var_type = TYPE_BOOLEAN; break;
+            case AST_ENUM_VALUE: node->var_type = TYPE_ENUM; break; // Enum values are known
+            case AST_SET: node->var_type = TYPE_SET; break;         // Set literals are known
+            case AST_ARRAY_LITERAL: node->var_type = TYPE_ARRAY; break; // Array literals are known
 
-        // Variable Usage
-        case AST_VARIABLE: {
-            const char* varName = node->token ? node->token->value : NULL;
-            if (!varName) { node->var_type = TYPE_VOID; break; }
+            // Variable Usage (lookup required)
+            case AST_VARIABLE: {
+                const char* varName = node->token ? node->token->value : NULL;
+                if (!varName) { node->var_type = TYPE_VOID; break; }
 
-            bool skipLookup = false;
-             if (node->parent) {
-                 if (node->parent->type == AST_PROGRAM && node == node->parent->left) skipLookup = true;
-                 else if (node->parent->type == AST_VAR_DECL && node == node->parent->right) skipLookup = true;
-                 else if (node->parent->type == AST_TYPE_DECL && node == node->parent->left) skipLookup = true;
-                 else if (node->parent->type == AST_TYPE_REFERENCE) skipLookup = true;
-                 else if (node->parent->type == AST_FIELD_ACCESS && node->token == node->parent->token) skipLookup = true;
-                 else if ((node->parent->type == AST_FUNCTION_DECL || node->parent->type == AST_PROCEDURE_DECL) && node->token == node->parent->token) skipLookup = true;
-                 else if ((node->parent->type == AST_FUNCTION_DECL) && node == node->parent->right) skipLookup = true;
-             }
-            if (skipLookup) break;
-
-            // Only annotate if type is currently VOID (or default)
-            // This prevents overwriting types set correctly earlier by the parser for declarations.
-            if (node->var_type == TYPE_VOID) { // <<< Check against TYPE_VOID
-                 AST* declNode = findStaticDeclarationInAST(varName, currentScopeNode, globalProgramNode);
+                // Find declaration (local, then global)
+                AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode); // Use childScopeNode for lookup context
                  if (declNode) {
-                     // Get type info from the declaration node
-                     if (declNode->type == AST_FUNCTION_DECL) {
+                     // Found declaration - get type from it
+                     if (declNode->type == AST_VAR_DECL || declNode->type == AST_CONST_DECL) {
+                         // Use the var_type directly stored on the VAR_DECL/CONST_DECL node by the parser
                          node->var_type = declNode->var_type;
-                     } else if (declNode->type == AST_VAR_DECL) {
-                         node->var_type = declNode->var_type;
-                     } else if (declNode->type == AST_CONST_DECL) {
-                         // Constant type inference might be tricky, rely on what parser/eval might set
-                         // or attempt inference from declNode->left if needed.
-                         if (declNode->left) node->var_type = declNode->left->var_type; // If left side has type
-                         else node->var_type = TYPE_VOID; // Fallback
-                     }
+                     } else if (declNode->type == AST_FUNCTION_DECL) { // Handle function name used as var (for return value assignment)
+                         if (declNode->right) node->var_type = declNode->right->var_type; // Return type is in 'right'
+                         else node->var_type = TYPE_VOID; // Function returning void? Error?
+                     } else { node->var_type = TYPE_VOID; } // Unknown declaration type
                  } else {
+                      // Check if it's a type identifier itself (less common in expressions)
                       AST* typeDef = lookupType(varName);
                       if (typeDef) {
-                           node->var_type = typeDef->var_type;
+                           // Mark as VOID as types aren't values in expressions directly
+                           node->var_type = TYPE_VOID;
+                           #ifdef DEBUG
+                           fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
+                           #endif
                       } else {
                            #ifdef DEBUG
                            fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
@@ -463,102 +466,153 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                            node->var_type = TYPE_VOID; // Mark as VOID/error
                       }
                  }
+                 // If it's 'result', assign function's return type
+                 if (strcasecmp(varName, "result") == 0 && childScopeNode && childScopeNode->type == AST_FUNCTION_DECL) {
+                      if(childScopeNode->right) node->var_type = childScopeNode->right->var_type;
+                      else node->var_type = TYPE_VOID; // Should have return type
+                 }
+                break;
+            } // End AST_VARIABLE case
+
+            // Operations
+            case AST_BINARY_OP: {
+                 VarType leftType = node->left ? node->left->var_type : TYPE_VOID;
+                 VarType rightType = node->right ? node->right->var_type : TYPE_VOID;
+                 TokenType op = node->token ? node->token->type : TOKEN_UNKNOWN;
+
+                 // *** CORRECTED LOGIC ***
+                 if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
+                     op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL ||
+                     op == TOKEN_IN) {
+                     // All relational operators result in BOOLEAN
+                     node->var_type = TYPE_BOOLEAN;
+                 }
+                 else if (op == TOKEN_AND || op == TOKEN_OR /* || TOKEN_XOR */) {
+                      // Logical operators result in BOOLEAN (Bitwise handled by eval based on operands)
+                      node->var_type = TYPE_BOOLEAN;
+                 }
+                 else if (op == TOKEN_SLASH) { // Real division always results in REAL
+                     node->var_type = TYPE_REAL;
+                 }
+                 else if (leftType == TYPE_REAL || rightType == TYPE_REAL) { // Arithmetic with REAL results in REAL (unless overridden above)
+                      node->var_type = TYPE_REAL;
+                 }
+                 else if (op == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) {
+                      node->var_type = TYPE_STRING; // String concatenation
+                 }
+                 else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
+                     // Integer arithmetic (div, mod, +, -, *, shl, shr) results in INTEGER
+                     node->var_type = TYPE_INTEGER;
+                 }
+                 // Add specific checks for other types if needed (BYTE, WORD etc.)
+                 else {
+                     // Default guess or error state if types are incompatible for the operator
+                     node->var_type = TYPE_VOID; // Fallback
+                 }
+                break;
             }
-            break;
-        } // End AST_VARIABLE case
+            case AST_UNARY_OP:
+                // NOT always results in BOOLEAN. Unary +/- keeps operand type initially.
+                node->var_type = (node->token && node->token->type == TOKEN_NOT) ? TYPE_BOOLEAN : (node->left ? node->left->var_type : TYPE_VOID);
+                break;
 
-        // Operations
-        case AST_BINARY_OP: {
-             VarType leftType = node->left ? node->left->var_type : TYPE_VOID;
-             VarType rightType = node->right ? node->right->var_type : TYPE_VOID;
-             // Your existing type inference logic (kept from previous correct version)
-             if (node->token->type == TOKEN_SLASH || leftType == TYPE_REAL || rightType == TYPE_REAL) node->var_type = TYPE_REAL;
-             else if (node->token->type == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) node->var_type = TYPE_STRING;
-             else if (node->token->type == TOKEN_EQUAL || node->token->type == TOKEN_NOT_EQUAL || node->token->type == TOKEN_LESS || node->token->type == TOKEN_LESS_EQUAL || node->token->type == TOKEN_GREATER || node->token->type == TOKEN_GREATER_EQUAL || node->token->type == TOKEN_AND || node->token->type == TOKEN_OR || node->token->type == TOKEN_IN) node->var_type = TYPE_BOOLEAN;
-             else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) node->var_type = TYPE_INTEGER;
-             else if (leftType == TYPE_SET || rightType == TYPE_SET) node->var_type = TYPE_BOOLEAN; // IN op results in BOOLEAN, other set ops need handling
-             else if (leftType != TYPE_VOID && rightType == TYPE_VOID) node->var_type = leftType;
-             else if (leftType == TYPE_VOID && rightType != TYPE_VOID) node->var_type = rightType;
-             else node->var_type = TYPE_INTEGER; // Default guess
-            break;
-        }
-        case AST_UNARY_OP:
-            node->var_type = (node->token->type == TOKEN_NOT) ? TYPE_BOOLEAN : (node->left ? node->left->var_type : TYPE_VOID);
-            break;
+            // Calls
+            case AST_PROCEDURE_CALL: {
+                 Procedure *proc = node->token ? lookupProcedure(node->token->value) : NULL;
+                 if (proc && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
+                     // User-defined function: get return type from declaration's 'right' child
+                     if (proc->proc_decl->right) node->var_type = proc->proc_decl->right->var_type;
+                     else node->var_type = TYPE_VOID; // Should have return type
+                 } else {
+                      // Check built-ins: Use a helper or hardcode known types
+                      if (node->token) {
+                           node->var_type = getBuiltinReturnType(node->token->value); // Use a helper function
+                           // If getBuiltinReturnType returns TYPE_VOID, it's likely a procedure or unknown
+                      } else { node->var_type = TYPE_VOID; }
+                 }
+                 break;
+             }
 
-        // Calls
-        case AST_PROCEDURE_CALL: {
-             // Only annotate if type is currently VOID
-             if (node->var_type == TYPE_VOID) {
-                  Procedure *proc = lookupProcedure(node->token->value);
-                  if (proc && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
-                      node->var_type = proc->proc_decl->var_type;
-                  } else {
-                      BuiltinRoutineType btype = getBuiltinType(node->token->value);
-                      if (btype == BUILTIN_TYPE_FUNCTION) {
-                           // TODO: Lookup actual builtin return type if possible
-                           // If registerBuiltinFunction correctly sets var_type on the dummy AST,
-                           // maybe proc->proc_decl->var_type works even for builtins? Check registration.
-                           // For now, leave as VOID and let eval determine type? Or make best guess?
-                      } else {
-                           node->var_type = TYPE_VOID; // Procedures return void
+            // Accessors
+            case AST_FIELD_ACCESS: {
+                 node->var_type = TYPE_VOID; // Default - needs proper lookup
+                 if(node->left && node->left->var_type == TYPE_RECORD) {
+                    // Requires finding the record type definition and the field's type within it
+                    // This needs a robust type system lookup.
+                 }
+                 break;
+            }
+             case AST_ARRAY_ACCESS: {
+                  node->var_type = TYPE_VOID; // Default - needs proper lookup
+                  if(node->left) {
+                      if (node->left->var_type == TYPE_ARRAY) {
+                           // Requires finding the array type definition and its element type.
+                           // Placeholder: node->var_type = lookup_array_element_type(node->left);
+                      } else if (node->left->var_type == TYPE_STRING) {
+                           node->var_type = TYPE_CHAR; // Indexing a string yields a char
                       }
                   }
+                 break;
              }
-             break;
-         }
+            default:
+                 // Keep existing VOID or type set by parser for declarations etc.
+                 break;
+        } // End switch
+    } // End if var_type was VOID
 
-        // Accessors
-        case AST_FIELD_ACCESS: {
-             node->var_type = TYPE_VOID; // Default
-             if(node->left && (node->left->var_type == TYPE_RECORD)) {
-                AST* recordDeclNode = node->left->right;
-                if (recordDeclNode && recordDeclNode->type == AST_TYPE_REFERENCE) recordDeclNode = recordDeclNode->right;
-                if (recordDeclNode && recordDeclNode->type == AST_RECORD_TYPE) {
-                    const char* fieldName = node->token ? node->token->value : NULL;
-                    if (fieldName) {
-                        // Find field declaration logic...
-                        for (int i = 0; i < recordDeclNode->child_count; ++i) {
-                            AST* fieldDeclGroup = recordDeclNode->children[i];
-                            if (!fieldDeclGroup || fieldDeclGroup->type != AST_VAR_DECL) continue;
-                            for (int j = 0; j < fieldDeclGroup->child_count; ++j) {
-                                 AST* varNameNode = fieldDeclGroup->children[j];
-                                 if (varNameNode && varNameNode->token && strcasecmp(varNameNode->token->value, fieldName) == 0) {
-                                      AST* fieldTypeNode = fieldDeclGroup->right;
-                                      if (fieldTypeNode) {
-                                           if(fieldTypeNode->type == AST_TYPE_REFERENCE) fieldTypeNode = fieldTypeNode->right;
-                                           if(fieldTypeNode) node->var_type = fieldTypeNode->var_type;
-                                      }
-                                      goto field_found_annotate_corrected; // Use corrected label
-                                 }
-                            }
-                        }
-                        field_found_annotate_corrected:; // Corrected label
-                    }
-                }
-             }
-             break;
-        }
-         case AST_ARRAY_ACCESS: {
-              node->var_type = TYPE_VOID; // Default
-              if(node->left && node->left->var_type == TYPE_ARRAY) {
-                 AST* arrayDeclNode = node->left->right;
-                 if (arrayDeclNode && arrayDeclNode->type == AST_TYPE_REFERENCE) arrayDeclNode = arrayDeclNode->right;
-                 if(arrayDeclNode && arrayDeclNode->type == AST_ARRAY_TYPE && arrayDeclNode->right) {
-                     AST* elemTypeNode = arrayDeclNode->right;
-                     if(elemTypeNode && elemTypeNode->type == AST_TYPE_REFERENCE) elemTypeNode = elemTypeNode->right;
-                     if (elemTypeNode) node->var_type = elemTypeNode->var_type;
-                 }
-             } else if (node->left && node->left->var_type == TYPE_STRING) {
-                 node->var_type = TYPE_CHAR;
-             }
-             break;
+    // Final pass: Ensure variable nodes definitely have a type if possible
+    // (This might be redundant if the logic above is complete)
+    if (node->type == AST_VARIABLE && node->var_type == TYPE_VOID) {
+         AST* declNode = findStaticDeclarationInAST(node->token->value, currentScopeNode, globalProgramNode);
+         if (declNode && declNode->type == AST_VAR_DECL) {
+             node->var_type = declNode->var_type;
          }
-        default:
-             break;
-    } // End switch
+          // Maybe handle const/function result again here if needed
+    }
 }
 
+// --- End: Corrected annotateTypes function ---
+
+// You might need to add a basic getBuiltinReturnType helper function,
+// similar to getBuiltinType, perhaps in builtin.c/builtin.h
+// For now, you can add a simple version like this to ast.c temporarily:
+
+VarType getBuiltinReturnType(const char* name) {
+     // Simplified version - add more built-in *functions* here
+     if (strcasecmp(name, "chr")==0) return TYPE_CHAR;
+     if (strcasecmp(name, "ord")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "length")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "abs")==0) return TYPE_INTEGER; // Or REAL depending on arg
+     if (strcasecmp(name, "sqr")==0) return TYPE_INTEGER; // Or REAL depending on arg
+     if (strcasecmp(name, "sqrt")==0) return TYPE_REAL;
+     if (strcasecmp(name, "sin")==0) return TYPE_REAL;
+     if (strcasecmp(name, "cos")==0) return TYPE_REAL;
+     if (strcasecmp(name, "ln")==0) return TYPE_REAL;
+     if (strcasecmp(name, "exp")==0) return TYPE_REAL;
+     if (strcasecmp(name, "trunc")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "round")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "random")==0) return TYPE_REAL; // Default, can be integer
+     if (strcasecmp(name, "keypressed")==0) return TYPE_BOOLEAN;
+     if (strcasecmp(name, "ioresult")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "eof")==0) return TYPE_BOOLEAN;
+     if (strcasecmp(name, "pos")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "copy")==0) return TYPE_STRING;
+     if (strcasecmp(name, "inttostr")==0) return TYPE_STRING;
+     if (strcasecmp(name, "paramcount")==0) return TYPE_INTEGER;
+     if (strcasecmp(name, "paramstr")==0) return TYPE_STRING;
+     if (strcasecmp(name, "readkey")==0) return TYPE_CHAR; // Or String[1]?
+     if (strcasecmp(name,"low")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
+     if (strcasecmp(name,"high")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
+     if (strcasecmp(name,"succ")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
+     if (strcasecmp(name,"pred")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
+     if (strcasecmp(name,"upcase")==0) return TYPE_CHAR;
+     if (strcasecmp(name,"screencols")==0) return TYPE_INTEGER;
+     if (strcasecmp(name,"screenrows")==0) return TYPE_INTEGER;
+     if (strcasecmp(name,"wherex")==0) return TYPE_INTEGER;
+     if (strcasecmp(name,"wherey")==0) return TYPE_INTEGER;
+     // Add other functions...
+     return TYPE_VOID; // Default for procedures or unknown
+}
 AST *copyAST(AST *node) {
     if (!node) return NULL;
     AST *newNode = newASTNode(node->type, node->token);
