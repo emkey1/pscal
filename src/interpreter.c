@@ -8,7 +8,6 @@
 
 AST *GlobalASTRoot = NULL;  // Declare global AST root
 
-// In interpreter.c
 void popLocalEnv(void) {
     Symbol *sym = localSymbols;
     #ifdef DEBUG
@@ -912,7 +911,7 @@ Value eval(AST *node) {
                      if(right.type==TYPE_CHAR){tr[0]=right.c_val;rs=tr;} else if(right.type!=TYPE_STRING){/*err*/}
                      if(!ls)ls=""; if(!rs)rs="";
                      if(op==TOKEN_PLUS){size_t ll=strlen(ls),lr=strlen(rs),bs=ll+lr+1; char* cr=malloc(bs); if(!cr){/*err*/} strcpy(cr,ls);strncat(cr,rs,lr); result=makeString(cr);free(cr);}
-                     else if(op>=TOKEN_GREATER && op<=TOKEN_LESS_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_EQUAL){ // Corrected condition for comparisons
+                     else if((op>=TOKEN_GREATER && op<=TOKEN_LESS_EQUAL) || op == TOKEN_NOT_EQUAL || op == TOKEN_EQUAL){ // Corrected condition for comparisons
                          int cmp=strcmp(ls,rs);
                          switch(op){
                              case TOKEN_EQUAL: result=makeBoolean(cmp==0);break;

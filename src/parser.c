@@ -1245,8 +1245,12 @@ AST *paramList(Parser *parser) {
     AST *compound = newASTNode(AST_COMPOUND, NULL);
     while (parser->current_token->type != TOKEN_RPAREN) {
         int byRef = 0;
-        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) {
-            byRef = 1;
+        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT || parser->current_token->type == TOKEN_CONST) {
+            // If it's VAR or OUT, mark as pass-by-reference
+            if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) {
+                 byRef = 1;
+            }
+            // Consume the keyword (VAR, OUT, or CONST)
             eat(parser, parser->current_token->type);
         }
 
