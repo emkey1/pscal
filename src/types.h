@@ -149,6 +149,14 @@ typedef enum {
     AST_BREAK
 } ASTNodeType;
 
+// Define the function pointer type for built-in handlers
+typedef Value (*BuiltinHandler)(AST *node);
+
+// Structure to map built-in names to handlers
+typedef struct {
+    const char *name;       // Lowercase name of the built-in
+    BuiltinHandler handler; // Pointer to the C function implementation
+} BuiltinMapping;
 
 const char *varTypeToString(VarType type);
 const char *tokenTypeToString(TokenType type);

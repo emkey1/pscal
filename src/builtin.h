@@ -17,10 +17,10 @@ Value executeBuiltinAbs(AST *node);
 Value executeBuiltinTrunc(AST *node);
 
 // File I/O
-void executeBuiltinAssign(AST *node);
-void executeBuiltinClose(AST *node);
-void executeBuiltinReset(AST *node);
-void executeBuiltinRewrite(AST *node);
+Value executeBuiltinAssign(AST *node);
+Value executeBuiltinClose(AST *node);
+Value executeBuiltinReset(AST *node);
+Value executeBuiltinRewrite(AST *node);
 Value executeBuiltinEOF(AST *node);
 Value executeBuiltinIOResult(AST *node);
 
@@ -34,17 +34,19 @@ Value executeBuiltinChr(AST *node);
 Value executeBuiltinIntToStr(AST *node);
 
 // System
-void executeBuiltinHalt(AST *node);
-void executeBuiltinInc(AST *node);
-void executeBuiltinRandomize(AST *node);
+Value executeBuiltinHalt(AST *node);
+Value executeBuiltinInc(AST *node);
+Value executeBuiltinRandomize(AST *node);
 Value executeBuiltinRandom(AST *node);
-void executeBuiltinDelay(AST *node);
+Value executeBuiltinDelay(AST *node);
+Value executeBuiltinDec(AST *node);
+Value executeBuiltinReadKey(AST *node);
 
 // Memory Streams
 Value executeBuiltinMstreamCreate(AST *node);
 Value executeBuiltinMstreamLoadFromFile(AST *node);
 Value executeBuiltinMstreamSaveToFile(AST *node);
-void executeBuiltinMstreamFree(AST *node);
+Value executeBuiltinMstreamFree(AST *node);
 
 // Support
 Value executeBuiltinResult(AST *node);

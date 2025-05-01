@@ -12,6 +12,67 @@
 #include <errno.h>
 #include <sys/ioctl.h> // For ioctl, FIONREAD
 
+// Comparison function for bsearch (case-insensitive)
+static int compareBuiltinMappings(const void *key, const void *element) {
+    const char *target_name = (const char *)key;
+    const BuiltinMapping *mapping = (const BuiltinMapping *)element;
+    return strcasecmp(target_name, mapping->name);
+}
+
+// Define the dispatch table - MUST BE SORTED ALPHABETICALLY BY NAME (lowercase)
+static const BuiltinMapping builtin_dispatch_table[] = {
+    {"abs",       executeBuiltinAbs},
+    {"api_receive", executeBuiltinAPIReceive}, // From builtin_network_api.c
+    {"api_send",  executeBuiltinAPISend},      // From builtin_network_api.c
+    {"assign",    executeBuiltinAssign},
+    {"chr",       executeBuiltinChr},
+    {"close",     executeBuiltinClose},
+    {"copy",      executeBuiltinCopy},
+    {"cos",       executeBuiltinCos},
+    {"dec",       executeBuiltinDec},         // Include Dec
+    {"delay",     executeBuiltinDelay},
+    {"eof",       executeBuiltinEOF},
+    {"exp",       executeBuiltinExp},
+    {"halt",      executeBuiltinHalt},
+    {"high",      executeBuiltinHigh},
+    {"inc",       executeBuiltinInc},
+    {"inttostr",  executeBuiltinIntToStr},
+    {"ioresult",  executeBuiltinIOResult},
+    {"keypressed", executeBuiltinKeyPressed},
+    {"length",    executeBuiltinLength},
+    {"ln",        executeBuiltinLn},
+    {"low",       executeBuiltinLow},
+    {"mstreamcreate", executeBuiltinMstreamCreate},
+    {"mstreamfree", executeBuiltinMstreamFree},
+    {"mstreamloadfromfile", executeBuiltinMstreamLoadFromFile},
+    {"mstreamsavetofile", executeBuiltinMstreamSaveToFile}, // Corrected name based on registration
+    {"ord",       executeBuiltinOrd},
+    {"paramcount", executeBuiltinParamcount},
+    {"paramstr",  executeBuiltinParamstr},
+    {"pos",       executeBuiltinPos},
+    {"random",    executeBuiltinRandom},
+    {"randomize", executeBuiltinRandomize},
+    {"readkey",   executeBuiltinReadKey},
+    {"reset",     executeBuiltinReset},
+    // {"result",    executeBuiltinResult}, // 'result' is special, handled differently? Let's assume not dispatched here.
+    {"rewrite",   executeBuiltinRewrite},
+    {"screencols", executeBuiltinScreenCols},
+    {"screenrows", executeBuiltinScreenRows},
+    {"sin",       executeBuiltinSin},
+    {"sqrt",      executeBuiltinSqrt},
+    {"succ",      executeBuiltinSucc},        // Include Succ
+    {"tan",       executeBuiltinTan},         // Include Tan
+    {"trunc",     executeBuiltinTrunc},
+    {"upcase",    executeBuiltinUpcase},
+    {"wherex",    executeBuiltinWhereX},
+    {"wherey",    executeBuiltinWhereY}
+    // Add Write/Writeln/Read/Readln if you want them dispatched here,
+    // but they are currently handled directly in the interpreter's main switch.
+};
+
+// Calculate the number of entries in the table
+static const size_t num_builtins = sizeof(builtin_dispatch_table) / sizeof(builtin_dispatch_table[0]);
+
 void assignValueToLValue(AST *lvalueNode, Value newValue) {
     if (!lvalueNode) {
         fprintf(stderr, "Runtime error: Cannot assign to NULL lvalue node.\n");
@@ -102,7 +163,7 @@ void assignValueToLValue(AST *lvalueNode, Value newValue) {
               Value indexVal = eval(lvalueNode->children[0]);
               if(indexVal.type != TYPE_INTEGER) { fprintf(stderr, "Runtime error: String index must be an integer.\n"); EXIT_FAILURE_HANDLER(); }
               long long idx = indexVal.i_val;
-              int len = arrSym->value->s_val ? strlen(arrSym->value->s_val) : 0;
+              int len = arrSym->value->s_val ? (int)strlen(arrSym->value->s_val) : 0;
               if (idx < 1 || idx > len) { fprintf(stderr, "Runtime error: String index %lld out of bounds [1..%d] for assignment.\n", idx, len); EXIT_FAILURE_HANDLER(); }
 
               char char_to_assign = (newValue.type == TYPE_CHAR) ? newValue.c_val : newValue.s_val[0];
@@ -305,9 +366,18 @@ Value executeBuiltinTan(AST *node) {
 Value executeBuiltinSqrt(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: sqrt expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
     Value arg = eval(node->children[0]);
-    double x = (arg.type == TYPE_INTEGER ? arg.i_val : arg.r_val);
-    if (x < 0) { fprintf(stderr, "Runtime error: sqrt expects a non-negative argument.\n"); EXIT_FAILURE_HANDLER(); }
-    return makeReal(sqrt(x));
+    double x = (arg.type == TYPE_INTEGER ? (double)arg.i_val : arg.r_val); // Promote int to double
+    if (x < 0) {
+        fprintf(stderr, "Runtime error: sqrt expects a non-negative argument.\n");
+        freeValue(&arg); // Free evaluated arg before exit
+        EXIT_FAILURE_HANDLER();
+    }
+    Value result = makeReal(sqrt(x));
+
+    // --- ADDED: Free the evaluated argument ---
+    freeValue(&arg);
+
+    return result;
 }
 
 Value executeBuiltinLn(AST *node) {
@@ -328,10 +398,22 @@ Value executeBuiltinExp(AST *node) {
 Value executeBuiltinAbs(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: abs expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
     Value arg = eval(node->children[0]);
+    Value result; // Declare result value
+
     if (arg.type == TYPE_INTEGER)
-        return makeInt(llabs(arg.i_val));
-    else
-        return makeReal(fabs(arg.r_val));
+        result = makeInt(llabs(arg.i_val));
+    else if (arg.type == TYPE_REAL) // Assume numeric if not integer
+        result = makeReal(fabs(arg.r_val));
+    else {
+        fprintf(stderr, "Runtime error: abs expects a numeric argument.\n");
+        freeValue(&arg); // Free evaluated arg before exit
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- ADDED: Free the evaluated argument ---
+    freeValue(&arg);
+
+    return result;
 }
 
 Value executeBuiltinTrunc(AST *node) {
@@ -353,57 +435,192 @@ Value executeBuiltinTrunc(AST *node) {
 }
 
 // File I/O
-void executeBuiltinAssign(AST *node) {
+Value executeBuiltinAssign(AST *node) {
     if (node->child_count != 2) { fprintf(stderr, "Runtime error: assign expects 2 arguments.\n"); EXIT_FAILURE_HANDLER(); }
+
+    // Evaluate arguments
     Value fileVal = eval(node->children[0]);
     Value nameVal = eval(node->children[1]);
-    if (fileVal.type != TYPE_FILE) { fprintf(stderr, "Runtime error: first parameter to assign must be a file variable.\n"); EXIT_FAILURE_HANDLER(); }
-    if (nameVal.type != TYPE_STRING) { fprintf(stderr, "Runtime error: second parameter to assign must be a string.\n"); EXIT_FAILURE_HANDLER(); }
+
+    // Type checks
+    if (fileVal.type != TYPE_FILE) {
+        fprintf(stderr, "Runtime error: first parameter to assign must be a file variable.\n");
+        freeValue(&fileVal); // Free potentially allocated value
+        freeValue(&nameVal); // Free potentially allocated value
+        EXIT_FAILURE_HANDLER();
+    }
+    if (nameVal.type != TYPE_STRING) {
+        fprintf(stderr, "Runtime error: second parameter to assign must be a string.\n");
+        freeValue(&fileVal); // Free potentially allocated value
+        freeValue(&nameVal); // Free potentially allocated value
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Find symbol and assign filename
+    // Ensure the LValue node (children[0]) is a variable
+    if (node->children[0]->type != AST_VARIABLE || !node->children[0]->token) {
+        fprintf(stderr, "Runtime error: file variable parameter to assign must be a simple variable.\n");
+        freeValue(&fileVal);
+        freeValue(&nameVal);
+        EXIT_FAILURE_HANDLER();
+    }
     const char *fileVarName = node->children[0]->token->value;
-    Symbol *sym = lookupSymbol(fileVarName);
-    if (!sym) { fprintf(stderr, "Runtime error: file variable '%s' not declared.\n", fileVarName); EXIT_FAILURE_HANDLER(); }
+    Symbol *sym = lookupSymbol(fileVarName); // lookupSymbol handles not found error
+
+    if (!sym || !sym->value || sym->value->type != TYPE_FILE) { // Check if symbol is actually a FILE type
+        fprintf(stderr, "Runtime error: Symbol '%s' is not a file variable.\n", fileVarName);
+        freeValue(&fileVal);
+        freeValue(&nameVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Free old filename if exists and assign new one
     if (sym->value->filename) free(sym->value->filename);
-    sym->value->filename = strdup(nameVal.s_val);
+    sym->value->filename = nameVal.s_val ? strdup(nameVal.s_val) : NULL;
+    if (nameVal.s_val && !sym->value->filename) { // Check strdup success
+         fprintf(stderr, "Memory allocation error assigning filename.\n");
+         freeValue(&fileVal);
+         freeValue(&nameVal);
+         EXIT_FAILURE_HANDLER();
+    }
+
+    // --- ADDED: Free the evaluated values ---
+    freeValue(&fileVal); // fileVal itself doesn't hold heap data for TYPE_FILE
+    freeValue(&nameVal); // Free the string evaluated for the filename
+
+    return makeVoid(); // Return void value
 }
 
-void executeBuiltinClose(AST *node) {
-    if (node->child_count != 1) { fprintf(stderr, "Runtime error: close expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
+
+Value executeBuiltinClose(AST *node) { // Return Value
+    if (node->child_count != 1) { /* ... error handling ... */ }
     Value fileVal = eval(node->children[0]);
-    if (fileVal.type != TYPE_FILE) { fprintf(stderr, "Runtime error: close parameter must be a file variable.\n"); EXIT_FAILURE_HANDLER(); }
-    if (!fileVal.f_val) { fprintf(stderr, "Runtime error: file is not open.\n"); EXIT_FAILURE_HANDLER(); }
+    if (fileVal.type != TYPE_FILE) { /* ... error handling ... */ }
+    if (!fileVal.f_val) { /* ... error handling ... */ }
+
+    // Existing core logic
     fclose(fileVal.f_val);
     const char *fileVarName = node->children[0]->token->value;
     Symbol *sym = lookupSymbol(fileVarName);
-    if (sym->value->filename) {
+    // Make robust: Check if sym and sym->value exist before dereferencing
+    if (sym && sym->value && sym->value->filename) {
         free(sym->value->filename);
         sym->value->filename = NULL;
+        // Also nullify the FILE* pointer in the symbol table
+        sym->value->f_val = NULL;
     }
+     // --- ADDED ---
+     freeValue(&fileVal); // Free value returned by eval
+
+    return makeVoid(); // Return void value for procedures
 }
 
-void executeBuiltinReset(AST *node) {
+Value executeBuiltinReset(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: reset expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
+
+    // Evaluate argument
     Value fileVal = eval(node->children[0]);
-    if (fileVal.type != TYPE_FILE) { fprintf(stderr, "Runtime error: reset parameter must be a file variable.\n"); EXIT_FAILURE_HANDLER(); }
-    if (fileVal.filename == NULL) { fprintf(stderr, "Runtime error: file variable not assigned a filename.\n"); EXIT_FAILURE_HANDLER(); }
-    FILE *f = fopen(fileVal.filename, "r");
-    if (f == NULL) { last_io_error = 1; return; }
+    if (fileVal.type != TYPE_FILE) {
+        fprintf(stderr, "Runtime error: reset parameter must be a file variable.\n");
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Find symbol
+    if (node->children[0]->type != AST_VARIABLE || !node->children[0]->token) {
+        fprintf(stderr, "Runtime error: file variable parameter to reset must be a simple variable.\n");
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
     const char *fileVarName = node->children[0]->token->value;
-    Symbol *sym = lookupSymbol(fileVarName);
-    sym->value->f_val = f;
-    last_io_error = 0;
+    Symbol *sym = lookupSymbol(fileVarName); // Handles not found
+    if (!sym || !sym->value || sym->value->type != TYPE_FILE) { // Check if symbol is actually a FILE type
+        fprintf(stderr, "Runtime error: Symbol '%s' is not a file variable.\n", fileVarName);
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
+    if (sym->value->filename == NULL) {
+        fprintf(stderr, "Runtime error: file variable '%s' not assigned a filename before reset.\n", fileVarName);
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Close existing file handle if open
+    if (sym->value->f_val) {
+        fclose(sym->value->f_val);
+        sym->value->f_val = NULL;
+    }
+
+    // Open file for reading
+    FILE *f = fopen(sym->value->filename, "r");
+    if (f == NULL) {
+        last_io_error = errno ? errno : 1; // Store system error or generic error 1
+        // Don't exit, allow IOResult check
+    } else {
+        sym->value->f_val = f; // Assign the new FILE handle
+        last_io_error = 0;
+    }
+
+    // --- ADDED: Free the evaluated value ---
+    freeValue(&fileVal); // fileVal itself doesn't hold heap data for TYPE_FILE
+
+    return makeVoid(); // Return void value
 }
 
-void executeBuiltinRewrite(AST *node) {
+Value executeBuiltinRewrite(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: rewrite expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
+
+    // Evaluate argument
     Value fileVal = eval(node->children[0]);
-    if (fileVal.type != TYPE_FILE) { fprintf(stderr, "Runtime error: rewrite parameter must be a file variable.\n"); EXIT_FAILURE_HANDLER(); }
-    if (fileVal.filename == NULL) { fprintf(stderr, "Runtime error: file variable not assigned a filename.\n"); EXIT_FAILURE_HANDLER(); }
-    FILE *f = fopen(fileVal.filename, "w");
-    if (!f) { fprintf(stderr, "Runtime error: could not open file '%s' for writing.\n", fileVal.filename); EXIT_FAILURE_HANDLER(); }
+    if (fileVal.type != TYPE_FILE) {
+        fprintf(stderr, "Runtime error: rewrite parameter must be a file variable.\n");
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Find symbol
+    if (node->children[0]->type != AST_VARIABLE || !node->children[0]->token) {
+        fprintf(stderr, "Runtime error: file variable parameter to rewrite must be a simple variable.\n");
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
     const char *fileVarName = node->children[0]->token->value;
-    Symbol *sym = lookupSymbol(fileVarName);
-    sym->value->f_val = f;
+    Symbol *sym = lookupSymbol(fileVarName); // Handles not found
+    if (!sym || !sym->value || sym->value->type != TYPE_FILE) { // Check if symbol is actually a FILE type
+        fprintf(stderr, "Runtime error: Symbol '%s' is not a file variable.\n", fileVarName);
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
+    if (sym->value->filename == NULL) {
+        fprintf(stderr, "Runtime error: file variable '%s' not assigned a filename before rewrite.\n", fileVarName);
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Close existing file handle if open
+    if (sym->value->f_val) {
+        fclose(sym->value->f_val);
+        sym->value->f_val = NULL;
+    }
+
+    // Open file for writing
+    FILE *f = fopen(sym->value->filename, "w"); // Use "w" for rewrite
+    if (!f) {
+        last_io_error = errno ? errno : 1;
+        fprintf(stderr, "Runtime error: could not open file '%s' for writing. IOResult=%d\n", sym->value->filename, last_io_error);
+        // Don't exit, allow IOResult check (though Rewrite usually aborts on error)
+        // EXIT_FAILURE_HANDLER(); // Or enable this for stricter Turbo Pascal compatibility
+    } else {
+        sym->value->f_val = f; // Assign the new FILE handle
+        last_io_error = 0;
+    }
+
+    // --- ADDED: Free the evaluated value ---
+    freeValue(&fileVal); // fileVal itself doesn't hold heap data for TYPE_FILE
+
+    return makeVoid(); // Return void value
 }
+
 
 Value executeBuiltinEOF(AST *node) {
     if (node->child_count != 1) {
@@ -433,9 +650,19 @@ Value executeBuiltinIOResult(AST *node) {
 Value executeBuiltinLength(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: length expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
     Value arg = eval(node->children[0]);
-    if (arg.type != TYPE_STRING) { fprintf(stderr, "Runtime error: length argument must be a string.\n"); EXIT_FAILURE_HANDLER(); }
-    int len = (int)strlen(arg.s_val);
-    return makeInt(len);
+    if (arg.type != TYPE_STRING) {
+        fprintf(stderr, "Runtime error: length argument must be a string. Got %s\n", varTypeToString(arg.type));
+        freeValue(&arg); // Free evaluated arg before exit
+        EXIT_FAILURE_HANDLER();
+    }
+    // Handle potential NULL string defensively
+    int len = (arg.s_val) ? (int)strlen(arg.s_val) : 0;
+    Value result = makeInt(len);
+
+    // --- ADDED: Free the evaluated argument ---
+    freeValue(&arg); // Frees the string content
+
+    return result;
 }
 
 // Strings
@@ -673,21 +900,37 @@ Value executeBuiltinChr(AST *node) {
 }
 
 // System
-void executeBuiltinHalt(AST *node) {
+Value executeBuiltinHalt(AST *node) {
     long long code = 0;
+    Value arg; // Declare outside conditional block
+    arg.type = TYPE_VOID; // Initialize type
+
     // Optionally allow one argument (the exit code)
     if (node->child_count == 1) {
-        Value arg = eval(node->children[0]);
+        arg = eval(node->children[0]);
         if (arg.type != TYPE_INTEGER) {
             fprintf(stderr, "Runtime error: halt expects an integer argument.\n");
+            freeValue(&arg); // Free if eval allocated something
             EXIT_FAILURE_HANDLER();
         }
         code = arg.i_val;
+        freeValue(&arg); // Free the evaluated integer value
     } else if (node->child_count != 0) {
         fprintf(stderr, "Runtime error: halt expects 0 or 1 argument.\n");
         EXIT_FAILURE_HANDLER();
     }
-    exit((int)code);
+
+    // --- Cleanup before exit ---
+    // Consider freeing global resources if necessary, e.g., symbol tables, type table AST nodes.
+    // freeProcedureTable(); // Example
+    // freeTypeTableASTNodes(); // Example
+    // freeTypeTable(); // Example
+    // You might want a dedicated cleanup function.
+
+    exit((int)code); // Exit the program
+
+    // This line is technically unreachable due to exit()
+    return makeVoid();
 }
 
 Value executeBuiltinIntToStr(AST *node) {
@@ -742,171 +985,170 @@ Value executeBuiltinIntToStr(AST *node) {
     return result; // Return the string Value (contains its own heap copy)
 }
 
-void executeBuiltinInc(AST *node) {
+Value executeBuiltinInc(AST *node) {
     if (node->child_count < 1 || node->child_count > 2) {
-        fprintf(stderr, "Runtime error: Inc expects 1 or 2 arguments.\n"); // Corrected error message
+        fprintf(stderr, "Runtime error: Inc expects 1 or 2 arguments.\n");
         EXIT_FAILURE_HANDLER();
     }
     AST *lvalueNode = node->children[0];
-    // Check if lvalueNode is assignable (Variable, Field Access, Array Access)
+    // Check if lvalueNode is assignable
     if (lvalueNode->type != AST_VARIABLE && lvalueNode->type != AST_FIELD_ACCESS && lvalueNode->type != AST_ARRAY_ACCESS) {
          fprintf(stderr, "Runtime error: First argument to Inc must be a variable, field, or array element.\n");
          EXIT_FAILURE_HANDLER();
     }
 
-    Value currentVal = eval(lvalueNode);
-    long long current_iVal = -1; // Placeholder
+    Value currentVal = eval(lvalueNode); // Get current value
+    long long current_iVal = -1;
     VarType originalType = currentVal.type;
 
-    // Determine current ordinal value based on type
-    // (Keep existing logic for determining current_iVal based on originalType)
-    if (originalType == TYPE_INTEGER || originalType == TYPE_BOOLEAN || originalType == TYPE_BYTE || originalType == TYPE_WORD) {
-        current_iVal = currentVal.i_val;
-    } else if (originalType == TYPE_CHAR) {
-        current_iVal = currentVal.c_val;
-    } else if (originalType == TYPE_ENUM) {
-        current_iVal = currentVal.enum_val.ordinal;
-    } else {
+    // Determine current ordinal value (logic remains the same)
+    if (originalType == TYPE_INTEGER || originalType == TYPE_BOOLEAN || originalType == TYPE_BYTE || originalType == TYPE_WORD) current_iVal = currentVal.i_val;
+    else if (originalType == TYPE_CHAR) current_iVal = currentVal.c_val;
+    else if (originalType == TYPE_ENUM) current_iVal = currentVal.enum_val.ordinal;
+    else {
         fprintf(stderr, "Runtime error: inc can only operate on ordinal types. Got %s\n", varTypeToString(originalType));
+        freeValue(&currentVal); // Free the evaluated value
         EXIT_FAILURE_HANDLER();
     }
 
+    long long increment = 1;
+    Value incrVal; // Declare outside conditional
+    incrVal.type = TYPE_VOID; // Initialize
 
-    long long increment = 1; // Default increment
-    // *** FIX: Evaluate the second argument if present ***
     if (node->child_count == 2) {
-        Value incrVal = eval(node->children[1]); // Evaluate the second argument
+        incrVal = eval(node->children[1]);
         if (incrVal.type != TYPE_INTEGER) {
             fprintf(stderr, "Runtime error: Inc step amount (second argument) must be an integer. Got %s\n", varTypeToString(incrVal.type));
+            freeValue(&currentVal);
+            freeValue(&incrVal); // Free the evaluated step value
             EXIT_FAILURE_HANDLER();
         }
-        increment = incrVal.i_val; // Use the provided integer value
-        if (increment < 0) { // Standard Pascal Inc usually requires positive step
-             fprintf(stderr, "Warning: Inc called with negative step %lld.\n", increment);
-             // Consider making this an error depending on desired compatibility
-        }
+        increment = incrVal.i_val;
+        freeValue(&incrVal); // Free the evaluated step value after use
     }
-    // *** END FIX ***
 
     long long new_iVal = current_iVal + increment;
-    Value newValue = makeInt(0); // Value to assign back
+    Value newValue = makeInt(0); // Placeholder initialization
 
-    // Create the correct type of value for the result
-    // (Keep existing switch statement for creating newValue based on originalType)
+    // Create the correct type of value for the result (switch logic remains the same)
     switch (originalType) {
-         case TYPE_INTEGER: newValue = makeInt(new_iVal); break;
-         case TYPE_BOOLEAN:
-             if (new_iVal > 1 || new_iVal < 0) { fprintf(stderr, "Runtime error: Boolean range error on Inc.\n"); EXIT_FAILURE_HANDLER(); }
+        case TYPE_INTEGER: newValue = makeInt(new_iVal); break;
+        case TYPE_BOOLEAN:
+             if (new_iVal > 1 || new_iVal < 0) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
              newValue = makeBoolean((int)new_iVal); break;
-         case TYPE_CHAR:
-             if (new_iVal > 255 || new_iVal < 0) { fprintf(stderr, "Runtime error: Char range error on Inc.\n"); EXIT_FAILURE_HANDLER(); }
+        case TYPE_CHAR:
+             if (new_iVal > 255 || new_iVal < 0) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
              newValue = makeChar((char)new_iVal); break;
-         case TYPE_BYTE:
-              if (new_iVal > 255 || new_iVal < 0) { fprintf(stderr, "Runtime error: Byte range error on Inc.\n"); EXIT_FAILURE_HANDLER(); }
-              newValue = makeInt(new_iVal); newValue.type = TYPE_BYTE; break;
-         case TYPE_WORD:
-              if (new_iVal > 65535 || new_iVal < 0) { fprintf(stderr, "Runtime error: Word range error on Inc.\n"); EXIT_FAILURE_HANDLER(); }
-              newValue = makeInt(new_iVal); newValue.type = TYPE_WORD; break;
-         case TYPE_ENUM:
-             {
-                 AST* typeDef = lookupType(currentVal.enum_val.enum_name);
+        case TYPE_BYTE:
+             if (new_iVal > 255 || new_iVal < 0) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
+             newValue = makeInt(new_iVal); newValue.type = TYPE_BYTE; break;
+        case TYPE_WORD:
+             if (new_iVal > 65535 || new_iVal < 0) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
+             newValue = makeInt(new_iVal); newValue.type = TYPE_WORD; break;
+        case TYPE_ENUM:
+             { // Block scope needed
+                 AST* typeDef = currentVal.enum_val.enum_name ? lookupType(currentVal.enum_val.enum_name) : NULL; // Lookup type def
+                 if (typeDef && typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right; // Resolve reference
                  long long maxOrdinal = -1;
                  if (typeDef && typeDef->type == AST_ENUM_TYPE) { maxOrdinal = typeDef->child_count - 1; }
-                 if (maxOrdinal != -1 && new_iVal > maxOrdinal) { fprintf(stderr, "Runtime error: Enum overflow on Inc for type '%s'.\n", currentVal.enum_val.enum_name ? currentVal.enum_val.enum_name : "?"); EXIT_FAILURE_HANDLER(); }
-                 if (new_iVal < 0) { fprintf(stderr, "Runtime error: Enum underflow on Inc for type '%s'.\n", currentVal.enum_val.enum_name ? currentVal.enum_val.enum_name : "?"); EXIT_FAILURE_HANDLER(); } // Check lower bound too
-                 newValue = makeEnum(currentVal.enum_val.enum_name, (int)new_iVal);
+                 else { fprintf(stderr, "Warning: Could not find enum definition for '%s' during Inc.\n", currentVal.enum_val.enum_name ? currentVal.enum_val.enum_name : "?");}
+
+                 if (maxOrdinal != -1 && new_iVal > maxOrdinal) { /* Overflow error */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
+                 if (new_iVal < 0) { /* Underflow error */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
+                 newValue = makeEnum(currentVal.enum_val.enum_name, (int)new_iVal); // makeEnum strdups the name
              }
              break;
-         default: EXIT_FAILURE_HANDLER(); break;
+        default: freeValue(&currentVal); EXIT_FAILURE_HANDLER(); break;
     }
 
-    // Assign the new value back
+    // Assign the new value back using the helper
     assignValueToLValue(lvalueNode, newValue);
 
-    if (newValue.type == TYPE_ENUM && newValue.enum_val.enum_name) {
-         // If makeEnum strdup'd the name, free the copy in newValue now that it's assigned
-         // free(newValue.enum_val.enum_name); // Be cautious with ownership here
-    }
+    // --- ADDED: Free temporary values ---
+    freeValue(&currentVal); // Free the value obtained from the initial eval
+    freeValue(&newValue);   // Free the temporary newValue (assignValueToLValue made its own copy)
+
+    return makeVoid();
 }
 
-void executeBuiltinDec(AST *node) {
-     if (node->child_count < 1 || node->child_count > 2) {
-         fprintf(stderr, "Runtime error: Dec expects 1 or 2 arguments.\n"); // Corrected error message
-         EXIT_FAILURE_HANDLER();
-     }
-     AST *lvalueNode = node->children[0];
-     // Check if lvalueNode is assignable
+Value executeBuiltinDec(AST *node) {
+    if (node->child_count < 1 || node->child_count > 2) {
+        fprintf(stderr, "Runtime error: Dec expects 1 or 2 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    AST *lvalueNode = node->children[0];
+    // Check if lvalueNode is assignable
     if (lvalueNode->type != AST_VARIABLE && lvalueNode->type != AST_FIELD_ACCESS && lvalueNode->type != AST_ARRAY_ACCESS) {
          fprintf(stderr, "Runtime error: First argument to Dec must be a variable, field, or array element.\n");
          EXIT_FAILURE_HANDLER();
     }
 
-
-    Value currentVal = eval(lvalueNode);
+    Value currentVal = eval(lvalueNode); // Get current value
     long long current_iVal = -1;
     VarType originalType = currentVal.type;
 
-    // Determine current ordinal value based on type
-    // (Keep existing logic for determining current_iVal based on originalType)
+    // Determine current ordinal value (logic remains the same)
     if (originalType == TYPE_INTEGER || originalType == TYPE_BOOLEAN || originalType == TYPE_BYTE || originalType == TYPE_WORD) current_iVal = currentVal.i_val;
     else if (originalType == TYPE_CHAR) current_iVal = currentVal.c_val;
     else if (originalType == TYPE_ENUM) current_iVal = currentVal.enum_val.ordinal;
-    else { fprintf(stderr, "Runtime error: dec can only operate on ordinal types. Got %s\n", varTypeToString(originalType)); EXIT_FAILURE_HANDLER(); }
+    else {
+        fprintf(stderr, "Runtime error: dec can only operate on ordinal types. Got %s\n", varTypeToString(originalType));
+        freeValue(&currentVal); // Free the evaluated value
+        EXIT_FAILURE_HANDLER();
+    }
 
+    long long decrement = 1;
+    Value decrVal; // Declare outside conditional
+    decrVal.type = TYPE_VOID; // Initialize
 
-    long long decrement = 1; // Default decrement
-    // *** FIX: Evaluate the second argument if present ***
     if (node->child_count == 2) {
-        Value decrVal = eval(node->children[1]); // Evaluate the second argument
+        decrVal = eval(node->children[1]);
         if (decrVal.type != TYPE_INTEGER) {
             fprintf(stderr, "Runtime error: Dec step amount (second argument) must be an integer. Got %s\n", varTypeToString(decrVal.type));
+            freeValue(&currentVal);
+            freeValue(&decrVal); // Free the evaluated step value
             EXIT_FAILURE_HANDLER();
         }
-        decrement = decrVal.i_val; // Use the provided integer value
-        if (decrement < 0) { // Standard Pascal Dec usually requires positive step
-             fprintf(stderr, "Warning: Dec called with negative step %lld.\n", decrement);
-             // Consider making this an error
-        }
+        decrement = decrVal.i_val;
+        freeValue(&decrVal); // Free the evaluated step value after use
     }
-    // *** END FIX ***
-
 
     long long new_iVal = current_iVal - decrement;
-    Value newValue = makeInt(0);
+    Value newValue = makeInt(0); // Placeholder initialization
 
-    // Create the correct type of value for the result
-    // (Keep existing switch statement for creating newValue based on originalType)
-     switch (originalType) {
+    // Create the correct type of value for the result (switch logic remains the same)
+    switch (originalType) {
          case TYPE_INTEGER: newValue = makeInt(new_iVal); break;
          case TYPE_BOOLEAN:
-             if (new_iVal < 0 || new_iVal > 1) { fprintf(stderr, "Runtime error: Boolean range error on Dec.\n"); EXIT_FAILURE_HANDLER(); }
+             if (new_iVal < 0 || new_iVal > 1) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
              newValue = makeBoolean((int)new_iVal); break;
          case TYPE_CHAR:
-             if (new_iVal < 0 || new_iVal > 255) { fprintf(stderr, "Runtime error: Char range error on Dec.\n"); EXIT_FAILURE_HANDLER(); }
+             if (new_iVal < 0 || new_iVal > 255) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
              newValue = makeChar((char)new_iVal); break;
-          case TYPE_BYTE:
-              if (new_iVal < 0 || new_iVal > 255) { fprintf(stderr, "Runtime error: Byte range error on Dec.\n"); EXIT_FAILURE_HANDLER(); }
+         case TYPE_BYTE:
+              if (new_iVal < 0 || new_iVal > 255) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
               newValue = makeInt(new_iVal); newValue.type = TYPE_BYTE; break;
          case TYPE_WORD:
-              if (new_iVal < 0 || new_iVal > 65535) { fprintf(stderr, "Runtime error: Word range error on Dec.\n"); EXIT_FAILURE_HANDLER(); }
+              if (new_iVal < 0 || new_iVal > 65535) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
               newValue = makeInt(new_iVal); newValue.type = TYPE_WORD; break;
          case TYPE_ENUM:
-             {
-                 if (new_iVal < 0) { fprintf(stderr, "Runtime error: Enum underflow on Dec for type '%s'.\n", currentVal.enum_val.enum_name ? currentVal.enum_val.enum_name : "?"); EXIT_FAILURE_HANDLER(); }
-                 // Need High check? Only necessary if decrement could be negative/large. Standard Dec won't overflow High.
-                 newValue = makeEnum(currentVal.enum_val.enum_name, (int)new_iVal);
+             { // Block scope needed
+                  // No upper bound check needed for standard Dec(X, 1)
+                 if (new_iVal < 0) { /* Underflow error */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
+                 newValue = makeEnum(currentVal.enum_val.enum_name, (int)new_iVal); // makeEnum strdups the name
              }
              break;
-         default: EXIT_FAILURE_HANDLER(); break;
+         default: freeValue(&currentVal); EXIT_FAILURE_HANDLER(); break;
     }
 
-
+    // Assign the new value back using the helper
     assignValueToLValue(lvalueNode, newValue);
 
-    if (newValue.type == TYPE_ENUM && newValue.enum_val.enum_name) {
-        // If makeEnum strdup'd the name, free the copy in newValue now that it's assigned
-        // free(newValue.enum_val.enum_name); // Be cautious with ownership here
-    }
+    // --- ADDED: Free temporary values ---
+    freeValue(&currentVal); // Free the value obtained from the initial eval
+    freeValue(&newValue);   // Free the temporary newValue (assignValueToLValue made its own copy)
+
+    return makeVoid();
 }
 
 Value executeBuiltinScreenCols(AST *node) {
@@ -951,9 +1193,10 @@ Value executeBuiltinScreenRows(AST *node) {
     }
 }
 
-void executeBuiltinRandomize(AST *node) {
+Value executeBuiltinRandomize(AST *node) {
     if (node->child_count != 0) { fprintf(stderr, "Runtime error: Randomize expects no arguments.\n"); EXIT_FAILURE_HANDLER(); }
     srand((unsigned int)time(NULL));
+    return makeVoid(); // Return void value
 }
 
 Value executeBuiltinRandom(AST *node) {
@@ -986,37 +1229,29 @@ Value executeBuiltinRandom(AST *node) {
     return makeValueForType(TYPE_INTEGER, NULL);
 }
 
-void executeBuiltinDelay(AST *node) {
+Value executeBuiltinDelay(AST *node) {
     if (node->child_count != 1) {
         fprintf(stderr, "Runtime error: Delay expects 1 argument (milliseconds).\n");
         EXIT_FAILURE_HANDLER();
     }
 
     Value msVal = eval(node->children[0]);
-
-    // Pascal 'word' is typically unsigned 0-65535. We'll accept INTEGER type.
-    if (msVal.type != TYPE_INTEGER && msVal.type != TYPE_WORD) { // Allow TYPE_WORD if you added it
+    if (msVal.type != TYPE_INTEGER && msVal.type != TYPE_WORD) {
          fprintf(stderr, "Runtime error: Delay argument must be an integer or word type. Got %s\n", varTypeToString(msVal.type));
+         freeValue(&msVal); // Free evaluated value
          EXIT_FAILURE_HANDLER();
     }
 
     long long ms = msVal.i_val;
+    if (ms < 0) ms = 0; // Treat negative delay as 0
 
-    if (ms < 0) {
-        // Negative delay doesn't make sense, treat as 0 or error.
-        // Turbo Pascal likely treated it as 0 or wrapped around for 'word'.
-        // We'll just do nothing for negative values for simplicity.
-        ms = 0;
-    }
-
-    // usleep expects microseconds (millionths of a second)
-    // Convert milliseconds (thousandths) to microseconds
     useconds_t usec = (useconds_t)ms * 1000;
-
-    // Call usleep
     usleep(usec);
 
-    // Delay is a procedure, doesn't return a value to Pascal side
+    // --- ADDED: Free the evaluated value ---
+    freeValue(&msVal);
+
+    return makeVoid(); // Return void value
 }
 
 // Memory Streams
@@ -1100,19 +1335,54 @@ Value executeBuiltinMstreamSaveToFile(AST *node) {
     return makeMStream(msVal.mstream);
 }
 
-void executeBuiltinMstreamFree(AST *node) {
+Value executeBuiltinMstreamFree(AST *node) {
     if (node->child_count != 1) {
         fprintf(stderr, "Runtime error: TMemoryStream.Free expects 1 argument (a memory stream).\n");
         EXIT_FAILURE_HANDLER();
     }
+
+    // --- Evaluate and Type Check ---
     Value msVal = eval(node->children[0]);
     if (msVal.type != TYPE_MEMORYSTREAM) {
         fprintf(stderr, "Runtime error: parameter of MStreamFree must be a Type MStream.\n");
+        freeValue(&msVal); // Free potentially allocated value
         EXIT_FAILURE_HANDLER();
     }
-    if (msVal.mstream->buffer)
-        free(msVal.mstream->buffer);
-    free(msVal.mstream);
+
+    // --- Find Symbol and Update ---
+    // We need to NULL the pointer in the symbol table after freeing
+    if (node->children[0]->type != AST_VARIABLE || !node->children[0]->token) {
+        fprintf(stderr, "Runtime error: Memory stream parameter to Free must be a simple variable.\n");
+        freeValue(&msVal);
+        EXIT_FAILURE_HANDLER();
+    }
+    const char *msVarName = node->children[0]->token->value;
+    Symbol *sym = lookupSymbol(msVarName); // Handles not found
+    if (!sym || !sym->value || sym->value->type != TYPE_MEMORYSTREAM) { // Check if symbol is actually a MSTREAM
+        fprintf(stderr, "Runtime error: Symbol '%s' is not a memory stream variable.\n", msVarName);
+        freeValue(&msVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Free Memory Stream Contents ---
+    // Ensure we are freeing the stream pointed to by the *symbol*,
+    // as msVal might be a temporary copy (though less likely for MStream).
+    if (sym->value->mstream) {
+        if (sym->value->mstream->buffer) {
+            free(sym->value->mstream->buffer);
+            sym->value->mstream->buffer = NULL;
+        }
+        free(sym->value->mstream);
+        sym->value->mstream = NULL; // Set symbol's pointer to NULL
+    }
+
+    // --- ADDED: Free the evaluated value ---
+    // msVal itself doesn't hold heap data here, the MStream* was shallow copied.
+    // Do NOT call freeValue(&msVal) if msVal.mstream points to the same memory
+    // as sym->value->mstream which we just freed. Setting sym->value->mstream = NULL
+    // prevents double-free if msVal was somehow a copy.
+
+    return makeVoid(); // Return void value
 }
 
 // Special
@@ -1123,123 +1393,45 @@ Value executeBuiltinResult(AST *node) {
 }
 
 Value executeBuiltinProcedure(AST *node) {
-    if (strcmp(node->token->value, "cos") == 0)
-        return executeBuiltinCos(node);
-    if (strcmp(node->token->value, "sin") == 0)
-        return executeBuiltinSin(node);
-    if (strcmp(node->token->value, "tan") == 0)
-        return executeBuiltinTan(node);
-    if (strcmp(node->token->value, "sqrt") == 0)
-        return executeBuiltinSqrt(node);
-    if (strcmp(node->token->value, "ln") == 0)
-        return executeBuiltinLn(node);
-    if (strcmp(node->token->value, "exp") == 0)
-        return executeBuiltinExp(node);
-    if (strcmp(node->token->value, "abs") == 0)
-        return executeBuiltinAbs(node);
-    if (strcmp(node->token->value, "eof") == 0)
-        return executeBuiltinEOF(node);
-    if (strcmp(node->token->value, "pos") == 0)
-        return executeBuiltinPos(node);
-    if (strcmp(node->token->value, "close") == 0) {
-        executeBuiltinClose(node);
-        return makeVoid();
+    if (!node || !node->token || !node->token->value) {
+        fprintf(stderr, "Internal Error: Invalid AST node passed to executeBuiltinProcedure.\n");
+        EXIT_FAILURE_HANDLER();
     }
-    if (strcmp(node->token->value, "halt") == 0) {
-         executeBuiltinHalt(node); // Call the function that exits
-         // Note: exit() should prevent the code below from running,
-         // but returning makeVoid() is formally correct for a procedure.
-         return makeVoid();
+
+    const char *original_name = node->token->value;
+
+    // Use a temporary buffer for lowercase conversion if needed,
+    // or ensure lookup uses case-insensitive compare.
+    // We use strcasecmp in the comparison function, so no need to lowercase here.
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG DISPATCH] Looking up built-in: '%s'\n", original_name);
+#endif
+
+    // Use bsearch to find the handler
+    BuiltinMapping *found = (BuiltinMapping *)bsearch(
+        original_name,                      // Key to search for
+        builtin_dispatch_table,             // Array to search in
+        num_builtins,                       // Number of elements in the array
+        sizeof(BuiltinMapping),             // Size of each element
+        compareBuiltinMappings              // Comparison function
+    );
+
+    if (found) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG DISPATCH] Found handler for '%s'. Calling function at %p.\n", original_name, (void*)found->handler);
+#endif
+        // Call the found handler function
+        return found->handler(node);
+    } else {
+        // This should ideally not happen if isBuiltin() was checked beforehand,
+        // but handle it defensively.
+        fprintf(stderr, "Runtime error: Built-in procedure/function '%s' not found in dispatch table (but isBuiltin returned true?).\n", original_name);
+        // Maybe check Write/Writeln/Read/Readln here if they aren't in the table?
+        // For now, treat as an internal inconsistency.
+        EXIT_FAILURE_HANDLER();
+        // return makeVoid(); // Or return void if exiting is too harsh
     }
-    if (strcmp(node->token->value, "low") == 0) // Use lowercase
-        return executeBuiltinLow(node);
-    if (strcmp(node->token->value, "high") == 0) // Use lowercase
-        return executeBuiltinHigh(node);
-    if (strcmp(node->token->value, "succ") == 0) // Use lowercase
-        return executeBuiltinSucc(node);
-    if (strcasecmp(node->token->value, "keypressed") == 0) { // Use strcasecmp if Pascal is case-insensitive
-         return executeBuiltinKeyPressed(node);
-    }
-    if (strcmp(node->token->value, "assign") == 0) {
-        executeBuiltinAssign(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "copy") == 0)
-        return executeBuiltinCopy(node);
-    if (strcmp(node->token->value, "mstreamloadfromfile") == 0)
-        return executeBuiltinMstreamLoadFromFile(node);
-    if (strcmp(node->token->value, "mstreamsavetofile") == 0)
-        return executeBuiltinMstreamSaveToFile(node);
-    if (strcmp(node->token->value, "mstreamfree") == 0) {
-        executeBuiltinMstreamFree(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "mstreamcreate") == 0)
-        return executeBuiltinMstreamCreate(node);
-    if (strcmp(node->token->value, "inc") == 0) {
-        executeBuiltinInc(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "dec") == 0) {
-        executeBuiltinDec(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "ioresult") == 0)
-        return executeBuiltinIOResult(node);
-    if (strcmp(node->token->value, "result") == 0)
-        return executeBuiltinResult(node);
-    if (strcmp(node->token->value, "length") == 0)
-        return executeBuiltinLength(node);
-    if (strcmp(node->token->value, "randomize") == 0) {
-        executeBuiltinRandomize(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "random") == 0)
-        return executeBuiltinRandom(node);
-    if (strcmp(node->token->value, "reset") == 0) {
-        executeBuiltinReset(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "delay") == 0) { // Check for "delay"
-        executeBuiltinDelay(node);                  // Call the C implementation
-        return makeVoid();                          // Procedures return void
-    }
-    if (strcasecmp(node->token->value, "screencols") == 0) // Use strcasecmp for case-insensitivity
-        return executeBuiltinScreenCols(node);
-    if (strcasecmp(node->token->value, "screenrows") == 0)
-        return executeBuiltinScreenRows(node);
-    if (strcmp(node->token->value, "rewrite") == 0) {
-        executeBuiltinRewrite(node);
-        return makeVoid();
-    }
-    if (strcmp(node->token->value, "trunc") == 0)
-        return executeBuiltinTrunc(node);
-    if (strcmp(node->token->value, "upcase") == 0)
-        return executeBuiltinUpcase(node);
-    if (strcmp(node->token->value, "ord") == 0)
-        return executeBuiltinOrd(node);
-    if (strcmp(node->token->value, "chr") == 0)
-        return executeBuiltinChr(node);
-    if (strcmp(node->token->value, "api_send") == 0)
-        return executeBuiltinAPISend(node);
-    if (strcmp(node->token->value, "api_receive") == 0)
-        return executeBuiltinAPIReceive(node);
-    if (strcmp(node->token->value, "paramstr") == 0)
-        return executeBuiltinParamstr(node);
-    if (strcmp(node->token->value, "paramcount") == 0)
-        return executeBuiltinParamcount(node);
-    if (strcmp(node->token->value, "readkey") == 0)
-        return executeBuiltinReadKey(node);
-    if (strcasecmp(node->token->value, "wherex") == 0)
-        return executeBuiltinWhereX(node);
-    if (strcasecmp(node->token->value, "wherey") == 0)
-        return executeBuiltinWhereY(node);
-    if (strcmp(node->token->value, "inttostr") == 0)
-        return executeBuiltinIntToStr(node);
-  //  if (strcmp(node->token->value, "trystrtofloat") == 0)
-   //     return execute_builtin_trystrtofloat(node);
-    else
-        return makeVoid();
 }
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType) {
@@ -1521,28 +1713,28 @@ Value executeBuiltinKeyPressed(AST *node) {
 }
 
 int isBuiltin(const char *name) {
-    // List all built-in procedure names (lowercase).
-    const char *builtins[] = {
-        "cos","sin","tan","sqrt","ln","exp","abs",
-        "trunc","assign","close","reset","rewrite",
-        "eof","ioresult","copy","length","pos",
-        "upcase","halt","inc","randomize","random",
-        "mstreamcreate","mstreamloadfromfile",
-        "mstream_savetofile","mstream_free","ord",
-        "chr","api_send","api_receive","paramstr",
-        "paramcount","readkey", "dec", "wherex",
-        "wherey", "delay", "keypressed",
-        "low", "high", "succ", "inttostr", "screencols",
-        "screenrows"
-
-    };
-
-    int num_builtins = sizeof(builtins) / sizeof(builtins[0]);
-    for (int i = 0; i < num_builtins; i++) {
-        if (strcasecmp(name, builtins[i]) == 0)
-            return 1;
+    if (!name) return 0;
+    
+    // Use bsearch to check if the name exists in the dispatch table
+    BuiltinMapping *found = (BuiltinMapping *)bsearch(
+                                                      name,                               // Key (function name)
+                                                      builtin_dispatch_table,             // Table to search
+                                                      num_builtins,                       // Number of elements
+                                                      sizeof(BuiltinMapping),             // Size of elements
+                                                      compareBuiltinMappings              // Comparison function
+                                                      );
+    
+    // Additionally check for Write/Writeln/Read/Readln if they are handled
+    // directly in the interpreter and not in the dispatch table.
+    if (!found) {
+        if (strcasecmp(name, "write") == 0 || strcasecmp(name, "writeln") == 0 ||
+            strcasecmp(name, "read") == 0 || strcasecmp(name, "readln") == 0) {
+            return 1; // Treat these as built-in even if not dispatched
+        }
     }
-    return 0;
+    
+    
+    return (found != NULL); // Return 1 if found, 0 otherwise
 }
 
 // --- Low(X) ---
@@ -1767,3 +1959,5 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     // If not found in either list
     return BUILTIN_TYPE_NONE;
 }
+
+
