@@ -22,7 +22,6 @@ const char *tokenTypeToString(TokenType type);
 const char *astTypeToString(ASTNodeType type);
 
 MStream *createMStream(void);
-void freeMStream(MStream *ms);
 FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
 void freeFieldValue(FieldValue *fv);
@@ -47,16 +46,13 @@ Token *copyToken(const Token *orig);
 void freeToken(Token *token);
 
 // Misc
-void cleanupLocalEnv(void);
 void freeProcedureTable(void);
 void freeTypeTable(void);
-Symbol *findInScope(const char *name, Symbol *scope);
 int getTerminalSize(int *rows, int *cols);
 
 void dumpSymbolTable(void);
 void parseError(Parser *parser, const char *message);
 void debugASTFile(AST *node);
-int areValuesEqual(Value a, Value b);
 Value makeEnum(const char *enum_name, int ordinal);
 void freeValue(Value *v);
 

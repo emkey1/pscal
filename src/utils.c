@@ -161,16 +161,6 @@ const char *astTypeToString(ASTNodeType type) {
     }
 }
 
-void cleanupLocalEnv(void) {
-    Symbol *sym;
-    while (localSymbols != NULL) {
-        sym = localSymbols;
-        localSymbols = localSymbols->next;
-        free(sym->name);
-        free(sym);
-    }
-}
-
 MStream *createMStream(void) {
     MStream *ms = malloc(sizeof(MStream));
     if (!ms) {
@@ -181,13 +171,6 @@ MStream *createMStream(void) {
     ms->size = 0;
     ms->capacity = 0;
     return ms;
-}
-
-void freeMStream(MStream *ms) { // Is this used?  Should it be?
-    if (ms) {
-        free(ms->buffer);
-        free(ms);
-    }
 }
 
 FieldValue *copyRecord(FieldValue *orig) {
@@ -645,16 +628,6 @@ Value makeMStream(MStream *ms) {
     v.type = TYPE_MEMORYSTREAM;
     v.mstream = ms;
     return v;
-}
-
-Symbol *findInScope(const char *name, Symbol *scope) {
-    Symbol *cur = scope;
-    while (cur) {
-        if (strcmp(cur->name, name) == 0)
-            return cur;
-        cur = cur->next;
-    }
-    return NULL;
 }
 
 void freeValue(Value *v) {
@@ -1125,22 +1098,6 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
     }
     
     return unitSymbols;
-}
-
-int areValuesEqual(Value a, Value b) {
-    if (a.type != b.type) return 0;
-    switch (a.type) {
-        case TYPE_INTEGER:   return a.i_val == b.i_val;
-        case TYPE_REAL:      return a.r_val == b.r_val;
-        case TYPE_STRING:    return strcmp(a.s_val, b.s_val) == 0;
-        case TYPE_CHAR:      return a.c_val == b.c_val;
-        case TYPE_BOOLEAN:   return a.i_val == b.i_val;
-        case TYPE_BYTE:      return a.i_val == b.i_val;
-        case TYPE_WORD:      return a.i_val == b.i_val;
-        case TYPE_ENUM:      return (strcmp(a.enum_val.enum_name, b.enum_val.enum_name) == 0) && (a.enum_val.ordinal == b.enum_val.ordinal);
-        // Add comparisons for other types as needed.
-        default:             return 0;
-    }
 }
 
 Value makeEnum(const char *enum_name, int ordinal) {

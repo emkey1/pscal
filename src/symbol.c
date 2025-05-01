@@ -472,72 +472,7 @@ Symbol *lookupSymbol(const char *name) {
     return sym;
 }
 
-
-void updateSymbolDirect(Symbol *sym, Value val) {
-#ifdef DEBUG
-    if (sym->value->type != val.type) {
-        fprintf(stderr, "[DEBUG] Type mismatch on direct updateSymbol. Expected %s, got %s\n", varTypeToString(sym->value->type), varTypeToString(val.type));
-    }
-#endif
-    *sym->value = val;
-}
-
 void assignToRecord(FieldValue *record, const char *fieldName, Value val);
-
-void assignToContainer(Value *container, AST *node, Value val) {
-    if (node->type == AST_ARRAY_ACCESS) {
-        // ✅ Special case: string indexing
-        if (container->type == TYPE_STRING) {
-            if (node->child_count != 1) {
-                fprintf(stderr, "String access must have exactly one index\n");
-                EXIT_FAILURE_HANDLER();
-            }
-
-            int index = (int)eval(node->children[0]).i_val;
-            if (index < 1 || index > (int)strlen(container->s_val)) {
-                fprintf(stderr, "String index out of bounds: %d\n", index);
-                EXIT_FAILURE_HANDLER();
-            }
-
-            if (val.type != TYPE_CHAR) {
-                fprintf(stderr, "Cannot assign non-char to string[%d]\n", index);
-                EXIT_FAILURE_HANDLER();
-            }
-
-            container->s_val[index - 1] = val.c_val; // 1-based Pascal indexing
-            return;
-        }
-
-        // 🧠 Regular array case
-        int indices[node->child_count];
-        for (int i = 0; i < node->child_count; i++) {
-            indices[i] = (int)eval(node->children[i]).i_val;
-        }
-
-        int flatIndex = computeFlatOffset(container, indices);
-
-        // Calculate total size of array
-        int totalSize = 1;
-        for (int i = 0; i < container->dimensions; i++) {
-            totalSize *= (container->upper_bounds[i] - container->lower_bounds[i] + 1);
-        }
-
-        if (flatIndex < 0 || flatIndex >= totalSize) {
-            fprintf(stderr, "Array assignment index out of bounds\n");
-            EXIT_FAILURE_HANDLER();
-        }
-
-        container->array_val[flatIndex] = val;
-    }
-    else if (node->type == AST_FIELD_ACCESS) {
-        assignToRecord(container->record_val, node->token->value, val);
-    }
-    else {
-        fprintf(stderr, "assignToContainer: unsupported container type %d\n", node->type);
-        EXIT_FAILURE_HANDLER();
-    }
-}
-
 
 void assignToRecord(FieldValue *record, const char *fieldName, Value val) {
     while (record) {

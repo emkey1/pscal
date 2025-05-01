@@ -20,9 +20,11 @@ char **gParamValues = NULL;
 
 List *inserted_global_names = NULL;
 
+#ifdef DEBUG
 void initSymbolSystem(void) {
     inserted_global_names = createList();
 }
+#endif
 
 /*
  * execute_with_ast_dump - Dumps the full AST to a file then executes the program.
@@ -122,6 +124,8 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("inttostr",  AST_FUNCTION_DECL);
     registerBuiltinFunction("screencols", AST_FUNCTION_DECL);
     registerBuiltinFunction("screenrows", AST_FUNCTION_DECL);
+    registerBuiltinFunction("dec", AST_PROCEDURE_DECL); 
+    registerBuiltinFunction("succ", AST_FUNCTION_DECL);
 
     /* Initialize lexer and parser. */
     Lexer lexer;

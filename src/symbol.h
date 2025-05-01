@@ -27,8 +27,6 @@ Symbol *lookupSymbol(const char *name);
 Symbol *lookupGlobalSymbol(const char *name);
 Symbol *lookupLocalSymbol(const char *name);
 void updateSymbol(const char *name, Value val);
-void updateSymbolDirect(Symbol *sym, Value val);
-void assignToContainer(Value *container, AST *node, Value val);
 Symbol *lookupSymbolIn(Symbol *env, const char *name);
 void insertGlobalSymbol(const char *name, VarType type, AST *type_def);
 Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is_variable_declaration);
