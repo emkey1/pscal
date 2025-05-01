@@ -857,6 +857,29 @@ Value eval(AST *node) {
             // 1. Handle SHL/SHR first
             if (op == TOKEN_SHL || op == TOKEN_SHR) {
                 if (left.type != TYPE_INTEGER || right.type != TYPE_INTEGER) { /* error */ freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();}
+                 const int PASCAL_INT_BITS = 32; // Define assumed integer bit width
+                 if (right.i_val < 0) {
+                      fprintf(stderr, "Runtime error: Shift amount cannot be negative.\n");
+                      freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                 }
+                 if (op == TOKEN_SHL) {
+                      if (right.i_val >= PASCAL_INT_BITS) {
+                          result = makeInt(0); // Shift out results in 0
+                      } else {
+                          result = makeInt(left.i_val << right.i_val);
+                      }
+                 } else { // TOKEN_SHR
+                      // SHR shifting out all bits also results in 0 in standard Pascal
+                      if (right.i_val >= PASCAL_INT_BITS) {
+                          result = makeInt(0);
+                      } else {
+                         // Note: C's >> behavior for negative numbers is implementation-defined.
+                         // Pascal typically does logical right shift (fill with 0).
+                         // For simplicity here, we rely on C's >> but acknowledge this potential difference.
+                         result = makeInt(left.i_val >> right.i_val);
+                      }
+                 }
+
                 if (op == TOKEN_SHL) result = makeInt(left.i_val << right.i_val); else result = makeInt(left.i_val >> right.i_val);
             }
             // 2. Handle IN
@@ -885,6 +908,8 @@ Value eval(AST *node) {
                     else if (left.type == TYPE_CHAR && right.type == TYPE_CHAR) { left = makeInt((long long)left.c_val); right = makeInt((long long)right.c_val); }
                     else if (left.type == TYPE_ENUM && right.type == TYPE_INTEGER) { left = makeInt((long long)left.enum_val.ordinal); }
                     else if (left.type == TYPE_INTEGER && right.type == TYPE_ENUM) { right = makeInt((long long)right.enum_val.ordinal); }
+                    else if (left.type == TYPE_INTEGER && right.type == TYPE_BOOLEAN) { right = makeInt((long long)right.i_val); } // Promote boolean (0/1) to integer
+                    else if (left.type == TYPE_BOOLEAN && right.type == TYPE_INTEGER) { left = makeInt((long long)left.i_val); } // Promote boolean (0/1) to integer
                 }
 
                 // --- Type-Specific Logic ---

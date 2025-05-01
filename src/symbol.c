@@ -570,7 +570,7 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     }
     
     if (lookupGlobalSymbol(name)) {
-        fprintf(stderr, "[ERROR] Duplicate global symbol '%s'\n", name);
+        //fprintf(stderr, "[ERROR] Duplicate global symbol '%s'\n", name); // For now, silently refuse to do something stupid
         return;
     }
     Symbol *new_symbol = malloc(sizeof(Symbol));

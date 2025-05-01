@@ -1,0 +1,180 @@
+program BitwiseAndExprSuite;
+
+{ Test suite for bitwise shift operators (SHL, SHR)
+  and their interaction with other operators regarding precedence. }
+
+var
+  i_a, i_b, i_c, i_res, i_expected: integer;
+  b_a, b_b, b_res, b_expected: boolean;
+
+{---------------------------------------------------------------------
+  Assertion Procedures
+---------------------------------------------------------------------}
+
+procedure AssertEqualInt(expected, actual: integer; const testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+procedure AssertEqualBool(expected, actual: boolean; const testName: string);
+var
+  s_exp, s_act : string[5];
+begin
+  write('START: ', testName, ': ');
+  if expected then s_exp := 'TRUE' else s_exp := 'FALSE';
+  if actual then s_act := 'TRUE' else s_act := 'FALSE';
+
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', s_exp, ', got: ', s_act, ')');
+end;
+
+{---------------------------------------------------------------------
+  Test Procedures
+---------------------------------------------------------------------}
+
+procedure TestSimpleShifts;
+begin
+  writeln;
+  writeln('--- Testing Simple SHL/SHR ---');
+
+  i_a := 5;  { Binary 00000101 }
+  i_b := 160; { Binary 10100000 }
+
+  // SHL
+  i_expected := 10; { Binary 00001010 }
+  i_res := i_a shl 1;
+  AssertEqualInt(i_expected, i_res, 'Simple 5 shl 1');
+
+  i_expected := 40; { Binary 00101000 }
+  i_res := i_a shl 3;
+  AssertEqualInt(i_expected, i_res, 'Simple 5 shl 3');
+
+  i_expected := 5120; { Shift out all bits assuming standard int size }
+  i_res := i_a shl 10;
+  AssertEqualInt(i_expected, i_res, 'Simple 5 shl 10 (Shift out)');
+
+  // SHR
+  i_expected := 80; { Binary 01010000 }
+  i_res := i_b shr 1;
+  AssertEqualInt(i_expected, i_res, 'Simple 160 shr 1');
+
+  i_expected := 10; { Binary 00001010 }
+  i_res := i_b shr 4;
+  AssertEqualInt(i_expected, i_res, 'Simple 160 shr 4');
+
+  i_expected := 0; { Shift out all bits }
+  i_res := i_b shr 8;
+  AssertEqualInt(i_expected, i_res, 'Simple 160 shr 8 (Shift out)');
+
+end;
+
+procedure TestMixedPrecedence;
+begin
+  writeln;
+  writeln('--- Testing Mixed Precedence ---');
+  { Precedence: NOT -> (SHL, SHR, *, /, DIV, MOD, AND) -> (+, -, OR) -> Relational }
+
+  i_a := 5; { 0101 }
+  i_b := 3; { 0011 }
+  i_c := 2; { 0010 }
+
+  // Test: a shl 1 + b = (5 shl 1) + 3 = 10 + 3 = 13
+  i_expected := 13;
+  i_res := i_a shl 1 + i_b;
+  AssertEqualInt(i_expected, i_res, 'a shl 1 + b');
+
+  // Test: a + b shl 1 = 5 + (3 shl 1) = 5 + 6 = 11
+  i_expected := 11;
+  i_res := i_a + i_b shl 1;
+  AssertEqualInt(i_expected, i_res, 'a + b shl 1');
+
+  // Test: a shl b - c = (5 shl 3) - 2 = 40 - 2 = 38
+  i_expected := 38;
+  i_res := i_a shl i_b - i_c;
+  AssertEqualInt(i_expected, i_res, 'a shl b - c');
+
+  // Test: a * b shl c = (5 * 3) shl 2 = 15 shl 2 = 60
+  i_expected := 60;
+  i_res := i_a * i_b shl i_c;
+  AssertEqualInt(i_expected, i_res, 'a * b shl c');
+
+  // Test: a shl c * b = (5 shl 2) * 3 = 20 * 3 = 60
+  i_expected := 60;
+  i_res := i_a shl i_c * i_b;
+  AssertEqualInt(i_expected, i_res, 'a shl c * b');
+
+  // Test: a and b shl 1 = (5 and 3) shl 1 = (0101 and 0011) shl 1 = (0001) shl 1 = 1 shl 1 = 2
+  i_expected := 2;
+  i_res := i_a and i_b shl 1;
+  AssertEqualInt(i_expected, i_res, 'a and b shl 1');
+
+  // Test: a shr 1 or b = (5 shr 1) or 3 = 2 or 3 = (0010 or 0011) = 0011 = 3
+  i_expected := 3;
+  i_res := i_a shr 1 or i_b;
+  AssertEqualInt(i_expected, i_res, 'a shr 1 or b');
+
+  // Test: a or b shr 1 = 5 or (3 shr 1) = 5 or 1 = (0101 or 0001) = 0101 = 5
+  i_expected := 5;
+  i_res := i_a or i_b shr 1;
+  AssertEqualInt(i_expected, i_res, 'a or b shr 1');
+
+  // Test with parentheses
+  // (a + b) shl c = (5 + 3) shl 2 = 8 shl 2 = 32
+  i_expected := 32;
+  i_res := (i_a + i_b) shl i_c;
+  AssertEqualInt(i_expected, i_res, '(a + b) shl c');
+
+  // a shl (b - c) = 5 shl (3 - 2) = 5 shl 1 = 10
+  i_expected := 10;
+  i_res := i_a shl (i_b - i_c);
+  AssertEqualInt(i_expected, i_res, 'a shl (b - c)');
+
+end;
+
+procedure TestBooleanLogicPrecedence;
+begin
+  writeln;
+  writeln('--- Testing Boolean/Relational Precedence with Shifts ---');
+
+  b_a := true;
+  b_b := false;
+  i_a := 4; { 100 }
+  i_b := 2; { 010 }
+
+  // Test: a shl 1 > b -> (4 shl 1) > 2 -> 8 > 2 -> true
+  b_expected := true;
+  b_res := i_a shl 1 > i_b;
+  AssertEqualBool(b_expected, b_res, 'a shl 1 > b');
+
+  // Test: a > b and b_a -> (4 > 2) and true -> true and true -> true
+  b_expected := true;
+  b_res := i_a > i_b and b_a;
+  AssertEqualBool(b_expected, b_res, 'a > b and b_a');
+
+  // Test: not b_b and (a shr 1 = b) -> (not false) and ( (4 shr 1) = 2 ) -> true and (2 = 2) -> true and true -> true
+  b_expected := true;
+  b_res := not b_b and (i_a shr 1 = i_b);
+  AssertEqualBool(b_expected, b_res, 'not b_b and (a shr 1 = b)');
+
+end;
+
+
+{---------------------------------------------------------------------
+  Main Program
+---------------------------------------------------------------------}
+begin
+  writeln('Running pscal Bitwise Shift and Expression Precedence Test Suite');
+
+  TestSimpleShifts;
+  TestMixedPrecedence;
+  TestBooleanLogicPrecedence;
+
+  writeln;
+  writeln('Bitwise Shift and Expression Precedence Test Suite Completed.');
+end.

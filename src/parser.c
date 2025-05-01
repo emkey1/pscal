@@ -281,47 +281,37 @@ AST *unitParser(Parser *parser, int recursion_depth) {
 
     // The current token should be the 'unit' keyword
     Token *unit_keyword = parser->current_token;
-    if (unit_keyword->type != TOKEN_UNIT) {
-        fprintf(stderr, "Error: Expected 'unit' keyword at line %d, column %d (found '%s')\n",
-                parser->lexer->line, parser->lexer->column, parser->current_token->value);
-        EXIT_FAILURE_HANDLER();
-    }
+    if (!unit_keyword || unit_keyword->type != TOKEN_UNIT) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
     AST *unit_node = newASTNode(AST_UNIT, parser->current_token);
-    eat(parser, TOKEN_UNIT); // Consume the 'unit' token
+    eat(parser, TOKEN_UNIT);
 
     // The next token should be the unit name
     Token *unit_token = parser->current_token;
-    if (unit_token->type != TOKEN_IDENTIFIER) {
-        fprintf(stderr, "Error: Expected unit name after 'unit' keyword at line %d\n",
-                parser->lexer->line);
-        EXIT_FAILURE_HANDLER();
-    }
-    //char *unit_name = unit_token->value;
-    eat(parser, TOKEN_IDENTIFIER); // Consume the unit name (e.g., 'mylib')
-    eat(parser, TOKEN_SEMICOLON);  // Consume the semicolon after 'unit mylib;'
+    if (!unit_token || unit_token->type != TOKEN_IDENTIFIER) { /* ... error handling ... */ freeAST(unit_node); EXIT_FAILURE_HANDLER(); }
+    char *unit_name_for_debug = strdup(unit_token->value);
+    if (!unit_name_for_debug) { /* Malloc error */ freeAST(unit_node); EXIT_FAILURE_HANDLER(); }
+    eat(parser, TOKEN_IDENTIFIER);
 
-    // Handle the uses clause within the unit
+    // Check for semicolon
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) { /* ... error handling ... */ free(unit_name_for_debug); freeAST(unit_node); EXIT_FAILURE_HANDLER(); }
+    eat(parser, TOKEN_SEMICOLON);
+
+    // Handle the uses clause
     AST *uses_clause = NULL;
-    if (parser->current_token->type == TOKEN_USES) {
+    if (parser->current_token && parser->current_token->type == TOKEN_USES) {
         eat(parser, TOKEN_USES);
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         List *unit_list = createList();
-        do {
+        do { // Parse unit list
             Token *unit_list_token = parser->current_token;
-            if (unit_list_token->type != TOKEN_IDENTIFIER) {
-                fprintf(stderr, "Error: Expected unit name in uses clause at line %d\n",
-                        parser->lexer->line);
-                EXIT_FAILURE_HANDLER();
-            }
+            if (!unit_list_token || unit_list_token->type != TOKEN_IDENTIFIER) { /* ... error cleanup ... */ EXIT_FAILURE_HANDLER(); }
             listAppend(unit_list, unit_list_token->value);
             eat(parser, TOKEN_IDENTIFIER);
-            if (parser->current_token->type == TOKEN_COMMA) {
-                eat(parser, TOKEN_COMMA);
-            } else {
-                break;
-            }
+            if (parser->current_token && parser->current_token->type == TOKEN_COMMA) { eat(parser, TOKEN_COMMA); }
+            else { break; }
         } while (1);
-        eat(parser, TOKEN_SEMICOLON); // Consume the semicolon after the uses clause
+        if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) { /* ... error cleanup ... */ EXIT_FAILURE_HANDLER(); }
+        eat(parser, TOKEN_SEMICOLON);
         AST *unit_list_node = newASTNode(AST_LIST, NULL);
         unit_list_node->unit_list = unit_list;
         addChild(uses_clause, unit_list_node);
@@ -330,65 +320,186 @@ AST *unitParser(Parser *parser, int recursion_depth) {
         for (int i = 0; i < listSize(unit_list); i++) {
             char *nested_unit_name = listGet(unit_list, i);
             char *nested_unit_path = findUnitFile(nested_unit_name);
-            if (nested_unit_path == NULL) {
-                fprintf(stderr, "Error: Unit '%s' not found.\n", nested_unit_name);
-                EXIT_FAILURE_HANDLER();
-            }
-
-            // Initialize a new lexer for the nested unit file
-            Lexer nested_unit_lexer;
-            initLexer(&nested_unit_lexer, nested_unit_path);
-
-            // Initialize a new parser for the nested unit file
-            Parser nested_unit_parser;
-            nested_unit_parser.lexer = &nested_unit_lexer;
-            nested_unit_parser.current_token = getNextToken(&nested_unit_lexer);
-
-            // Parse the nested unit using the new parser
-            AST *nested_unit_ast = unitParser(&nested_unit_parser, recursion_depth + 1); // Recursively parse with incremented depth
-
-            // Link the nested unit symbols into the global scope
-            linkUnit(nested_unit_ast, recursion_depth);
+            if (nested_unit_path == NULL) { /* ... error cleanup ... */ EXIT_FAILURE_HANDLER(); }
+            // Read file content
+            FILE *nested_file = fopen(nested_unit_path, "r");
+            if (!nested_file) { /* ... error cleanup ... */ EXIT_FAILURE_HANDLER(); }
+            fseek(nested_file, 0, SEEK_END); long nested_fsize = ftell(nested_file); rewind(nested_file);
+            char *nested_source = malloc(nested_fsize + 1);
+            if (!nested_source) { /* ... error cleanup ... */ EXIT_FAILURE_HANDLER(); }
+            fread(nested_source, 1, nested_fsize, nested_file); nested_source[nested_fsize] = '\0'; fclose(nested_file);
+            // Parse recursively
+            Lexer nested_unit_lexer; initLexer(&nested_unit_lexer, nested_source);
+            Parser nested_unit_parser; nested_unit_parser.lexer = &nested_unit_lexer; nested_unit_parser.current_token = getNextToken(&nested_unit_lexer);
+            AST *nested_unit_ast = unitParser(&nested_unit_parser, recursion_depth + 1);
+            if (!nested_unit_ast) { /* ... error cleanup ... */ EXIT_FAILURE_HANDLER(); }
+            linkUnit(nested_unit_ast, recursion_depth + 1);
+            free(nested_source); free(nested_unit_path);
         }
-    }
+         if (uses_clause) { addChild(unit_node, uses_clause); } // Add uses_clause if it exists
+    } // End if (TOKEN_USES)
 
     // Parse the interface section
+    if (!parser->current_token || parser->current_token->type != TOKEN_INTERFACE) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
     eat(parser, TOKEN_INTERFACE);
-    AST *interface_decls = declarations(parser, true); // Pass a flag to indicate interface section
-    addChild(unit_node, interface_decls);
-    
-    // After parsing the interface section:
+    AST *interface_decls = declarations(parser, true);
+    setLeft(unit_node, interface_decls); // Store interface decls in left
+
+    // Build INTERFACE symbol table
     Symbol *unitSymbols = buildUnitSymbolTable(interface_decls);
     unit_node->symbol_table = unitSymbols;
 
-
     // Parse IMPLEMENTATION section
+    if (!parser->current_token || parser->current_token->type != TOKEN_IMPLEMENTATION) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
     eat(parser, TOKEN_IMPLEMENTATION);
-    AST *impl_decls = declarations(parser, false); // Pass a flag to indicate implementation section
-    addChild(unit_node, impl_decls);
+    AST *impl_decls = declarations(parser, false);
+    setExtra(unit_node, impl_decls); // Store impl decls in extra
 
-    // Handle INITIALIZATION block (if present)
+    // --- MODIFICATION START: Process IMPLEMENTATION VAR/CONST as Globals ---
+    if (impl_decls && impl_decls->type == AST_COMPOUND) {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG UNIT_IMPL] Processing IMPLEMENTATION declarations for Unit '%s'\n", unit_name_for_debug);
+        #endif
+        for (int i = 0; i < impl_decls->child_count; i++) {
+            AST *declNode = impl_decls->children[i];
+            if (!declNode) continue;
+
+            if (declNode->type == AST_VAR_DECL) {
+                 AST *typeNode = declNode->right;
+                 if (!typeNode) { /* ... warning ... */ continue; }
+                 for (int j = 0; j < declNode->child_count; j++) {
+                    AST *varNode = declNode->children[j];
+                    if (!varNode || !varNode->token) continue;
+                    const char *varName = varNode->token->value;
+
+                    // --- REINSTATED Global Insert ---
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG UNIT_IMPL]   Attempting global insert for VAR: %s (Type: %s)\n", varName, varTypeToString(declNode->var_type));
+                    #endif
+                    // Insert into GLOBAL symbol table (insertGlobalSymbol handles internal duplicate check)
+                    insertGlobalSymbol(varName, declNode->var_type, typeNode);
+                    // ---
+
+                    // --- Array Initialization (IF symbol was successfully added/found and is an array) ---
+                    Symbol *sym = lookupGlobalSymbol(varName); // Look up *after* attempting insert
+                    if (sym && sym->value && sym->type == TYPE_ARRAY) {
+                         if (sym->value->array_val == NULL) { // Check if uninitialized
+                             #ifdef DEBUG
+                             fprintf(stderr, "[DEBUG UNIT_IMPL]     Initializing global array VAR: %s\n", varName);
+                             #endif
+                            // (Array initialization logic using makeArrayND - kept from previous step)
+                            AST *actualArrayTypeNode = typeNode;
+                             if (actualArrayTypeNode->type == AST_TYPE_REFERENCE) { /* ... resolve reference ... */
+                                 actualArrayTypeNode = lookupType(actualArrayTypeNode->token->value);
+                                 if (!actualArrayTypeNode) { /* Error */ continue; }
+                             }
+                             if (actualArrayTypeNode->type != AST_ARRAY_TYPE) { /* Error */ continue; }
+                             int dimensions = actualArrayTypeNode->child_count;
+                             if (dimensions <= 0) { /* Error */ continue; }
+                             int *lower_bounds = malloc(sizeof(int) * dimensions);
+                             int *upper_bounds = malloc(sizeof(int) * dimensions);
+                             if (!lower_bounds || !upper_bounds) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+                             bool bounds_ok = true;
+                              for (int dim = 0; dim < dimensions; dim++) { /* ... evaluate bounds (ensure eval works here) ... */
+                                  AST *subrange = actualArrayTypeNode->children[dim];
+                                  if (!subrange || subrange->type != AST_SUBRANGE || !subrange->left || !subrange->right) { bounds_ok = false; break; }
+                                  Value low_val = eval(subrange->left); Value high_val = eval(subrange->right);
+                                  if (low_val.type != TYPE_INTEGER || high_val.type != TYPE_INTEGER) { bounds_ok = false; break; }
+                                  lower_bounds[dim] = (int)low_val.i_val; upper_bounds[dim] = (int)high_val.i_val;
+                                  if (lower_bounds[dim] > upper_bounds[dim]) { bounds_ok = false; break; }
+                              }
+                             if (!bounds_ok) { free(lower_bounds); free(upper_bounds); continue; }
+                             AST *elemTypeNode = actualArrayTypeNode->right; VarType elemType = TYPE_VOID;
+                             if (!elemTypeNode) { /* Error */ free(lower_bounds); free(upper_bounds); continue; }
+                             elemType = elemTypeNode->var_type;
+                             if (elemType == TYPE_VOID && elemTypeNode->type == AST_VARIABLE && elemTypeNode->token) { /* ... fallback type lookup ... */
+                                const char *elemTypeName = elemTypeNode->token->value;
+                                if (strcasecmp(elemTypeName, "integer")==0) elemType = TYPE_INTEGER;
+                                else { AST* userTypeDef = lookupType(elemTypeName); if(userTypeDef) elemType = userTypeDef->var_type; else elemType = TYPE_VOID;}
+                             } else if (elemType == TYPE_VOID) { /* Error */ elemType = TYPE_VOID; }
+
+                             if (elemType != TYPE_VOID) {
+                                 Value initialized_array = makeArrayND(dimensions, lower_bounds, upper_bounds, elemType, elemTypeNode);
+                                 freeValue(sym->value); // Free default Value struct content
+                                 *sym->value = initialized_array; // Assign new array Value
+                             }
+                             free(lower_bounds); free(upper_bounds);
+                         }
+                    } else if (!sym) {
+                         // This case should ideally not happen if insertGlobalSymbol succeeded or handled duplicate.
+                         // If insertGlobalSymbol printed an error and returned due to duplicate, sym would be NULL here.
+                         fprintf(stderr, "Warning: Could not find global symbol for IMPLEMENTATION var '%s' after insertion attempt.\n", varName);
+                    }
+                    // --- END Array Initialization ---
+                 } // End loop j (var names)
+            } else if (declNode->type == AST_CONST_DECL) {
+                if (!declNode->token || !declNode->left) continue;
+                const char *constName = declNode->token->value;
+
+                // --- REINSTATED Global Insert (without prior check) ---
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG UNIT_IMPL]   Attempting global insert for CONST: %s\n", constName);
+                #endif
+                Value constVal;
+                 if (declNode->left->type == AST_NUMBER || declNode->left->type == AST_STRING || declNode->left->type == AST_BOOLEAN) {
+                      constVal = eval(declNode->left); // Evaluate simple literals
+                 } else {
+                      fprintf(stderr, "Warning: Cannot evaluate complex IMPLEMENTATION constant '%s' during parse phase in unit '%s'. Skipping.\n", constName, unit_name_for_debug);
+                      continue; // Skip if not simple
+                 }
+                 // Insert into GLOBAL symbol table (insertGlobalSymbol handles internal duplicate check)
+                 insertGlobalSymbol(constName, constVal.type, declNode->right);
+                 // ---
+
+                 // --- Update value and set const flag (IF symbol exists after insert attempt) ---
+                 Symbol *sym = lookupGlobalSymbol(constName);
+                 if (sym && sym->value) {
+                      if (!sym->is_const) { // Only update if not already marked const
+                          freeValue(sym->value);
+                         *sym->value = makeCopyOfValue(&constVal);
+                         sym->is_const = true;
+                         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG UNIT_IMPL]     Set value and is_const=TRUE for global constant '%s'\n", constName);
+                         #endif
+                      } else {
+                           #ifdef DEBUG
+                           fprintf(stderr, "[DEBUG UNIT_IMPL]     Skipping value update for already const global '%s'\n", constName);
+                           #endif
+                      }
+                 } else if (!sym) {
+                      // This implies insertGlobalSymbol failed (likely duplicate based on its internal check)
+                       #ifdef DEBUG
+                       fprintf(stderr, "[DEBUG UNIT_IMPL]     Skipping value update for CONST '%s' (likely duplicate prevented insert)\n", constName);
+                       #endif
+                 } else { /* sym exists but sym->value is NULL - Should not happen after insertGlobalSymbol */ }
+                 freeValue(&constVal); // Free temp value from eval
+                 // ---
+            } // End if CONST_DECL
+        } // End loop i (declarations)
+    }
+    // --- MODIFICATION END ---
+
+    // Handle INITIALIZATION block
     int has_initialization = 0;
-    if (parser->current_token->type == TOKEN_BEGIN) {
-        AST *init_block = compoundStatement(parser); // Parses BEGIN...END (consumes END)
-        addChild(unit_node, init_block);
+    if (parser->current_token && parser->current_token->type == TOKEN_BEGIN) {
+        AST *init_block = compoundStatement(parser);
+         if (!init_block) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
+        setRight(unit_node, init_block); // Store init_block in right
         has_initialization = 1;
     }
 
-    // Consume the final 'end.' based on initialization presence
+    // Consume final 'end.'
     if (has_initialization) {
-        // After compoundStatement, current token is '.' from 'end.'
-        if (parser->current_token->type != TOKEN_PERIOD) {
-            fprintf(stderr, "Error: Expected '.' after unit end at line %d\n", parser->lexer->line);
-            EXIT_FAILURE_HANDLER();
-        }
+        if (!parser->current_token || parser->current_token->type != TOKEN_PERIOD) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
         eat(parser, TOKEN_PERIOD);
     } else {
-        // No initialization block: consume 'end' then '.'
+        if (!parser->current_token || parser->current_token->type != TOKEN_END) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
         eat(parser, TOKEN_END);
+        if (!parser->current_token || parser->current_token->type != TOKEN_PERIOD) { /* ... error handling ... */ EXIT_FAILURE_HANDLER(); }
         eat(parser, TOKEN_PERIOD);
     }
 
+    free(unit_name_for_debug);
     return unit_node;
 }
 
@@ -509,6 +620,8 @@ AST *buildProgramAST(Parser *main_parser) {
         } else {
              errorParser(main_parser, "Expected ')' after program parameters");
              freeToken(copiedProgToken); // Free the copy before returning error node
+             // Need to free prog_name_node too
+             freeAST(prog_name_node);
              return newASTNode(AST_NOOP, NULL);
         }
     }
@@ -516,14 +629,14 @@ AST *buildProgramAST(Parser *main_parser) {
     if (main_parser->current_token && main_parser->current_token->type == TOKEN_SEMICOLON) { // Add NULL check
         eat(main_parser, TOKEN_SEMICOLON); // Frees ';'
     } else { // Error if missing semicolon (and not EOF)
-         // Handle case where EOF might be acceptable after program name (e.g., empty program)
-         // For now, require semicolon unless it's EOF right after the name (which is unlikely valid Pascal)
          if (main_parser->current_token) {
               errorParser(main_parser, "Expected ';' after program header");
          } else {
               errorParser(main_parser, "Unexpected end of file after program header");
          }
          freeToken(copiedProgToken); // Free the copy before returning error node
+         // Need to free prog_name_node too
+         freeAST(prog_name_node);
          return newASTNode(AST_NOOP, NULL);
     }
 
@@ -539,13 +652,14 @@ AST *buildProgramAST(Parser *main_parser) {
             Token *unit_token_original = main_parser->current_token;
             if (!unit_token_original || unit_token_original->type != TOKEN_IDENTIFIER) {
                 errorParser(main_parser, "Expected unit name in uses clause");
-                // Cleanup needed?
-                freeToken(copiedProgToken); // Free the program token copy
+                // Cleanup needed
+                freeToken(copiedProgToken);
+                freeAST(prog_name_node);
                 if (uses_clause) freeAST(uses_clause); // Might cause issues if partially built
-                if (unit_list) freeList(unit_list); // <<< Corrected Function Call (1 arg)
+                if (unit_list) freeList(unit_list);
                 return newASTNode(AST_NOOP, NULL);
             }
-            // listAppend uses strdup internally [cite: 24]
+            // listAppend uses strdup internally
             listAppend(unit_list, unit_token_original->value);
             eat(main_parser, TOKEN_IDENTIFIER); // Eat original unit name (frees it)
 
@@ -563,134 +677,173 @@ AST *buildProgramAST(Parser *main_parser) {
              errorParser(main_parser, "Expected ';' after uses clause");
              // Cleanup list etc.
              freeToken(copiedProgToken);
+             freeAST(prog_name_node);
              if (uses_clause) freeAST(uses_clause); // Might cause issues
-             if (unit_list) freeList(unit_list); // <<< Corrected Function Call (1 arg)
+             if (unit_list) freeList(unit_list);
              return newASTNode(AST_NOOP, NULL);
         }
 
         // Attach list to uses_clause node
         uses_clause->unit_list = unit_list; // unit_list now owned by uses_clause
 
-        // Link units (assuming linkUnit/unitParser handle their own memory)
-        // Add error handling around findUnitFile, fopen, etc. if needed
-        // In src/parser.c -> buildProgramAST() -> within the 'if (uses_clause)' block
+        // --- Start: Process and Link Units from 'uses' list ---
+        for (int i = 0; i < listSize(unit_list); i++) {
+            char *unit_name = listGet(unit_list, i);
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG USES] Processing unit '%s'...\n", unit_name);
+            #endif
+            // Attempt to find the unit source file
+            char *nested_unit_path = findUnitFile(unit_name); // Assumes findUnitFile returns allocated string or NULL
 
-                     // --- Start: Process and Link Units from 'uses' list ---
-                     for (int i = 0; i < listSize(unit_list); i++) {
-                         char *unit_name = listGet(unit_list, i);
-         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG USES] Processing unit '%s'...\n", unit_name);
-         #endif
-                         // Attempt to find the unit source file
-                         char *unit_path = findUnitFile(unit_name); // Assumes findUnitFile returns allocated string or NULL
+            // --- MODIFICATION START: Add Check After findUnitFile ---
+            if (nested_unit_path == NULL) {
+                // Use errorParser for consistency
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg), "Unit '%s' specified in USES clause not found (findUnitFile returned NULL).", unit_name);
+                errorParser(main_parser, error_msg); // errorParser should exit
+                // If errorParser doesn't exit, ensure cleanup happens here.
+                // uses_clause owns unit_list, freeing uses_clause handles both
+                if(uses_clause) freeAST(uses_clause);
+                freeAST(prog_name_node);
+                freeToken(copiedProgToken);
+                return NULL; // Indicate failure
+            }
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG USES] Found unit '%s' at path: %s (ptr: %p)\n", unit_name, nested_unit_path, (void*)nested_unit_path);
+            #endif
+            // --- MODIFICATION END ---
 
-                         if (unit_path == NULL) {
-                             // Use errorParser for consistency
-                             char error_msg[256];
-                             snprintf(error_msg, sizeof(error_msg), "Unit '%s' specified in USES clause not found.", unit_name);
-                             errorParser(main_parser, error_msg); // errorParser should exit
-                             // Clean up potentially partially built AST? Very complex. Exit for now.
-                             // If errorParser doesn't exit, ensure cleanup happens here.
-                              if(unit_list) freeList(unit_list); // Free list contents
-                              if(uses_clause) freeAST(uses_clause); // Free uses node
-                              // Free other potentially allocated nodes like prog_name_node etc.
-                              freeToken(copiedProgToken); // Free program token copy
-                             return NULL; // Indicate failure
-                         }
 
-         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG USES] Found unit '%s' at path: %s\n", unit_name, unit_path);
-         #endif
+            // --- Parse the found unit file ---
+            // 1. Read the unit file content
+            FILE *unit_file = fopen(nested_unit_path, "r");
+            if (!unit_file) {
+                 char error_msg[512];
+                 snprintf(error_msg, sizeof(error_msg), "Could not open unit file '%s' for unit '%s'", nested_unit_path, unit_name);
+                 perror(error_msg); // Print system error message too
+                 free(nested_unit_path); // Free path returned by findUnitFile
+                 // Cleanup...
+                 if(uses_clause) freeAST(uses_clause);
+                 freeAST(prog_name_node);
+                 freeToken(copiedProgToken);
+                 EXIT_FAILURE_HANDLER(); // Exit on file open error
+                 return NULL;
+            }
+            fseek(unit_file, 0, SEEK_END);
+            long unit_fsize = ftell(unit_file);
+            rewind(unit_file);
+            char *unit_source = malloc(unit_fsize + 1);
+            if (!unit_source) {
+                fprintf(stderr, "Memory allocation error reading unit '%s'\n", unit_name);
+                fclose(unit_file);
+                free(nested_unit_path);
+                // Cleanup...
+                 if(uses_clause) freeAST(uses_clause);
+                 freeAST(prog_name_node);
+                 freeToken(copiedProgToken);
+                 EXIT_FAILURE_HANDLER();
+                 return NULL;
+            }
+            fread(unit_source, 1, unit_fsize, unit_file);
+            unit_source[unit_fsize] = '\0';
+            fclose(unit_file);
+            // ---
 
-                         // --- Parse the found unit file ---
-                         // 1. Read the unit file content
-                         FILE *unit_file = fopen(unit_path, "r");
-                         if (!unit_file) {
-                              char error_msg[512];
-                              snprintf(error_msg, sizeof(error_msg), "Could not open unit file '%s' for unit '%s'", unit_path, unit_name);
-                              perror(error_msg); // Print system error message too
-                              free(unit_path); // Free path returned by findUnitFile
-                              // Cleanup...
-                              EXIT_FAILURE_HANDLER(); // Exit on file open error
-                              return NULL;
-                         }
-                         fseek(unit_file, 0, SEEK_END);
-                         long unit_fsize = ftell(unit_file);
-                         rewind(unit_file);
-                         char *unit_source = malloc(unit_fsize + 1);
-                         if (!unit_source) {
-                             fprintf(stderr, "Memory allocation error reading unit '%s'\n", unit_name);
-                             fclose(unit_file);
-                             free(unit_path);
-                             // Cleanup...
-                             EXIT_FAILURE_HANDLER();
-                              return NULL;
-                         }
-                         fread(unit_source, 1, unit_fsize, unit_file);
-                         unit_source[unit_fsize] = '\0';
-                         fclose(unit_file);
-                         // ---
+            // 2. Initialize a new lexer and parser for the unit source
+            Lexer unit_lexer;
+            initLexer(&unit_lexer, unit_source);
+            Parser unit_parser;
+            unit_parser.lexer = &unit_lexer;
+            unit_parser.current_token = getNextToken(&unit_lexer); // Initialize the first token
 
-                         // 2. Initialize a new lexer and parser for the unit source
-                         Lexer unit_lexer;
-                         initLexer(&unit_lexer, unit_source);
-                         Parser unit_parser; // <<< CHANGE: Use a separate parser instance
-                         unit_parser.lexer = &unit_lexer;
-                         unit_parser.current_token = getNextToken(&unit_lexer); // Initialize the first token
+            // 3. Parse the unit recursively
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG USES] >>> Calling unitParser for '%s'...\n", unit_name);
+            #endif
+            AST *unit_ast = unitParser(&unit_parser, 1); // Pass unit_parser, start depth 1
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG USES] <<< Returned from unitParser for '%s'. AST node: %p\n", unit_name, (void*)unit_ast);
+            #endif
+            if (!unit_ast) {
+                // unitParser should have reported an error via errorParser
+                fprintf(stderr, "Error: Failed to parse unit '%s'.\n", unit_name);
+                free(unit_source);
+                free(nested_unit_path);
+                // Cleanup...
+                 if(uses_clause) freeAST(uses_clause);
+                 freeAST(prog_name_node);
+                 freeToken(copiedProgToken);
+                 EXIT_FAILURE_HANDLER();
+                 return NULL;
+            }
+            // ---
 
-                         // 3. Parse the unit recursively (use unitParser)
-                         // Pass recursion depth (start at 1 for first level units)
-         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG USES] Calling unitParser for '%s'...\n", unit_name);
-         #endif
-                         AST *unit_ast = unitParser(&unit_parser, 1); // <<< Pass unit_parser, start depth 1
-                         if (!unit_ast) {
-                             // unitParser should have reported an error via errorParser
-                             fprintf(stderr, "Error: Failed to parse unit '%s'.\n", unit_name);
-                             free(unit_source);
-                             free(unit_path);
-                             // Cleanup...
-                             EXIT_FAILURE_HANDLER();
-                              return NULL;
-                         }
-         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG USES] Finished parsing unit '%s'. AST node: %p\n", unit_name, (void*)unit_ast);
-         #endif
-                         // ---
+            // 4. Link symbols from the unit's interface into the global scope
+            #ifdef DEBUG
+             fprintf(stderr, "[DEBUG USES] Building symbol table for unit '%s'...\n", unit_name);
+            #endif
+             // Build symbol table from interface (left child holds interface decls)
+             Symbol* unitSymTable = NULL;
+             if (unit_ast->left) { // Check if interface node exists
+                 unitSymTable = buildUnitSymbolTable(unit_ast->left);
+                 unit_ast->symbol_table = unitSymTable; // Attach symbol table to unit AST node
+             } else {
+                  fprintf(stderr,"Warning: No interface declarations found for unit '%s' to build symbol table.\n", unit_name);
+             }
 
-                         // 4. Link symbols from the unit's interface into the global scope
-                         //    (Requires buildUnitSymbolTable and linkUnit functions)
-         #ifdef DEBUG
-                          fprintf(stderr, "[DEBUG USES] Building symbol table for unit '%s'...\n", unit_name);
-         #endif
-                          // Build the symbol table from the interface part (assuming child[0] is interface decls)
-                          // Note: buildUnitSymbolTable might need access to the Type Table if units define types
-                          // Assuming unit_ast->children[0] holds the INTERFACE declarations compound node
-                          Symbol* unitSymTable = buildUnitSymbolTable(unit_ast->children[0]);
-                          unit_ast->symbol_table = unitSymTable; // Attach symbol table to unit AST node
-         #ifdef DEBUG
-                          fprintf(stderr, "[DEBUG USES] Linking unit '%s'...\n", unit_name);
-         #endif
-                         linkUnit(unit_ast, 1); // <<< Call linkUnit with the parsed unit AST
+            #ifdef DEBUG
+             fprintf(stderr, "[DEBUG USES] Linking unit '%s'...\n", unit_name);
+            #endif
+            linkUnit(unit_ast, 1); // Call linkUnit with the parsed unit AST
 
-                         // 5. Cleanup resources for this unit
-                         free(unit_source);
-                         free(unit_path);
-                         // Do NOT free unit_ast here if its symbols/types are now linked globally
-                         // Memory management of shared AST nodes (like type definitions) needs care.
-                         // If linkUnit copies necessary info, freeAST(unit_ast) might be okay. Assume not for now.
 
-                     } // End for loop processing unit_list
-                     // --- End: Process and Link Units ---
-    }
+            // 5. Cleanup resources for this unit
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG USES] Freeing nested_source at %p for unit '%s'\n", (void*)unit_source, unit_name);
+             #endif
+             free(unit_source); // Free the source buffer first
+             unit_source = NULL; // Prevent double free
+
+
+            // --- MODIFICATION START: Add Check Before free(nested_unit_path) ---
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG USES] Attempting to free nested_unit_path (ptr: %p) for unit '%s'\n", (void*)nested_unit_path, unit_name);
+             if (nested_unit_path == NULL) {
+                  fprintf(stderr, "[DEBUG USES] *** CRITICAL: nested_unit_path IS NULL before free()! ***\n");
+                  // Optionally trigger debugger or dump stack here if needed
+                  // For now, the check below will prevent the crash by skipping free(NULL)
+             }
+             #endif
+             // ---
+
+             // --- Original free call that might crash, now guarded ---
+             if (nested_unit_path != NULL) {
+                 free(nested_unit_path); // Free the path string
+             } else {
+                 // Log if it was NULL
+                 fprintf(stderr, "Warning: nested_unit_path was NULL before free in buildProgramAST loop for unit '%s'.\n", unit_name);
+             }
+             nested_unit_path = NULL; // Prevent potential double-free within the loop
+
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG USES] Successfully processed free for nested_unit_path for unit '%s'\n", unit_name);
+             #endif
+             // --- MODIFICATION END ---
+
+
+             // Do NOT free unit_ast here if its symbols/types are now linked globally
+
+        } // End for loop processing unit_list
+        // --- End: Process and Link Units ---
+    } // End if (uses_clause)
 
     // Parse the main block
     AST *block_node = block(main_parser); // block handles its internal tokens
     if (!block_node) { // block returns NULL on error
-        errorParser(main_parser, "Failed to parse main program block"); // <<< Corrected typo: main_parser
-        freeToken(copiedProgToken); // Free copy
-        // Free uses clause? freeAST should handle it if called later
-        // If not, need: if (uses_clause) freeAST(uses_clause); // which also frees unit_list if freeAST is correct
+        // errorParser(main_parser, "Failed to parse main program block"); // Error reported in block()
+        freeToken(copiedProgToken);
+        freeAST(prog_name_node);
+        if (uses_clause) freeAST(uses_clause);
         return newASTNode(AST_NOOP, NULL);
     }
 
@@ -699,10 +852,10 @@ AST *buildProgramAST(Parser *main_parser) {
          eat(main_parser, TOKEN_PERIOD); // Frees '.'
     } else { // Error if not period or EOF
          errorParser(main_parser, "Expected '.' at end of program");
-         freeToken(copiedProgToken); // Free copy
-         // Free block_node and uses_clause? Depends on ownership and error handling strategy
-         // freeAST(block_node);
-         // if (uses_clause) freeAST(uses_clause);
+         freeToken(copiedProgToken);
+         freeAST(prog_name_node);
+         if (uses_clause) freeAST(uses_clause);
+         freeAST(block_node);
          return newASTNode(AST_NOOP, NULL);
     }
 
@@ -714,9 +867,16 @@ AST *buildProgramAST(Parser *main_parser) {
 
     setLeft(programNode, prog_name_node); // prog_name_node already built
     setRight(programNode, block_node);    // block_node already built
-    if (block_node) block_node->is_global_scope = true; // Safety check
+    if (block_node) block_node->is_global_scope = true; // Mark main block as global
 
     // Add uses_clause node if it was created
+    // NOTE: uses_clause was already added as a child to unit_node in the uses loop,
+    //       this might be redundant or incorrect depending on desired final AST structure.
+    //       If uses_clause should be a direct child of PROGRAM, modify the uses loop logic.
+    //       For now, assuming uses_clause memory is managed via unit_node which becomes part of programNode?
+    //       Let's add it directly to programNode IF it wasn't added elsewhere.
+    //       Revisiting the structure: uses_clause is local to this function and *not* added elsewhere.
+    //       So, it should be added as a child to the programNode.
     if (uses_clause) {
         addChild(programNode, uses_clause); // addChild handles parent pointers
     }

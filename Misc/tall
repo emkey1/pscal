@@ -25,6 +25,7 @@ run () {
 run "MDArray"        "$PSCAL" "$TESTS/MDArray_Suite.p"
 run "TestSuite"      "$PSCAL" "$TESTS/TestSuite7.p"
 run "MathSuite"      "$PSCAL" "$TESTS/MathSuite01.p"
+run "BitwiseSuite"      "$PSCAL" "$TESTS/BitWiseSuite"
 
 # assorted one‑offs
 run "Assorted (tid)" "$PSCAL" "$TESTS/tid.p"
