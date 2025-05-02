@@ -9,6 +9,7 @@
 #include "globals.h"
 #include "symbol.h"
 #include "types.h"
+#include "builtin.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
 
@@ -599,16 +600,52 @@ void freeToken(Token *token) {
 
 void freeProcedureTable(void) {
     Procedure *proc = procedure_table;
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG_FREE] Starting freeProcedureTable.\n");
+#endif
     while (proc) {
         Procedure *next = proc->next;
-        free(proc->name);
-        // --- DO NOT FREE THE AST NODE HERE ---
-        // freeAST(proc->proc_decl); // This line causes the double-free/use-after-free
-        // --- CHANGE END ---
-        free(proc); // Free the Procedure struct itself
+
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG_FREE]  Processing procedure entry: '%s' (AST Node: %p)\n",
+                proc->name ? proc->name : "NULL", (void*)proc->proc_decl);
+#endif
+
+        // --- ADDED CHECK FOR BUILT-INS ---
+        // Only free the AST node if it's a dummy node for a built-in.
+        // User-defined procedure ASTs are part of the main tree and freed there.
+        if (proc->name && isBuiltin(proc->name)) {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG_FREE]   -> '%s' is a built-in. Freeing associated dummy AST node %p.\n",
+                    proc->name, (void*)proc->proc_decl);
+#endif
+            freeAST(proc->proc_decl); // Free the dummy AST node
+        } else {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG_FREE]   -> '%s' is user-defined or name is NULL. AST node %p will be freed with main tree.\n",
+                    proc->name ? proc->name : "NULL", (void*)proc->proc_decl);
+#endif
+            // Do not free proc->proc_decl here for user-defined procedures
+        }
+        // --- END ADDED CHECK ---
+
+        // Free the procedure name and the Procedure struct itself
+        if (proc->name) {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG_FREE]   Freeing procedure name '%s' at %p.\n", proc->name, (void*)proc->name);
+#endif
+            free(proc->name);
+        }
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG_FREE]   Freeing Procedure struct itself at %p.\n", (void*)proc);
+#endif
+        free(proc);
         proc = next;
     }
     procedure_table = NULL;
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG_FREE] Finished freeProcedureTable.\n");
+#endif
 }
 
 void freeTypeTable(void) {
