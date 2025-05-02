@@ -6,7 +6,83 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-AST *GlobalASTRoot = NULL;  // Declare global AST root
+// Helper function to check if a VarType is ordinal
+static bool isOrdinalType(VarType type) {
+    return (type == TYPE_INTEGER || type == TYPE_CHAR || type == TYPE_BOOLEAN ||
+            type == TYPE_ENUM || type == TYPE_BYTE || type == TYPE_WORD);
+}
+
+// Helper function to get the ordinal value from a Value struct
+// Returns true on success, false if the type is not ordinal. Stores value in out_ord.
+static bool getOrdinalValue(Value val, long long *out_ord) {
+    if (!out_ord) return false; // Safety check
+
+    switch (val.type) {
+        case TYPE_INTEGER:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_BOOLEAN: // Ord(False)=0, Ord(True)=1 stored in i_val
+            *out_ord = val.i_val;
+            return true;
+        case TYPE_CHAR:
+            *out_ord = (long long)val.c_val;
+            return true;
+        case TYPE_ENUM:
+            *out_ord = (long long)val.enum_val.ordinal;
+            return true;
+        case TYPE_STRING: // Allow single-char strings
+            if (val.s_val && strlen(val.s_val) == 1) {
+                *out_ord = (long long)val.s_val[0];
+                return true;
+            }
+            // Fall through if not single-char string
+        default:
+            return false; // Not a recognized ordinal type or valid single-char string
+    }
+}
+
+// Helper to check if an ordinal value exists in a set's values array
+static bool setContainsOrdinal(const Value* setVal, long long ordinal) {
+    if (!setVal || setVal->type != TYPE_SET || !setVal->set_val.set_values) {
+        return false;
+    }
+    for (int i = 0; i < setVal->set_val.set_size; i++) {
+        if (setVal->set_val.set_values[i] == ordinal) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper to add an ordinal value to a result set, handling allocation and duplicates.
+// Modifies the resultVal directly. Assumes resultVal is already TYPE_SET.
+// Uses max_length field to track allocated capacity.
+static void addOrdinalToResultSet(Value* resultVal, long long ordinal) {
+    if (!resultVal || resultVal->type != TYPE_SET) return;
+
+    // Avoid adding duplicates
+    if (setContainsOrdinal(resultVal, ordinal)) {
+        return;
+    }
+
+    // Check capacity and reallocate if necessary
+    // Using max_length to store capacity here. Initialize resultVal->max_length appropriately before first call.
+    if (resultVal->set_val.set_size >= resultVal->max_length) {
+        int new_capacity = (resultVal->max_length == 0) ? 8 : resultVal->max_length * 2;
+        long long* new_values = realloc(resultVal->set_val.set_values, sizeof(long long) * new_capacity);
+        if (!new_values) {
+            fprintf(stderr, "FATAL: realloc failed in addOrdinalToResultSet\n");
+            // Consider freeing partially built set before exiting? Complex.
+            EXIT_FAILURE_HANDLER();
+        }
+        resultVal->set_val.set_values = new_values;
+        resultVal->max_length = new_capacity; // Update capacity store
+    }
+
+    // Add the new element
+    resultVal->set_val.set_values[resultVal->set_val.set_size] = ordinal;
+    resultVal->set_val.set_size++;
+}
 
 // Helper function to map 0-15 to ANSI FG codes (30-37 standard, 90-97 bright)
 static int map16FgColorToAnsi(int colorCode, bool isBold) {
@@ -95,87 +171,99 @@ void restoreLocalEnv(SymbolEnvSnapshot *snap) {
     localSymbols = snap->head;
 }
 
-// Note: This is adapted from the diff provided. Ensure it integrates
-// with your Value structure and makeChar/makeInt helpers.
 Value evalSet(AST *node) {
     // ... (initial checks and variable declarations remain the same) ...
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_SET;
-    v.set_val.set_size = 0;
-    v.set_val.set_values = NULL;
-    int capacity = 0;
+    // Using max_length to track capacity. Initialize.
+    v.max_length = 0; // Capacity
+    v.set_val.set_size = 0; // Current size
+    v.set_val.set_values = NULL; // Pointer to elements
+
 
     for (int i = 0; i < node->child_count; i++) {
         AST *element = node->children[i];
+        if (!element) continue; // Safety check
+
         if (element->type == AST_SUBRANGE) {
-            Value start = eval(element->left);
-            Value end = eval(element->right);
+            if (!element->left || !element->right) { /* Error: Invalid subrange node */ continue; }
 
-            // --- Modification Start: Allow single-char strings ---
-            bool start_is_ordinal = (start.type == TYPE_INTEGER || (start.type == TYPE_STRING && start.s_val && strlen(start.s_val) == 1));
-            bool end_is_ordinal = (end.type == TYPE_INTEGER || (end.type == TYPE_STRING && end.s_val && strlen(end.s_val) == 1));
-            // Check for type compatibility (both int or both char-like string)
-            bool types_compatible = (start.type == TYPE_INTEGER && end.type == TYPE_INTEGER) ||
-                                    ((start.type == TYPE_STRING && start_is_ordinal) && (end.type == TYPE_STRING && end_is_ordinal));
+            Value startVal = eval(element->left);
+            Value endVal = eval(element->right);
+            long long start_ord, end_ord;
 
-            if (!start_is_ordinal || !end_is_ordinal || !types_compatible) {
-                 fprintf(stderr, "Runtime error: Set range elements must be compatible ordinals (integer or single char). Start: %s, End: %s\n",
-                         varTypeToString(start.type), varTypeToString(end.type));
+            // --- MODIFIED: Use helper functions for ordinal check and value extraction ---
+            bool start_ok = getOrdinalValue(startVal, &start_ord);
+            bool end_ok = getOrdinalValue(endVal, &end_ord);
+
+            if (!start_ok || !end_ok) {
+                 fprintf(stderr, "Runtime error: Set range bounds must be ordinal types. Got Start=%s, End=%s\n",
+                         varTypeToString(startVal.type), varTypeToString(endVal.type));
+                 // Cleanup temporary evaluated values before exiting
+                 freeValue(&startVal);
+                 freeValue(&endVal);
+                 // Cleanup partially built set 'v'
+                 freeValue(&v);
                  EXIT_FAILURE_HANDLER();
             }
 
-            // Get ordinal value (integer value or ASCII value of char from string)
-            long long start_ord = (start.type == TYPE_INTEGER) ? start.i_val : start.s_val[0];
-            long long end_ord   = (end.type == TYPE_INTEGER) ? end.i_val : end.s_val[0];
-            // --- Modification End ---
+            // Basic compatibility check: For now, allow mixing if convertible to ordinals.
+            // Stricter checks might compare startVal.type and endVal.type if needed.
 
             if (start_ord > end_ord) {
-               // Empty range is valid
+               // Empty range is valid, do nothing
             } else {
-               for (long long val = start_ord; val <= end_ord; val++) {
-                   // Check duplicates, resize, add ordinal 'val'
-                   // ... (duplicate check, resize, and add logic remains the same, using v.set_val.*) ...
-                    int exists = 0;
-                    for(int k = 0; k < v.set_val.set_size; k++) { if (v.set_val.set_values[k] == val) { exists = 1; break; } }
-                    if (exists) continue;
-                    if (v.set_val.set_size >= capacity) {
-                        capacity = (capacity == 0) ? 8 : capacity * 2;
-                        long long *new_values = realloc(v.set_val.set_values, capacity * sizeof(long long));
-                        if (!new_values) { /* error */ EXIT_FAILURE_HANDLER(); }
-                        v.set_val.set_values = new_values;
-                    }
-                    v.set_val.set_values[v.set_val.set_size++] = val;
+               // Iterate and add ordinals to the set
+               for (long long val_ord = start_ord; val_ord <= end_ord; val_ord++) {
+                   // addOrdinalToResultSet handles duplicates and allocation
+                   addOrdinalToResultSet(&v, val_ord);
                 }
             }
+            // Free temporary values evaluated for bounds
+            freeValue(&startVal);
+            freeValue(&endVal);
+            // --- END MODIFICATION ---
+
         } else { // Single element
             Value elemVal = eval(element);
-            // --- Modification Start: Allow single-char strings ---
-            bool elem_is_ordinal = (elemVal.type == TYPE_INTEGER || (elemVal.type == TYPE_STRING && elemVal.s_val && strlen(elemVal.s_val) == 1));
+            long long elem_ord;
 
-            if (!elem_is_ordinal) {
-                 fprintf(stderr, "Runtime error: Set elements must be ordinal type (integer or single char). Got %s\n", varTypeToString(elemVal.type));
+            // --- MODIFIED: Use helper functions ---
+            bool elem_ok = getOrdinalValue(elemVal, &elem_ord);
+
+            if (!elem_ok) {
+                 fprintf(stderr, "Runtime error: Set elements must be ordinal type. Got %s\n", varTypeToString(elemVal.type));
+                 // Cleanup temporary evaluated value before exiting
+                 freeValue(&elemVal);
+                 // Cleanup partially built set 'v'
+                 freeValue(&v);
                  EXIT_FAILURE_HANDLER();
             }
 
-            long long elem_ord = (elemVal.type == TYPE_INTEGER) ? elemVal.i_val : elemVal.s_val[0];
-            // --- Modification End ---
-
-            // Check duplicates, resize, add ordinal 'elem_ord'
-            // ... (duplicate check, resize, and add logic remains the same, using v.set_val.*) ...
-            int exists = 0;
-            for(int k = 0; k < v.set_val.set_size; k++) { if (v.set_val.set_values[k] == elem_ord) { exists = 1; break; } }
-            if (exists) continue;
-            if (v.set_val.set_size >= capacity) {
-                 capacity = (capacity == 0) ? 8 : capacity * 2;
-                 long long *new_values = realloc(v.set_val.set_values, capacity * sizeof(long long));
-                 if (!new_values) { /* error */ EXIT_FAILURE_HANDLER(); }
-                 v.set_val.set_values = new_values;
-            }
-            v.set_val.set_values[v.set_val.set_size++] = elem_ord;
+            // Add the ordinal value to the set
+            addOrdinalToResultSet(&v, elem_ord);
+            // Free temporary value evaluated for element
+            freeValue(&elemVal);
+            // --- END MODIFICATION ---
         }
-    }
-    return v;
+    } // End for loop iterating through set constructor elements
+
+    // Optional: Trim excess capacity if desired
+    // if (v.set_val.set_size > 0 && v.set_val.set_size < v.max_length) {
+    //     long long* final_values = realloc(v.set_val.set_values, sizeof(long long) * v.set_val.set_size);
+    //     if (final_values) {
+    //          v.set_val.set_values = final_values;
+    //          v.max_length = v.set_val.set_size;
+    //      } // Ignore realloc failure for trimming
+    // } else if (v.set_val.set_size == 0) { // If set ended up empty
+    //      free(v.set_val.set_values);
+    //      v.set_val.set_values = NULL;
+    //      v.max_length = 0;
+    // }
+
+
+    return v; // Return the constructed set Value
 }
 
 Value executeProcedureCall(AST *node) {
@@ -585,115 +673,91 @@ Value eval(AST *node) {
 
     switch (node->type) {
         case AST_ARRAY_ACCESS: {
-            Value arrVal = eval(node->left);
+            // Evaluate the base array/string expression
+            Value arrVal = eval(node->left); // This might be a deep copy if node->left was complex
 
+            // Handle Array Element Access
             if (arrVal.type == TYPE_ARRAY) {
+                if (!arrVal.array_val) {
+                     fprintf(stderr, "Runtime error: Array accessed before initialization or after being freed.\n");
+                     freeValue(&arrVal); // Free the temporary base value
+                     EXIT_FAILURE_HANDLER();
+                }
                 if (node->child_count != arrVal.dimensions) {
-                    printf("===== Dumping Full AST Tree START ======\n");
-                    dumpASTFromRoot(node);
-                    printf("===== Dumping Full AST Tree END ======\n");
                     fprintf(stderr, "Runtime error: Expected %d index(es), got %d.\n",
                             arrVal.dimensions, node->child_count);
+                    freeValue(&arrVal); // Free the temporary base value
                     EXIT_FAILURE_HANDLER();
                 }
 
+                // Calculate indices (mallocs 'indices')
                 int *indices = malloc(sizeof(int) * arrVal.dimensions);
-                if (!indices) {
-                    fprintf(stderr, "Memory allocation error in array access.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
+                if (!indices) { /* Mem error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
                 for (int i = 0; i < node->child_count; i++) {
-                    if (!node->children[i]) {
-                        fprintf(stderr, "Runtime error: NULL index expression in AST_ARRAY_ACCESS.\n");
-                        dumpASTFromRoot(node);
-                        EXIT_FAILURE_HANDLER();
-                    }
-                    
-                    Value idxVal = eval(node->children[i]);
+                    if (!node->children[i]) { /* NULL index node check */ free(indices); freeValue(&arrVal); EXIT_FAILURE_HANDLER();}
+                    Value idxVal = eval(node->children[i]); // Evaluate index expression
                     if (idxVal.type != TYPE_INTEGER) {
                         fprintf(stderr, "Runtime error: Array index must be an integer.\n");
-                        free(indices);
-                        EXIT_FAILURE_HANDLER();
+                        freeValue(&idxVal); free(indices); freeValue(&arrVal); EXIT_FAILURE_HANDLER();
                     }
                     indices[i] = (int)idxVal.i_val;
+                    freeValue(&idxVal); // Free temporary index value
                 }
 
+                // Calculate offset and perform bounds check
                 int offset = computeFlatOffset(&arrVal, indices);
-
-                // Add explicit bounds check for offset
                 int total_size = 1;
-                for (int i = 0; i < arrVal.dimensions; i++) {
-                    total_size *= (arrVal.upper_bounds[i] - arrVal.lower_bounds[i] + 1);
-                }
-
+                for (int i = 0; i < arrVal.dimensions; i++) { total_size *= (arrVal.upper_bounds[i] - arrVal.lower_bounds[i] + 1); }
                 if (offset < 0 || offset >= total_size) {
-                    fprintf(stderr, "Computed array offset %d is out of bounds (0..%d).\n", offset, total_size - 1);
-                    free(indices);
-                    EXIT_FAILURE_HANDLER();
+                    fprintf(stderr, "Runtime error: Array index out of bounds (offset %d, size %d).\n", offset, total_size);
+                    free(indices); freeValue(&arrVal); EXIT_FAILURE_HANDLER();
                 }
 
-                Value result = arrVal.array_val[offset];
+                // --- MODIFICATION: Return a DEEP COPY of the element ---
+                // Original: Value result = arrVal.array_val[offset]; (Shallow copy)
+                Value result = makeCopyOfValue(&arrVal.array_val[offset]); // Deep copy
+                // --- END MODIFICATION ---
 
-                free(indices);
-                return result;
+                free(indices); // Free indices array
+                freeValue(&arrVal); // Free the temporary array value returned by eval(node->left)
+                return result; // Return the deep copy
             }
-
+            // Handle String/Char Element Access
             else if (arrVal.type == TYPE_STRING) {
-                if (node->child_count < 1) {
-                    fprintf(stderr, "Runtime error: String access missing index expression.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                Value indexVal = eval(node->children[0]);
-                if (indexVal.type != TYPE_INTEGER) {
-                    fprintf(stderr, "Runtime error: String index must be an integer.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                long long idx = indexVal.i_val;
-                if (!arrVal.s_val) {
-                    fprintf(stderr, "Runtime error: Null string access.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                int len = (int)strlen(arrVal.s_val);
-                if (idx < 1 || idx > len) {
-                    printf("===== AST Dump START =====\n");
-                    dumpASTFromRoot(node);
-                    printf("===== AST Dump END =====\n");
-                    printf("===== Symbol Table(s) Dump START =====\n");
-                    dumpSymbolTable();
-                    printf("===== Symbol Table(s) Dump END =====\n");
-                    fprintf(stderr, "Runtime error: String index %lld out of bounds [1..%d].\n", idx, len);
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                char selected = arrVal.s_val[idx - 1];
-                return makeChar(selected);
+                 // ... existing string access logic ...
+                 // Ensure result is created correctly (makeChar returns a value copy)
+                 // Remember to free arrVal at the end
+                 if (node->child_count != 1) { /* Error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
+                 Value indexVal = eval(node->children[0]);
+                 if (indexVal.type != TYPE_INTEGER) { /* Error */ freeValue(&indexVal); freeValue(&arrVal); EXIT_FAILURE_HANDLER();}
+                 long long idx = indexVal.i_val;
+                 freeValue(&indexVal); // Free index value
+                 int len = (arrVal.s_val) ? (int)strlen(arrVal.s_val) : 0;
+                 if (idx < 1 || idx > len) { /* Bounds error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
+                 char selected = arrVal.s_val[idx - 1];
+                 Value result = makeChar(selected); // makeChar creates a proper Value copy
+                 freeValue(&arrVal); // Free the temporary string value
+                 return result;
             }
-
-            else if (arrVal.type == TYPE_CHAR) {
-                // Optional: allow 'char[1]' style access, e.g., 'c[1]' => c
-                if (node->child_count != 1) {
-                    fprintf(stderr, "Runtime error: CHAR type only supports single index access.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                Value indexVal = eval(node->children[0]);
-                if (indexVal.type != TYPE_INTEGER || indexVal.i_val != 1) {
-                    fprintf(stderr, "Runtime error: CHAR index must be exactly 1.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                return arrVal; // Already a char, return as-is
-            }
-
+             else if (arrVal.type == TYPE_CHAR) {
+                 // ... existing char access logic ...
+                 // Remember to free arrVal at the end
+                 if (node->child_count != 1) { /* Error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER();}
+                 Value indexVal = eval(node->children[0]);
+                 if (indexVal.type != TYPE_INTEGER || indexVal.i_val != 1) { /* Error */ freeValue(&indexVal); freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
+                 freeValue(&indexVal);
+                 // Return a copy of the char value - makeCopyOfValue handles this simply
+                 Value result = makeCopyOfValue(&arrVal);
+                 freeValue(&arrVal); // Free the original char value evaluated
+                 return result;
+             }
             else {
-                fprintf(stderr, "Runtime error: Attempted array access on non-array variable.\n");
+                fprintf(stderr, "Runtime error: Attempted array/string access on incompatible type %s.\n", varTypeToString(arrVal.type));
+                freeValue(&arrVal); // Free the incompatible value
                 EXIT_FAILURE_HANDLER();
             }
-        }
+            break; // Should be unreachable if all paths return/exit
+        } // End case AST_ARRAY_ACCESS
         case AST_ARRAY_LITERAL: {
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG] Evaluating AST_ARRAY_LITERAL\n");
@@ -836,6 +900,14 @@ Value eval(AST *node) {
                 dumpSymbolTable();
                 EXIT_FAILURE_HANDLER();
             }
+#ifdef DEBUG
+ if(sym->type == TYPE_ENUM) {
+      fprintf(stderr, "[DEBUG EVAL VAR] Symbol '%s' found. Enum Name in Symbol Table (BEFORE COPY): '%s' (addr=%p)\n",
+              sym->name,
+              sym->value->enum_val.enum_name ? sym->value->enum_val.enum_name : "<NULL>",
+              (void*)sym->value->enum_val.enum_name);
+ }
+ #endif
 
             Value val = makeCopyOfValue(sym->value);  // Copy for safety
             if (val.type == TYPE_STRING && val.s_val == NULL)
@@ -865,159 +937,298 @@ Value eval(AST *node) {
         }
 
         case AST_BINARY_OP: {
-            Value left = eval(node->left);
-            Value right = eval(node->right);
-            TokenType op = node->token->type;
-            Value result = makeVoid(); // Initialize result placeholder
+                    Value left = eval(node->left);
+                    Value right = eval(node->right);
+                    TokenType op = node->token->type;
+                    Value result = makeVoid(); // Initialize result placeholder
 
-            // --- Consolidated Operator Handling ---
+                    // --- Stage 1: Determine effective types for operation dispatch ---
+                    // We use these 'dispatch' types to decide which block of logic to enter (integer, real, string, etc.)
+                    VarType dispatchLeftType = left.type;
+                    VarType dispatchRightType = right.type;
 
-            // 1. Handle SHL/SHR first
-            if (op == TOKEN_SHL || op == TOKEN_SHR) {
-                if (left.type != TYPE_INTEGER || right.type != TYPE_INTEGER) { /* error */ freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();}
-                 const int PASCAL_INT_BITS = 32; // Define assumed integer bit width
-                 if (right.i_val < 0) {
-                      fprintf(stderr, "Runtime error: Shift amount cannot be negative.\n");
-                      freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                 }
-                 if (op == TOKEN_SHL) {
-                      if (right.i_val >= PASCAL_INT_BITS) {
-                          result = makeInt(0); // Shift out results in 0
-                      } else {
-                          result = makeInt(left.i_val << right.i_val);
-                      }
-                 } else { // TOKEN_SHR
-                      // SHR shifting out all bits also results in 0 in standard Pascal
-                      if (right.i_val >= PASCAL_INT_BITS) {
-                          result = makeInt(0);
-                      } else {
-                         // Note: C's >> behavior for negative numbers is implementation-defined.
-                         // Pascal typically does logical right shift (fill with 0).
-                         // For simplicity here, we rely on C's >> but acknowledge this potential difference.
-                         result = makeInt(left.i_val >> right.i_val);
-                      }
-                 }
-
-                if (op == TOKEN_SHL) result = makeInt(left.i_val << right.i_val); else result = makeInt(left.i_val >> right.i_val);
-            }
-            // 2. Handle IN
-            else if (op == TOKEN_IN) {
-                if (right.type != TYPE_SET) { /* error */ freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
-                bool left_is_ordinal = (left.type==TYPE_INTEGER || left.type==TYPE_ENUM || left.type==TYPE_CHAR || (left.type==TYPE_STRING && left.s_val && strlen(left.s_val)==1));
-                if (!left_is_ordinal) { /* error */ freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
-                long long left_ord = (left.type==TYPE_INTEGER) ? left.i_val : ((left.type==TYPE_ENUM)?left.enum_val.ordinal:((left.type==TYPE_CHAR)?left.c_val:left.s_val[0]));
-                int found = 0; if (right.set_val.set_values) { for(int i=0;i<right.set_val.set_size;i++){if(right.set_val.set_values[i]==left_ord){found=1;break;}}} result = makeBoolean(found);
-            }
-            // 3. Handle AND/OR (Bitwise and Logical)
-            else if (op == TOKEN_AND || op == TOKEN_OR /* || op == TOKEN_XOR */ ) {
-                 if (left.type == TYPE_INTEGER && right.type == TYPE_INTEGER) { // Bitwise
-                     if (op == TOKEN_AND) result = makeInt(left.i_val & right.i_val); else result = makeInt(left.i_val | right.i_val);
-                 } else if ((left.type==TYPE_BOOLEAN||left.type==TYPE_INTEGER) && (right.type==TYPE_BOOLEAN||right.type==TYPE_INTEGER)) { // Logical
-                      long long lval=(left.type==TYPE_BOOLEAN)?left.i_val:left.i_val; long long rval=(right.type==TYPE_BOOLEAN)?right.i_val:right.i_val;
-                      if (op == TOKEN_AND) result = makeBoolean((lval != 0) && (rval != 0)); else result = makeBoolean((lval != 0) || (rval != 0));
-                 } else { /* error */ fprintf(stderr, "Runtime error: Invalid operands for %s.\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
-            }
-            // 4. Handle other operators (+, -, *, /, comparisons) based on type combinations
-            else {
-                // --- Promotions for Comparisons ---
-                if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL) {
-                    if (left.type == TYPE_CHAR && right.type == TYPE_INTEGER) { left = makeInt((long long)left.c_val); }
-                    else if (left.type == TYPE_INTEGER && right.type == TYPE_CHAR) { right = makeInt((long long)right.c_val); }
-                    else if (left.type == TYPE_CHAR && right.type == TYPE_CHAR) { left = makeInt((long long)left.c_val); right = makeInt((long long)right.c_val); }
-                    else if (left.type == TYPE_ENUM && right.type == TYPE_INTEGER) { left = makeInt((long long)left.enum_val.ordinal); }
-                    else if (left.type == TYPE_INTEGER && right.type == TYPE_ENUM) { right = makeInt((long long)right.enum_val.ordinal); }
-                    else if (left.type == TYPE_INTEGER && right.type == TYPE_BOOLEAN) { right = makeInt((long long)right.i_val); } // Promote boolean (0/1) to integer
-                    else if (left.type == TYPE_BOOLEAN && right.type == TYPE_INTEGER) { left = makeInt((long long)left.i_val); } // Promote boolean (0/1) to integer
-                }
-
-                // --- Type-Specific Logic ---
-                if (left.type == TYPE_INTEGER && right.type == TYPE_INTEGER && op != TOKEN_SLASH) {
-                    long long a = left.i_val, b = right.i_val;
-                    switch (op) {
-                        case TOKEN_PLUS: result = makeInt(a + b); break;
-                        case TOKEN_MINUS: result = makeInt(a - b); break;
-                        case TOKEN_MUL: result = makeInt(a * b); break;
-                        case TOKEN_INT_DIV: if(b==0){/*err*/} result = makeInt(a / b); break;
-                        case TOKEN_MOD: if(b==0){/*err*/} result = makeInt(a % b); break;
-                        case TOKEN_GREATER: result = makeBoolean(a > b); break;
-                        case TOKEN_GREATER_EQUAL: result = makeBoolean(a >= b); break;
-                        case TOKEN_EQUAL: result = makeBoolean(a == b); break;
-                        case TOKEN_NOT_EQUAL: result = makeBoolean(a != b); break;
-                        case TOKEN_LESS: result = makeBoolean(a < b); break;
-                        case TOKEN_LESS_EQUAL: result = makeBoolean(a <= b); break;
-                        default: fprintf(stderr,"Unhandled op %s for INTEGER\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                    // Promote Byte/Word/Bool to Integer *for dispatching* arithmetic/comparison logic
+                    if (dispatchLeftType == TYPE_BYTE || dispatchLeftType == TYPE_WORD || dispatchLeftType == TYPE_BOOLEAN) {
+                         dispatchLeftType = TYPE_INTEGER;
                     }
-                }
-                else if (left.type == TYPE_STRING || right.type == TYPE_STRING || left.type == TYPE_CHAR || right.type == TYPE_CHAR) {
-                     char tl[2]={0}, tr[2]={0}; const char *ls=left.s_val, *rs=right.s_val;
-                     if(left.type==TYPE_CHAR){tl[0]=left.c_val;ls=tl;} else if(left.type!=TYPE_STRING){/*err*/}
-                     if(right.type==TYPE_CHAR){tr[0]=right.c_val;rs=tr;} else if(right.type!=TYPE_STRING){/*err*/}
-                     if(!ls)ls=""; if(!rs)rs="";
-                     if(op==TOKEN_PLUS){size_t ll=strlen(ls),lr=strlen(rs),bs=ll+lr+1; char* cr=malloc(bs); if(!cr){/*err*/} strcpy(cr,ls);strncat(cr,rs,lr); result=makeString(cr);free(cr);}
-                     else if((op>=TOKEN_GREATER && op<=TOKEN_LESS_EQUAL) || op == TOKEN_NOT_EQUAL || op == TOKEN_EQUAL){ // Corrected condition for comparisons
-                         int cmp=strcmp(ls,rs);
-                         switch(op){
-                             case TOKEN_EQUAL: result=makeBoolean(cmp==0);break;
-                             case TOKEN_NOT_EQUAL: result=makeBoolean(cmp!=0);break; // <<< Handles <>
-                             case TOKEN_LESS: result=makeBoolean(cmp<0);break;
-                             case TOKEN_LESS_EQUAL: result=makeBoolean(cmp<=0);break;
-                             case TOKEN_GREATER: result=makeBoolean(cmp>0);break;
-                             case TOKEN_GREATER_EQUAL: result=makeBoolean(cmp>=0);break;
-                             default: break; // Should not happen if condition above is correct
+                    if (dispatchRightType == TYPE_BYTE || dispatchRightType == TYPE_WORD || dispatchRightType == TYPE_BOOLEAN) {
+                         dispatchRightType = TYPE_INTEGER;
+                    }
+                    // Note: Char can be treated as Integer via Ord() within specific cases below.
+
+                    // --- Stage 2: Handle Operators based on types ---
+
+                    // Handle specific operators first that have unique type rules or don't fit the general pattern easily
+                    if (op == TOKEN_SHL || op == TOKEN_SHR) {
+                        // Requires integer-like types. Use original types for value access.
+                        // Check if original types are integer-compatible (Integer, Byte, Word)
+                        if (!((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&
+                              (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD))) {
+                             fprintf(stderr,"Runtime error: Operands for SHL/SHR must be integer types. Got %s and %s\n", varTypeToString(left.type), varTypeToString(right.type));
+                             freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
                          }
-                     }
-                     else {fprintf(stderr,"Invalid op %s for STRING\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();}
-                }
-                else if (left.type == TYPE_ENUM && right.type == TYPE_ENUM) {
-                     bool match=(!left.enum_val.enum_name || !right.enum_val.enum_name || strcmp(left.enum_val.enum_name, right.enum_val.enum_name)==0);
-                     if(!match && op!=TOKEN_EQUAL && op!=TOKEN_NOT_EQUAL){/*err*/}
-                     switch(op){ case TOKEN_EQUAL: result=makeBoolean(match && left.enum_val.ordinal==right.enum_val.ordinal); break; /*...*/ case TOKEN_LESS: result=makeBoolean(match && left.enum_val.ordinal < right.enum_val.ordinal); break; /*...*/ case TOKEN_NOT_EQUAL: result = makeBoolean(!match || (left.enum_val.ordinal != right.enum_val.ordinal)); break; /*...*/ default: /*err*/ break; }
-                }
-                else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN && (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL)) {
-                     switch(op){ case TOKEN_EQUAL: result=makeBoolean(left.i_val==right.i_val); break; case TOKEN_NOT_EQUAL: result=makeBoolean(left.i_val!=right.i_val); break; default: break;}
-                }
-                else if ((left.type == TYPE_REAL || left.type == TYPE_INTEGER) && (right.type == TYPE_REAL || right.type == TYPE_INTEGER)) {
-                     double a=(left.type==TYPE_REAL)?left.r_val:(double)left.i_val; double b=(right.type==TYPE_REAL)?right.r_val:(double)right.i_val;
-                     switch(op){
-                         case TOKEN_PLUS: result=makeReal(a+b); break; /*...*/
-                         case TOKEN_MINUS: result=makeReal(a-b); break;
-                         case TOKEN_MUL: result=makeReal(a*b); break;
-                         case TOKEN_SLASH: if(b==0.0){/*err*/} result=makeReal(a/b); break;
-                         case TOKEN_GREATER: result=makeBoolean(a>b); break; /*...*/
-                         case TOKEN_GREATER_EQUAL: result=makeBoolean(a>=b); break;
-                         case TOKEN_EQUAL: result=makeBoolean(a==b); break;
-                         case TOKEN_NOT_EQUAL: result=makeBoolean(a!=b); break;
-                         case TOKEN_LESS:
-                             result=makeBoolean(a<b);
-                             #ifdef DEBUG
-                             fprintf(stderr, "[DEBUG EVAL_BINARY_OP] Inside TOKEN_LESS (REAL/Mixed): assigned result.type=%s, result.i_val=%lld\n", varTypeToString(result.type), result.i_val);
-                             #endif
-                             break;
-                         case TOKEN_LESS_EQUAL: result=makeBoolean(a<=b); break;
-                         default: fprintf(stderr,"Unhandled op %s for REAL/Mixed\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                     }
-                }
-                else { // Fallback Error for unhandled type combinations
-                    fprintf(stderr, "Runtime error: Unsupported operand types for binary operator %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
-                    freeValue(&left); freeValue(&right);
-                    EXIT_FAILURE_HANDLER();
-                }
-            } // End the main else block for operators
+                         long long l_int = left.i_val; // Assumes i_val holds byte/word/int value
+                         long long r_int = right.i_val;
 
-            // Free temporary operand values
-            freeValue(&left);
-            freeValue(&right);
+                         // Basic check for negative shift amount
+                         if (r_int < 0) {
+                              fprintf(stderr, "Runtime error: Shift amount cannot be negative.\n");
+                              freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                         }
+                         // Note: More robust checks might involve bit width (e.g., PASCAL_INT_BITS)
 
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EVAL_BINARY_OP] Returning result: Type=%s", varTypeToString(result.type));
-            if (result.type == TYPE_BOOLEAN || result.type == TYPE_INTEGER) fprintf(stderr, ", i_val=%lld\n", result.i_val);
-            else if (result.type == TYPE_REAL) fprintf(stderr, ", r_val=%f\n", result.r_val);
-            else fprintf(stderr, "\n");
-            #endif
-            return result;
+                         if (op == TOKEN_SHL) result = makeInt(l_int << r_int); else result = makeInt(l_int >> r_int);
+                    }
+                    else if (op == TOKEN_IN) {
+                        // Uses original types: Left must be ordinal, Right must be SET
+                        if (right.type != TYPE_SET) { fprintf(stderr,"Runtime error: Right operand of IN must be a set. Got %s\n", varTypeToString(right.type)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
 
-        }
+                        // Check if left operand is an ordinal type
+                        bool left_is_ordinal = (left.type==TYPE_INTEGER || left.type==TYPE_ENUM || left.type==TYPE_CHAR || (left.type==TYPE_STRING && left.s_val && strlen(left.s_val)==1) || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN);
+                        if (!left_is_ordinal) { fprintf(stderr,"Runtime error: Left operand of IN must be an ordinal type. Got %s\n", varTypeToString(left.type)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
 
+                        long long left_ord = 0; // Determine ordinal value based on the original type
+                         if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) left_ord = left.i_val;
+                         else if (left.type == TYPE_ENUM) left_ord = left.enum_val.ordinal;
+                         else if (left.type == TYPE_CHAR) left_ord = left.c_val;
+                         else if (left.type == TYPE_STRING) left_ord = left.s_val[0]; // Assumes single char string checked by left_is_ordinal
+
+                         // Search for the ordinal value in the set
+                         int found = 0;
+                         if (right.set_val.set_values) {
+                             for(int i=0; i < right.set_val.set_size; i++) {
+                                 if(right.set_val.set_values[i] == left_ord) {
+                                     found = 1;
+                                     break;
+                                 }
+                             }
+                         }
+                         result = makeBoolean(found);
+                    }
+                    else if (op == TOKEN_AND || op == TOKEN_OR) {
+                         // Handle bitwise for integer-like types, logical for boolean (using original types)
+                         if ((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&
+                             (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD))
+                         { // Bitwise operation
+                               long long l_int = left.i_val; // Assumes i_val stores value
+                               long long r_int = right.i_val;
+                               if (op == TOKEN_AND) result = makeInt(l_int & r_int); else result = makeInt(l_int | r_int);
+                         }
+                         else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN)
+                         { // Logical operation for booleans
+                               // Note: Pascal has short-circuit evaluation, this simple version evaluates both operands first.
+                               if (op == TOKEN_AND) result = makeBoolean(left.i_val && right.i_val); else result = makeBoolean(left.i_val || right.i_val);
+                         }
+                         else { // Invalid combination for AND/OR
+                             fprintf(stderr, "Runtime error: Invalid operands for %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
+                             freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                         }
+                    }
+                    // --- Stage 3: Handle remaining operators (+, -, *, /, comparisons) using type combination checks ---
+                    else {
+                        // --- Check 1: Integer/Ordinal Operations ---
+                        // Use dispatch types (Byte/Word/Bool promoted to Integer)
+                        // Exclude real division '/'
+                        if (dispatchLeftType == TYPE_INTEGER && dispatchRightType == TYPE_INTEGER && op != TOKEN_SLASH) {
+                            // Get values, treating bool/char as ordinals if needed for comparison/arithmetic
+                            long long a = 0; // Get left value as integer/ordinal
+                             if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) a = left.i_val;
+                             else if (left.type == TYPE_CHAR) a = left.c_val;
+                             else {/* This path shouldn't be reached if dispatchLeftType is INTEGER */ fprintf(stderr,"Internal error: Type mismatch in integer op block (left=%s)\n", varTypeToString(left.type)); EXIT_FAILURE_HANDLER(); }
+
+                            long long b = 0; // Get right value as integer/ordinal
+                             if (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD || right.type == TYPE_BOOLEAN) b = right.i_val;
+                             else if (right.type == TYPE_CHAR) b = right.c_val;
+                             else {/* This path shouldn't be reached if dispatchRightType is INTEGER */ fprintf(stderr,"Internal error: Type mismatch in integer op block (right=%s)\n", varTypeToString(right.type)); EXIT_FAILURE_HANDLER(); }
+
+                            // Perform integer arithmetic or comparison
+                            switch (op) {
+                                case TOKEN_PLUS: result = makeInt(a + b); break;
+                                case TOKEN_MINUS: result = makeInt(a - b); break;
+                                case TOKEN_MUL: result = makeInt(a * b); break;
+                                case TOKEN_INT_DIV: if(b==0){fprintf(stderr,"Runtime error: Division by zero (DIV)\n"); EXIT_FAILURE_HANDLER();} result = makeInt(a / b); break;
+                                case TOKEN_MOD: if(b==0){fprintf(stderr,"Runtime error: Division by zero (MOD)\n"); EXIT_FAILURE_HANDLER();} result = makeInt(a % b); break;
+                                // Comparisons result in Boolean
+                                case TOKEN_GREATER: result = makeBoolean(a > b); break;
+                                case TOKEN_GREATER_EQUAL: result = makeBoolean(a >= b); break;
+                                case TOKEN_EQUAL: result = makeBoolean(a == b); break;
+                                case TOKEN_NOT_EQUAL: result = makeBoolean(a != b); break;
+                                case TOKEN_LESS: result = makeBoolean(a < b); break;
+                                case TOKEN_LESS_EQUAL: result = makeBoolean(a <= b); break;
+                                default: fprintf(stderr,"Unhandled op %s for INTEGER/Ordinal types\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                            }
+                            // Result type is INTEGER or BOOLEAN
+                        }
+                        // --- Check 2: Real Number Operations ---
+                        // Check if REAL is involved (using original types) OR if it's real division '/'
+                        // Operands must be promotable to Real (Int, Byte, Word, Bool, Char)
+                        else if ((left.type == TYPE_REAL || dispatchLeftType == TYPE_INTEGER || left.type == TYPE_CHAR) &&
+                                 (right.type == TYPE_REAL || dispatchRightType == TYPE_INTEGER || right.type == TYPE_CHAR) &&
+                                 (left.type == TYPE_REAL || right.type == TYPE_REAL || op == TOKEN_SLASH))
+                        {
+                             // At least one operand is REAL, OR both are integer-like/char AND operator is '/'
+                             double a = 0.0, b = 0.0; // Promote values to double
+
+                             // Promote Left Operand
+                             if (left.type == TYPE_REAL) a = left.r_val;
+                             else if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) a = (double)left.i_val;
+                             else if (left.type == TYPE_CHAR) a = (double)left.c_val;
+                             else { /* Invalid type for real op */ goto unsupported_operands_label; } // Should not happen based on outer condition
+
+                             // Promote Right Operand
+                             if (right.type == TYPE_REAL) b = right.r_val;
+                             else if (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD || right.type == TYPE_BOOLEAN) b = (double)right.i_val;
+                             else if (right.type == TYPE_CHAR) b = (double)right.c_val;
+                             else { /* Invalid type for real op */ goto unsupported_operands_label; } // Should not happen
+
+                             // Perform real arithmetic or comparison
+                             switch(op){
+                                 case TOKEN_PLUS: result=makeReal(a+b); break; case TOKEN_MINUS: result=makeReal(a-b); break;
+                                 case TOKEN_MUL: result=makeReal(a*b); break; case TOKEN_SLASH: if(b==0.0){fprintf(stderr,"Runtime error: Division by zero (/)\n"); EXIT_FAILURE_HANDLER();} result=makeReal(a/b); break;
+                                 // Comparisons result in Boolean
+                                 case TOKEN_GREATER: result=makeBoolean(a>b); break; case TOKEN_GREATER_EQUAL: result=makeBoolean(a>=b); break;
+                                 case TOKEN_EQUAL: result=makeBoolean(a==b); break; case TOKEN_NOT_EQUAL: result=makeBoolean(a!=b); break;
+                                 case TOKEN_LESS: result=makeBoolean(a<b); break; case TOKEN_LESS_EQUAL: result=makeBoolean(a<=b); break;
+                                 default: fprintf(stderr,"Unhandled op %s for REAL/Mixed types\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
+                             // Result type is REAL or BOOLEAN
+                        }
+                        // --- Check 3: String/Char Operations ---
+                        // Check using original types. Must involve at least one String/Char.
+                        // Operator must be '+' or a comparison operator.
+                        else if ((left.type == TYPE_STRING || left.type == TYPE_CHAR) || (right.type == TYPE_STRING || right.type == TYPE_CHAR))
+                        {
+                             // Ensure the other operand (if not string/char) is compatible for '+' (none) or comparison (string/char only)
+                             bool types_valid_for_op = false;
+                             if (op == TOKEN_PLUS && (left.type == TYPE_STRING || left.type == TYPE_CHAR) && (right.type == TYPE_STRING || right.type == TYPE_CHAR)) {
+                                 types_valid_for_op = true; // Concatenation
+                             } else if ((op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL) &&
+                                        (left.type == TYPE_STRING || left.type == TYPE_CHAR) && (right.type == TYPE_STRING || right.type == TYPE_CHAR)) {
+                                 types_valid_for_op = true; // Comparison
+                             }
+
+                             if (!types_valid_for_op) {
+                                  goto unsupported_operands_label; // Operation not valid for these types
+                             }
+
+                             // --- Perform String/Char Operation ---
+                             char tl_buf[2]={0}, tr_buf[2]={0}; // Buffers for potential char->string conversion
+                             const char *ls = NULL, *rs = NULL;
+
+                             // Get left string pointer or convert char
+                             if(left.type == TYPE_CHAR) { tl_buf[0] = left.c_val; ls = tl_buf; }
+                             else if (left.type == TYPE_STRING) { ls = left.s_val; }
+                             else { /* Should have been caught by types_valid_for_op */ goto unsupported_operands_label; }
+
+                             // Get right string pointer or convert char
+                             if(right.type == TYPE_CHAR) { tr_buf[0] = right.c_val; rs = tr_buf; }
+                             else if (right.type == TYPE_STRING) { rs = right.s_val; }
+                             else { /* Should have been caught by types_valid_for_op */ goto unsupported_operands_label; }
+
+                             // Handle NULL string pointers safely (treat as empty string)
+                             if (!ls) ls = "";
+                             if (!rs) rs = "";
+
+                             if (op == TOKEN_PLUS) { // Concatenation
+                                 size_t len_l = strlen(ls); size_t len_r = strlen(rs);
+                                 size_t buf_size = len_l + len_r + 1;
+                                 char* concat_res = malloc(buf_size);
+                                 if (!concat_res) { fprintf(stderr,"Malloc failed for string concat\n"); EXIT_FAILURE_HANDLER(); }
+                                 strcpy(concat_res, ls); // Copy left part
+                                 strcat(concat_res, rs); // Append right part
+                                 result = makeString(concat_res); // makeString copies it again
+                                 free(concat_res); // Free intermediate buffer
+                             }
+                             else { // Comparison (already checked operator validity)
+                                 int cmp = strcmp(ls, rs);
+                                 switch (op) {
+                                     case TOKEN_EQUAL: result = makeBoolean(cmp == 0); break;
+                                     case TOKEN_NOT_EQUAL: result = makeBoolean(cmp != 0); break;
+                                     case TOKEN_LESS: result = makeBoolean(cmp < 0); break;
+                                     case TOKEN_LESS_EQUAL: result = makeBoolean(cmp <= 0); break;
+                                     case TOKEN_GREATER: result = makeBoolean(cmp > 0); break;
+                                     case TOKEN_GREATER_EQUAL: result = makeBoolean(cmp >= 0); break;
+                                     default: break; // Should not happen
+                                 }
+                             }
+                             // Result type is STRING or BOOLEAN
+                        }
+                        // --- Check 4: Enum/Enum Comparison ---
+                        // Must be the same enum type (approximated by name check), operator must be comparison.
+                        else if (left.type == TYPE_ENUM && right.type == TYPE_ENUM &&
+                                 (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL))
+                        {
+                             bool types_match = (!left.enum_val.enum_name || !right.enum_val.enum_name || strcmp(left.enum_val.enum_name, right.enum_val.enum_name)==0);
+                             // Allow EQ/NE even if types mismatch, but other comparisons require match
+                             if (!types_match && op != TOKEN_EQUAL && op != TOKEN_NOT_EQUAL) {
+                                  fprintf(stderr, "Runtime error: Cannot compare different enum types ('%s' vs '%s') with %s\n", left.enum_val.enum_name?:"?", right.enum_val.enum_name?:"?", tokenTypeToString(op));
+                                  freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                             }
+                             int ord_l = left.enum_val.ordinal; int ord_r = right.enum_val.ordinal;
+                             switch(op){
+                                 case TOKEN_EQUAL: result = makeBoolean(types_match && (ord_l == ord_r)); break; // Only true if types match AND ordinals match
+                                 case TOKEN_NOT_EQUAL: result = makeBoolean(!types_match || (ord_l != ord_r)); break; // True if types mismatch OR ordinals mismatch
+                                 case TOKEN_LESS: result = makeBoolean(types_match && (ord_l < ord_r)); break;
+                                 case TOKEN_LESS_EQUAL: result = makeBoolean(types_match && (ord_l <= ord_r)); break;
+                                 case TOKEN_GREATER: result = makeBoolean(types_match && (ord_l > ord_r)); break;
+                                 case TOKEN_GREATER_EQUAL: result = makeBoolean(types_match && (ord_l >= ord_r)); break;
+                                 default: break; // Should not happen
+                             }
+                             // Result type is BOOLEAN
+                        }
+                        // --- Check 5: Boolean/Boolean Comparison ---
+                        // Only allows EQ and NE. AND/OR handled earlier.
+                        else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN && (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL))
+                        {
+                            switch(op){
+                                case TOKEN_EQUAL: result = makeBoolean(left.i_val == right.i_val); break;
+                                case TOKEN_NOT_EQUAL: result = makeBoolean(left.i_val != right.i_val); break;
+                                default: break; // Should not happen
+                            }
+                            // Result type is BOOLEAN
+                        }
+                        // --- Check 6: ADDED Set Operations ---
+                             else if (left.type == TYPE_SET && right.type == TYPE_SET) {
+                                 switch (op) {
+                                     case TOKEN_PLUS: // Union
+                                         result = setUnion(left, right);
+                                         break;
+                                     case TOKEN_MINUS: // Difference
+                                         result = setDifference(left, right);
+                                         break;
+                                     case TOKEN_MUL: // Intersection
+                                         result = setIntersection(left, right);
+                                         break;
+                                     // Optional: Add set comparisons like =, <>, <=, >= here if needed
+                                     default:
+                                         fprintf(stderr, "Runtime error: Invalid operator '%s' for SET operands.\n", tokenTypeToString(op));
+                                         // No need to free left/right here, happens below
+                                         EXIT_FAILURE_HANDLER(); // Exit on invalid operator for sets
+                                 }
+                                 // Result type is SET (or BOOLEAN for comparisons if added)
+                             }
+                        else {
+        unsupported_operands_label: // Target label for goto from other blocks if needed
+                            fprintf(stderr, "Runtime error: Unsupported operand types for binary operator %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
+                            freeValue(&left); freeValue(&right);
+                            EXIT_FAILURE_HANDLER();
+                        }
+                    } // End else block for general operators (+, -, *, /, comparisons)
+
+                    // Free temporary operand values
+                    freeValue(&left);
+                    freeValue(&right);
+
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG EVAL_BINARY_OP] Returning result: Type=%s", varTypeToString(result.type));
+                    if (result.type == TYPE_BOOLEAN || result.type == TYPE_INTEGER || result.type == TYPE_BYTE || result.type == TYPE_WORD) fprintf(stderr, ", i_val=%lld\n", result.i_val);
+                    else if (result.type == TYPE_REAL) fprintf(stderr, ", r_val=%f\n", result.r_val);
+                    else if (result.type == TYPE_CHAR) fprintf(stderr, ", c_val='%c'\n", result.c_val);
+                    else fprintf(stderr, "\n");
+                    #endif
+                    return result;
+
+                } // End Case AST_BINARY_OP
         case AST_SET: // Add case to handle set evaluation
             return evalSet(node);
         case AST_UNARY_OP: {
@@ -1372,259 +1583,81 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             // The loop checking the flag will handle the exit.
             break; // Break out of the switch statement
         case AST_PROGRAM:
-            GlobalASTRoot = node;
             executeWithScope(node->right, true);
             break;
         case AST_ASSIGN: {
-             // Evaluate the right-hand side expression FIRST.
-             // 'val' might hold heap-allocated data (string, record, array).
-             Value val = eval(node->right);
+             Value rhsValue = eval(node->right); // Evaluate RHS (e.g., cRed -> cRedValue)
 
-             // --- MODIFICATION START: Determine LValue type and handle appropriately ---
+             #ifdef DEBUG
+             if(rhsValue.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] rhsValue evaluated. Name: '%s' (addr=%p)\n", rhsValue.enum_val.enum_name ? rhsValue.enum_val.enum_name : "<NULL>", (void*)rhsValue.enum_val.enum_name);
+             #endif
 
-             if (node->left->type == AST_FIELD_ACCESS) {
-                 // --- Handle Record Field Assignment ---
+             // --- Create another explicit deep copy ---
+             // This copy will be passed to updateSymbol or used for complex assignment
+             Value valueForUpdate = makeCopyOfValue(&rhsValue);
+             #ifdef DEBUG
+             if(valueForUpdate.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] valueForUpdate (extra copy) created. Name: '%s' (addr=%p)\n", valueForUpdate.enum_val.enum_name ? valueForUpdate.enum_val.enum_name : "<NULL>", (void*)valueForUpdate.enum_val.enum_name);
+             #endif
+             // --- End explicit deep copy ---
 
-                 // 1. Find the base variable symbol for the record
-                 AST* baseVarNode = node->left->left; // Start with node left of '.'
-                 // Traverse up if the left side is complex (e.g., array[i].field)
-                 // This simplified traversal might need enhancement for deeper nesting.
-                 while (baseVarNode && baseVarNode->type != AST_VARIABLE) {
-                     if (baseVarNode->left) baseVarNode = baseVarNode->left;
-                     else {
-                         fprintf(stderr, "Runtime error: Cannot find base variable for field assignment.\n");
-                         freeValue(&val); // Free RHS value before exiting
-                         EXIT_FAILURE_HANDLER();
-                     }
-                 }
-                  if (!baseVarNode || baseVarNode->type != AST_VARIABLE || !baseVarNode->token) { // Added token check
-                     fprintf(stderr, "Runtime error: Could not determine base variable for field assignment.\n");
-                     freeValue(&val); // Free RHS value before exiting
-                     EXIT_FAILURE_HANDLER();
-                 }
-
-                 Symbol *recSym = lookupSymbol(baseVarNode->token->value);
-                 if (!recSym || !recSym->value || recSym->value->type != TYPE_RECORD) {
-                     fprintf(stderr, "Runtime error: Base variable '%s' is not a record for field assignment.\n", baseVarNode->token->value);
-                     freeValue(&val); // Free RHS value before exiting
-                     EXIT_FAILURE_HANDLER();
-                 }
-                  if (recSym->is_const) { // Check if base record is constant
-                      fprintf(stderr, "Runtime error: Cannot assign to field of constant record '%s'.\n", recSym->name);
-                      freeValue(&val);
+             // Check if target is simple variable or complex lvalue
+             if (node->left->type == AST_VARIABLE) {
+                 // Simple variable assignment
+                  #ifdef DEBUG
+                  fprintf(stderr, "[DEBUG ASSIGN] Calling updateSymbol for '%s' with valueForUpdate...\n", node->left->token->value);
+                  #endif
+                 // Pass the *new explicit copy* to updateSymbol
+                 updateSymbol(node->left->token->value, valueForUpdate);
+             } else {
+                  // Complex LValue (Record field, array element)
+                  Value* targetPtr = resolveLValueToPtr(node->left);
+                  if (!targetPtr) {
+                      // Error handled by resolve, clean up values before exit
+                      freeValue(&rhsValue);
+                      freeValue(&valueForUpdate); // Free the extra copy too
                       EXIT_FAILURE_HANDLER();
                   }
 
-                 // 2. Find the target FieldValue within the *symbol's* record data
-                 FieldValue *targetField = recSym->value->record_val;
-                  const char *targetFieldName = node->left->token ? node->left->token->value : NULL; // Field name from the AST_FIELD_ACCESS node's token
-                  if (!targetFieldName) { /* Should not happen if parser is correct */ EXIT_FAILURE_HANDLER(); }
+                  // --- Perform assignment directly to targetPtr ---
+                  // Use valueForUpdate as the source, apply promotions if needed
+                  Value finalValue = valueForUpdate; // Start with the extra copy
+                  bool needToFreeFinal = false;    // Flag if promotion creates *another* value
 
-                 while (targetField) {
-                     if (targetField->name && strcmp(targetField->name, targetFieldName) == 0) {
-                         break; // Found the field
-                     }
-                     targetField = targetField->next;
-                 }
+                  // <<<< Placeholder: INSERT TYPE CHECKING / PROMOTION LOGIC HERE >>>>
+                  // This logic modifies 'finalValue' if promotion is needed, setting needToFreeFinal=true.
+                  // E.g., if targetPtr->type == TYPE_REAL and finalValue.type == TYPE_INTEGER:
+                  //      finalValue = makeReal((double)finalValue.i_val); needToFreeFinal = true;
+                  // (Ensure compatibility checks prevent invalid assignments)
 
-                 if (!targetField) {
-                     fprintf(stderr, "Runtime error: Field '%s' not found in record '%s' for assignment.\n", targetFieldName, recSym->name);
-                     freeValue(&val); // Free RHS value before exiting
-                     EXIT_FAILURE_HANDLER();
-                 }
+                  // Free old value pointed to by targetPtr
+                  freeValue(targetPtr);
 
-                 // 3. Check type compatibility (using targetField->value.type and val.type)
-                 if (targetField->value.type != val.type) {
-                     // Allow compatible assignments like INTEGER to REAL, CHAR to STRING etc.
-                     bool compatible = false;
-                     if (targetField->value.type == TYPE_REAL && val.type == TYPE_INTEGER) compatible = true;
-                     else if (targetField->value.type == TYPE_STRING && val.type == TYPE_CHAR) compatible = true; // Allow char to string
-                     else if (targetField->value.type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val)==1) compatible = true; // Allow single-char string to char
-                     // Add other compatible pairs as needed (e.g., Integer to Byte/Word if desired)
+                  // Assign deep copy of finalValue (which might be the promoted value or still valueForUpdate)
+                  // to the location pointed to by targetPtr
+                  *targetPtr = makeCopyOfValue(&finalValue);
 
-                     if (!compatible) {
-                          fprintf(stderr, "Runtime error: Type mismatch assigning to field '%s'. Expected %s, got %s.\n",
-                                  targetFieldName, varTypeToString(targetField->value.type), varTypeToString(val.type));
-                          freeValue(&val); // Free RHS value before exiting
-                          EXIT_FAILURE_HANDLER();
-                     }
-                 }
-
-                 // 4. Free the *current* value stored in the field BEFORE assigning/copying the new one.
-                 freeValue(&targetField->value); // Frees heap data held by the current field value (e.g., old string)
-
-                 // 5. Assign the new value (handle complex types with deep copies)
-                 if (val.type == TYPE_STRING) {
-                     // Use makeString which handles strdup and NULL checks
-                     targetField->value = makeString(val.s_val);
-                     // Free the temporary RHS value 'val' *after* its content is copied
-                     freeValue(&val);
-                 } else if (val.type == TYPE_RECORD) {
-                     targetField->value = makeRecord(copyRecord(val.record_val)); // copyRecord performs deep copy
-                     freeValue(&val); // Free the temporary RHS value 'val'
-                 } else if (val.type == TYPE_ARRAY) {
-                     targetField->value = makeCopyOfValue(&val); // makeCopyOfValue performs deep copy
-                     freeValue(&val); // Free the temporary RHS value 'val'
-                 } else {
-                     // For simple types (int, real, char, bool, enum, etc.),
-                     // direct assignment of the struct is sufficient (shallow copy of Value struct).
-                     targetField->value = val;
-                      // For simple types, 'val' is just a struct copy, no deep data to free via freeValue(&val).
-                      // Type promotion (like int to real) should be handled above during assignment.
-                      // Set the correct type if promotion occurred.
-                      if (targetField->value.type == TYPE_REAL && val.type == TYPE_INTEGER) {
-                          targetField->value.r_val = (double)val.i_val; // Assign converted value
-                          targetField->value.type = TYPE_REAL; // Ensure type is REAL
-                      }
-                      // Handle char -> string assignment type
-                      else if (targetField->value.type == TYPE_STRING && val.type == TYPE_CHAR) {
-                            // makeString already handled this, type should be STRING
-                            targetField->value.type = TYPE_STRING;
-                      }
-                       // Handle single-char string -> char assignment type
-                       else if (targetField->value.type == TYPE_CHAR && val.type == TYPE_STRING) {
-                            targetField->value.c_val = val.s_val[0]; // Assign char value
-                            targetField->value.type = TYPE_CHAR; // Ensure type is CHAR
-                            // We still need to free the temporary val from eval
-                            freeValue(&val);
-                       }
-
-                 }
-
-             } else if (node->left->type == AST_ARRAY_ACCESS) {
-                  // --- Handle Array Element Assignment ---
-
-                  // 1. Find the base variable symbol for the array/string
-                  AST* baseVarNodeArr = node->left->left; // Start with node left of '['
-                  // Simplified traversal (improve if needed for complex bases like record.array[i])
-                  while(baseVarNodeArr && baseVarNodeArr->type != AST_VARIABLE) {
-                      if (baseVarNodeArr->left) baseVarNodeArr = baseVarNodeArr->left;
-                      else { /* Error */ fprintf(stderr, "Runtime error: Cannot find base variable for array/string assignment.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
+                  // Free the potentially promoted 'finalValue' if it's different from 'valueForUpdate'
+                  if (needToFreeFinal) {
+                      freeValue(&finalValue);
                   }
-                  if (!baseVarNodeArr || baseVarNodeArr->type != AST_VARIABLE || !baseVarNodeArr->token) { /* Error */ fprintf(stderr, "Runtime error: Could not determine base variable for array/string assignment.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-
-                  Symbol *sym = lookupSymbol(baseVarNodeArr->token->value);
-                  if (!sym || !sym->value || (sym->value->type != TYPE_ARRAY && sym->value->type != TYPE_STRING)) {
-                      fprintf(stderr, "Runtime error: Base variable '%s' is not an array or string for assignment.\n", baseVarNodeArr->token->value);
-                      freeValue(&val); EXIT_FAILURE_HANDLER();
-                  }
-                   if (sym->is_const) { // Check if base array/string is constant
-                       fprintf(stderr, "Runtime error: Cannot assign to element of constant '%s'.\n", sym->name);
-                       freeValue(&val); EXIT_FAILURE_HANDLER();
-                   }
-
-
-                  // 2. Handle String Index Assignment
-                  if (sym->value->type == TYPE_STRING) {
-                      if (node->left->child_count != 1) { fprintf(stderr, "Runtime error: String assignment requires exactly one index.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-
-                      Value idxVal = eval(node->left->children[0]);
-                      if(idxVal.type != TYPE_INTEGER) { fprintf(stderr, "Runtime error: String index must be an integer.\n"); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-                      long long idx = idxVal.i_val;
-
-                      int len = (sym->value->s_val) ? (int)strlen(sym->value->s_val) : 0;
-                      // Check bounds (Pascal uses 1-based indexing)
-                      if (idx < 1 || idx > len) {
-                          // Allow assigning to position len+1 only if assigning a non-empty char/string? Standard Pascal differs.
-                          // Delphi/FPC might allow extending. For simplicity, error for now if index > len.
-                           dumpASTFromRoot(node); dumpSymbolTable();
-                          fprintf(stderr, "Runtime error: String index %lld out of bounds [1..%d] for assignment.\n", idx, len);
-                          freeValue(&val); EXIT_FAILURE_HANDLER();
-                      }
-
-                      char char_to_assign = '\0';
-                      if (val.type == TYPE_CHAR) {
-                          char_to_assign = val.c_val;
-                      } else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) { // Allow single-char string
-                          char_to_assign = val.s_val[0];
-                      } else {
-                          fprintf(stderr, "Runtime error: Assignment to string index requires a char or single-character string.\n");
-                          freeValue(&val); EXIT_FAILURE_HANDLER();
-                      }
-
-                      // Ensure string is mutable (should be if not const)
-                      if (!sym->value->s_val) { /* Should not happen if initialized */ }
-                      else { sym->value->s_val[idx - 1] = char_to_assign; } // Assign char
-
-                      freeValue(&val); // Free the temporary RHS value
-
-                  }
-                  // 3. Handle Array Element Assignment
-                  else if (sym->value->type == TYPE_ARRAY) {
-                      if (!node->left->children || node->left->child_count != sym->value->dimensions) {
-                           fprintf(stderr, "Runtime error: Incorrect number of indices for array '%s'. Expected %d, got %d.\n", sym->name, sym->value->dimensions, node->left->child_count);
-                           freeValue(&val); EXIT_FAILURE_HANDLER();
-                      }
-
-                      // Calculate index offset
-                      int *indices = malloc(sizeof(int) * sym->value->dimensions);
-                      if (!indices) { /* Mem error */ freeValue(&val); EXIT_FAILURE_HANDLER(); }
-                      for (int i = 0; i < node->left->child_count; i++) {
-                          Value idxVal = eval(node->left->children[i]);
-                          if (idxVal.type != TYPE_INTEGER) { /* Type error */ free(indices); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-                          indices[i] = (int)idxVal.i_val;
-                      }
-                      int offset = computeFlatOffset(sym->value, indices); // Use symbol's bounds
-
-                      // Bounds check offset
-                      int total_size = 1;
-                      for (int i = 0; i < sym->value->dimensions; i++) { total_size *= (sym->value->upper_bounds[i] - sym->value->lower_bounds[i] + 1); }
-                      if (offset < 0 || offset >= total_size) { /* Bounds error */ fprintf(stderr, "Runtime error: Array index out of bounds during assignment (offset %d, size %d).\n", offset, total_size); free(indices); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-
-                      // Check type compatibility (optional but recommended)
-                      VarType elementType = sym->value->element_type;
-                      if (elementType != val.type) {
-                          // Add compatibility checks if needed (e.g., int to real)
-                          bool compatible = false;
-                           if (elementType == TYPE_REAL && val.type == TYPE_INTEGER) compatible = true;
-                          // Add more...
-                          if (!compatible) {
-                              fprintf(stderr, "Runtime error: Type mismatch assigning to array element. Expected %s, got %s.\n", varTypeToString(elementType), varTypeToString(val.type));
-                              free(indices); freeValue(&val); EXIT_FAILURE_HANDLER();
-                          }
-                           // Perform conversion if compatible but different (e.g., int to real)
-                           if (elementType == TYPE_REAL && val.type == TYPE_INTEGER) {
-                               val.r_val = (double)val.i_val;
-                               val.type = TYPE_REAL;
-                           }
-                      }
-
-                      // Free existing element value BEFORE assigning new one
-                      freeValue(&sym->value->array_val[offset]);
-
-                      // Assign new value (deep copy complex types)
-                      if (val.type == TYPE_STRING || val.type == TYPE_RECORD || val.type == TYPE_ARRAY) {
-                          sym->value->array_val[offset] = makeCopyOfValue(&val);
-                          freeValue(&val); // Free temporary RHS value as its content was copied
-                      } else {
-                          sym->value->array_val[offset] = val; // Simple type struct copy
-                      }
-                      free(indices);
-                  }
-
-             } else if (node->left->type == AST_VARIABLE) {
-                 // --- Handle Simple Variable Assignment ---
-                 Symbol *sym = lookupSymbol(node->left->token->value);
-                 if (!sym) { /* Error */ fprintf(stderr, "Runtime error: variable '%s' not declared.\n", node->left->token->value); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-                  if (sym->is_const) { /* Error */ fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n", sym->name); freeValue(&val); EXIT_FAILURE_HANDLER(); }
-
-                 // Use updateSymbol which handles type checking, freeing old, copying new
-                 updateSymbol(sym->name, val);
-
-                 // Free the temporary RHS value AFTER updateSymbol has potentially copied its contents
-                 freeValue(&val);
-
-             } else {
-                  // Invalid LValue type
-                  fprintf(stderr, "Runtime error: Invalid lvalue node type in assignment: %s\n", astTypeToString(node->left->type));
-                  freeValue(&val); // Free RHS value before exiting
-                  EXIT_FAILURE_HANDLER();
+                  // valueForUpdate itself will be freed below.
              }
 
-             // --- MODIFICATION END ---
 
-             // assign_end label removed
-             break; // Break from the main switch statement for AST_ASSIGN
+             // Free the original RHS value returned by eval()
+             #ifdef DEBUG
+             if(rhsValue.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] Freeing original rhsValue (Name addr %p)\n", (void*)rhsValue.enum_val.enum_name);
+             #endif
+             freeValue(&rhsValue);
+
+             // Free the explicit deep copy we made ('valueForUpdate')
+              #ifdef DEBUG
+             if(valueForUpdate.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] Freeing valueForUpdate (extra copy) (Name addr %p)\n", (void*)valueForUpdate.enum_val.enum_name);
+             #endif
+             freeValue(&valueForUpdate);
+
+
+             break;
          } // End case AST_ASSIGN
         case AST_CASE: {
                    // Evaluate the case expression
@@ -2226,7 +2259,12 @@ Value makeCopyOfValue(Value *src) {
             }
             break;
         case TYPE_ENUM:
+            // Perform deep copy for the enum name string
             v.enum_val.enum_name = src->enum_val.enum_name ? strdup(src->enum_val.enum_name) : NULL;
+            if (src->enum_val.enum_name && !v.enum_val.enum_name) {
+                 fprintf(stderr, "Memory allocation failed in makeCopyOfValue (enum name strdup)\n");
+                 EXIT_FAILURE_HANDLER();
+            }
             break;
         case TYPE_RECORD: {
             FieldValue *head = NULL, *tail = NULL;
@@ -2269,3 +2307,206 @@ Value makeCopyOfValue(Value *src) {
 
     return v;
 }
+
+Value* resolveLValueToPtr(AST* lvalueNode) {
+    if (!lvalueNode) {
+        fprintf(stderr, "Runtime error: Cannot resolve NULL lvalue node.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    switch (lvalueNode->type) {
+        case AST_VARIABLE: {
+            Symbol* sym = lookupSymbol(lvalueNode->token->value); // Handles not found error
+            if (sym->is_const) {
+                 fprintf(stderr, "Runtime error: Cannot modify constant symbol '%s'.\n", sym->name);
+                 EXIT_FAILURE_HANDLER();
+            }
+            if (!sym->value) {
+                 fprintf(stderr, "Runtime error: Symbol '%s' has NULL value pointer.\n", sym->name);
+                 EXIT_FAILURE_HANDLER();
+            }
+            return sym->value; // Return pointer to the symbol's value storage
+        }
+
+        case AST_ARRAY_ACCESS: {
+            // Recursively resolve the base of the array access (e.g., 'myArray' or 'myRecord.myArray')
+            Value* baseValuePtr = resolveLValueToPtr(lvalueNode->left);
+            if (!baseValuePtr) { /* Error handled in recursive call */ EXIT_FAILURE_HANDLER(); }
+
+            // Check if the resolved base is actually an array or string
+            if (baseValuePtr->type == TYPE_ARRAY) {
+                // --- Array Element Access ---
+                if (!baseValuePtr->array_val) { /* Error: Array not initialized */ }
+                if (lvalueNode->child_count != baseValuePtr->dimensions) { /* Error: Index count mismatch */ }
+
+                // Calculate indices
+                int* indices = malloc(sizeof(int) * baseValuePtr->dimensions);
+                if (!indices) { /* Mem Error */ }
+                for (int i = 0; i < lvalueNode->child_count; i++) {
+                    Value idxVal = eval(lvalueNode->children[i]); // Eval index expressions
+                    if (idxVal.type != TYPE_INTEGER) { /* Index Type Error */ free(indices); freeValue(&idxVal); EXIT_FAILURE_HANDLER(); }
+                    indices[i] = (int)idxVal.i_val;
+                    freeValue(&idxVal); // Free temp index value
+                }
+
+                // Calculate offset and check bounds
+                int offset = computeFlatOffset(baseValuePtr, indices);
+                int total_size = 1;
+                for (int i = 0; i < baseValuePtr->dimensions; i++) { total_size *= (baseValuePtr->upper_bounds[i] - baseValuePtr->lower_bounds[i] + 1); }
+                 if (offset < 0 || offset >= total_size) { /* Bounds Error */ free(indices); EXIT_FAILURE_HANDLER(); }
+
+                free(indices); // Free indices array after calculating offset
+
+                // Return pointer to the element within the array's value storage
+                return &(baseValuePtr->array_val[offset]);
+
+            } else if (baseValuePtr->type == TYPE_STRING) {
+                // --- String Character Access (Complicated for LValue pointer) ---
+                // Returning a direct pointer isn't feasible as strings are contiguous chars.
+                // Assignment to string chars needs special handling within the assignment logic itself.
+                fprintf(stderr, "Runtime error: Cannot get direct pointer for assignment to string character index.\n");
+                EXIT_FAILURE_HANDLER(); // Or handle differently in assignment logic
+                 return NULL; // Should not be reached
+            } else {
+                fprintf(stderr, "Runtime error: Attempted array/string access on non-array/string type (%s).\n", varTypeToString(baseValuePtr->type));
+                EXIT_FAILURE_HANDLER();
+            }
+            break; // Keep compiler happy
+        }
+
+        case AST_FIELD_ACCESS: {
+            // Recursively resolve the base of the field access (e.g., 'myRecord' or 'myArray[i]')
+            Value* baseValuePtr = resolveLValueToPtr(lvalueNode->left);
+             if (!baseValuePtr) { /* Error handled in recursive call */ EXIT_FAILURE_HANDLER(); }
+
+            // Check if the resolved base is actually a record
+            if (baseValuePtr->type != TYPE_RECORD) {
+                 fprintf(stderr, "Runtime error: Field access on non-record type (%s).\n", varTypeToString(baseValuePtr->type));
+                 EXIT_FAILURE_HANDLER();
+            }
+             if (!baseValuePtr->record_val) {
+                  fprintf(stderr, "Runtime error: Record accessed before initialization or after being freed.\n");
+                  EXIT_FAILURE_HANDLER();
+             }
+
+            // Find the specific field by name
+            const char* targetFieldName = lvalueNode->token ? lvalueNode->token->value : NULL;
+            if (!targetFieldName) { /* Invalid AST node error */ }
+
+            FieldValue* currentField = baseValuePtr->record_val;
+            while (currentField) {
+                if (currentField->name && strcmp(currentField->name, targetFieldName) == 0) {
+                    // Found the field, return pointer to its Value struct
+                    return &(currentField->value);
+                }
+                currentField = currentField->next;
+            }
+
+            // Field not found
+            fprintf(stderr, "Runtime error: Field '%s' not found in record.\n", targetFieldName);
+            EXIT_FAILURE_HANDLER();
+            break; // Keep compiler happy
+        }
+
+        default:
+            fprintf(stderr, "Runtime error: Invalid lvalue node type (%s) for assignment target resolution.\n", astTypeToString(lvalueNode->type));
+            EXIT_FAILURE_HANDLER();
+    }
+    return NULL; // Should not be reached
+}
+
+Value setUnion(Value setA, Value setB) {
+    // Basic check: Ensure both are sets
+    if (setA.type != TYPE_SET || setB.type != TYPE_SET) {
+        fprintf(stderr, "Internal Error: Non-set type passed to setUnion.\n");
+        return makeVoid(); // Or handle error more gracefully
+    }
+    // TODO: Add check for base type compatibility if needed later
+
+    Value result = makeValueForType(TYPE_SET, NULL); // Creates empty set structure {size=0, values=NULL, capacity=0}
+    result.max_length = setA.set_val.set_size + setB.set_val.set_size; // Initial capacity guess
+
+    if (result.max_length > 0) {
+        result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
+        if (!result.set_val.set_values) {
+            fprintf(stderr, "Malloc failed for set union result\n");
+            result.max_length = 0; // Reset capacity on failure
+            EXIT_FAILURE_HANDLER(); // Exit on critical memory failure
+        }
+    } else {
+        result.set_val.set_values = NULL; // Handle case where both inputs are empty
+    }
+    result.set_val.set_size = 0; // Explicitly set initial size
+
+
+    // Add elements from setA
+    if (setA.set_val.set_values) {
+        for (int i = 0; i < setA.set_val.set_size; i++) {
+            addOrdinalToResultSet(&result, setA.set_val.set_values[i]); // Handles duplicates & realloc
+        }
+    }
+    // Add elements from setB
+     if (setB.set_val.set_values) {
+        for (int i = 0; i < setB.set_val.set_size; i++) {
+            addOrdinalToResultSet(&result, setB.set_val.set_values[i]); // Handles duplicates & realloc
+        }
+     }
+
+    return result; // Return the new set Value
+}
+
+// Calculates the Difference (A - B)
+Value setDifference(Value setA, Value setB) {
+    if (setA.type != TYPE_SET || setB.type != TYPE_SET) { /* Error */ return makeVoid();}
+    // TODO: Base type check?
+
+    Value result = makeValueForType(TYPE_SET, NULL);
+    result.max_length = setA.set_val.set_size; // Max possible size is size of A
+    if (result.max_length > 0) {
+         result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
+         if (!result.set_val.set_values) { /* Malloc error */ result.max_length=0; EXIT_FAILURE_HANDLER(); }
+     } else {
+         result.set_val.set_values = NULL;
+     }
+    result.set_val.set_size = 0;
+
+    // Add elements from setA only if they are NOT in setB
+    if (setA.set_val.set_values) {
+        for (int i = 0; i < setA.set_val.set_size; i++) {
+            if (!setContainsOrdinal(&setB, setA.set_val.set_values[i])) {
+                // Assuming addOrdinalToResultSet handles capacity correctly
+                addOrdinalToResultSet(&result, setA.set_val.set_values[i]);
+            }
+        }
+    }
+    return result;
+}
+
+// Calculates the Intersection (A * B)
+Value setIntersection(Value setA, Value setB) {
+    if (setA.type != TYPE_SET || setB.type != TYPE_SET) { /* Error */ return makeVoid();}
+    // TODO: Base type check?
+
+    Value result = makeValueForType(TYPE_SET, NULL);
+    // Max possible size is the smaller of the two input sets
+    result.max_length = (setA.set_val.set_size < setB.set_val.set_size) ? setA.set_val.set_size : setB.set_val.set_size;
+     if (result.max_length > 0) {
+         result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
+          if (!result.set_val.set_values) { /* Malloc error */ result.max_length=0; EXIT_FAILURE_HANDLER(); }
+     } else {
+         result.set_val.set_values = NULL;
+     }
+    result.set_val.set_size = 0;
+
+    // Add elements from setA only if they ARE ALSO in setB
+    if (setA.set_val.set_values) {
+        for (int i = 0; i < setA.set_val.set_size; i++) {
+            if (setContainsOrdinal(&setB, setA.set_val.set_values[i])) {
+                // Assuming addOrdinalToResultSet handles capacity and duplicates within result
+                 addOrdinalToResultSet(&result, setA.set_val.set_values[i]);
+            }
+        }
+    }
+    return result;
+}
+

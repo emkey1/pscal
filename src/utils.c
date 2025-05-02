@@ -478,14 +478,88 @@ Value makeValueForType(VarType type, AST *type_def) {
         case TYPE_REAL:
             v.r_val = 0.0;
             break;
-        case TYPE_STRING:
-            v.s_val = strdup("");
-            if (!v.s_val) { // Check strdup
-                 fprintf(stderr, "FATAL: strdup(\"\") failed in makeValueForType\n");
-                 EXIT_FAILURE_HANDLER();
+        case TYPE_STRING: {
+            v.s_val = NULL;      // Initialize pointer to NULL
+            v.max_length = -1; // Default to dynamic string (-1 or 0 can indicate dynamic)
+
+            // Check if a type definition AST node was provided
+            if (type_def != NULL) {
+                AST* actualTypeDef = type_def; // Start with the provided node
+
+                // Resolve the type if it's a reference to another defined type
+                if (actualTypeDef->type == AST_TYPE_REFERENCE) {
+                    // Assuming lookupType finds the actual definition AST
+                    actualTypeDef = lookupType(actualTypeDef->token->value);
+                     if (!actualTypeDef) {
+                          // Handle error: referenced type not found. Default to dynamic string.
+                          fprintf(stderr, "Warning: Could not resolve type reference '%s' during string initialization. Defaulting to dynamic.\n",
+                                   type_def->token ? type_def->token->value : "<unknown>");
+                          actualTypeDef = NULL; // Prevent using invalid pointer below
+                     }
+                }
+
+                // Now check if the resolved definition represents 'string[N]'
+                // This relies on the parser creating an AST_VARIABLE node for 'string'
+                // and putting the length AST (e.g., AST_NUMBER) in its 'right' child.
+                if (actualTypeDef &&
+                    actualTypeDef->type == AST_VARIABLE &&
+                    actualTypeDef->token &&
+                    strcasecmp(actualTypeDef->token->value, "string") == 0 &&
+                    actualTypeDef->right != NULL)
+                {
+                    AST* lenNode = actualTypeDef->right; // Node representing the length
+                    Value lenVal = makeInt(0);          // Temp Value to hold evaluated length
+                    bool length_ok = false;            // Flag to track if length was valid
+
+                    // Currently, only support simple integer constants for length
+                    // (Evaluating complex constant expressions here can be risky)
+                    if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
+                        // Use atoll for safety, although length shouldn't exceed int range typically
+                        long long parsed_len = atoll(lenNode->token->value);
+                        if (parsed_len > 0 && parsed_len <= 2147483647) { // Check positive and reasonable upper bound
+                            lenVal = makeInt(parsed_len);
+                            length_ok = true;
+                        } else {
+                             fprintf(stderr, "Warning: Fixed string length constant %lld is out of valid range (1..%d). Defaulting to dynamic string.\n", parsed_len, 2147483647);
+                        }
+                    } else {
+                         fprintf(stderr, "Warning: Fixed string length is not a simple integer constant. Defaulting to dynamic string.\n");
+                    }
+
+                    // If we got a valid positive length, set up the fixed-size string
+                    if (length_ok) {
+                        v.max_length = (int)lenVal.i_val; // Store the fixed length
+                        #ifdef DEBUG
+                        fprintf(stderr, "[DEBUG makeValueForType] Setting fixed string length to %d\n", v.max_length);
+                        #endif
+
+                        // Allocate buffer for fixed size + null terminator
+                        // Use calloc for zero-initialization (ensures empty string initially)
+                        v.s_val = calloc(v.max_length + 1, 1);
+                        if (!v.s_val) {
+                            fprintf(stderr, "FATAL: calloc failed for fixed string buffer in makeValueForType (size %d)\n", v.max_length + 1);
+                            EXIT_FAILURE_HANDLER();
+                        }
+                    }
+                    // If length wasn't valid (not const int, <=0), v.max_length remains -1 (dynamic)
+                }
+                 // If actualTypeDef wasn't 'string[N]', v.max_length remains -1
+            } // End if(type_def != NULL)
+
+            // If, after all checks, it's still determined to be dynamic (max_length == -1),
+            // allocate storage for an empty dynamic string.
+            if (v.max_length == -1) {
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG makeValueForType] Initializing as dynamic empty string.\n");
+                 #endif
+                 v.s_val = strdup(""); // Use strdup for empty string
+                 if (!v.s_val) {
+                     fprintf(stderr, "FATAL: strdup(\"\") failed for dynamic string in makeValueForType\n");
+                     EXIT_FAILURE_HANDLER();
+                 }
             }
-            v.max_length = -1; // Default to dynamic string
-            break;
+            break; // End case TYPE_STRING
+        } // End block for case TYPE_STRING
         case TYPE_CHAR:
             v.c_val = '\0'; // Default char value (null char)
             break;
@@ -522,15 +596,23 @@ Value makeValueForType(VarType type, AST *type_def) {
             v.mstream = createMStream(); // Assumes createMStream handles its errors
             break;
         case TYPE_ENUM:
-            // Initialize enum fields
-            v.enum_val.ordinal = 0; // Default to the first ordinal value (usually 0)
-            // Get the type name from the definition node if possible
-            v.enum_val.enum_name = (type_def && type_def->token && type_def->token->value) ? strdup(type_def->token->value) : strdup("<unknown_enum>");
-            if (!v.enum_val.enum_name) { // Check strdup
-                 fprintf(stderr, "FATAL: strdup failed for enum_name in makeValueForType\n");
-                 EXIT_FAILURE_HANDLER();
-            }
-            break;
+             // Initialize enum fields
+             v.enum_val.ordinal = 0; // Default to the first ordinal value (usually 0)
+             // Get the type name from the definition node if possible
+             v.enum_val.enum_name = (type_def && type_def->token && type_def->token->value) ? strdup(type_def->token->value) : strdup("<unknown_enum>");
+              // <<< ADD DEBUG PRINT HERE >>>
+              #ifdef DEBUG
+              fprintf(stderr, "[DEBUG MAKEVAL ENUM] Initializing enum. TypeDef Token: '%s'. strdup result: '%s' (addr=%p)\n",
+                      (type_def && type_def->token && type_def->token->value) ? type_def->token->value : "<NO_TYPEDEF_TOKEN>",
+                      v.enum_val.enum_name ? v.enum_val.enum_name : "<NULL>",
+                      (void*)v.enum_val.enum_name);
+              #endif
+              // <<< END DEBUG PRINT >>>
+             if (!v.enum_val.enum_name) { // Check strdup
+                  fprintf(stderr, "FATAL: strdup failed for enum_name in makeValueForType\n");
+                  EXIT_FAILURE_HANDLER();
+             }
+             break;
         case TYPE_BYTE:
             v.i_val = 0;
             break;

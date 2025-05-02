@@ -1036,6 +1036,52 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         if(node) setTypeAST(node, TYPE_ARRAY); // Set type if parse succeeded
         // --- End ARRAY logic ---
     }
+    else if (typeToken->type == TOKEN_SET) {
+         #ifdef DEBUG
+         fprintf(stderr, "[DEBUG typeSpecifier] Detected SET\n");
+         #endif
+         eat(parser, TOKEN_SET); // Consume 'set'
+
+         if (!parser->current_token || parser->current_token->type != TOKEN_OF) {
+             errorParser(parser, "Expected 'of' after 'set'");
+             return NULL; // Or return NOOP node
+         }
+         eat(parser, TOKEN_OF); // Consume 'of'
+
+         // Parse the base type (must be an ordinal type)
+         // Allow anonymous base types? Standard Pascal usually requires named ordinal types here.
+         // Let's allow anonymous for now by passing allowAnonymous=1.
+         AST *baseTypeNode = typeSpecifier(parser, 1);
+         if (!baseTypeNode || baseTypeNode->type == AST_NOOP) {
+             errorParser(parser, "Invalid base type specified for set");
+             return NULL; // Or return NOOP node
+         }
+
+         // --- Type Check: Ensure base type is ordinal ---
+         // (This check ideally happens during semantic analysis, but a basic check here is good)
+         VarType baseVarType = baseTypeNode->var_type;
+         bool isOrdinal = (baseVarType == TYPE_INTEGER || baseVarType == TYPE_CHAR ||
+                           baseVarType == TYPE_BOOLEAN || baseVarType == TYPE_ENUM ||
+                           baseVarType == TYPE_BYTE || baseVarType == TYPE_WORD);
+
+         if (!isOrdinal) {
+             errorParser(parser, "Set base type must be an ordinal type (Integer, Char, Boolean, Enum, Byte, Word)");
+             freeAST(baseTypeNode); // Free the invalid base type node
+             return NULL; // Or return NOOP node
+         }
+         // --- End Type Check ---
+
+         // Create a node to represent the SET type.
+         // We can reuse AST_ARRAY_TYPE conceptually, storing the base type in 'right'.
+         // Or create a dedicated AST_SET_TYPE if preferred. Let's use AST_ARRAY_TYPE for now.
+         node = newASTNode(AST_ARRAY_TYPE, NULL); // Using ARRAY_TYPE node structure
+         setTypeAST(node, TYPE_SET);             // *** Set VarType to TYPE_SET ***
+         setRight(node, baseTypeNode);           // Store base type node in 'right'
+
+         #ifdef DEBUG
+         fprintf(stderr, "[DEBUG typeSpecifier] Created SET type node. Base type: %s\n", varTypeToString(baseTypeNode->var_type));
+         #endif
+     }
     else if (typeToken->type == TOKEN_IDENTIFIER) {
         char *typeName = typeToken->value;
         char *typeNameCopy = strdup(typeName); // <<< FIX: Copy the type name string
@@ -1164,7 +1210,7 @@ AST *parseEnumDefinition(Parser *parser, Token* enumTypeNameToken) {
         // ---
         valueNode->i_val = ordinal++;
         setTypeAST(valueNode, TYPE_ENUM);
-
+        
         addChild(node, valueNode); // Add value node as child of AST_ENUM_TYPE node
 
         // --- Symbol Table Handling (using copied token's value) ---
@@ -2132,21 +2178,13 @@ AST *expression(Parser *parser) {
         eat(parser, opOriginal->type); // Eat original token
 
         AST *right;
-        if (opCopied->type == TOKEN_IN) {
-             right = parseSetConstructor(parser); // Expects set literal '[...]'
-             if (!right || right->type == AST_NOOP) {
-                 // parseSetConstructor should report errors
-                 // errorParser(parser, "Expected set literal after IN"); // Already reported
-                 freeToken(opCopied); if(node) freeAST(node); return newASTNode(AST_NOOP, NULL); // Cleanup
-             }
-        } else {
-            right = simpleExpression(parser); // Parse RHS simple expression
-            if (!right || right->type == AST_NOOP) {
-                // simpleExpression should report errors
-                // errorParser(parser, "Failed to parse right operand for relational operator"); // Already reported
-                freeToken(opCopied); if(node) freeAST(node); return newASTNode(AST_NOOP, NULL); // Cleanup
-            }
-        }
+        // Parse the right-hand side using simpleExpression for ALL relational operators, including IN.
+         right = simpleExpression(parser);
+         if (!right || right->type == AST_NOOP) {
+             // simpleExpression should report errors
+             // errorParser(parser, "Failed to parse right operand for relational operator"); // Already reported
+             freeToken(opCopied); if(node) freeAST(node); return newASTNode(AST_NOOP, NULL); // Cleanup
+         }
 
         // Create binary operation node using the copied token
         AST *new_node = newASTNode(AST_BINARY_OP, opCopied);

@@ -7,21 +7,28 @@
 
 static Keyword keywords[] = {
     {"and", TOKEN_AND}, {"array", TOKEN_ARRAY}, {"begin", TOKEN_BEGIN},
+    {"break", TOKEN_BREAK}, // Added break here alphabetically
     {"case", TOKEN_CASE}, {"const", TOKEN_CONST}, {"do", TOKEN_DO},
     {"div", TOKEN_INT_DIV}, {"downto", TOKEN_DOWNTO}, {"else", TOKEN_ELSE},
-    {"end", TOKEN_END}, {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
+    {"end", TOKEN_END}, {"enum", TOKEN_ENUM}, // Added enum
+    {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
     {"function", TOKEN_FUNCTION}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
+    {"in", TOKEN_IN}, // Added IN
     {"initialization", TOKEN_INITIALIZATION},
     {"interface", TOKEN_INTERFACE}, {"mod", TOKEN_MOD}, {"not", TOKEN_NOT},
-    {"of", TOKEN_OF}, {"or", TOKEN_OR}, {"program", TOKEN_PROGRAM},
-    {"procedure", TOKEN_PROCEDURE}, {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
-    {"record", TOKEN_RECORD}, {"repeat", TOKEN_REPEAT}, {"then", TOKEN_THEN},
+    {"of", TOKEN_OF}, {"or", TOKEN_OR},
+    {"out", TOKEN_OUT}, // Added OUT
+    {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
+    {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
+    {"record", TOKEN_RECORD}, {"repeat", TOKEN_REPEAT},
+    {"set", TOKEN_SET}, // <--- ADD THIS LINE (alphabetical position)
+    {"shl", TOKEN_SHL}, // Added SHL
+    {"shr", TOKEN_SHR}, // Added SHR
+    {"then", TOKEN_THEN},
     {"to", TOKEN_TO}, {"true", TOKEN_TRUE}, {"type", TOKEN_TYPE},
     {"unit", TOKEN_UNIT}, {"until", TOKEN_UNTIL}, {"uses", TOKEN_USES},
     {"var", TOKEN_VAR}, {"while", TOKEN_WHILE}, {"write", TOKEN_WRITE},
-    {"writeln", TOKEN_WRITELN}, {"enum", TOKEN_ENUM}, {"in", TOKEN_IN},
-    {"break", TOKEN_BREAK}, {"out", TOKEN_OUT}, {"shl", TOKEN_SHL},
-    {"shr", TOKEN_SHR}
+    {"writeln", TOKEN_WRITELN}
 };
 
 #define NUM_KEYWORDS (sizeof(keywords)/sizeof(Keyword))

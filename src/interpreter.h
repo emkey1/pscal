@@ -20,6 +20,8 @@ FieldValue *createEmptyRecord(AST *recordType);
 // Arrays
 int computeFlatOffset(Value *array, int *indices);
 
+Value* resolveLValueToPtr(AST* lvalueNode); // Returns pointer to the Value struct to be modified
+
 // Program flow
 typedef enum {
     EXEC_NORMAL,    // Continue execution normally
@@ -29,6 +31,9 @@ typedef enum {
     // Add EXEC_HALT if you want to handle halt this way too
 } ExecStatus;
 
-extern AST *GlobalASTRoot;
+// Various set related stuff
+Value setUnion(Value setA, Value setB);
+Value setDifference(Value setA, Value setB);
+Value setIntersection(Value setA, Value setB);
 
 #endif // INTERPRETER_H

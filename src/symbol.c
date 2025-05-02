@@ -19,7 +19,7 @@
 // Helper to search only in the global symbol table.
 Symbol *lookupGlobalSymbol(const char *name) {
     Symbol *current = globalSymbols;
-    DEBUG_PRINT("[DEBUG] lookupGlobalSymbol: Searching for '%s'. Starting list walk (globalSymbols=%p).\n", name, (void*)current);
+    //DEBUG_PRINT("[DEBUG] lookupGlobalSymbol: Searching for '%s'. Starting list walk (globalSymbols=%p).\n", name, (void*)current);
     
     while (current) {
         // --- Add Diagnostic Check ---
@@ -30,19 +30,19 @@ Symbol *lookupGlobalSymbol(const char *name) {
              EXIT_FAILURE_HANDLER(); // Or handle more gracefully
         }
         // --- End Diagnostic Check ---
-        DEBUG_PRINT("[DEBUG] lookupGlobalSymbol: Checking node %p, name '%s' against '%s'. next=%p\n",
-                      (void*)current,
-                      current->name ? current->name : "<NULL_NAME>", // Safety check
-                      name,
-                      (void*)current->next);
+        //DEBUG_PRINT("[DEBUG] lookupGlobalSymbol: Checking node %p, name '%s' against '%s'. next=%p\n",
+      //                (void*)current,
+       //               current->name ? current->name : "<NULL_NAME>", // Safety check
+        //              name,
+         //             (void*)current->next);
 
         if (strcmp(current->name, name) == 0) { // Original line 41
 #ifdef DEBUG
             // Original line 43 (where crash likely occurs reading current->type for debug)
-            DEBUG_PRINT("[DEBUG] lookupGlobalSymbol: found '%s', type=%s, value_ptr=%p\n",
-                        name,
-                        varTypeToString(current->type), // Accessing type here
-                        (void*)current->value); // Print value pointer for debugging
+     //       DEBUG_PRINT("[DEBUG] lookupGlobalSymbol: found '%s', type=%s, value_ptr=%p\n",
+          //              name,
+           //             varTypeToString(current->type), // Accessing type here
+            //            (void*)current->value); // Print value pointer for debugging
             // Safely print value details only if current->value is not NULL
             if (current->value) {
                  // ... (keep existing switch statement for printing value details) ...
@@ -177,8 +177,18 @@ void updateSymbol(const char *name, Value val) {
     // This switch operates on the TYPE OF THE SYMBOL being assigned TO (sym->type)
     switch (sym->type) {
         case TYPE_INTEGER:
-            // Assign INTEGER or REAL (truncated) to INTEGER
-            sym->value->i_val = (val.type == TYPE_INTEGER) ? val.i_val : (long long)val.r_val;
+            // Allow assignment from Integer, Real (truncated), Byte, Word, Boolean, Char (ordinal)
+             if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) {
+                 sym->value->i_val = val.i_val; // Copy integer value (0/1 for bool)
+             } else if (val.type == TYPE_CHAR) {
+                 sym->value->i_val = (long long)val.c_val; // Assign ordinal value of char
+             } else if (val.type == TYPE_REAL) {
+                 sym->value->i_val = (long long)val.r_val; // Truncate real
+             } else {
+                  // Type mismatch if none of the above
+                  fprintf(stderr, "Runtime error: Type mismatch assigning to INTEGER. Cannot assign %s.\n", varTypeToString(val.type));
+                  EXIT_FAILURE_HANDLER();
+             }
             break;
         case TYPE_REAL:
             // Assign REAL or INTEGER (promoted) to REAL
@@ -408,24 +418,52 @@ void updateSymbol(const char *name, Value val) {
         {
             // Target symbol is an ENUM
             if (val.type == TYPE_ENUM) {
-                // Assigning ENUM to ENUM (existing logic)
-                if (!sym->value->enum_val.enum_name || sym->value->enum_val.enum_name[0] == '\0') {
-                    if (sym->value->enum_val.enum_name) free(sym->value->enum_val.enum_name);
-                    sym->value->enum_val.enum_name = val.enum_val.enum_name ? strdup(val.enum_val.enum_name) : NULL;
-                } else {
-                    if (!val.enum_val.enum_name || strcmp(sym->value->enum_val.enum_name, val.enum_val.enum_name) != 0) {
-                        fprintf(stderr, "Runtime error: Enumerated type mismatch. Expected '%s', got '%s'.\n", sym->value->enum_val.enum_name, val.enum_val.enum_name ? val.enum_val.enum_name : "<NULL>");
-                        EXIT_FAILURE_HANDLER();
-                    }
+                // Assigning ENUM to ENUM
+
+                // --- MODIFICATION: Force strdup approach ---
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG UPDATE ENUM] Forcing strdup for symbol '%s'. Incoming name: '%s'\n",
+                        sym->name, val.enum_val.enum_name ? val.enum_val.enum_name : "<NULL>");
+                #endif
+
+                // 1. Free the existing name in the symbol's value struct, if any.
+                //    Check pointer before freeing for safety.
+                if (sym->value && sym->value->enum_val.enum_name) {
+                     #ifdef DEBUG
+                     fprintf(stderr, "[DEBUG UPDATE ENUM] Freeing old name '%s' at %p for symbol '%s'\n",
+                             sym->value->enum_val.enum_name, (void*)sym->value->enum_val.enum_name, sym->name);
+                     #endif
+                    free(sym->value->enum_val.enum_name);
+                    sym->value->enum_val.enum_name = NULL; // Avoid dangling pointer
                 }
-                // Assign ordinal value (safe even if names didn't match but we didn't exit)
+
+                // 2. Duplicate the name from the source value ('val').
+                //    Check source pointer before strdup.
+                sym->value->enum_val.enum_name = val.enum_val.enum_name ? strdup(val.enum_val.enum_name) : NULL;
+
+                // 3. Check if strdup failed (if source was not NULL)
+                if (val.enum_val.enum_name && !sym->value->enum_val.enum_name) {
+                     fprintf(stderr, "FATAL: strdup failed for enum name in updateSymbol (forced copy)\n");
+                     EXIT_FAILURE_HANDLER();
+                 }
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG UPDATE ENUM] Symbol '%s' new name pointer: %p ('%s')\n",
+                         sym->name, (void*)sym->value->enum_val.enum_name,
+                         sym->value->enum_val.enum_name ? sym->value->enum_val.enum_name : "<NULL>");
+                 #endif
+                 // --- End Force strdup approach ---
+
+
+                // Assign ordinal value (always do this if types are compatible)
                 sym->value->enum_val.ordinal = val.enum_val.ordinal;
-                sym->value->type = TYPE_ENUM; // Ensure type is set
-                
+                sym->value->type = TYPE_ENUM; // Ensure type is correct
+
             } else if (val.type == TYPE_INTEGER) {
-                // <<< FIX: Assigning INTEGER to ENUM
-                // Treat integer as the ordinal value.
-                // Optional: Add bounds check if type definition info is available
+                // Assigning INTEGER to ENUM (logic remains the same)
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG UPDATE ENUM] Assigning Integer %lld as ordinal to Enum '%s'\n", val.i_val, sym->name);
+                #endif
+                // Add bounds check if possible
                 AST* typeDef = sym->type_def;
                 if (typeDef && typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
                 if (typeDef && typeDef->type == AST_ENUM_TYPE) {
@@ -434,19 +472,18 @@ void updateSymbol(const char *name, Value val) {
                         fprintf(stderr, "Runtime error: Integer value %lld out of range for enum type '%s'.\n", val.i_val, sym->value->enum_val.enum_name ? sym->value->enum_val.enum_name : sym->name);
                         EXIT_FAILURE_HANDLER();
                     }
-                } // Else: Cannot perform bounds check if typeDef isn't available/correct
-                
+                }
                 sym->value->enum_val.ordinal = (int)val.i_val; // Assign ordinal
                 sym->value->type = TYPE_ENUM; // Ensure type is correct
-                // Note: enum_name remains unchanged as we only got an integer
-                
+                // enum_name remains unchanged when assigning integer
             } else {
                 // Assigning other types to ENUM is an error
-                fprintf(stderr, "Runtime error: type mismatch in enum assignment. Expected TYPE_ENUM or TYPE_INTEGER, got %s.\n", varTypeToString(val.type));
+                fprintf(stderr, "Runtime error: type mismatch in enum assignment for '%s'. Expected TYPE_ENUM or TYPE_INTEGER, got %s.\n", sym->name, varTypeToString(val.type));
                 EXIT_FAILURE_HANDLER();
             }
             break; // End case TYPE_ENUM
-        }
+        } // End TYPE_ENUM block
+
         default:
             fprintf(stderr, "Runtime error: unhandled type (%s) in updateSymbol assignment.\n", varTypeToString(sym->type));
             EXIT_FAILURE_HANDLER();
@@ -500,63 +537,53 @@ Symbol *lookupSymbolIn(Symbol *env, const char *name) {
 void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     if (!name || name[0] == '\0') {
         fprintf(stderr, "[ERROR] Attempted to insert global symbol with invalid name.\n");
-        // Optionally dump call stack or more context if possible in debug mode
-        return; // Or EXIT_FAILURE_HANDLER(); depending on desired strictness
+        return; // Or EXIT_FAILURE_HANDLER();
     }
-    
+
+    // Check for duplicates (optional: add warning/error if desired)
     if (lookupGlobalSymbol(name)) {
-        //fprintf(stderr, "[ERROR] Duplicate global symbol '%s'\n", name); // For now, silently refuse to do something stupid
-        return;
+        // fprintf(stderr, "[Warning] Duplicate global symbol '%s'\n", name);
+        return; // Silently ignore duplicate for now
     }
+
+    // Allocate Symbol struct
     Symbol *new_symbol = malloc(sizeof(Symbol));
     if (!new_symbol) {
-        fprintf(stderr, "Memory allocation error in insertGlobalSymbol\n");
+        fprintf(stderr, "Memory allocation error in insertGlobalSymbol (Symbol struct)\n");
         EXIT_FAILURE_HANDLER();
     }
-    new_symbol->name = strdup(name);
-    new_symbol->type = type;
-    new_symbol->is_alias = false;
-    new_symbol->is_const = false;
-    new_symbol->is_local_var = false;
-    new_symbol->next = NULL;
-    new_symbol->value = calloc(1, sizeof(Value)); // calloc zero-initializes
-    new_symbol->type_def = type_def; // Store type definition link
 
-    if (!new_symbol->value) { // Check calloc result
-        fprintf(stderr, "Memory allocation error (calloc) in insertGlobalSymbol\n");
-        free(new_symbol->name);
+    // Duplicate name
+    new_symbol->name = strdup(name);
+    if (!new_symbol->name) { // Check strdup result
+        fprintf(stderr, "Memory allocation error (strdup name) in insertGlobalSymbol\n");
         free(new_symbol);
         EXIT_FAILURE_HANDLER();
     }
 
-    // Initialize value based on type
-    new_symbol->value->type = type; // Set the type first
+    // Set basic fields
+    new_symbol->type = type;
+    new_symbol->is_alias = false;
+    new_symbol->is_const = false;
+    new_symbol->is_local_var = false; // Globals aren't local vars
+    new_symbol->next = NULL;
+    new_symbol->type_def = type_def; // Store type definition link
 
-    if (type == TYPE_STRING) {
-        *new_symbol->value = makeString(""); // Explicitly initialize string
+    // --- CORRECTED Initialization ---
+    // Allocate the Value struct itself
+    new_symbol->value = malloc(sizeof(Value));
+    if (!new_symbol->value) {
+        fprintf(stderr, "Memory allocation error (malloc Value) in insertGlobalSymbol\n");
+        free(new_symbol->name);
+        free(new_symbol);
+        EXIT_FAILURE_HANDLER();
     }
-    // --- ADDED INITIALIZATION FOR ENUM ---
-    else if (type == TYPE_ENUM) {
-        // Initialize enum fields
-        new_symbol->value->enum_val.ordinal = 0; // Default to the first ordinal value
-        // Attempt to get the enum type name from the type definition AST
-        if (type_def && type_def->token && type_def->token->value) {
-             new_symbol->value->enum_val.enum_name = strdup(type_def->token->value);
-             if (!new_symbol->value->enum_val.enum_name) {
-                 fprintf(stderr, "Memory allocation error (strdup enum_name) in insertGlobalSymbol\n");
-                 EXIT_FAILURE_HANDLER(); // Handle allocation failure
-             }
-        } else {
-             // Fallback if type_def name isn't available (should ideally not happen for enums)
-             new_symbol->value->enum_val.enum_name = strdup("<unknown_enum>");
-             fprintf(stderr, "Warning: Could not determine enum type name for global symbol '%s'.\n", name);
-        }
-    }
-    // --- END OF ADDED INITIALIZATION ---
-    // Add initializations for other types like RECORD, ARRAY if needed here
-    // based on how makeValueForType works for local symbols.
+    // Initialize the contents of the Value struct using the helper function
+    // This function handles default values and fixed-string allocation correctly.
+    *(new_symbol->value) = makeValueForType(type, type_def);
+    // --- END CORRECTED Initialization ---
 
-    // Link into symbol table
+    // Link into global symbol table
     if (!globalSymbols) {
         globalSymbols = new_symbol;
     } else {
@@ -568,147 +595,74 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     }
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG] insertGlobalSymbol('%s', type=%s)\n", name, varTypeToString(type));
+    fprintf(stderr, "[DEBUG] insertGlobalSymbol('%s', type=%s, max_len=%d)\n",
+            name, varTypeToString(type), new_symbol->value ? new_symbol->value->max_length : -2);
 #endif
 }
 
-// src/symbol.c (Complete and Corrected)
-
 Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is_variable_declaration) {
-    // First, check for an existing local symbol (case-insensitive check)
+    if (!name || name[0] == '\0') {
+         fprintf(stderr, "[ERROR] Attempted to insert local symbol with invalid name.\n");
+         return NULL; // Return NULL on error
+    }
+
+    // Check for existing local symbol (case-insensitive)
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG] insertLocalSymbol: Checking for existing local symbol named '%s'\n", name ? name : "<NULL_NAME>");
+    fprintf(stderr, "[DEBUG] insertLocalSymbol: Checking for existing local symbol named '%s'\n", name);
 #endif
     Symbol *existing = localSymbols;
     while (existing) {
-        if (existing->name == NULL) {
-             fprintf(stderr, "CRITICAL ERROR in insertLocalSymbol: Encountered symbol node with NULL name in local list!\n");
-             EXIT_FAILURE_HANDLER();
-        }
-        // Use strcasecmp for case-insensitive comparison if needed, or strcmp for case-sensitive
-        if (strcasecmp(existing->name, name) == 0) {
+        if (existing->name && strcasecmp(existing->name, name) == 0) { // Added NULL check for existing->name
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG] insertLocalSymbol: Symbol '%s' already exists in local scope, returning existing.\n", name);
 #endif
-            // If symbol exists, maybe update its type/value or return?
-            // Current behavior: Return existing. Decide if re-declaration is an error.
-            return existing;
+            return existing; // Symbol already exists in this scope
         }
         existing = existing->next;
     }
 
     // Create a new symbol if it doesn't exist locally
     Symbol *sym = malloc(sizeof(Symbol));
-    if (!sym) { // Check malloc for Symbol struct
-        fprintf(stderr, "FATAL: malloc failed for Symbol struct in insertLocalSymbol for '%s'\n", name ? name : "<NULL_NAME>");
+    if (!sym) {
+        fprintf(stderr, "FATAL: malloc failed for Symbol struct in insertLocalSymbol for '%s'\n", name);
         EXIT_FAILURE_HANDLER();
     }
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG] insertLocalSymbol('%s', type=%s, is_var_decl=%d)\n", name ? name : "<NULL_NAME>", varTypeToString(type), is_variable_declaration);
+    fprintf(stderr, "[DEBUG] insertLocalSymbol('%s', type=%s, is_var_decl=%d)\n", name, varTypeToString(type), is_variable_declaration);
 #endif
 
     // Duplicate and lowercase the name for consistent storage/lookup
-    char *lowerName = name ? strdup(name) : NULL;
-    if (name && !lowerName) { // Check strdup for name
+    char *lowerName = strdup(name);
+    if (!lowerName) {
         fprintf(stderr, "FATAL: strdup failed for name in insertLocalSymbol for '%s'\n", name);
-        free(sym); // Free partially allocated symbol
+        free(sym);
         EXIT_FAILURE_HANDLER();
     }
-    if (lowerName) {
-        for (int i = 0; lowerName[i]; i++) {
-            lowerName[i] = (char)tolower((unsigned char)lowerName[i]);
-        }
-    }
+    // Convert to lowercase (optional, depends on desired lookup behavior)
+    // for (int i = 0; lowerName[i]; i++) {
+    //     lowerName[i] = (char)tolower((unsigned char)lowerName[i]);
+    // }
     sym->name = lowerName; // Store the processed name
 
     // Assign type information
     sym->type = type;
     sym->type_def = type_def; // Store link to the AST type definition node
 
-    // Allocate the Value struct
+    // Allocate and initialize the Value struct using the helper function
     sym->value = malloc(sizeof(Value));
-    if (!sym->value) { // Check malloc for Value struct
-        fprintf(stderr, "FATAL: malloc failed for Value struct in insertLocalSymbol for '%s'\n", sym->name ? sym->name : "<NULL_NAME>");
-        if (sym->name) free(sym->name);
+    if (!sym->value) {
+        fprintf(stderr, "FATAL: malloc failed for Value struct in insertLocalSymbol for '%s'\n", sym->name);
+        free(sym->name);
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
+    *(sym->value) = makeValueForType(type, type_def); // Initialize using helper
 
-    // Initialize the Value struct based on its type using makeValueForType
-    // makeValueForType should handle its own internal allocations and checks
-    *sym->value = makeValueForType(type, type_def);
-
-    // Set flags for the symbol
-    sym->is_alias = false; // Default, change later for VAR parameters etc.
-    sym->is_local_var = is_variable_declaration; // Mark if it's a VAR decl or parameter
-    sym->is_const = false; // Local symbols are not const by default
-
-    // *** Handling for Fixed-Length Strings (Integrated from original file content) ***
-    // Note: This logic assumes a specific AST structure for fixed strings.
-    // It checks if the type is STRING and if a type_def AST node is provided
-    // that allows extracting a length.
-    if (type == TYPE_STRING && type_def != NULL) {
-        AST* actualTypeDef = type_def;
-        // Resolve reference if needed
-        if (actualTypeDef->type == AST_TYPE_REFERENCE) {
-            actualTypeDef = actualTypeDef->right; // Assuming right points to the actual definition
-        }
-
-        // Check if the actual type definition indicates a fixed length
-        // This depends heavily on how typeSpecifier parses 'string[len]'
-        // Assuming the AST_VARIABLE node for 'string' might have the length node in its 'right' child
-        if (actualTypeDef && actualTypeDef->type == AST_VARIABLE && strcasecmp(actualTypeDef->token->value, "string") == 0 && actualTypeDef->right != NULL)
-        {
-            AST* lenNode = actualTypeDef->right; // The node representing the length
-            Value lenVal; // Need a temporary Value struct to hold evaluation result
-
-            // Evaluate the length expression - CAUTION: Calling eval during parsing/symbol insertion can be risky
-            // if the expression isn't guaranteed to be a simple constant.
-            // A safer approach might be to resolve this during a later semantic pass.
-            // For now, assuming it works for constant integer lengths:
-            // lenVal = eval(lenNode); // <<< Original call - commented out due to risk
-            
-            // SAFER ALTERNATIVE: Assume length node is AST_NUMBER with integer const
-            if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
-                lenVal = makeInt(atoll(lenNode->token->value)); // Use atoll for long long
-            } else {
-                // If it's not a simple integer constant, treat length as invalid for now
-                 fprintf(stderr, "Warning: Fixed string length for '%s' is not a simple integer constant. Treating as dynamic.\n", name);
-                 lenVal = makeInt(0); // Indicate invalid length
-            }
-
-
-            if (lenVal.type == TYPE_INTEGER && lenVal.i_val > 0) {
-                sym->value->max_length = (int)lenVal.i_val; // Store fixed length
-#ifdef DEBUG
-                fprintf(stderr, "[DEBUG] insertLocalSymbol: Set fixed string length for '%s' to %d\n", name, sym->value->max_length);
-#endif
-                // Re-allocate buffer for fixed size + null terminator
-                if(sym->value->s_val) free(sym->value->s_val); // Free initial "" from makeValueForType
-                sym->value->s_val = calloc(sym->value->max_length + 1, 1); // Use calloc for zero-init
-                if (!sym->value->s_val) { // Check calloc
-                    fprintf(stderr, "FATAL: calloc failed for fixed string buffer in insertLocalSymbol for '%s'\n", name);
-                    if(sym->name) free(sym->name);
-                    free(sym->value); // Free Value struct
-                    free(sym); // Free Symbol struct
-                    EXIT_FAILURE_HANDLER();
-                }
-            } else {
-                 // Warning already printed if not a simple integer const
-                 if (lenVal.type != TYPE_INTEGER || lenVal.i_val <= 0) {
-                      fprintf(stderr, "Warning: Invalid fixed string length specification (value <= 0 or not integer) for '%s'. Treating as dynamic.\n", name);
-                 }
-                 sym->value->max_length = 0; // Treat as dynamic if length is invalid
-                 // Keep the dynamically allocated "" from makeValueForType
-            }
-        } else {
-            sym->value->max_length = 0; // Not a fixed-length string declaration
-        }
-    } else {
-         sym->value->max_length = 0; // Default for non-string types
-    }
-    // *** End Fixed-Length String Handling ***
+    // Set flags
+    sym->is_alias = false;
+    sym->is_local_var = is_variable_declaration;
+    sym->is_const = false;
 
     // Link the new symbol into the head of the local symbol list
     sym->next = localSymbols;
