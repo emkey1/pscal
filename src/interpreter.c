@@ -1900,97 +1900,115 @@ void executeWithScope(AST *node, bool is_global_scope)  {
 
         case AST_WRITE:
         case AST_WRITELN: {
-             FILE *output = stdout; // Assuming stdout for now
-             int startIndex = 0;
-             // Note: File redirection for Write/WriteLn needs more robust handling
-             //       if you want colors written to files (usually not desired).
-             //       This implementation assumes console output via stdout.
+            FILE *output = stdout; // Default to console
+            int startIndex = 0;     // Start processing args from index 0 by default
+            Value fileVal;          // To hold evaluated file variable if present
+            bool isFileOp = false;  // Flag to track if writing to file
 
-             // --- Apply current text attributes BEFORE printing arguments ---
-             char escape_sequence[64] = "\x1B["; // Start escape sequence buffer
-             char code_str[10];
-             bool first_attr = true;
-
-             // 1. Handle Bold/Intensity (only applies if NOT using 256 color FG)
-             if (!gCurrentColorIsExt && gCurrentTextBold) {
-                 strcat(escape_sequence, "1");
-                 first_attr = false;
-             } else {
-                 // Use "22" to explicitly turn OFF bold if needed? Usually 0 does it.
-                 // strcat(escape_sequence, "22"); // Optional: Force non-bold
-                 // first_attr = false;
-             }
-
-             // 2. Handle Foreground Color
-             if (!first_attr) strcat(escape_sequence, ";"); // Separator
-             if (gCurrentColorIsExt) {
-                 snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-             } else {
-                 snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
-             }
-             strcat(escape_sequence, code_str);
-             first_attr = false;
-
-             // 3. Handle Background Color
-             if (!first_attr) strcat(escape_sequence, ";"); // Separator
-             if (gCurrentBgIsExt) {
-                 snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-             } else {
-                 snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
-             }
-             strcat(escape_sequence, code_str);
-
-             // 4. Terminate sequence
-             strcat(escape_sequence, "m");
-            // <<< --- ADD DEBUG BLOCK START --- >>>
+            // --- START: Original File Variable Check Logic ---
+            // Check if the first argument *might* be a file variable
+            if (node->child_count > 0 && node->children[0] != NULL) { // Added NULL check for child node
+                 // Check if it *looks* like a variable that could hold a file
+                 if (node->children[0]->type == AST_VARIABLE) {
+                     // Evaluate the first argument ONLY to check its type and get f_val
+                     fileVal = eval(node->children[0]); // Evaluate children[0]
+                     if (fileVal.type == TYPE_FILE) {
+                         if (fileVal.f_val != NULL) { // Check if file is open
+                            output = fileVal.f_val; // <<< Use f_val from the evaluated Value
+                            startIndex = 1;         // <<< Skip file var when printing args
+                            isFileOp = true;
 #ifdef DEBUG
-           fprintf(stderr, "[DEBUG WRITE] Generated Sequence: '");
-           // Print escape sequence safely for debugging (replace non-printables like ESC)
-           for (int k = 0; escape_sequence[k] != '\0'; ++k) {
-               if (escape_sequence[k] == '\x1B') fprintf(stderr, "<ESC>"); // Show ESC clearly
-               else if (isprint(escape_sequence[k])) fputc(escape_sequence[k], stderr);
-               else fprintf(stderr, "\\x%02X", (unsigned char)escape_sequence[k]); // Show other non-printables as hex
-           }
-           fprintf(stderr, "'\n");
+                            fprintf(stderr, "[DEBUG WRITE] Detected File Operation. Target FILE*: %p\n", (void*)output);
 #endif
-            // <<< --- ADD DEBUG BLOCK END --- >>>
+                         } else {
+                            // File variable provided but not open - Error or Warning?
+                            // Standard Pascal might raise an IO error here.
+                            fprintf(stderr, "Runtime Warning: File variable passed to write(ln) is not open.\n");
+                            // Keep output = stdout, startIndex = 0 - try to print all args to console?
+                            // Or maybe skip output entirely? Let's print all to console for now.
+                            isFileOp = false; // Treat as console op despite file var
+                            freeValue(&fileVal); // Free the temporary fileVal (since we're not using its f_val)
+                         }
+                     } else {
+                         // First arg wasn't TYPE_FILE, free the temp value from eval
+                         freeValue(&fileVal);
+                     }
+                 }
+                 // If first arg is not AST_VARIABLE, it cannot be a file variable, proceed with console output
+            }
+            // --- END: Original File Variable Check Logic ---
 
-             // 5. Print the combined sequence *once* before processing args
-             printf("%s", escape_sequence);
-             // No fflush here, let it buffer with the actual content
 
-             // --- Loop through arguments to print (existing logic) ---
-             for (int i = startIndex; i < node->child_count; i++) {
-                 AST *argNode = node->children[i];
-                 if (!argNode) continue;
-                 Value val = eval(argNode);
+            // --- Apply ANSI color codes ONLY if writing to stdout ---
+            if (!isFileOp) { // <<< Only apply colors if output is stdout
+#ifdef DEBUG
+                fprintf(stderr, "<< Write Handler Start (stdout): Reading FG=%d, Ext=%d, BG=%d, BGExt=%d, Bold=%d\n",
+                        gCurrentTextColor, gCurrentColorIsExt,
+                        gCurrentTextBackground, gCurrentBgIsExt,
+                        gCurrentTextBold);
+                fflush(stderr);
+#endif
+                char escape_sequence[64] = "\x1B[";
+                char code_str[10];
+                bool first_attr = true;
 
-                 // Print argument value based on type
+                // 1. Handle Bold/Intensity
+                if (!gCurrentColorIsExt && gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                // 2. Handle Foreground Color
+                if (!first_attr) strcat(escape_sequence, ";");
+                if (gCurrentColorIsExt) { snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor); }
+                else { snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold)); }
+                strcat(escape_sequence, code_str);
+                first_attr = false;
+                // 3. Handle Background Color
+                strcat(escape_sequence, ";");
+                if (gCurrentBgIsExt) { snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground); }
+                else { snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground)); }
+                strcat(escape_sequence, code_str);
+                // 4. Terminate sequence
+                strcat(escape_sequence, "m");
+                // 5. Print sequence to stdout
+                printf("%s", escape_sequence);
+                fflush(stdout); // Flush color code immediately might help
+            } // End if (!isFileOp) for colors
+
+            // --- Loop through arguments to print (start index adjusted for file ops) ---
+            for (int i = startIndex; i < node->child_count; i++) {
+                AST *argNode = node->children[i];
+                if (!argNode) continue;
+                Value val = eval(argNode); // Evaluate data argument
+
+                // Use 'output' (either stdout or the file pointer)
+                // (Keep the existing printing logic based on val.type using fprintf/fputc)
                  if (argNode->type == AST_FORMATTED_EXPR) {
+                     // Print formatted string contained in 'val' (eval handles formatting)
                      if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");
                      else fprintf(output, "[formatted_eval_error]");
-                 } else {
-                      if (val.type == TYPE_INTEGER) fprintf(output, "%lld", val.i_val);
-                      else if (val.type == TYPE_REAL) fprintf(output, "%f", val.r_val);
-                      else if (val.type == TYPE_BOOLEAN) fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
-                      else if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");
-                      else if (val.type == TYPE_CHAR) fputc(val.c_val, output);
-                      else if (val.type == TYPE_ENUM) fprintf(output, "%s(ord %d)", val.enum_val.enum_name ? val.enum_val.enum_name : "?", val.enum_val.ordinal); // Print ordinal too
-                      // Add cases for other printable types (BYTE, WORD?)
-                      else fprintf(output, "[unprintable_type_%d]", val.type); // More specific unprintable message
+                 } else { // Standard printing
+                     if (val.type == TYPE_INTEGER) fprintf(output, "%lld", val.i_val);
+                     else if (val.type == TYPE_REAL) fprintf(output, "%f", val.r_val);
+                     else if (val.type == TYPE_BOOLEAN) fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
+                     else if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");
+                     else if (val.type == TYPE_CHAR) fputc(val.c_val, output);
+                     else if (val.type == TYPE_ENUM) fprintf(output, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "?");
+                     // Do not print file vars or other unprintables when writing data
+                     else if (val.type != TYPE_FILE) fprintf(output, "[unprintable_type_%d]", val.type);
                  }
-                 freeValue(&val); // Free the evaluated value
-             } // End loop
+                 freeValue(&val); // Free the evaluated data argument
+            } // End loop through data arguments
 
-             // Handle WriteLn
-             if (node->type == AST_WRITELN) {
-                 // Print newline. Crucially, DO NOT reset color here.
-                 // Let the color persist until explicitly changed or NormVideo is called.
-                 fprintf(output, "\n");
-             }
-             fflush(output); // Flush after all arguments and potential newline are done
-             break;
-         } // End case AST_WRITE/AST_WRITELN
+            // Handle WriteLn vs Write
+            if (node->type == AST_WRITELN) {
+                fprintf(output, "\n"); // Add newline to the correct output stream
+            }
+
+            fflush(output); // Flush the output stream (stdout or file)
+
+            // --- Crucial: Free the fileVal *if* it was evaluated and not used ---
+            // (This was handled inside the file check logic now)
+
+            break;
+        } // End case AST_WRITE/AST_WRITELN
             
         case AST_READLN: {
             FILE *input = stdin;
