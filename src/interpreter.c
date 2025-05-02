@@ -1141,6 +1141,8 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
                 // fprintf(stderr, "Warning: Non-ordinal type %s used in CASE expression.\n", varTypeToString(caseVal.type));
                 return false;
         }
+        
+        freeValue(&labelVal);
 
         // If we fall through, types were incompatible
         return false;
