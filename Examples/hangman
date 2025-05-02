@@ -1,282 +1,648 @@
-program HangmanGame;
+program ComprehensiveTypeTest;
 
-uses CRT;
+uses CRT; // For WriteLn, Write, etc.
 
 const
-  MAX_WRONG = 8;  { maximum number of wrong guesses }
-  MIN_LENGTH = 4; { minimum length of word }
-  MAX_LENGTH = 7; { maximum length of word }
+  TOLERANCE = 0.0001;
+
+type
+  // Enum for testing
+  TColor = (cRed, cGreen, cBlue, cYellow);
+
+  // Record for testing
+  TPerson = record
+    name: string[50]; // Fixed-length string field
+    age: integer;
+    height: real;
+    isStudent: boolean;
+    favColor: TColor;
+  end;
+
+  // Array types for testing
+  IntArray = array[0..4] of integer;
+  RealMatrix = array[1..2, 1..2] of real;
+  PersonList = array[1..3] of TPerson;
+
+  // Set types for testing
+  CharSet = set of char;
+  ColorSet = set of TColor;
+  ByteSet = set of byte; // Test set of byte
 
 var
-  chosen: string;
-  display: string;
-  guessed: string;
-  letter: char;
-  i, wrong: integer;
-  found: boolean;
+  // --- Variable Declarations for Each Type ---
+  // Simple Ordinals & Numerics
+  testInt: integer;
+  testLong: longint; // Assumed to map to integer internally
+  testCard: cardinal; // Assumed to map to integer internally
+  testReal: real;
+  testChar: char;
+  testBool: boolean;
+  testByte: byte;
+  testWord: word;
 
-{ Convert a string to uppercase }
-function UpperCaseStr(s: string): string;
-var
-  i: integer;
-begin
-  for i := 1 to length(s) do
-    s[i] := UpCase(s[i]);
-  UpperCaseStr := s;
-end;
+  // String Types
+  testStringDynamic: string;
+  testStringFixed: string[10];
 
-{ Sorts the characters in a string in alphabetical order }
-procedure SortString(var s: string);
-var
+  // Enum Type
+  testEnum: TColor;
+
+  // Record Type
+  testRecord: TPerson;
+  testRecord2: TPerson; // For assignment test
+
+  // Array Types
+  testArrInt: IntArray;
+  testArrReal: RealMatrix;
+  testArrRecord: PersonList;
+
+  // Set Types
+  testSetChar: CharSet;
+  testSetEnum: ColorSet;
+  testSetByte: ByteSet;
+
+  // File Type
+  testFile: file; // Generic file
+  testTextFile: text; // Text file
+
+  // Memory Stream Type
+  // testMStream: TMemoryStream; // Assuming MStream type is defined elsewhere or via uses
+  testMStream: MStream; // Using the simpler MStream identifier from types.h
+
+  // Utility variables
   i, j: integer;
-  temp: char;
+  r: real;
+  s: string;
+  c: char;
+  b: boolean;
+
+{---------------------------------------------------------------------
+  Assertion Procedures
+---------------------------------------------------------------------}
+procedure AssertTrue(condition: boolean; testName: string);
 begin
-  for i := 1 to length(s) - 1 do
-    for j := i + 1 to length(s) do
-      if s[i] > s[j] then
-      begin
-        temp := s[i];
-        s[i] := s[j];
-        s[j] := temp;
-      end;
-end;
-
-{ Choose a random word of length 4 to 6 from a text file }
-function ChooseRandomWord: string;
-var
-  f: Text;
-  word: string;
-  filename: string;
-  validCount, target: integer;
-begin
-  filename := '/usr/local/Pscal/etc/words';  { Adjust path as needed }
-  ChooseRandomWord := '';  
-  assign(f, filename);
-  {$I-}
-  reset(f);
-  {$I+}
-  if IOResult <> 0 then
-  begin
-    writeln('Error opening file: ', filename);
-    halt(1);
-  end;
-  validCount := 0;
-  while not eof(f) do
-  begin
-    readln(f, word);
-    if (length(word) >= MIN_LENGTH) and (length(word) <= MAX_LENGTH) then
-      inc(validCount);
-  end;
-  close(f);
-  if validCount = 0 then
-  begin
-    writeln('No valid words found.');
-    halt(1);
-  end;
-  target := Random(validCount) + 1;
-  assign(f, filename);
-  {$I-}
-  reset(f);
-  {$I+}
-  if IOResult <> 0 then
-  begin
-    writeln('Error reopening file: ', filename);
-    halt(1);
-  end;
-  validCount := 0;
-  while (not eof(f)) and (ChooseRandomWord = '') do
-  begin
-    readln(f, word);
-    if (length(word) >= MIN_LENGTH) and (length(word) <= MAX_LENGTH) then
-    begin
-      inc(validCount);
-      if validCount = target then
-        ChooseRandomWord := UpperCaseStr(word);
-    end;
-  end;
-  close(f);
-end;
-
-{ Draw the hangman graphic based on the number of wrong guesses }
-procedure DrawHangman(wrong: integer);
-begin
-  case wrong of
-    0: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('          |');
-         writeln('          |');
-         writeln('          |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    1: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('          |');
-         writeln('          |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    2: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('      |   |');
-         writeln('          |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    3: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('     /|   |');
-         writeln('          |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    4: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('     /|\  |');
-         writeln('          |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    5: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('     /|\  |');
-         writeln('     /    |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    6: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('     /|\  |');
-         writeln('     / \  |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    7: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('     /|\  |');
-         writeln('    _/ \  |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-    8: begin
-         writeln('      +---+');
-         writeln('      |   |');
-         writeln('      O   |');
-         writeln('     /|\  |');
-         writeln('    _/ \_ |');
-         writeln('          |');
-         writeln('   ==========');
-       end;
-  end;
-end;
-
-{ Main program block }
-begin
-  Randomize;
-  chosen := ChooseRandomWord;
-
-  { Build the display string (underscores) and initialize guessed letters }
-  display := '';
-  guessed := '';
-  for i := 1 to length(chosen) do
-    display := display + '_';
-
-  wrong := 0;
-  ClrScr;
-
-  { Display title and instructions with color }
-  GotoXY(1,1);
-  TextColor(2);  
-  writeln('Welcome to Hangman!');
-  GotoXY(1,2);
-  writeln(' (Guess a letter)');
-  TextColor(7);   { Default }
-
-  { Display initial word (underscores) }
-  GotoXY(1,4);
-  writeln('    ', display);
-
-  { Draw initial hangman }
-  GotoXY(1,6);
-  DrawHangman(wrong);
-
-  while (wrong < MAX_WRONG) and (display <> chosen) do
-  begin
-    { Sort guessed letters before displaying }
-    SortString(guessed);
-    GotoXY(1,15);
-    if length(guessed) > 0 then
-      writeln('Letters chosen so far: ', guessed);
-
-    GotoXY(1,17);
-    write('Enter a letter: ');
-    readln(letter);
-    letter := UpCase(letter);
-    if pos(letter, guessed) = 0 then
-      guessed := guessed + letter;
-
-    found := false;
-    for i := 1 to length(chosen) do
-    begin
-      if chosen[i] = letter then
-      begin
-        display[i] := letter;
-        found := true;
-      end;
-    end;
-
-    ClrScr;
-    GotoXY(1,1);
-    if not found then
-    begin
-      TextColor(12);  { LightRed }
-      writeln('Wrong guess!');
-      TextColor(7);
-      wrong := wrong + 1;
-      writeln('Attempts left: ', MAX_WRONG - wrong);
-    end
-    else
-    begin
-      TextColor(10);  { LightGreen }
-      writeln('Correct guess!');
-      TextColor(7);
-      writeln('Attempts left: ', MAX_WRONG - wrong);
-    end;
-
-    GotoXY(1,4);
-    writeln('    ', display);
-
-    GotoXY(1,6);
-    DrawHangman(wrong);
-  end;
-
-  GotoXY(1,15);
-  if display = chosen then
-  begin
-    TextColor(10);  { LightGreen }
-    writeln('Congratulations, you guessed the word!');
-  end
+  write('START: ', testName, ': ');
+  if condition then
+    writeln('PASS')
   else
-  begin
-    TextColor(12);  { LightRed }
-    writeln('Game over. The word was: ', chosen);
-  end;
-  TextColor(7);
-  writeln;
-end.
+    writeln('FAIL (expected true, got false)');
+end;
 
+procedure AssertFalse(condition: boolean; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if not condition then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected false, got true)');
+end;
+
+procedure AssertEqualInt(expected, actual: integer; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+procedure AssertEqualReal(expected, actual: real; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if abs(expected - actual) < TOLERANCE then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected:0:4, ', got: ', actual:0:4, ')');
+end;
+
+procedure AssertEqualString(expected, actual: string; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: "', expected, '", got: "', actual, '")');
+end;
+
+procedure AssertEqualChar(expected, actual: char; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ''', expected, ''', got: ''', actual, ''')');
+end;
+
+procedure AssertEqualBool(expected, actual: boolean; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+// Assertion for Enum (compares ordinal values)
+procedure AssertEqualEnum(expected, actual: TColor; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then // Direct comparison should work for enums
+    writeln('PASS')
+  else
+    writeln('FAIL (expected enum ord: ', ord(expected), ', got enum ord: ', ord(actual), ')');
+end;
+
+
+{---------------------------------------------------------------------
+  Type Test Procedures
+---------------------------------------------------------------------}
+
+procedure TestIntegerType;
+begin
+  writeln;
+  writeln('--- Testing INTEGER / LONGINT / CARDINAL ---');
+  testInt := 123;
+  testLong := -987654321;
+  testCard := 40000; // Should fit within typical longint range
+  AssertEqualInt(123, testInt, 'Integer Assign');
+  AssertEqualInt(-987654321, testLong, 'LongInt Assign');
+  AssertEqualInt(40000, testCard, 'Cardinal Assign');
+
+  testInt := testInt + 7;
+  AssertEqualInt(130, testInt, 'Integer Addition');
+  testInt := testInt - 30;
+  AssertEqualInt(100, testInt, 'Integer Subtraction');
+  testInt := testInt * 2;
+  AssertEqualInt(200, testInt, 'Integer Multiplication');
+  testInt := testInt div 10;
+  AssertEqualInt(20, testInt, 'Integer Division (DIV)');
+  testInt := 23;
+  AssertEqualInt(3, testInt mod 5, 'Integer Modulo (MOD)');
+
+  AssertTrue(testLong < testInt, 'Integer Comparison (<)');
+  AssertTrue(testCard > testInt, 'Integer Comparison (>)');
+  testInt := 23;
+  AssertTrue(testInt = 23, 'Integer Comparison (=)');
+  AssertTrue(testInt <> 24, 'Integer Comparison (<>)');
+  AssertTrue(testInt <= 23, 'Integer Comparison (<=)');
+  AssertTrue(testInt >= 23, 'Integer Comparison (>=)');
+
+  // Test Inc/Dec
+  testInt := 10;
+  Inc(testInt);
+  AssertEqualInt(11, testInt, 'Inc(Integer)');
+  Inc(testInt, 5);
+  AssertEqualInt(16, testInt, 'Inc(Integer, 5)');
+  Dec(testInt);
+  AssertEqualInt(15, testInt, 'Dec(Integer)');
+  Dec(testInt, 10);
+  AssertEqualInt(5, testInt, 'Dec(Integer, 10)');
+end;
+
+procedure TestRealType;
+begin
+  writeln;
+  writeln('--- Testing REAL ---');
+  testReal := 123.456;
+  AssertEqualReal(123.456, testReal, 'Real Assign');
+
+  testReal := testReal + 0.544;
+  AssertEqualReal(124.0, testReal, 'Real Addition');
+  testReal := testReal - 100.5;
+  AssertEqualReal(23.5, testReal, 'Real Subtraction');
+  testReal := testReal * 2.0;
+  AssertEqualReal(47.0, testReal, 'Real Multiplication');
+  testReal := testReal / 4.0;
+  AssertEqualReal(11.75, testReal, 'Real Division (/)');
+
+  AssertTrue(testReal > 11.7, 'Real Comparison (>)');
+  AssertTrue(testReal < 11.8, 'Real Comparison (<)');
+  AssertTrue(abs(testReal - 11.75) < TOLERANCE, 'Real Comparison (=, approx)');
+  AssertTrue(abs(testReal - 11.7) > TOLERANCE, 'Real Comparison (<>, approx)');
+
+  // Test Trunc
+  AssertEqualInt(11, trunc(testReal), 'Trunc(Real)');
+  AssertEqualInt(-5, trunc(-5.8), 'Trunc(Negative Real)');
+end;
+
+procedure TestStringType;
+var tempStr: string;
+begin
+  writeln;
+  writeln('--- Testing STRING (Dynamic and Fixed) ---');
+  testStringDynamic := 'Hello';
+  AssertEqualString('Hello', testStringDynamic, 'Dynamic String Assign');
+  testStringFixed := 'Pascal';
+  AssertEqualString('Pascal', testStringFixed, 'Fixed String Assign');
+
+  // Concatenation
+  testStringDynamic := testStringDynamic + ' ' + testStringFixed;
+  AssertEqualString('Hello Pascal', testStringDynamic, 'String Concatenation');
+
+  // Length
+  AssertEqualInt(12, length(testStringDynamic), 'String Length');
+  AssertEqualInt(6, length(testStringFixed), 'Fixed String Length');
+
+  // Assignment exceeding fixed length
+  testStringFixed := 'This is too long';
+  AssertEqualString('This is to', testStringFixed, 'Fixed String Truncation'); // Should truncate to 10 chars
+  AssertEqualInt(10, length(testStringFixed), 'Fixed String Length after truncate');
+
+  // Assigning char to string
+  testStringDynamic := 'A';
+  c := 'B';
+  testStringDynamic := c;
+  AssertEqualString('B', testStringDynamic, 'Assign Char to String');
+
+
+  // Comparisons
+  AssertTrue('Apple' < 'Banana', 'String Comparison (<)');
+  AssertTrue('Zebra' > 'Yak', 'String Comparison (>)');
+  AssertTrue('Case' = 'Case', 'String Comparison (=)');
+  AssertTrue('Test' <> 'test', 'String Comparison (<>) - Case Sensitive?'); // Pascal is usually case-sensitive for strings
+
+  // Copy
+  tempStr := copy(testStringDynamic, 1, 1); // Should copy 'B'
+  AssertEqualString('B', tempStr, 'Copy(1,1)');
+  testStringDynamic := 'Programming';
+  tempStr := copy(testStringDynamic, 4, 7); // 'grammin'
+  AssertEqualString('grammin', tempStr, 'Copy(4,7)');
+  tempStr := copy(testStringDynamic, 10, 5); // 'ng' (only 2 chars left)
+  AssertEqualString('ng', tempStr, 'Copy past end');
+  tempStr := copy(testStringDynamic, 15, 2); // Start past end
+  AssertEqualString('', tempStr, 'Copy start past end');
+
+
+  // Pos
+  AssertEqualInt(1, pos('P', 'Programming'), 'Pos(P, Programming)');
+  AssertEqualInt(4, pos('gram', 'Programming'), 'Pos(gram, Programming)');
+  AssertEqualInt(0, pos('xyz', 'Programming'), 'Pos(xyz, Programming)');
+  AssertEqualInt(0, pos('p', 'Programming'), 'Pos(p, Programming) - Case Sensitive?'); // Usually case-sensitive
+  AssertEqualInt(1, pos('P', 'Pascal Programming'), 'Pos finds first');
+
+end;
+
+procedure TestCharType;
+begin
+  writeln;
+  writeln('--- Testing CHAR ---');
+  testChar := 'A';
+  AssertEqualChar('A', testChar, 'Char Assign Literal');
+  s := 'B'; // Use single-char string
+  testChar := s[1]; // Standard Pascal doesn't assign string to char directly
+  AssertEqualChar('B', testChar, 'Char Assign from String[1]');
+
+  // Comparisons
+  AssertTrue('a' < 'b', 'Char Comparison (<)');
+  AssertTrue('Z' > 'A', 'Char Comparison (>)');
+  AssertTrue('=' = '=', 'Char Comparison (=)');
+  AssertTrue('X' <> 'Y', 'Char Comparison (<>)');
+
+  // Ord / Chr
+  AssertEqualInt(65, ord('A'), 'Ord(A)');
+  AssertEqualChar('A', chr(65), 'Chr(65)');
+
+  // Upcase
+  AssertEqualChar('A', upcase('a'), 'Upcase(a)');
+  AssertEqualChar('A', upcase('A'), 'Upcase(A)');
+  AssertEqualChar('1', upcase('1'), 'Upcase(1)');
+
+  // Low / High / Succ / Pred (if implemented)
+  AssertEqualChar(#0, low(char), 'Low(char)');   // #0 is ASCII NUL
+  AssertEqualChar(#255, high(char), 'High(char)'); // Depends on char implementation (often 8-bit)
+  AssertEqualChar('B', succ('A'), 'Succ(A)');
+  // AssertEqualChar('A', pred('B'), 'Pred(B)'); // Uncomment if Pred is implemented
+end;
+
+procedure TestBooleanType;
+begin
+  writeln;
+  writeln('--- Testing BOOLEAN ---');
+  testBool := true;
+  AssertEqualBool(true, testBool, 'Boolean Assign true');
+  AssertTrue(testBool, 'Boolean AssertTrue (true)');
+  testBool := false;
+  AssertEqualBool(false, testBool, 'Boolean Assign false');
+  AssertFalse(testBool, 'Boolean AssertFalse (false)');
+
+  // Comparisons
+  AssertTrue(true = true, 'Boolean Comparison (= true)');
+  AssertTrue(false = false, 'Boolean Comparison (= false)');
+  AssertTrue(true <> false, 'Boolean Comparison (<>)');
+
+  // Logical Ops
+  AssertTrue(true and true, 'Boolean AND (T, T)');
+  AssertFalse(true and false, 'Boolean AND (T, F)');
+  AssertFalse(false and true, 'Boolean AND (F, T)');
+  AssertFalse(false and false, 'Boolean AND (F, F)');
+
+  AssertTrue(true or true, 'Boolean OR (T, T)');
+  AssertTrue(true or false, 'Boolean OR (T, F)');
+  AssertTrue(false or true, 'Boolean OR (F, T)');
+  AssertFalse(false or false, 'Boolean OR (F, F)');
+
+  AssertFalse(not true, 'Boolean NOT (T)');
+  AssertTrue(not false, 'Boolean NOT (F)');
+
+  // Boolean/Integer Interaction (Standard Pascal doesn't directly assign int to bool)
+  // AssertEqualInt(0, Ord(False), 'Ord(False)');
+  // AssertEqualInt(1, Ord(True), 'Ord(True)');
+  // Test assignment if your interpreter allows:
+  // testInt := 1; testBool := (testInt = 1); AssertTrue(testBool, 'Assign Integer comparison to Boolean');
+end;
+
+procedure TestByteType;
+begin
+  writeln;
+  writeln('--- Testing BYTE ---');
+  testByte := 0;
+  AssertEqualInt(0, testByte, 'Byte Assign 0');
+  testByte := 255;
+  AssertEqualInt(255, testByte, 'Byte Assign 255');
+
+  // Arithmetic (should behave like integer within range)
+  testByte := 100;
+  testByte := testByte + 50;
+  AssertEqualInt(150, testByte, 'Byte Addition');
+  testByte := testByte - 100;
+  AssertEqualInt(50, testByte, 'Byte Subtraction');
+
+  // Test Ordinal Functions
+  AssertEqualInt(0, low(byte), 'Low(byte)');
+  AssertEqualInt(255, high(byte), 'High(byte)');
+  testByte := 10;
+  Inc(testByte);
+  AssertEqualInt(11, testByte, 'Inc(Byte)');
+  Dec(testByte, 5);
+  AssertEqualInt(6, testByte, 'Dec(Byte, 5)');
+  // AssertEqualInt(11, succ(byte(10)), 'Succ(Byte)'); // Type cast syntax likely needed
+  // AssertEqualInt(9, pred(byte(10)), 'Pred(Byte)');
+
+  // Assigning integer (should work if in range, behavior outside range depends on impl)
+  testInt := 128;
+  testByte := testInt;
+  AssertEqualInt(128, testByte, 'Assign Integer to Byte');
+end;
+
+procedure TestWordType;
+begin
+  writeln;
+  writeln('--- Testing WORD ---');
+  testWord := 0;
+  AssertEqualInt(0, testWord, 'Word Assign 0');
+  testWord := 65535;
+  AssertEqualInt(65535, testWord, 'Word Assign 65535');
+
+  // Arithmetic
+  testWord := 30000;
+  testWord := testWord + 10000;
+  AssertEqualInt(40000, testWord, 'Word Addition');
+  testWord := testWord - 20000;
+  AssertEqualInt(20000, testWord, 'Word Subtraction');
+
+  // Test Ordinal Functions
+  AssertEqualInt(0, low(word), 'Low(word)');
+  AssertEqualInt(65535, high(word), 'High(word)');
+  testWord := 1000;
+  Inc(testWord);
+  AssertEqualInt(1001, testWord, 'Inc(Word)');
+  Dec(testWord, 500);
+  AssertEqualInt(501, testWord, 'Dec(Word, 500)');
+
+  // Assigning integer
+  testInt := 50000;
+  testWord := testInt;
+  AssertEqualInt(50000, testWord, 'Assign Integer to Word');
+end;
+
+procedure TestEnumType;
+begin
+  writeln;
+  writeln('--- Testing ENUM (TColor) ---');
+  testEnum := cRed;
+  AssertEqualEnum(cRed, testEnum, 'Enum Assign cRed');
+  testEnum := cYellow;
+  AssertEqualEnum(cYellow, testEnum, 'Enum Assign cYellow');
+
+  // Comparisons
+  AssertTrue(cRed < cGreen, 'Enum Comparison (<)');
+  AssertTrue(cYellow > cBlue, 'Enum Comparison (>)');
+  AssertTrue(cBlue = cBlue, 'Enum Comparison (=)');
+  AssertTrue(cRed <> cGreen, 'Enum Comparison (<>)');
+
+  // Ordinal Functions
+  AssertEqualInt(0, ord(cRed), 'Ord(cRed)');
+  AssertEqualInt(3, ord(cYellow), 'Ord(cYellow)');
+  AssertEqualEnum(cRed, low(TColor), 'Low(TColor)');
+  AssertEqualEnum(cYellow, high(TColor), 'High(TColor)');
+  AssertEqualEnum(cGreen, succ(cRed), 'Succ(cRed)');
+  AssertEqualEnum(cBlue, succ(cGreen), 'Succ(cGreen)');
+  // AssertEqualEnum(cBlue, pred(cYellow), 'Pred(cYellow)');
+
+  // Test assignment using Ord (if supported)
+  // testEnum := TColor(1); // Pascal doesn't usually allow this cast
+  // AssertEqualEnum(cGreen, testEnum, 'Enum Assign via Ord');
+end;
+
+procedure TestRecordType;
+begin
+  writeln;
+  writeln('--- Testing RECORD (TPerson) ---');
+  // Assign fields
+  testRecord.name := 'Alice';
+  testRecord.age := 30;
+  testRecord.height := 1.65;
+  testRecord.isStudent := false;
+  testRecord.favColor := cBlue;
+
+  // Assert field values
+  AssertEqualString('Alice', testRecord.name, 'Record Assign/Access name');
+  AssertEqualInt(30, testRecord.age, 'Record Assign/Access age');
+  AssertEqualReal(1.65, testRecord.height, 'Record Assign/Access height');
+  AssertEqualBool(false, testRecord.isStudent, 'Record Assign/Access isStudent');
+  AssertEqualEnum(cBlue, testRecord.favColor, 'Record Assign/Access favColor');
+
+  // Modify a field
+  testRecord.age := 31;
+  AssertEqualInt(31, testRecord.age, 'Record Modify age');
+
+  // Test record assignment
+  testRecord2 := testRecord;
+  AssertEqualString('Alice', testRecord2.name, 'Record Assignment name check');
+  AssertEqualInt(31, testRecord2.age, 'Record Assignment age check');
+  AssertEqualEnum(cBlue, testRecord2.favColor, 'Record Assignment favColor check');
+
+  // Verify independence after assignment
+  testRecord2.name := 'Bob';
+  testRecord2.age := 45;
+  AssertEqualString('Alice', testRecord.name, 'Record Original unchanged (name)');
+  AssertEqualInt(31, testRecord.age, 'Record Original unchanged (age)');
+  AssertEqualString('Bob', testRecord2.name, 'Record Copy changed (name)');
+  AssertEqualInt(45, testRecord2.age, 'Record Copy changed (age)');
+end;
+
+procedure TestArrayType;
+begin
+  writeln;
+  writeln('--- Testing ARRAY ---');
+
+  // 1D Integer Array
+  writeln('Testing 1D Integer Array...');
+  for i := 0 to 4 do
+    testArrInt[i] := i * i;
+  AssertEqualInt(0, testArrInt[0], 'Array[0]');
+  AssertEqualInt(4, testArrInt[2], 'Array[2]');
+  AssertEqualInt(16, testArrInt[4], 'Array[4]');
+  testArrInt[1] := 99;
+  AssertEqualInt(99, testArrInt[1], 'Array Modify/Access');
+
+  // 2D Real Array
+  writeln('Testing 2D Real Array...');
+  for i := 1 to 2 do
+    for j := 1 to 2 do
+      testArrReal[i, j] := i + j / 10.0;
+  AssertEqualReal(1.1, testArrReal[1, 1], 'Matrix[1,1]');
+  AssertEqualReal(1.2, testArrReal[1, 2], 'Matrix[1,2]');
+  AssertEqualReal(2.1, testArrReal[2, 1], 'Matrix[2,1]');
+  AssertEqualReal(2.2, testArrReal[2, 2], 'Matrix[2,2]');
+  testArrReal[1,2] := -3.14;
+   AssertEqualReal(-3.14, testArrReal[1,2], 'Matrix Modify/Access');
+
+  // Array of Records
+  writeln('Testing Array of Records...');
+  testArrRecord[1].name := 'Charlie'; testArrRecord[1].age := 25; testArrRecord[1].favColor := cGreen;
+  testArrRecord[2].name := 'Diana'; testArrRecord[2].age := 35; testArrRecord[2].favColor := cRed;
+  testArrRecord[3].name := 'Eve'; testArrRecord[3].age := 28; testArrRecord[3].favColor := cYellow;
+
+  AssertEqualString('Charlie', testArrRecord[1].name, 'Array Record[1].name');
+  AssertEqualInt(35, testArrRecord[2].age, 'Array Record[2].age');
+  AssertEqualEnum(cYellow, testArrRecord[3].favColor, 'Array Record[3].favColor');
+  testArrRecord[2].age := 36;
+  AssertEqualInt(36, testArrRecord[2].age, 'Array Record Modify/Access');
+
+  // Test High/Low on array types? (Standard Pascal doesn't support this directly on array type)
+  // AssertEqualInt(0, Low(IntArray)); // This syntax isn't standard
+end;
+
+procedure TestSetType;
+begin
+  writeln;
+  writeln('--- Testing SET ---');
+
+  // Char Set
+  testSetChar := ['a', 'e', 'i', 'o', 'u'];
+  AssertTrue('a' in testSetChar, 'Set IN [vowels] (a)');
+  AssertFalse('b' in testSetChar, 'Set NOT IN [vowels] (b)');
+  testSetChar := testSetChar + ['b'..'d']; // Set union
+  AssertTrue('c' in testSetChar, 'Set IN [vowels+b..d] (c)');
+  testSetChar := testSetChar - ['i', 'o', 'u']; // Set difference
+  AssertFalse('o' in testSetChar, 'Set NOT IN after difference (o)');
+  AssertTrue('a' in testSetChar, 'Set IN after difference (a)');
+  testSetChar := testSetChar * ['a'..'z']; // Set intersection
+  AssertTrue('d' in testSetChar, 'Set IN after intersection (d)');
+  AssertFalse('A' in testSetChar, 'Set NOT IN after intersection (A)');
+
+  // Enum Set
+  testSetEnum := [cRed, cBlue];
+  AssertTrue(cRed in testSetEnum, 'Set IN [Colors] (cRed)');
+  AssertFalse(cGreen in testSetEnum, 'Set NOT IN [Colors] (cGreen)');
+  testSetEnum := [low(TColor)..high(TColor)] - [cGreen]; // All except green
+  AssertTrue(cYellow in testSetEnum, 'Set IN [All-Green] (cYellow)');
+  AssertFalse(cGreen in testSetEnum, 'Set NOT IN [All-Green] (cGreen)');
+
+  // Byte Set
+  testSetByte := [0, 10, 20..30, 255];
+  AssertTrue(0 in testSetByte, 'Set IN [Bytes] (0)');
+  AssertTrue(25 in testSetByte, 'Set IN [Bytes] (25)');
+  AssertFalse(15 in testSetByte, 'Set NOT IN [Bytes] (15)');
+  AssertTrue(255 in testSetByte, 'Set IN [Bytes] (255)');
+end;
+
+procedure TestFileType;
+begin
+  writeln;
+  writeln('--- Testing FILE / TEXT ---');
+  // NOTE: File operations often require external interaction and error handling.
+  // Basic tests for Assign, Reset/Rewrite, Close. IO operations are harder to assert.
+  Assign(testTextFile, 'test_output.txt');
+  AssertEqualInt(0, IOResult, 'Assign IOResult'); // Should be 0 after Assign
+
+  Rewrite(testTextFile);
+  AssertEqualInt(0, IOResult, 'Rewrite IOResult');
+  if IOResult = 0 then
+  begin
+    Write(testTextFile, 'Testing 123...'); // Write to file
+    WriteLn(testTextFile, ' New Line.'); // WriteLn to file
+    AssertEqualInt(0, IOResult, 'WriteLn IOResult');
+    Close(testTextFile);
+    AssertEqualInt(0, IOResult, 'Close after Rewrite IOResult');
+  end else
+    writeln('Skipping file write tests due to Rewrite error.');
+
+  // Add Reset test if desired (requires checking content, which is harder)
+  // Assign(testFile, 'test_output.txt'); // Assign to generic file
+  // Reset(testFile);
+  // ... read from testFile ...
+  // Close(testFile);
+
+  writeln('(File tests need manual verification of test_output.txt)');
+end;
+
+procedure TestMemoryStreamType;
+begin
+  writeln;
+  writeln('--- Testing MemoryStream (MStream) ---');
+  // This type often requires specific library functions (like TMemoryStream in Delphi/FPC)
+  // or custom builtins. Assuming basic create/free/load/save builtins exist.
+
+  testMStream := MStreamCreate;
+  // Assert that a new stream is somehow valid (e.g., size is 0?) - Needs internal access or specific builtins
+  writeln('MStream created (manual verification needed)');
+
+  // Test Load/Save (needs dummy file)
+  Assign(testTextFile, 'mstream_temp.txt');
+  Rewrite(testTextFile);
+  if IOResult = 0 then
+  begin
+    WriteLn(testTextFile, 'Data for MemoryStream');
+    Close(testTextFile);
+    // Load from file
+    // MStreamLoadFromFile(testMStream, 'mstream_temp.txt');
+    // Assert stream size or content if possible
+    // writeln('MStream loaded from file (manual verification needed)');
+
+    // Save to another file
+    // MStreamSaveToFile(testMStream, 'mstream_out.txt');
+    // writeln('MStream saved to file (manual verification needed)');
+  end else
+      writeln('Skipping MStream load/save tests due to file error.');
+
+
+  MStreamFree(testMStream);
+  writeln('MStream freed (manual verification needed)');
+end;
+
+
+{---------------------------------------------------------------------
+  Main Program
+---------------------------------------------------------------------}
+begin
+  writeln('===== pscal Comprehensive Type Test =====');
+
+  TestIntegerType;
+  TestRealType;
+  TestStringType;
+  TestCharType;
+  TestBooleanType;
+  TestByteType;
+  TestWordType;
+  TestEnumType;
+  TestRecordType;
+  TestArrayType;
+  TestSetType;
+  // TestFileType; // Requires file system interaction
+  // TestMemoryStreamType; // Requires MStream builtins and file system
+
+  writeln;
+  writeln('===== Comprehensive Type Test Completed =====');
+end.

@@ -141,6 +141,33 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_BOOLEAN:
             DEBUG_PRINT("TYPE_BOOLEAN %s", val.i_val ? "true" : "false");
             break;
+        case TYPE_SET: {
+            // Target symbol is a SET
+            if (val.type == TYPE_SET) {
+                // Assigning SET to SET
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG UPDATE SET] Assigning set to symbol '%s'.\n", sym->name);
+                #endif
+
+                // 1. Free the *contents* of the old set value stored in the symbol.
+                //    freeValue handles freeing the set_values array if it exists.
+                freeValue(sym->value);
+
+                // 2. Perform a deep copy of the new set value ('val') and assign it
+                //    to the symbol's value struct. makeCopyOfValue now handles sets.
+                //    This overwrites the entire sym->value struct with the new deep copy.
+                *sym->value = makeCopyOfValue(&val);
+
+                // 3. Ensure the type is correctly set (though makeCopyOfValue should preserve it)
+                sym->value->type = TYPE_SET;
+
+            } else {
+                // Assigning a non-set type to a SET is an error
+                fprintf(stderr, "Runtime error: type mismatch in set assignment for '%s'. Expected TYPE_SET, got %s.\n", sym->name, varTypeToString(val.type));
+                EXIT_FAILURE_HANDLER();
+            }
+            break; // End case TYPE_SET
+        }
         // Add other cases for debug printing if needed
         default:
             DEBUG_PRINT("Type %s", varTypeToString(val.type));
@@ -414,8 +441,7 @@ void updateSymbol(const char *name, Value val) {
                 EXIT_FAILURE_HANDLER();
             }
             break;
-        case TYPE_ENUM:
-        {
+        case TYPE_ENUM: {
             // Target symbol is an ENUM
             if (val.type == TYPE_ENUM) {
                 // Assigning ENUM to ENUM
@@ -483,6 +509,35 @@ void updateSymbol(const char *name, Value val) {
             }
             break; // End case TYPE_ENUM
         } // End TYPE_ENUM block
+        case TYPE_SET:
+            {
+                // Target symbol is a SET
+                if (val.type == TYPE_SET) {
+                    // Assigning SET to SET
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG UPDATE SET] Assigning set to symbol '%s'.\n", sym->name);
+                    #endif
+
+                    // 1. Free the *contents* of the old set value stored in the symbol.
+                    //    freeValue handles freeing the set_values array if it exists.
+                    freeValue(sym->value);
+
+                    // 2. Perform a deep copy of the new set value ('val') and assign it
+                    //    to the symbol's value struct. makeCopyOfValue now handles sets.
+                    //    This overwrites the entire sym->value struct with the new deep copy.
+                    *sym->value = makeCopyOfValue(&val);
+
+                    // 3. Ensure the type is correctly set (though makeCopyOfValue should preserve it)
+                    sym->value->type = TYPE_SET;
+
+                } else {
+                    // Assigning a non-set type to a SET is an error
+                    fprintf(stderr, "Runtime error: type mismatch in set assignment for '%s'. Expected TYPE_SET, got %s.\n", sym->name, varTypeToString(val.type));
+                    EXIT_FAILURE_HANDLER();
+                }
+                break; // End case TYPE_SET
+            }
+            // <<< ADD THIS CASE END >>> // Or verify it exists
 
         default:
             fprintf(stderr, "Runtime error: unhandled type (%s) in updateSymbol assignment.\n", varTypeToString(sym->type));

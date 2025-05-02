@@ -2300,6 +2300,26 @@ Value makeCopyOfValue(Value *src) {
         case TYPE_CHAR:
             // Already handled by shallow copy
             break;
+        case TYPE_SET:
+            // Deep copy the set elements
+            v.set_val.set_values = NULL; // Initialize destination pointer
+            v.set_val.set_size = 0;      // Initialize destination size
+            // v.max_length = 0; // Reset capacity tracking if you use it
+
+            if (src->set_val.set_size > 0 && src->set_val.set_values != NULL) {
+                size_t array_size_bytes = sizeof(long long) * src->set_val.set_size;
+                v.set_val.set_values = malloc(array_size_bytes);
+                if (!v.set_val.set_values) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (set values)\n");
+                    // Potentially free other copied parts before exiting if necessary
+                    EXIT_FAILURE_HANDLER();
+                }
+                memcpy(v.set_val.set_values, src->set_val.set_values, array_size_bytes);
+                v.set_val.set_size = src->set_val.set_size;
+                 // Optionally copy capacity if tracked: v.max_length = src->max_length;
+            }
+            // If source size is 0 or values pointer is NULL, destination remains empty (NULL/0)
+            break;
         default:
             // ints, bools, reals etc. are already safely copied by value
             break;
