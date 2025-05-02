@@ -229,7 +229,7 @@ int main(int argc, char *argv[]) {
         const char *sourceFile = argv[1];
         FILE *file = fopen(sourceFile, "r");
         if (!file) {
-            perror("Error opening source file");
+            printf("Error opening source file %s\n", sourceFile);
             return EXIT_FAILURE;
         }
         fseek(file, 0, SEEK_END);
@@ -284,7 +284,7 @@ int main(int argc, char *argv[]) {
 
     FILE *file = fopen(sourceFile, "r");
     if (!file) {
-        perror("Error opening source file");
+        printf("Error opening source file %s\n", sourceFile);
         return EXIT_FAILURE;
     }
     fseek(file, 0, SEEK_END);

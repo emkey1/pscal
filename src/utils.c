@@ -646,14 +646,26 @@ void freeValue(Value *v) {
         case TYPE_REAL:
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
-        case TYPE_ENUM: // Enum name is usually shared/static, ordinal is inline
-            
         case TYPE_BYTE:
         case TYPE_WORD:
             // No heap data associated with the Value struct itself for these
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG]   No heap data to free for type %s\n", varTypeToString(v->type));
 #endif
+            break;
+        case TYPE_ENUM:
+            if (v->enum_val.enum_name) {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG]   Attempting to free enum name '%s' at %p\n",
+                        v->enum_val.enum_name, (void*)v->enum_val.enum_name);
+#endif
+                free(v->enum_val.enum_name);
+                v->enum_val.enum_name = NULL;
+            } else {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG]   Enum name pointer is NULL, nothing to free.\n");
+#endif
+            }
             break;
 
         case TYPE_STRING:
