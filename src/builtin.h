@@ -74,6 +74,12 @@ Value executeBuiltinLow(AST *node);
 Value executeBuiltinHigh(AST *node);
 Value executeBuiltinSucc(AST *node);
 
+// Terminal Extended Color stuff
+Value executeBuiltinTextColor(AST *node); // Existing 16-color
+Value executeBuiltinTextBackground(AST *node); // Existing 16-color
+Value executeBuiltinTextColorE(AST *node); // <--- ADD for 256 foreground
+Value executeBuiltinTextBackgroundE(AST *node); // <--- ADD for 256 background
+
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine
     BUILTIN_TYPE_PROCEDURE, // Built-in, does not return a value usable in expressions

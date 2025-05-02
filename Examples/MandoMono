@@ -1,0 +1,110 @@
+PROGRAM MandelbrotASCII;
+
+USES Crt;  // For GotoXY, Write, ScreenCols, ScreenRows, ClrScr, ReadKey
+
+CONST
+  MaxIter       = 30;    // Maximum iterations (lower for faster rendering)
+  EscapeRadiusSq = 4.0;  // Escape radius squared (2*2)
+
+  // Complex plane coordinates to map the screen onto
+  MinX = -2.0;
+  MaxX = 1.0;
+  MinY = -1.0;
+  MaxY = 1.0;
+
+  // Characters to use for drawing based on escape speed
+  // Palette cycles through these characters. More chars = more 'colors'.
+  AsciiPalette = '.,-~:;=!*#$@';
+
+VAR
+  Row, Col     : Integer; // Screen coordinates (1-based)
+  Width, Height: Integer; // Screen dimensions
+  iter         : Integer; // Iteration counter
+
+  // Complex number components (using Real type)
+  cx, cy       : Real;    // Current point in the complex plane (constant for inner loop)
+  zx, zy       : Real;    // Z value during iteration
+  xTemp        : Real;    // Temporary variable for zx calculation
+
+  ScaleX, ScaleY : Real;    // Scaling factors
+  AsciiChar    : Char;    // Character to draw
+  PaletteLen   : Integer; // Length of the ASCII palette
+
+BEGIN
+  // Clear the screen (optional, requires ClrScr built-in if available)
+  // ClrScr; // Uncomment if ClrScr is implemented in your Crt unit
+
+  // Get screen dimensions
+  Width := ScreenCols;  // Assumes ScreenCols built-in exists
+  Height := ScreenRows; // Assumes ScreenRows built-in exists
+
+  WriteLn('Calculating Mandelbrot for ', Width, 'x', Height, ' console...');
+
+  // Calculate scaling factors to map screen coords to complex plane
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+
+  PaletteLen := Length(AsciiPalette); // Assumes Length built-in exists
+
+  // Iterate through each row on the screen
+  FOR Row := 1 TO Height DO
+  BEGIN
+    cy := MinY + Row * ScaleY; // Calculate the imaginary part for this row
+
+    // Iterate through each column in the current row
+    FOR Col := 1 TO Width DO
+    BEGIN
+      cx := MinX + Col * ScaleX; // Calculate the real part for this column
+
+      // Reset Z for the Mandelbrot iteration
+      zx := 0.0;
+      zy := 0.0;
+      iter := 0;
+
+      // Mandelbrot iteration loop
+      WHILE (iter < MaxIter) AND ((zx*zx + zy*zy) < EscapeRadiusSq) DO
+      BEGIN
+        // Calculate Z = Z^2 + C
+        xTemp := zx*zx - zy*zy + cx;
+        zy := 2.0 * zx * zy + cy;
+        zx := xTemp;
+        iter := iter + 1;
+      END;
+
+      // Choose character based on iteration count
+      IF iter = MaxIter THEN
+      BEGIN
+        // Point is likely inside the set
+        AsciiChar := ' '; // Use space for points inside the set
+      END
+      ELSE
+      BEGIN
+        // Point escaped - choose char from palette based on escape speed
+        // Use modulo to wrap around the palette string
+        IF PaletteLen > 0 THEN
+           // Pascal strings are often 1-based index, adjust if necessary
+           // Assuming pscal string indexing is 1-based like Turbo Pascal
+           AsciiChar := AsciiPalette[ (iter MOD PaletteLen) + 1 ]
+        ELSE
+           AsciiChar := '.'; // Fallback if palette is empty
+      END;
+
+      // Draw the character
+      GotoXY(Col, Row); // Assumes GotoXY built-in exists
+      Write(AsciiChar);   // Assumes Write built-in exists
+
+    END; // End FOR Col
+     // Optional: Print progress indicator per row
+     // GotoXY(1, Height + 1); Write('Row ', Row, ' of ', Height);
+
+  END; // End FOR Row
+
+  NormVideo; // Use NormVideo (ESC[0m) to reset all attributes (color, bold, etc.)
+  TextColor(LightGray); // Reset to default color (7)
+  // Position cursor at the bottom after drawing
+  GotoXY(1, Height + 1);
+  Write('Calculation complete. Press any key to exit.');
+  ReadKey; // Assumes ReadKey built-in exists to pause
+  WriteLn;
+
+END.

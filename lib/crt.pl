@@ -27,8 +27,8 @@ const
 procedure ClrScr;
 procedure GotoXY(x, y: integer);
 procedure ClrEol;
-procedure TextColor(color: byte);
-procedure TextBackground(color: byte);
+//procedure TextColor(color: byte); // Now built in
+//procedure TextBackground(color: byte); // Now built in
 procedure Delay(ms: word);
 procedure HideCursor;
 procedure CursorOff;
@@ -48,8 +48,8 @@ function KeyPressed: boolean;
 // --- Extended/Helper Procedures/Functions 
 procedure InvertColors;
 procedure NormalColors; // Note: Same effect as NormVideo
-procedure TextColorE(color: byte);
-procedure TextBackgroundE(color: byte);
+//procedure TextColorE(color: byte);       // <--- DECLARATION ONLY (Uses 256 colors via C built-in)
+//procedure TextBackgroundE(color: byte); // <--- DECLARATION ONLY (Uses 256 colors via C built-in)
 procedure SaveCursor;
 procedure RestoreCursor;
 procedure BoldText;      // Note: Same effect as HighVideo
@@ -198,15 +198,15 @@ begin
   Write(#7);
 end;
 
-procedure TextColorE(color: byte);
-begin
-  Write(ESC, '[38;5;', color, 'm');
-end;
+//procedure TextColorE(color: byte);
+//begin
+//  Write(ESC, '[38;5;', color, 'm');
+//end;
 
-procedure TextBackgroundE(color: byte);
-begin
-  Write(ESC, '[48;5;', color, 'm');
-end;
+//procedure TextBackgroundE(color: byte);
+//begin
+//  Write(ESC, '[48;5;', color, 'm');
+//end;
 
 procedure SaveCursor;
 begin

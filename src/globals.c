@@ -10,6 +10,14 @@ Symbol *current_function_symbol = NULL;
 Procedure *procedure_table = NULL;
 TypeEntry *type_table = NULL;
 
+// --- CRT State Variable Definitions & Defaults ---
+int gCurrentTextColor       = 7;       // Default LightGray
+int gCurrentTextBackground = 0;       // Default Black
+bool gCurrentTextBold      = false;   // Default off
+bool gCurrentColorIsExt    = false;   // Default standard 16-color mode
+bool gCurrentBgIsExt       = false;   // Default standard 16-color mode (using 0-7 range)
+// --- End CRT State Variables ---
+
 int break_requested = 0;
 
 

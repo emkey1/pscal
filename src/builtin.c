@@ -62,6 +62,10 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"sqrt",      executeBuiltinSqrt},
     {"succ",      executeBuiltinSucc},        // Include Succ
     {"tan",       executeBuiltinTan},         // Include Tan
+    {"textbackground", executeBuiltinTextBackground},
+    {"textbackgrounde", executeBuiltinTextBackgroundE},
+    {"textcolor", executeBuiltinTextColor},
+    {"textcolore", executeBuiltinTextColorE},
     {"trunc",     executeBuiltinTrunc},
     {"upcase",    executeBuiltinUpcase},
     {"wherex",    executeBuiltinWhereX},
@@ -1492,6 +1496,13 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         setTypeAST(retTypeNode, TYPE_MEMORYSTREAM);
         setRight(dummy, retTypeNode);
         dummy->var_type = TYPE_MEMORYSTREAM; // Set function's return type
+        
+    } else if (strcmp(name, "textcolore") == 0 || strcmp(name, "textbackgrounde") == 0 ) {
+        // Param: byte/integer
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST *)); if (!dummy->children) { /* Error */ }
+        AST *p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_BYTE); // Expect byte
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_tc_color"); AST *v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
     } else if (strcmp(name, "api_receive") == 0) {
         Token* typeNameToken = newToken(TOKEN_IDENTIFIER, "string");
         AST *retTypeNode = newASTNode(AST_VARIABLE, typeNameToken);
@@ -2000,7 +2011,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     const char *procedures[] = {
          "writeln", "write", "readln", "read", "reset", "rewrite",
          "close", "assign", "halt", "inc", "dec", "delay",
-         "randomize", "mstreamfree"
+         "randomize", "mstreamfree", "textcolore", "textbackgrounde"
          // Add others like clrscr, gotoxy, assert if implemented
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
@@ -2014,4 +2025,64 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     return BUILTIN_TYPE_NONE;
 }
 
+Value executeBuiltinTextColorE(AST *node) {
+    fflush(stderr); // Flush immediately
+    if (node->child_count != 1) { /* Error handling */ EXIT_FAILURE_HANDLER(); }
+    Value colorVal = eval(node->children[0]);
+    if (colorVal.type != TYPE_INTEGER && colorVal.type != TYPE_BYTE) { /* Error handling */ freeValue(&colorVal); EXIT_FAILURE_HANDLER(); }
+    long long colorCode = colorVal.i_val;
+    freeValue(&colorVal);
 
+    // Store 0-255 index
+    gCurrentTextColor = (colorCode >= 0 && colorCode <= 255) ? (int)colorCode : 7; // Default to 7 if out of range
+    gCurrentTextBold = false; // Extended colors don't usually use the bold flag for intensity
+    gCurrentColorIsExt = true; // Mark as extended 256-color mode
+
+    // DO NOT PRINT ANYTHING HERE
+    return makeVoid();
+}
+
+Value executeBuiltinTextBackgroundE(AST *node) {
+    if (node->child_count != 1) { /* Error handling */ EXIT_FAILURE_HANDLER(); }
+    Value colorVal = eval(node->children[0]);
+    if (colorVal.type != TYPE_INTEGER && colorVal.type != TYPE_BYTE) { /* Error handling */ freeValue(&colorVal); EXIT_FAILURE_HANDLER(); }
+    long long colorCode = colorVal.i_val;
+    freeValue(&colorVal);
+
+    // Store 0-255 index
+    gCurrentTextBackground = (colorCode >= 0 && colorCode <= 255) ? (int)colorCode : 0; // Default to 0 if out of range
+    gCurrentBgIsExt = true; // Mark as extended 256-color mode
+
+    // DO NOT PRINT ANYTHING HERE
+    return makeVoid();
+}
+
+Value executeBuiltinTextColor(AST *node) {
+    if (node->child_count != 1) { /* Error handling */ EXIT_FAILURE_HANDLER(); }
+    Value colorVal = eval(node->children[0]);
+    if (colorVal.type != TYPE_INTEGER && colorVal.type != TYPE_BYTE) { /* Error handling */ freeValue(&colorVal); EXIT_FAILURE_HANDLER(); }
+    long long colorCode = colorVal.i_val;
+    freeValue(&colorVal);
+
+    gCurrentTextColor = (int)(colorCode % 16); // Store 0-15 index
+    gCurrentTextBold = (colorCode >= 8 && colorCode <= 15); // Set bold for high-intensity 8-15
+    gCurrentColorIsExt = false; // Mark as standard 16-color mode
+
+    // DO NOT PRINT ANYTHING HERE
+    return makeVoid();
+}
+
+// --- MODIFIED TextBackground ---
+Value executeBuiltinTextBackground(AST *node) {
+    if (node->child_count != 1) { /* Error handling */ EXIT_FAILURE_HANDLER(); }
+    Value colorVal = eval(node->children[0]);
+    if (colorVal.type != TYPE_INTEGER && colorVal.type != TYPE_BYTE) { /* Error handling */ freeValue(&colorVal); EXIT_FAILURE_HANDLER(); }
+    long long colorCode = colorVal.i_val;
+    freeValue(&colorVal);
+
+    gCurrentTextBackground = (int)(colorCode % 8); // Store 0-7 index (standard BG range)
+    gCurrentBgIsExt = false; // Mark as standard 16-color mode (only 8 for BG used)
+
+    // DO NOT PRINT ANYTHING HERE
+    return makeVoid();
+}

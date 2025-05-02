@@ -1,0 +1,94 @@
+PROGRAM Mandelbrot256Color;
+
+USES Crt; // Assumes CRT.pas contains TextColorE, GotoXY, etc.
+
+CONST
+  MaxIter       = 80;    // Increase iterations for finer color gradients
+  EscapeRadiusSq = 4.0;
+
+  // Complex plane coordinates (adjust for aspect ratio if needed)
+  MinX = -2.0;
+  MaxX = 1.0;
+  MinY = -1.0;
+  MaxY = 1.0;
+
+  // Color index for points inside the set (can be any 0-255)
+  InsideColorIndex = 16; // Often black in the 256 palette
+
+  // Number of colors to cycle through for escaped points
+  // We exclude the 'InsideColorIndex' and potentially the first 16 basic colors
+  // Max index is 255. 255 - 16 = 239 available indices after the basic 16.
+  PaletteSize = 239;
+
+VAR
+  Row, Col     : Integer;
+  Width, Height: Integer;
+  iter         : Integer;
+  cx, cy       : Real;
+  zx, zy       : Real;
+  xTemp        : Real;
+  ScaleX, ScaleY : Real;
+  DrawChar     : Char;
+  ColorIndex   : Byte; // Use Byte for 0-255 range
+
+BEGIN
+  // ClrScr; // Optional
+
+  Width := ScreenCols;
+  Height := ScreenRows;
+
+  WriteLn('Calculating Mandelbrot (', Width, 'x', Height, ') with 256 colors...');
+
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+
+  DrawChar := '#'; // Or use Char(219) for a block if UTF-8 works reliably
+
+  FOR Row := 1 TO Height DO
+  BEGIN
+    cy := MinY + Row * ScaleY;
+    GotoXY(1, Row); // Position at start of line
+
+    FOR Col := 1 TO Width DO
+    BEGIN
+      cx := MinX + Col * ScaleX;
+      zx := 0.0;
+      zy := 0.0;
+      iter := 0;
+
+      WHILE (iter < MaxIter) AND ((zx*zx + zy*zy) < EscapeRadiusSq) DO
+      BEGIN
+        xTemp := zx*zx - zy*zy + cx;
+        zy := 2.0 * zx * zy + cy;
+        zx := xTemp;
+        iter := iter + 1;
+      END;
+
+      // Map iteration count to a 256-color index
+      IF iter = MaxIter THEN
+      BEGIN
+        ColorIndex := InsideColorIndex; // Inside the set
+      END
+      ELSE
+      BEGIN
+        // Cycle through the extended palette (indices 16-255)
+        // Add 16 to offset past the standard 16 colors.
+        ColorIndex := 16 + (iter MOD PaletteSize);
+      END;
+
+      // Set the extended color and draw the character
+      TextColorE(ColorIndex); // <--- Use the extended color procedure
+      Write(DrawChar);
+
+    END; // End FOR Col
+  END; // End FOR Row
+
+  // Reset attributes and position cursor at the bottom
+  NormVideo; // Use NormVideo (ESC[0m) to reset all attributes (color, bold, etc.)
+  TextColor(LightGray); // Reset to default color (7)
+  GotoXY(1, Height + 1);
+  Write('Calculation complete. Press any key to exit.');
+  ReadKey;
+  WriteLn;
+
+END.

@@ -390,7 +390,6 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
      return foundDecl;
 }
 
-
 void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
     if (!node) return;
 
@@ -570,12 +569,6 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
           // Maybe handle const/function result again here if needed
     }
 }
-
-// --- End: Corrected annotateTypes function ---
-
-// You might need to add a basic getBuiltinReturnType helper function,
-// similar to getBuiltinType, perhaps in builtin.c/builtin.h
-// For now, you can add a simple version like this to ast.c temporarily:
 
 VarType getBuiltinReturnType(const char* name) {
      // Simplified version - add more built-in *functions* here

@@ -15,6 +15,14 @@
 extern "C" {
 #endif
 
+// --- CRT State Variables (Declarations) ---
+extern int gCurrentTextColor;
+extern int gCurrentTextBackground;
+extern bool gCurrentTextBold;
+extern bool gCurrentColorIsExt;
+extern bool gCurrentBgIsExt;
+// --- End CRT State Variables ---
+
 // For unit parsing...
 #define MAX_RECURSION_DEPTH 10
 

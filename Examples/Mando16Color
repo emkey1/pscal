@@ -1,0 +1,106 @@
+PROGRAM MandelbrotColorASCII;
+
+USES Crt;
+
+CONST
+  MaxIter       = 90;    // Increased iterations for more color variation
+  EscapeRadiusSq = 4.0;
+
+  // Complex plane coordinates
+  MinX = -2.0;
+  MaxX = 1.0;
+  MinY = -1.0;
+  MaxY = 1.0;
+
+  // Standard Turbo Pascal Color Constants (for readability)
+  Black         = 0;
+  Blue          = 1;
+  Green         = 2;
+  Cyan          = 3;
+  Red           = 4;
+  Magenta       = 5;
+  Brown         = 6;
+  LightGray     = 7;
+  DarkGray      = 8;
+  LightBlue     = 9;
+  LightGreen    = 10;
+  LightCyan     = 11;
+  LightRed      = 12;
+  LightMagenta  = 13;
+  Yellow        = 14;
+  White         = 15;
+
+VAR
+  Row, Col     : Integer;
+  Width, Height: Integer;
+  iter         : Integer;
+  cx, cy       : Real;
+  zx, zy       : Real;
+  xTemp        : Real;
+  ScaleX, ScaleY : Real;
+  DrawChar     : Char;    // Character to draw (use a solid block or '*')
+  ColorNum     : Integer; // Color index (0-15)
+
+BEGIN
+  // ClrScr; // Optional: Clear screen if implemented
+
+  Width := ScreenCols;
+  Height := ScreenRows;
+
+  WriteLn('Calculating Mandelbrot (', Width, 'x', Height, ') with color...');
+
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+
+  DrawChar := '#'; // Character to use for drawing pixels
+  // Alternative: Use a block character if terminal supports UTF-8 well:
+  // DrawChar := Char(219); // Or directly if pscal supports #nnn notation for chars
+
+  FOR Row := 1 TO Height DO
+  BEGIN
+    cy := MinY + Row * ScaleY;
+    GotoXY(1, Row); // Go to start of line once per row
+
+    FOR Col := 1 TO Width DO
+    BEGIN
+      cx := MinX + Col * ScaleX;
+      zx := 0.0;
+      zy := 0.0;
+      iter := 0;
+
+      WHILE (iter < MaxIter) AND ((zx*zx + zy*zy) < EscapeRadiusSq) DO
+      BEGIN
+        xTemp := zx*zx - zy*zy + cx;
+        zy := 2.0 * zx * zy + cy;
+        zx := xTemp;
+        iter := iter + 1;
+      END;
+
+      // Map iteration count to a color (0-15)
+      IF iter = MaxIter THEN
+      BEGIN
+        ColorNum := Black; // Inside the set
+      END
+      ELSE
+      BEGIN
+        // Cycle through colors 1 to 14 for escaped points
+        ColorNum := (iter MOD 14) + 1; // Avoid black (0) and bright white (15) for escapes
+        // You can create more complex color mappings here!
+      END;
+
+      // Set the color and draw the character
+      TextColor(ColorNum);  // <--- Use the new procedure
+      Write(DrawChar);      // <--- Write the chosen character
+
+    END; // End FOR Col
+  END; // End FOR Row
+
+  NormVideo; // Use NormVideo (ESC[0m) to reset all attributes (color, bold, etc.)
+  TextColor(LightGray); // Reset to default color (7)
+
+  GotoXY(1, Height + 1);
+  Write('Calculation complete. Press any key to exit.');
+  ReadKey;
+  WriteLn;
+
+END.

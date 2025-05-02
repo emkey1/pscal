@@ -126,6 +126,8 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("screenrows", AST_FUNCTION_DECL);
     registerBuiltinFunction("dec", AST_PROCEDURE_DECL); 
     registerBuiltinFunction("succ", AST_FUNCTION_DECL);
+    registerBuiltinFunction("textcolore", AST_PROCEDURE_DECL); // <--- ADD THIS
+    registerBuiltinFunction("textbackgrounde", AST_PROCEDURE_DECL); // <--- ADD THIS
 
     /* Initialize lexer and parser. */
     Lexer lexer;

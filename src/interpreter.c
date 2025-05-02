@@ -8,6 +8,24 @@
 
 AST *GlobalASTRoot = NULL;  // Declare global AST root
 
+// Helper function to map 0-15 to ANSI FG codes (30-37 standard, 90-97 bright)
+static int map16FgColorToAnsi(int colorCode, bool isBold) {
+    colorCode %= 16;
+    if (isBold || (colorCode >= 8 && colorCode <= 15)) { // Use bright codes if bold OR color is 8-15
+        // Map 8-15 to 90-97
+        return 90 + (colorCode % 8);
+    } else {
+        // Map 0-7 to 30-37
+        return 30 + (colorCode % 8);
+    }
+}
+
+// Helper function to map 0-7 to ANSI BG codes (40-47)
+static int map16BgColorToAnsi(int colorCode) {
+    // Standard BG only uses 0-7
+    return 40 + (colorCode % 8);
+}
+
 void popLocalEnv(void) {
     Symbol *sym = localSymbols;
     #ifdef DEBUG
@@ -1882,75 +1900,95 @@ void executeWithScope(AST *node, bool is_global_scope)  {
 
         case AST_WRITE:
         case AST_WRITELN: {
-             FILE *output = stdout;
+             FILE *output = stdout; // Assuming stdout for now
              int startIndex = 0;
-             // --- Check for File Argument ---
-             if (node->child_count > 0) {
-                  if (node->children[0]->type == AST_VARIABLE) {
-                      Symbol* sym = lookupSymbol(node->children[0]->token->value);
-                      if (sym && sym->type == TYPE_FILE) {
-                          Value fileVal = eval(node->children[0]);
-                          if (fileVal.type == TYPE_FILE) {
-                               if (fileVal.f_val != NULL) {
-                                   output = fileVal.f_val;
-                                   startIndex = 1;
-                               } else {
-                                   fprintf(stderr, "Runtime Warning: File variable passed to write(ln) is not open.\n");
-                               }
-                          }
-                      }
-                  }
-             } // End file argument check
+             // Note: File redirection for Write/WriteLn needs more robust handling
+             //       if you want colors written to files (usually not desired).
+             //       This implementation assumes console output via stdout.
 
-             // --- Loop through arguments to print ---
+             // --- Apply current text attributes BEFORE printing arguments ---
+             char escape_sequence[64] = "\x1B["; // Start escape sequence buffer
+             char code_str[10];
+             bool first_attr = true;
+
+             // 1. Handle Bold/Intensity (only applies if NOT using 256 color FG)
+             if (!gCurrentColorIsExt && gCurrentTextBold) {
+                 strcat(escape_sequence, "1");
+                 first_attr = false;
+             } else {
+                 // Use "22" to explicitly turn OFF bold if needed? Usually 0 does it.
+                 // strcat(escape_sequence, "22"); // Optional: Force non-bold
+                 // first_attr = false;
+             }
+
+             // 2. Handle Foreground Color
+             if (!first_attr) strcat(escape_sequence, ";"); // Separator
+             if (gCurrentColorIsExt) {
+                 snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
+             } else {
+                 snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
+             }
+             strcat(escape_sequence, code_str);
+             first_attr = false;
+
+             // 3. Handle Background Color
+             if (!first_attr) strcat(escape_sequence, ";"); // Separator
+             if (gCurrentBgIsExt) {
+                 snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
+             } else {
+                 snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
+             }
+             strcat(escape_sequence, code_str);
+
+             // 4. Terminate sequence
+             strcat(escape_sequence, "m");
+            // <<< --- ADD DEBUG BLOCK START --- >>>
+#ifdef DEBUG
+           fprintf(stderr, "[DEBUG WRITE] Generated Sequence: '");
+           // Print escape sequence safely for debugging (replace non-printables like ESC)
+           for (int k = 0; escape_sequence[k] != '\0'; ++k) {
+               if (escape_sequence[k] == '\x1B') fprintf(stderr, "<ESC>"); // Show ESC clearly
+               else if (isprint(escape_sequence[k])) fputc(escape_sequence[k], stderr);
+               else fprintf(stderr, "\\x%02X", (unsigned char)escape_sequence[k]); // Show other non-printables as hex
+           }
+           fprintf(stderr, "'\n");
+#endif
+            // <<< --- ADD DEBUG BLOCK END --- >>>
+
+             // 5. Print the combined sequence *once* before processing args
+             printf("%s", escape_sequence);
+             // No fflush here, let it buffer with the actual content
+
+             // --- Loop through arguments to print (existing logic) ---
              for (int i = startIndex; i < node->child_count; i++) {
-                 // --- Get the argument node itself ---
                  AST *argNode = node->children[i];
-                 if (!argNode) { // Safety check
-                     fprintf(stderr, "Error: NULL argument node in write/writeln.\n");
-                     continue;
-                 }
-                 // ---
+                 if (!argNode) continue;
+                 Value val = eval(argNode);
 
-                 Value val = eval(argNode); // Evaluate the argument node
-
-                 // --- CORRECTED Check: Check the ARGUMENT node's type ---
+                 // Print argument value based on type
                  if (argNode->type == AST_FORMATTED_EXPR) {
-                      // We already evaluated it, and 'eval' returned the formatted string.
-                      // So, just print the string contained in 'val'.
-                      if (val.type == TYPE_STRING) { // Should always be true here
-                          fprintf(output, "%s", val.s_val ? val.s_val : "");
-                      } else {
-                          // Should not happen if eval(AST_FORMATTED_EXPR) works correctly
-                          fprintf(output, "[formatted_eval_error]");
-                      }
+                     if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");
+                     else fprintf(output, "[formatted_eval_error]");
                  } else {
-                      // Original logic for non-formatted values
-                      if (val.type == TYPE_INTEGER)
-                         fprintf(output, "%lld", val.i_val);
-                      else if (val.type == TYPE_REAL)
-                          fprintf(output, "%f", val.r_val); // Default float format
-                      else if (val.type == TYPE_BOOLEAN)
-                         fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
-                      else if (val.type == TYPE_STRING)
-                         fprintf(output, "%s", val.s_val ? val.s_val : ""); // Handle null string
-                      else if (val.type == TYPE_CHAR)
-                         fputc(val.c_val, output);
-                      else if (val.type == TYPE_RECORD)
-                         fprintf(output, "[record]");
-                      // Add cases for ENUM, ARRAY, SET etc. if needed
-                       else if (val.type == TYPE_ENUM) // Example for Enum
-                          fprintf(output, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "<enum>"); // Adjust as needed
-                      else fprintf(output, "[unprintable]");
+                      if (val.type == TYPE_INTEGER) fprintf(output, "%lld", val.i_val);
+                      else if (val.type == TYPE_REAL) fprintf(output, "%f", val.r_val);
+                      else if (val.type == TYPE_BOOLEAN) fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
+                      else if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");
+                      else if (val.type == TYPE_CHAR) fputc(val.c_val, output);
+                      else if (val.type == TYPE_ENUM) fprintf(output, "%s(ord %d)", val.enum_val.enum_name ? val.enum_val.enum_name : "?", val.enum_val.ordinal); // Print ordinal too
+                      // Add cases for other printable types (BYTE, WORD?)
+                      else fprintf(output, "[unprintable_type_%d]", val.type); // More specific unprintable message
                  }
-                 // --- END CORRECTED Check ---
-
                  freeValue(&val); // Free the evaluated value
              } // End loop
 
-             if (node->type == AST_WRITELN)
+             // Handle WriteLn
+             if (node->type == AST_WRITELN) {
+                 // Print newline. Crucially, DO NOT reset color here.
+                 // Let the color persist until explicitly changed or NormVideo is called.
                  fprintf(output, "\n");
-             fflush(output); // Force the output buffer to be written
+             }
+             fflush(output); // Flush after all arguments and potential newline are done
              break;
          } // End case AST_WRITE/AST_WRITELN
             
