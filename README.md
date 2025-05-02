@@ -10,7 +10,69 @@ As the code was written primarily by AI's I'm releasing this to the public domai
 
 Install:
 
-After clonging the repo...
+You will need cmake and curl.  If so,
+
+For curl...
+
+```
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install libcurl4-openssl-dev
+
+# RHEL / CentOS 7
+sudo yum install libcurl-devel
+
+# Fedora
+sudo dnf install libcurl-devel
+
+# SUSE / openSUSE
+sudo zypper install libcurl-devel
+
+# Alpine
+sudo apk add curl-dev
+
+# Arch Linux
+sudo pacman -S curl
+
+# MacOS (with Homebrew)
+brew install curl
+
+On macOS you may also need to tell your build where Homebrew’s curl lives:
+export LDFLAGS="-L$(brew --prefix curl)/lib"
+export CPPFLAGS="-I$(brew --prefix curl)/include"
+
+
+```
+
+Here’s how to get CMake itself installed if needed...
+
+
+```
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install cmake
+
+# RHEL / CentOS
+sudo yum install cmake
+
+# Fedora
+sudo dnf install cmake
+
+# SUSE / openSUSE
+sudo zypper install cmake
+
+# Alpine
+sudo apk add cmake
+
+# Arch Linux
+sudo pacman -S cmake
+
+# macOS (with Homebrew)
+brew update
+brew install cmake
+```
+
+After cloning the repo...
 
 ```
 cd pscal
