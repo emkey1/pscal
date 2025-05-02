@@ -1640,6 +1640,9 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                    if (!branchMatched && node->extra) {
                        executeWithScope(node->extra, false);
                    }
+            
+                   freeValue(&caseValue);
+            
                    break;
         }
         case AST_BLOCK: {
