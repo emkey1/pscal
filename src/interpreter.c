@@ -1076,298 +1076,297 @@ Value eval(AST *node) {
         }
 
         case AST_BINARY_OP: {
-                    Value left = eval(node->left);
-                    Value right = eval(node->right);
-                    TokenType op = node->token->type;
-                    Value result = makeVoid(); // Initialize result placeholder
+            Value left = eval(node->left);
+            Value right = eval(node->right);
+            TokenType op = node->token->type;
+            Value result = makeVoid(); // Initialize result placeholder
 
-                    // --- Stage 1: Determine effective types for operation dispatch ---
-                    // We use these 'dispatch' types to decide which block of logic to enter (integer, real, string, etc.)
-                    VarType dispatchLeftType = left.type;
-                    VarType dispatchRightType = right.type;
+            // --- Stage 1: Determine effective types for operation dispatch ---
+            // We use these 'dispatch' types to decide which block of logic to enter (integer, real, string, etc.)
+            VarType dispatchLeftType = left.type;
+            VarType dispatchRightType = right.type;
 
-                    // Promote Byte/Word/Bool to Integer *for dispatching* arithmetic/comparison logic
-                    if (dispatchLeftType == TYPE_BYTE || dispatchLeftType == TYPE_WORD || dispatchLeftType == TYPE_BOOLEAN) {
-                         dispatchLeftType = TYPE_INTEGER;
+            // Promote Byte/Word/Bool/CHAR to Integer *for dispatching* arithmetic/comparison logic
+            if (dispatchLeftType == TYPE_BYTE || dispatchLeftType == TYPE_WORD || dispatchLeftType == TYPE_BOOLEAN || dispatchLeftType == TYPE_CHAR) {
+                 dispatchLeftType = TYPE_INTEGER;
+            }
+            if (dispatchRightType == TYPE_BYTE || dispatchRightType == TYPE_WORD || dispatchRightType == TYPE_BOOLEAN || dispatchRightType == TYPE_CHAR) {
+                 dispatchRightType = TYPE_INTEGER;
+            }
+
+            // --- Stage 2: Handle Operators based on types ---
+
+            // Handle specific operators first that have unique type rules or don't fit the general pattern easily
+            if (op == TOKEN_SHL || op == TOKEN_SHR) {
+                // Requires integer-like types. Use original types for value access.
+                // Check if original types are integer-compatible (Integer, Byte, Word)
+                if (!((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&
+                      (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD))) {
+                     fprintf(stderr,"Runtime error: Operands for SHL/SHR must be integer types. Got %s and %s\n", varTypeToString(left.type), varTypeToString(right.type));
+                     freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                 }
+                 long long l_int = left.i_val; // Assumes i_val holds byte/word/int value
+                 long long r_int = right.i_val;
+
+                 // Basic check for negative shift amount
+                 if (r_int < 0) {
+                      fprintf(stderr, "Runtime error: Shift amount cannot be negative.\n");
+                      freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                 }
+                 // Note: More robust checks might involve bit width (e.g., PASCAL_INT_BITS)
+
+                 if (op == TOKEN_SHL) result = makeInt(l_int << r_int); else result = makeInt(l_int >> r_int);
+            }
+            else if (op == TOKEN_IN) {
+                // Uses original types: Left must be ordinal, Right must be SET
+                if (right.type != TYPE_SET) { fprintf(stderr,"Runtime error: Right operand of IN must be a set. Got %s\n", varTypeToString(right.type)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+
+                // Check if left operand is an ordinal type
+                bool left_is_ordinal = (left.type==TYPE_INTEGER || left.type==TYPE_ENUM || left.type==TYPE_CHAR || (left.type==TYPE_STRING && left.s_val && strlen(left.s_val)==1) || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN);
+                if (!left_is_ordinal) { fprintf(stderr,"Runtime error: Left operand of IN must be an ordinal type. Got %s\n", varTypeToString(left.type)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+
+                long long left_ord = 0; // Determine ordinal value based on the original type
+                 if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) left_ord = left.i_val;
+                 else if (left.type == TYPE_ENUM) left_ord = left.enum_val.ordinal;
+                 else if (left.type == TYPE_CHAR) left_ord = left.c_val;
+                 else if (left.type == TYPE_STRING) left_ord = left.s_val[0]; // Assumes single char string checked by left_is_ordinal
+
+                 // Search for the ordinal value in the set
+                 int found = 0;
+                 if (right.set_val.set_values) {
+                     for(int i=0; i < right.set_val.set_size; i++) {
+                         if(right.set_val.set_values[i] == left_ord) {
+                             found = 1;
+                             break;
+                         }
+                     }
+                 }
+                 result = makeBoolean(found);
+            }
+            else if (op == TOKEN_AND || op == TOKEN_OR) {
+                 // Handle bitwise for integer-like types, logical for boolean (using original types)
+                 if ((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&
+                     (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD))
+                 { // Bitwise operation
+                       long long l_int = left.i_val; // Assumes i_val stores value
+                       long long r_int = right.i_val;
+                       if (op == TOKEN_AND) result = makeInt(l_int & r_int); else result = makeInt(l_int | r_int);
+                 }
+                 else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN)
+                 { // Logical operation for booleans
+                       // Note: Pascal has short-circuit evaluation, this simple version evaluates both operands first.
+                       if (op == TOKEN_AND) result = makeBoolean(left.i_val && right.i_val); else result = makeBoolean(left.i_val || right.i_val);
+                 }
+                 else { // Invalid combination for AND/OR
+                     fprintf(stderr, "Runtime error: Invalid operands for %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
+                     freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                 }
+            }
+            // --- Stage 3: Handle remaining operators (+, -, *, /, comparisons) using type combination checks ---
+            else {
+                // --- Check 1: Integer/Ordinal Operations ---
+                // Use dispatch types (Byte/Word/Bool promoted to Integer)
+                // Exclude real division '/'
+                if (dispatchLeftType == TYPE_INTEGER && dispatchRightType == TYPE_INTEGER && op != TOKEN_SLASH) {
+                    // Get values, treating bool/char as ordinals if needed for comparison/arithmetic
+                    long long a = 0; // Get left value as integer/ordinal
+                     if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) a = left.i_val;
+                     else if (left.type == TYPE_CHAR) a = left.c_val;
+                     else {/* This path shouldn't be reached if dispatchLeftType is INTEGER */ fprintf(stderr,"Internal error: Type mismatch in integer op block (left=%s)\n", varTypeToString(left.type)); EXIT_FAILURE_HANDLER(); }
+
+                    long long b = 0; // Get right value as integer/ordinal
+                     if (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD || right.type == TYPE_BOOLEAN) b = right.i_val;
+                     else if (right.type == TYPE_CHAR) b = right.c_val;
+                     else {/* This path shouldn't be reached if dispatchRightType is INTEGER */ fprintf(stderr,"Internal error: Type mismatch in integer op block (right=%s)\n", varTypeToString(right.type)); EXIT_FAILURE_HANDLER(); }
+
+                    // Perform integer arithmetic or comparison
+                    switch (op) {
+                        case TOKEN_PLUS: result = makeInt(a + b); break;
+                        case TOKEN_MINUS: result = makeInt(a - b); break;
+                        case TOKEN_MUL: result = makeInt(a * b); break;
+                        case TOKEN_INT_DIV: if(b==0){fprintf(stderr,"Runtime error: Division by zero (DIV)\n"); EXIT_FAILURE_HANDLER();} result = makeInt(a / b); break;
+                        case TOKEN_MOD: if(b==0){fprintf(stderr,"Runtime error: Division by zero (MOD)\n"); EXIT_FAILURE_HANDLER();} result = makeInt(a % b); break;
+                        // Comparisons result in Boolean
+                        case TOKEN_GREATER: result = makeBoolean(a > b); break;
+                        case TOKEN_GREATER_EQUAL: result = makeBoolean(a >= b); break;
+                        case TOKEN_EQUAL: result = makeBoolean(a == b); break;
+                        case TOKEN_NOT_EQUAL: result = makeBoolean(a != b); break;
+                        case TOKEN_LESS: result = makeBoolean(a < b); break;
+                        case TOKEN_LESS_EQUAL: result = makeBoolean(a <= b); break;
+                        default: fprintf(stderr,"Unhandled op %s for INTEGER/Ordinal types\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
                     }
-                    if (dispatchRightType == TYPE_BYTE || dispatchRightType == TYPE_WORD || dispatchRightType == TYPE_BOOLEAN) {
-                         dispatchRightType = TYPE_INTEGER;
+                    // Result type is INTEGER or BOOLEAN
+                }
+                // --- Check 2: Real Number Operations ---
+                // Check if REAL is involved (using original types) OR if it's real division '/'
+                // Operands must be promotable to Real (Int, Byte, Word, Bool, Char)
+                else if ((left.type == TYPE_REAL || dispatchLeftType == TYPE_INTEGER || left.type == TYPE_CHAR) &&
+                         (right.type == TYPE_REAL || dispatchRightType == TYPE_INTEGER || right.type == TYPE_CHAR) &&
+                         (left.type == TYPE_REAL || right.type == TYPE_REAL || op == TOKEN_SLASH))
+                {
+                     // At least one operand is REAL, OR both are integer-like/char AND operator is '/'
+                     double a = 0.0, b = 0.0; // Promote values to double
+
+                     // Promote Left Operand
+                     if (left.type == TYPE_REAL) a = left.r_val;
+                     else if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) a = (double)left.i_val;
+                     else if (left.type == TYPE_CHAR) a = (double)left.c_val;
+                     else { /* Invalid type for real op */ goto unsupported_operands_label; } // Should not happen based on outer condition
+
+                     // Promote Right Operand
+                     if (right.type == TYPE_REAL) b = right.r_val;
+                     else if (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD || right.type == TYPE_BOOLEAN) b = (double)right.i_val;
+                     else if (right.type == TYPE_CHAR) b = (double)right.c_val;
+                     else { /* Invalid type for real op */ goto unsupported_operands_label; } // Should not happen
+
+                     // Perform real arithmetic or comparison
+                     switch(op){
+                         case TOKEN_PLUS: result=makeReal(a+b); break; case TOKEN_MINUS: result=makeReal(a-b); break;
+                         case TOKEN_MUL: result=makeReal(a*b); break; case TOKEN_SLASH: if(b==0.0){fprintf(stderr,"Runtime error: Division by zero (/)\n"); EXIT_FAILURE_HANDLER();} result=makeReal(a/b); break;
+                         // Comparisons result in Boolean
+                         case TOKEN_GREATER: result=makeBoolean(a>b); break; case TOKEN_GREATER_EQUAL: result=makeBoolean(a>=b); break;
+                         case TOKEN_EQUAL: result=makeBoolean(a==b); break; case TOKEN_NOT_EQUAL: result=makeBoolean(a!=b); break;
+                         case TOKEN_LESS: result=makeBoolean(a<b); break; case TOKEN_LESS_EQUAL: result=makeBoolean(a<=b); break;
+                         default: fprintf(stderr,"Unhandled op %s for REAL/Mixed types\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                     }
+                     // Result type is REAL or BOOLEAN
+                }
+                // --- Check 3: String/Char Operations ---
+                // Check using original types. Must involve at least one String/Char.
+                // Operator must be '+' or a comparison operator.
+                else if ((left.type == TYPE_STRING || left.type == TYPE_CHAR) || (right.type == TYPE_STRING || right.type == TYPE_CHAR))
+                {
+                     // Ensure the other operand (if not string/char) is compatible for '+' (none) or comparison (string/char only)
+                     bool types_valid_for_op = false;
+                     if (op == TOKEN_PLUS && (left.type == TYPE_STRING || left.type == TYPE_CHAR) && (right.type == TYPE_STRING || right.type == TYPE_CHAR)) {
+                         types_valid_for_op = true; // Concatenation
+                     } else if ((op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL) &&
+                                (left.type == TYPE_STRING || left.type == TYPE_CHAR) && (right.type == TYPE_STRING || right.type == TYPE_CHAR)) {
+                         types_valid_for_op = true; // Comparison
+                     }
+
+                     if (!types_valid_for_op) {
+                          goto unsupported_operands_label; // Operation not valid for these types
+                     }
+
+                     // --- Perform String/Char Operation ---
+                     char tl_buf[2]={0}, tr_buf[2]={0}; // Buffers for potential char->string conversion
+                     const char *ls = NULL, *rs = NULL;
+
+                     // Get left string pointer or convert char
+                     if(left.type == TYPE_CHAR) { tl_buf[0] = left.c_val; ls = tl_buf; }
+                     else if (left.type == TYPE_STRING) { ls = left.s_val; }
+                     else { /* Should have been caught by types_valid_for_op */ goto unsupported_operands_label; }
+
+                     // Get right string pointer or convert char
+                     if(right.type == TYPE_CHAR) { tr_buf[0] = right.c_val; rs = tr_buf; }
+                     else if (right.type == TYPE_STRING) { rs = right.s_val; }
+                     else { /* Should have been caught by types_valid_for_op */ goto unsupported_operands_label; }
+
+                     // Handle NULL string pointers safely (treat as empty string)
+                     if (!ls) ls = "";
+                     if (!rs) rs = "";
+
+                     if (op == TOKEN_PLUS) { // Concatenation
+                         size_t len_l = strlen(ls); size_t len_r = strlen(rs);
+                         size_t buf_size = len_l + len_r + 1;
+                         char* concat_res = malloc(buf_size);
+                         if (!concat_res) { fprintf(stderr,"Malloc failed for string concat\n"); EXIT_FAILURE_HANDLER(); }
+                         strcpy(concat_res, ls); // Copy left part
+                         strcat(concat_res, rs); // Append right part
+                         result = makeString(concat_res); // makeString copies it again
+                         free(concat_res); // Free intermediate buffer
+                     }
+                     else { // Comparison (already checked operator validity)
+                         int cmp = strcmp(ls, rs);
+                         switch (op) {
+                             case TOKEN_EQUAL: result = makeBoolean(cmp == 0); break;
+                             case TOKEN_NOT_EQUAL: result = makeBoolean(cmp != 0); break;
+                             case TOKEN_LESS: result = makeBoolean(cmp < 0); break;
+                             case TOKEN_LESS_EQUAL: result = makeBoolean(cmp <= 0); break;
+                             case TOKEN_GREATER: result = makeBoolean(cmp > 0); break;
+                             case TOKEN_GREATER_EQUAL: result = makeBoolean(cmp >= 0); break;
+                             default: break; // Should not happen
+                         }
+                     }
+                     // Result type is STRING or BOOLEAN
+                }
+                // --- Check 4: Enum/Enum Comparison ---
+                // Must be the same enum type (approximated by name check), operator must be comparison.
+                else if (left.type == TYPE_ENUM && right.type == TYPE_ENUM &&
+                         (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL))
+                {
+                     bool types_match = (!left.enum_val.enum_name || !right.enum_val.enum_name || strcmp(left.enum_val.enum_name, right.enum_val.enum_name)==0);
+                     // Allow EQ/NE even if types mismatch, but other comparisons require match
+                     if (!types_match && op != TOKEN_EQUAL && op != TOKEN_NOT_EQUAL) {
+                          fprintf(stderr, "Runtime error: Cannot compare different enum types ('%s' vs '%s') with %s\n", left.enum_val.enum_name?:"?", right.enum_val.enum_name?:"?", tokenTypeToString(op));
+                          freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                     }
+                     int ord_l = left.enum_val.ordinal; int ord_r = right.enum_val.ordinal;
+                     switch(op){
+                         case TOKEN_EQUAL: result = makeBoolean(types_match && (ord_l == ord_r)); break; // Only true if types match AND ordinals match
+                         case TOKEN_NOT_EQUAL: result = makeBoolean(!types_match || (ord_l != ord_r)); break; // True if types mismatch OR ordinals mismatch
+                         case TOKEN_LESS: result = makeBoolean(types_match && (ord_l < ord_r)); break;
+                         case TOKEN_LESS_EQUAL: result = makeBoolean(types_match && (ord_l <= ord_r)); break;
+                         case TOKEN_GREATER: result = makeBoolean(types_match && (ord_l > ord_r)); break;
+                         case TOKEN_GREATER_EQUAL: result = makeBoolean(types_match && (ord_l >= ord_r)); break;
+                         default: break; // Should not happen
+                     }
+                     // Result type is BOOLEAN
+                }
+                // --- Check 5: Boolean/Boolean Comparison ---
+                // Only allows EQ and NE. AND/OR handled earlier.
+                else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN && (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL))
+                {
+                    switch(op){
+                        case TOKEN_EQUAL: result = makeBoolean(left.i_val == right.i_val); break;
+                        case TOKEN_NOT_EQUAL: result = makeBoolean(left.i_val != right.i_val); break;
+                        default: break; // Should not happen
                     }
-                    // Note: Char can be treated as Integer via Ord() within specific cases below.
-
-                    // --- Stage 2: Handle Operators based on types ---
-
-                    // Handle specific operators first that have unique type rules or don't fit the general pattern easily
-                    if (op == TOKEN_SHL || op == TOKEN_SHR) {
-                        // Requires integer-like types. Use original types for value access.
-                        // Check if original types are integer-compatible (Integer, Byte, Word)
-                        if (!((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&
-                              (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD))) {
-                             fprintf(stderr,"Runtime error: Operands for SHL/SHR must be integer types. Got %s and %s\n", varTypeToString(left.type), varTypeToString(right.type));
-                             freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
+                    // Result type is BOOLEAN
+                }
+                // --- Check 6: ADDED Set Operations ---
+                     else if (left.type == TYPE_SET && right.type == TYPE_SET) {
+                         switch (op) {
+                             case TOKEN_PLUS: // Union
+                                 result = setUnion(left, right);
+                                 break;
+                             case TOKEN_MINUS: // Difference
+                                 result = setDifference(left, right);
+                                 break;
+                             case TOKEN_MUL: // Intersection
+                                 result = setIntersection(left, right);
+                                 break;
+                             // Optional: Add set comparisons like =, <>, <=, >= here if needed
+                             default:
+                                 fprintf(stderr, "Runtime error: Invalid operator '%s' for SET operands.\n", tokenTypeToString(op));
+                                 // No need to free left/right here, happens below
+                                 EXIT_FAILURE_HANDLER(); // Exit on invalid operator for sets
                          }
-                         long long l_int = left.i_val; // Assumes i_val holds byte/word/int value
-                         long long r_int = right.i_val;
+                         // Result type is SET (or BOOLEAN for comparisons if added)
+                     }
+                else {
+unsupported_operands_label: // Target label for goto from other blocks if needed
+                    fprintf(stderr, "Runtime error: Unsupported operand types for binary operator %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
+                    freeValue(&left); freeValue(&right);
+                    EXIT_FAILURE_HANDLER();
+                }
+            } // End else block for general operators (+, -, *, /, comparisons)
 
-                         // Basic check for negative shift amount
-                         if (r_int < 0) {
-                              fprintf(stderr, "Runtime error: Shift amount cannot be negative.\n");
-                              freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                         }
-                         // Note: More robust checks might involve bit width (e.g., PASCAL_INT_BITS)
+            // Free temporary operand values
+            freeValue(&left);
+            freeValue(&right);
 
-                         if (op == TOKEN_SHL) result = makeInt(l_int << r_int); else result = makeInt(l_int >> r_int);
-                    }
-                    else if (op == TOKEN_IN) {
-                        // Uses original types: Left must be ordinal, Right must be SET
-                        if (right.type != TYPE_SET) { fprintf(stderr,"Runtime error: Right operand of IN must be a set. Got %s\n", varTypeToString(right.type)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG EVAL_BINARY_OP] Returning result: Type=%s", varTypeToString(result.type));
+            if (result.type == TYPE_BOOLEAN || result.type == TYPE_INTEGER || result.type == TYPE_BYTE || result.type == TYPE_WORD) fprintf(stderr, ", i_val=%lld\n", result.i_val);
+            else if (result.type == TYPE_REAL) fprintf(stderr, ", r_val=%f\n", result.r_val);
+            else if (result.type == TYPE_CHAR) fprintf(stderr, ", c_val='%c'\n", result.c_val);
+            else fprintf(stderr, "\n");
+            #endif
+            return result;
 
-                        // Check if left operand is an ordinal type
-                        bool left_is_ordinal = (left.type==TYPE_INTEGER || left.type==TYPE_ENUM || left.type==TYPE_CHAR || (left.type==TYPE_STRING && left.s_val && strlen(left.s_val)==1) || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN);
-                        if (!left_is_ordinal) { fprintf(stderr,"Runtime error: Left operand of IN must be an ordinal type. Got %s\n", varTypeToString(left.type)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER(); }
-
-                        long long left_ord = 0; // Determine ordinal value based on the original type
-                         if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) left_ord = left.i_val;
-                         else if (left.type == TYPE_ENUM) left_ord = left.enum_val.ordinal;
-                         else if (left.type == TYPE_CHAR) left_ord = left.c_val;
-                         else if (left.type == TYPE_STRING) left_ord = left.s_val[0]; // Assumes single char string checked by left_is_ordinal
-
-                         // Search for the ordinal value in the set
-                         int found = 0;
-                         if (right.set_val.set_values) {
-                             for(int i=0; i < right.set_val.set_size; i++) {
-                                 if(right.set_val.set_values[i] == left_ord) {
-                                     found = 1;
-                                     break;
-                                 }
-                             }
-                         }
-                         result = makeBoolean(found);
-                    }
-                    else if (op == TOKEN_AND || op == TOKEN_OR) {
-                         // Handle bitwise for integer-like types, logical for boolean (using original types)
-                         if ((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&
-                             (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD))
-                         { // Bitwise operation
-                               long long l_int = left.i_val; // Assumes i_val stores value
-                               long long r_int = right.i_val;
-                               if (op == TOKEN_AND) result = makeInt(l_int & r_int); else result = makeInt(l_int | r_int);
-                         }
-                         else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN)
-                         { // Logical operation for booleans
-                               // Note: Pascal has short-circuit evaluation, this simple version evaluates both operands first.
-                               if (op == TOKEN_AND) result = makeBoolean(left.i_val && right.i_val); else result = makeBoolean(left.i_val || right.i_val);
-                         }
-                         else { // Invalid combination for AND/OR
-                             fprintf(stderr, "Runtime error: Invalid operands for %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
-                             freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                         }
-                    }
-                    // --- Stage 3: Handle remaining operators (+, -, *, /, comparisons) using type combination checks ---
-                    else {
-                        // --- Check 1: Integer/Ordinal Operations ---
-                        // Use dispatch types (Byte/Word/Bool promoted to Integer)
-                        // Exclude real division '/'
-                        if (dispatchLeftType == TYPE_INTEGER && dispatchRightType == TYPE_INTEGER && op != TOKEN_SLASH) {
-                            // Get values, treating bool/char as ordinals if needed for comparison/arithmetic
-                            long long a = 0; // Get left value as integer/ordinal
-                             if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) a = left.i_val;
-                             else if (left.type == TYPE_CHAR) a = left.c_val;
-                             else {/* This path shouldn't be reached if dispatchLeftType is INTEGER */ fprintf(stderr,"Internal error: Type mismatch in integer op block (left=%s)\n", varTypeToString(left.type)); EXIT_FAILURE_HANDLER(); }
-
-                            long long b = 0; // Get right value as integer/ordinal
-                             if (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD || right.type == TYPE_BOOLEAN) b = right.i_val;
-                             else if (right.type == TYPE_CHAR) b = right.c_val;
-                             else {/* This path shouldn't be reached if dispatchRightType is INTEGER */ fprintf(stderr,"Internal error: Type mismatch in integer op block (right=%s)\n", varTypeToString(right.type)); EXIT_FAILURE_HANDLER(); }
-
-                            // Perform integer arithmetic or comparison
-                            switch (op) {
-                                case TOKEN_PLUS: result = makeInt(a + b); break;
-                                case TOKEN_MINUS: result = makeInt(a - b); break;
-                                case TOKEN_MUL: result = makeInt(a * b); break;
-                                case TOKEN_INT_DIV: if(b==0){fprintf(stderr,"Runtime error: Division by zero (DIV)\n"); EXIT_FAILURE_HANDLER();} result = makeInt(a / b); break;
-                                case TOKEN_MOD: if(b==0){fprintf(stderr,"Runtime error: Division by zero (MOD)\n"); EXIT_FAILURE_HANDLER();} result = makeInt(a % b); break;
-                                // Comparisons result in Boolean
-                                case TOKEN_GREATER: result = makeBoolean(a > b); break;
-                                case TOKEN_GREATER_EQUAL: result = makeBoolean(a >= b); break;
-                                case TOKEN_EQUAL: result = makeBoolean(a == b); break;
-                                case TOKEN_NOT_EQUAL: result = makeBoolean(a != b); break;
-                                case TOKEN_LESS: result = makeBoolean(a < b); break;
-                                case TOKEN_LESS_EQUAL: result = makeBoolean(a <= b); break;
-                                default: fprintf(stderr,"Unhandled op %s for INTEGER/Ordinal types\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                            }
-                            // Result type is INTEGER or BOOLEAN
-                        }
-                        // --- Check 2: Real Number Operations ---
-                        // Check if REAL is involved (using original types) OR if it's real division '/'
-                        // Operands must be promotable to Real (Int, Byte, Word, Bool, Char)
-                        else if ((left.type == TYPE_REAL || dispatchLeftType == TYPE_INTEGER || left.type == TYPE_CHAR) &&
-                                 (right.type == TYPE_REAL || dispatchRightType == TYPE_INTEGER || right.type == TYPE_CHAR) &&
-                                 (left.type == TYPE_REAL || right.type == TYPE_REAL || op == TOKEN_SLASH))
-                        {
-                             // At least one operand is REAL, OR both are integer-like/char AND operator is '/'
-                             double a = 0.0, b = 0.0; // Promote values to double
-
-                             // Promote Left Operand
-                             if (left.type == TYPE_REAL) a = left.r_val;
-                             else if (left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD || left.type == TYPE_BOOLEAN) a = (double)left.i_val;
-                             else if (left.type == TYPE_CHAR) a = (double)left.c_val;
-                             else { /* Invalid type for real op */ goto unsupported_operands_label; } // Should not happen based on outer condition
-
-                             // Promote Right Operand
-                             if (right.type == TYPE_REAL) b = right.r_val;
-                             else if (right.type == TYPE_INTEGER || right.type == TYPE_BYTE || right.type == TYPE_WORD || right.type == TYPE_BOOLEAN) b = (double)right.i_val;
-                             else if (right.type == TYPE_CHAR) b = (double)right.c_val;
-                             else { /* Invalid type for real op */ goto unsupported_operands_label; } // Should not happen
-
-                             // Perform real arithmetic or comparison
-                             switch(op){
-                                 case TOKEN_PLUS: result=makeReal(a+b); break; case TOKEN_MINUS: result=makeReal(a-b); break;
-                                 case TOKEN_MUL: result=makeReal(a*b); break; case TOKEN_SLASH: if(b==0.0){fprintf(stderr,"Runtime error: Division by zero (/)\n"); EXIT_FAILURE_HANDLER();} result=makeReal(a/b); break;
-                                 // Comparisons result in Boolean
-                                 case TOKEN_GREATER: result=makeBoolean(a>b); break; case TOKEN_GREATER_EQUAL: result=makeBoolean(a>=b); break;
-                                 case TOKEN_EQUAL: result=makeBoolean(a==b); break; case TOKEN_NOT_EQUAL: result=makeBoolean(a!=b); break;
-                                 case TOKEN_LESS: result=makeBoolean(a<b); break; case TOKEN_LESS_EQUAL: result=makeBoolean(a<=b); break;
-                                 default: fprintf(stderr,"Unhandled op %s for REAL/Mixed types\n", tokenTypeToString(op)); freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                             }
-                             // Result type is REAL or BOOLEAN
-                        }
-                        // --- Check 3: String/Char Operations ---
-                        // Check using original types. Must involve at least one String/Char.
-                        // Operator must be '+' or a comparison operator.
-                        else if ((left.type == TYPE_STRING || left.type == TYPE_CHAR) || (right.type == TYPE_STRING || right.type == TYPE_CHAR))
-                        {
-                             // Ensure the other operand (if not string/char) is compatible for '+' (none) or comparison (string/char only)
-                             bool types_valid_for_op = false;
-                             if (op == TOKEN_PLUS && (left.type == TYPE_STRING || left.type == TYPE_CHAR) && (right.type == TYPE_STRING || right.type == TYPE_CHAR)) {
-                                 types_valid_for_op = true; // Concatenation
-                             } else if ((op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL) &&
-                                        (left.type == TYPE_STRING || left.type == TYPE_CHAR) && (right.type == TYPE_STRING || right.type == TYPE_CHAR)) {
-                                 types_valid_for_op = true; // Comparison
-                             }
-
-                             if (!types_valid_for_op) {
-                                  goto unsupported_operands_label; // Operation not valid for these types
-                             }
-
-                             // --- Perform String/Char Operation ---
-                             char tl_buf[2]={0}, tr_buf[2]={0}; // Buffers for potential char->string conversion
-                             const char *ls = NULL, *rs = NULL;
-
-                             // Get left string pointer or convert char
-                             if(left.type == TYPE_CHAR) { tl_buf[0] = left.c_val; ls = tl_buf; }
-                             else if (left.type == TYPE_STRING) { ls = left.s_val; }
-                             else { /* Should have been caught by types_valid_for_op */ goto unsupported_operands_label; }
-
-                             // Get right string pointer or convert char
-                             if(right.type == TYPE_CHAR) { tr_buf[0] = right.c_val; rs = tr_buf; }
-                             else if (right.type == TYPE_STRING) { rs = right.s_val; }
-                             else { /* Should have been caught by types_valid_for_op */ goto unsupported_operands_label; }
-
-                             // Handle NULL string pointers safely (treat as empty string)
-                             if (!ls) ls = "";
-                             if (!rs) rs = "";
-
-                             if (op == TOKEN_PLUS) { // Concatenation
-                                 size_t len_l = strlen(ls); size_t len_r = strlen(rs);
-                                 size_t buf_size = len_l + len_r + 1;
-                                 char* concat_res = malloc(buf_size);
-                                 if (!concat_res) { fprintf(stderr,"Malloc failed for string concat\n"); EXIT_FAILURE_HANDLER(); }
-                                 strcpy(concat_res, ls); // Copy left part
-                                 strcat(concat_res, rs); // Append right part
-                                 result = makeString(concat_res); // makeString copies it again
-                                 free(concat_res); // Free intermediate buffer
-                             }
-                             else { // Comparison (already checked operator validity)
-                                 int cmp = strcmp(ls, rs);
-                                 switch (op) {
-                                     case TOKEN_EQUAL: result = makeBoolean(cmp == 0); break;
-                                     case TOKEN_NOT_EQUAL: result = makeBoolean(cmp != 0); break;
-                                     case TOKEN_LESS: result = makeBoolean(cmp < 0); break;
-                                     case TOKEN_LESS_EQUAL: result = makeBoolean(cmp <= 0); break;
-                                     case TOKEN_GREATER: result = makeBoolean(cmp > 0); break;
-                                     case TOKEN_GREATER_EQUAL: result = makeBoolean(cmp >= 0); break;
-                                     default: break; // Should not happen
-                                 }
-                             }
-                             // Result type is STRING or BOOLEAN
-                        }
-                        // --- Check 4: Enum/Enum Comparison ---
-                        // Must be the same enum type (approximated by name check), operator must be comparison.
-                        else if (left.type == TYPE_ENUM && right.type == TYPE_ENUM &&
-                                 (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS || op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL))
-                        {
-                             bool types_match = (!left.enum_val.enum_name || !right.enum_val.enum_name || strcmp(left.enum_val.enum_name, right.enum_val.enum_name)==0);
-                             // Allow EQ/NE even if types mismatch, but other comparisons require match
-                             if (!types_match && op != TOKEN_EQUAL && op != TOKEN_NOT_EQUAL) {
-                                  fprintf(stderr, "Runtime error: Cannot compare different enum types ('%s' vs '%s') with %s\n", left.enum_val.enum_name?:"?", right.enum_val.enum_name?:"?", tokenTypeToString(op));
-                                  freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
-                             }
-                             int ord_l = left.enum_val.ordinal; int ord_r = right.enum_val.ordinal;
-                             switch(op){
-                                 case TOKEN_EQUAL: result = makeBoolean(types_match && (ord_l == ord_r)); break; // Only true if types match AND ordinals match
-                                 case TOKEN_NOT_EQUAL: result = makeBoolean(!types_match || (ord_l != ord_r)); break; // True if types mismatch OR ordinals mismatch
-                                 case TOKEN_LESS: result = makeBoolean(types_match && (ord_l < ord_r)); break;
-                                 case TOKEN_LESS_EQUAL: result = makeBoolean(types_match && (ord_l <= ord_r)); break;
-                                 case TOKEN_GREATER: result = makeBoolean(types_match && (ord_l > ord_r)); break;
-                                 case TOKEN_GREATER_EQUAL: result = makeBoolean(types_match && (ord_l >= ord_r)); break;
-                                 default: break; // Should not happen
-                             }
-                             // Result type is BOOLEAN
-                        }
-                        // --- Check 5: Boolean/Boolean Comparison ---
-                        // Only allows EQ and NE. AND/OR handled earlier.
-                        else if (left.type == TYPE_BOOLEAN && right.type == TYPE_BOOLEAN && (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL))
-                        {
-                            switch(op){
-                                case TOKEN_EQUAL: result = makeBoolean(left.i_val == right.i_val); break;
-                                case TOKEN_NOT_EQUAL: result = makeBoolean(left.i_val != right.i_val); break;
-                                default: break; // Should not happen
-                            }
-                            // Result type is BOOLEAN
-                        }
-                        // --- Check 6: ADDED Set Operations ---
-                             else if (left.type == TYPE_SET && right.type == TYPE_SET) {
-                                 switch (op) {
-                                     case TOKEN_PLUS: // Union
-                                         result = setUnion(left, right);
-                                         break;
-                                     case TOKEN_MINUS: // Difference
-                                         result = setDifference(left, right);
-                                         break;
-                                     case TOKEN_MUL: // Intersection
-                                         result = setIntersection(left, right);
-                                         break;
-                                     // Optional: Add set comparisons like =, <>, <=, >= here if needed
-                                     default:
-                                         fprintf(stderr, "Runtime error: Invalid operator '%s' for SET operands.\n", tokenTypeToString(op));
-                                         // No need to free left/right here, happens below
-                                         EXIT_FAILURE_HANDLER(); // Exit on invalid operator for sets
-                                 }
-                                 // Result type is SET (or BOOLEAN for comparisons if added)
-                             }
-                        else {
-        unsupported_operands_label: // Target label for goto from other blocks if needed
-                            fprintf(stderr, "Runtime error: Unsupported operand types for binary operator %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
-                            freeValue(&left); freeValue(&right);
-                            EXIT_FAILURE_HANDLER();
-                        }
-                    } // End else block for general operators (+, -, *, /, comparisons)
-
-                    // Free temporary operand values
-                    freeValue(&left);
-                    freeValue(&right);
-
-                    #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG EVAL_BINARY_OP] Returning result: Type=%s", varTypeToString(result.type));
-                    if (result.type == TYPE_BOOLEAN || result.type == TYPE_INTEGER || result.type == TYPE_BYTE || result.type == TYPE_WORD) fprintf(stderr, ", i_val=%lld\n", result.i_val);
-                    else if (result.type == TYPE_REAL) fprintf(stderr, ", r_val=%f\n", result.r_val);
-                    else if (result.type == TYPE_CHAR) fprintf(stderr, ", c_val='%c'\n", result.c_val);
-                    else fprintf(stderr, "\n");
-                    #endif
-                    return result;
-
-                } // End Case AST_BINARY_OP
+        } // End Case AST_BINARY_OP
         case AST_SET: // Add case to handle set evaluation
             return evalSet(node);
         case AST_UNARY_OP: {
@@ -1725,162 +1724,206 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             executeWithScope(node->right, true);
             break;
         case AST_ASSIGN: {
-               Value rhs_val = eval(node->right); // Evaluate RHS - Need to free this later
+                     Value rhs_val = eval(node->right); // Evaluate RHS - Need to free this later
 
-               // --- Get pointer to LHS target ---
-               // Use resolveLValueToPtr for ALL LHS nodes now, it handles simple VARs too
-               Value* target_ptr = resolveLValueToPtr(node->left);
-               if (!target_ptr) {
-                   // Error logged in resolveLValueToPtr or lookupSymbol
-                   freeValue(&rhs_val); // Free the evaluated RHS
-                   EXIT_FAILURE_HANDLER();
-               }
-            
-               // --- Get LHS name string (for potential error/debug messages) ---
-               // Get this *after* resolving target_ptr to ensure node->left is valid
-               const char* lhs_name_debug = node->left->token ? node->left->token->value : "<complex LValue>";
+                     // --- Get pointer to LHS target ---
+                     // Use resolveLValueToPtr for ALL LHS nodes now, it handles simple VARs too
+                     Value* target_ptr = resolveLValueToPtr(node->left);
+                     if (!target_ptr) {
+                         // Error logged in resolveLValueToPtr or lookupSymbol
+                         freeValue(&rhs_val); // Free the evaluated RHS
+                         EXIT_FAILURE_HANDLER();
+                     }
 
-               // --- Type Check/Promotion ---
-               // resolveLValueToPtr also checks for const assignment attempts
+                     // --- Get LHS name string (for potential error/debug messages) ---
+                     // Get this *after* resolving target_ptr to ensure node->left is valid
+                     const char* lhs_name_debug = node->left->token ? node->left->token->value : "<complex LValue>"; // Using your variable name
 
-               // --- Type Check/Promotion (Simplified Example) ---
-               Value value_to_assign = rhs_val; // Start with original RHS value
-               bool value_was_promoted = false;
+                     // --- <<<< ADDED: Check if assignment is TO a string index >>>> ---
+                     bool is_string_index_assign = false;
+                     if (node->left->type == AST_ARRAY_ACCESS // Original LHS node is index access
+                         && target_ptr->type == TYPE_STRING // AND resolved pointer points to a STRING
+                         && node->left->child_count == 1) { // AND there's exactly one index
+                         is_string_index_assign = true;
+                     }
+                     // --- <<<< END ADDED CHECK >>>> ---
 
-               if (target_ptr->type != value_to_assign.type) {
-                   // Allow compatible assignments (e.g., INTEGER to REAL)
-                   if (target_ptr->type == TYPE_REAL && value_to_assign.type == TYPE_INTEGER) {
-                       #ifdef DEBUG
-                       fprintf(stderr, "[DEBUG ASSIGN] Promoting INTEGER RHS (%lld) to REAL for assignment.\n", value_to_assign.i_val);
-                       #endif
-                       value_to_assign = makeReal((double)value_to_assign.i_val);
-                       value_was_promoted = true; // A new Value struct was created
-                   }
-                   // Allow assigning single-char STRING to CHAR
-                   else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING && value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
-                        // No promotion needed here, just assign the char later
-                   }
-                   // Allow assigning INTEGER to compatible ordinal types (BYTE, WORD, BOOLEAN, CHAR)
-                   else if ((target_ptr->type == TYPE_BYTE || target_ptr->type == TYPE_WORD || target_ptr->type == TYPE_BOOLEAN || target_ptr->type == TYPE_CHAR) && value_to_assign.type == TYPE_INTEGER) {
-                       // No promotion needed, direct assignment of i_val/c_val handles it, but add range checks if desired
-                   }
-                    // Allow assigning ENUM <= INTEGER or INTEGER <= ENUM (ordinal comparison)
-                   else if ((target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) || (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) ) {
-                       // Assign ordinals directly, type tag remains target_ptr->type
-                   }
-                   else if (target_ptr->type == TYPE_STRING && value_to_assign.type == TYPE_CHAR && value_to_assign.s_val ) {
-                        // No promotion needed here, just assign the char later
-                   }
+                     Value value_to_assign = rhs_val; // Start with original RHS value
+                     bool value_was_promoted = false;
 
-                   // --- Add other compatible promotions/checks as needed ---
+                     // --- <<<< ADDED: Handle String Index Assign SEPARATELY >>>> ---
+                     if (is_string_index_assign) {
+                         // --- Special Handling for String Index Assignment ---
+                         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Handling String Index Assignment (LHS Base Type: %s).\n",
+                                 varTypeToString(target_ptr->type));
+                         #endif
 
-                   else { // Incompatible types
-                        const char* lhs_name = node->left->token ? node->left->token->value : "<complex LValue>";
-                        fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for LHS '%s'.\n",
-                                varTypeToString(rhs_val.type), varTypeToString(target_ptr->type), lhs_name);
-                        freeValue(&rhs_val); // Free original RHS value
-                        if (value_was_promoted) freeValue(&value_to_assign); // Free temp promoted value
-                        EXIT_FAILURE_HANDLER();
-                   }
-               }
-               // --- End Type Check/Promotion ---
+                         // 1. Evaluate Index
+                         AST* index_node = node->left->children[0];
+                         Value index_val = eval(index_node);
+                         if (index_val.type != TYPE_INTEGER) {
+                              fprintf(stderr, "Runtime error: String index must be an integer.\n");
+                              freeValue(&rhs_val); freeValue(&index_val); EXIT_FAILURE_HANDLER();
+                         }
+                         long long idx_ll = index_val.i_val;
+                         freeValue(&index_val); // Free evaluated index
+
+                         // 2. Check RHS type & Get Character to Assign
+                         if (rhs_val.type != TYPE_CHAR && !(rhs_val.type == TYPE_STRING && rhs_val.s_val && strlen(rhs_val.s_val) == 1)) {
+                             fprintf(stderr, "Runtime error: Assignment to string index requires CHAR or single-char STRING value.\n");
+                             freeValue(&rhs_val); EXIT_FAILURE_HANDLER();
+                         }
+                         char char_to_assign = (rhs_val.type == TYPE_CHAR) ? rhs_val.c_val : rhs_val.s_val[0];
+
+                         // 3. Bounds Check & Modification
+                         // <<< Use target_ptr->s_val directly >>>
+                         size_t len = target_ptr->s_val ? strlen(target_ptr->s_val) : 0;
+
+                         // Debug Prints using target_ptr->s_val
+                         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Attempting assign: LHS='%s', Index=%lld, Char='%c'\n", lhs_name_debug, idx_ll, char_to_assign); // Using your var name lhs_name_debug
+                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Target Buffer Ptr: %p, Content BEFORE strlen/check: \"%s\"\n",
+                                 (void*)target_ptr->s_val, target_ptr->s_val ? target_ptr->s_val : "<NULL>"); // Use target_ptr->s_val
+                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Calculated strlen = %zu\n", len);
+                         #endif
+
+                         if (idx_ll < 1 || (size_t)idx_ll > len) { // Bounds check
+                             fprintf(stderr, "Runtime error: String index (%lld) out of bounds [1..%zu] for assignment to '%s'.\n", idx_ll, len, lhs_name_debug); // Use correct name var
+                             freeValue(&rhs_val); EXIT_FAILURE_HANDLER();
+                         }
+                         size_t idx_0based = (size_t)idx_ll - 1;
+
+                         // 4. Modify Character in Buffer directly
+                         if (target_ptr->s_val) { // Check pointer before dereferencing
+                             #ifdef DEBUG
+                             fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Modifying buffer at index %zu ('%c') to '%c'\n", idx_0based, target_ptr->s_val[idx_0based], char_to_assign);
+                             #endif
+                             target_ptr->s_val[idx_0based] = char_to_assign; // <<< Use target_ptr->s_val >>>
+                             #ifdef DEBUG
+                             // Check strlen IMMEDIATELY after write
+                             size_t len_after_write = strlen(target_ptr->s_val); // <<< Use target_ptr->s_val >>>
+                             fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Buffer content AFTER modification: \"%s\" (New strlen: %zu)\n", target_ptr->s_val, len_after_write); // <<< Use target_ptr->s_val >>>
+                             #endif
+                         } else { /* Should not happen if len > 0 */ }
+
+                         // 5. Cleanup RHS value only (target was modified in place)
+                         freeValue(&rhs_val);
+
+                     } else {
+                         // --- <<<< Handling for ALL OTHER Assignments >>>> ---
+                         // (This block should match the logic you provided previously)
+
+                         // Type Check/Promotion
+                         if (target_ptr->type != value_to_assign.type) {
+                             // Allow compatible assignments (e.g., INTEGER to REAL)
+                             if (target_ptr->type == TYPE_REAL && value_to_assign.type == TYPE_INTEGER) {
+                                 #ifdef DEBUG
+                                 fprintf(stderr, "[DEBUG ASSIGN] Promoting INTEGER RHS (%lld) to REAL for assignment.\n", value_to_assign.i_val);
+                                 #endif
+                                 value_to_assign = makeReal((double)value_to_assign.i_val);
+                                 value_was_promoted = true; // A new Value struct was created
+                             }
+                             // Allow assigning single-char STRING to CHAR
+                             else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING && value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
+                                  // No promotion needed here, just assign the char later
+                             }
+                             // Allow assigning INTEGER to compatible ordinal types (BYTE, WORD, BOOLEAN, CHAR)
+                             else if ((target_ptr->type == TYPE_BYTE || target_ptr->type == TYPE_WORD || target_ptr->type == TYPE_BOOLEAN || target_ptr->type == TYPE_CHAR) && value_to_assign.type == TYPE_INTEGER) {
+                                  // No promotion needed
+                             }
+                             // Allow assigning ENUM <=> INTEGER (ordinal comparison)
+                             else if ((target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) || (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) ) {
+                                  // No promotion needed
+                             }
+                             // Allow assigning CHAR to STRING
+                             else if (target_ptr->type == TYPE_STRING && value_to_assign.type == TYPE_CHAR /* Removed && value_to_assign.s_val from your code as CHAR has no s_val */ ) {
+                                   // No promotion needed here
+                             }
+                             // --- Add other compatible promotions/checks as needed ---
+                             else { // Incompatible types
+                                  // Use the variable name you declared earlier: lhs_name_debug
+                                  fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for LHS '%s'.\n",
+                                          varTypeToString(rhs_val.type), varTypeToString(target_ptr->type), lhs_name_debug);
+                                  freeValue(&rhs_val); // Free original RHS value
+                                  if (value_was_promoted) freeValue(&value_to_assign); // Free temp promoted value
+                                  EXIT_FAILURE_HANDLER();
+                             }
+                         } // --- End Type Check/Promotion ---
 
 
-               // --- Perform Assignment ---
-            // 1. Free existing value CONTENTS at the target location
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG ASSIGN] Freeing old value at targetPtr for LHS '%s' (Type: %s)\n", lhs_name_debug, varTypeToString(target_ptr->type));
-            #endif
-            freeValue(target_ptr); // Frees heap data *within* the target Value struct
+                         // --- Perform Assignment ---
+                         // 1. Free existing value CONTENTS at the target location
+                         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG ASSIGN] Freeing old value at targetPtr for LHS '%s' (Type: %s)\n", lhs_name_debug, varTypeToString(target_ptr->type));
+                         #endif
+                         freeValue(target_ptr); // Frees heap data *within* the target Value struct
 
-            // 2. Assign a DEEP COPY of the potentially promoted value_to_assign
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG ASSIGN] Assigning deep copy of value_to_assign (Type: %s) to targetPtr (Target Type: %s)\n",
-                    varTypeToString(value_to_assign.type), varTypeToString(target_ptr->type));
-            #endif
+                         // 2. Assign a DEEP COPY of the potentially promoted value_to_assign
+                         #ifdef DEBUG
+                         fprintf(stderr, "[DEBUG ASSIGN] Regular Assign: Assigning value (Type: %s) to targetPtr (Target Type: %s) for LHS '%s'\n",
+                                 varTypeToString(value_to_assign.type), varTypeToString(target_ptr->type), lhs_name_debug);
+                         #endif
 
-            // --- Specific Type Handling During Assignment ---
+                         // --- Specific Type Handling During Assignment (Based on your provided code) ---
 
-            // Case: Assigning String or Char TO a String Variable
-            if (target_ptr->type == TYPE_STRING && (value_to_assign.type == TYPE_STRING || value_to_assign.type == TYPE_CHAR)) {
-                 const char* source_str = NULL;
-                 char char_buf[2]; // Temp buffer if source is char
+                         // Case: Assigning String or Char TO a String Variable
+                         if (target_ptr->type == TYPE_STRING && (value_to_assign.type == TYPE_STRING || value_to_assign.type == TYPE_CHAR)) {
+                              const char* source_str = NULL; char char_buf[2];
+                              if (value_to_assign.type == TYPE_STRING) { source_str = value_to_assign.s_val ? value_to_assign.s_val : ""; }
+                              else { char_buf[0] = value_to_assign.c_val; char_buf[1] = '\0'; source_str = char_buf; }
 
-                 if (value_to_assign.type == TYPE_STRING) {
-                     source_str = value_to_assign.s_val ? value_to_assign.s_val : "";
-                 } else { // value_to_assign.type == TYPE_CHAR
-                     char_buf[0] = value_to_assign.c_val;
-                     char_buf[1] = '\0';
-                     source_str = char_buf;
-                 }
+                              if (target_ptr->max_length > 0) { // Target is fixed-length string
+                                   size_t source_len = strlen(source_str);
+                                   size_t copy_len = (source_len > (size_t)target_ptr->max_length) ? (size_t)target_ptr->max_length : source_len;
+                                   target_ptr->s_val = malloc((size_t)target_ptr->max_length + 1);
+                                   if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
+                                   strncpy(target_ptr->s_val, source_str, copy_len); target_ptr->s_val[copy_len] = '\0';
+                                   #ifdef DEBUG
+                                   fprintf(stderr, "[DEBUG ASSIGN] Fixed String Assignment: Copied %zu chars ('%s') into fixed length %d buffer for LHS '%s'.\n", copy_len, target_ptr->s_val, target_ptr->max_length, lhs_name_debug);
+                                   #endif
+                              } else { // Target is dynamic string
+                                   target_ptr->s_val = strdup(source_str);
+                                   if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
+                              }
+                              target_ptr->type = TYPE_STRING; // Ensure type is correct
+                         }
+                         // Case: Assigning single-char STRING to CHAR variable
+                         else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING) {
+                              if (value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
+                                   target_ptr->c_val = value_to_assign.s_val[0];
+                                   target_ptr->type = TYPE_CHAR; // Ensure type is correct
+                              } else {
+                                   fprintf(stderr, "Runtime error: Cannot assign multi-character or empty string to CHAR variable '%s'.\n", lhs_name_debug);
+                                   freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER();
+                              }
+                         }
+                         // Case: Assigning Integer to Enum (assign ordinal)
+                         else if (target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) {
+                              target_ptr->enum_val.ordinal = (int)value_to_assign.i_val;
+                              target_ptr->type = TYPE_ENUM; // Ensure type is set
+                         }
+                         // Case: Assigning Enum to Integer (assign ordinal)
+                         else if (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) {
+                              target_ptr->i_val = value_to_assign.enum_val.ordinal;
+                              target_ptr->type = TYPE_INTEGER; // Set type to INTEGER
+                              if (value_was_promoted && value_to_assign.enum_val.enum_name) { /* free? */ }
+                         }
+                         // Default: Perform a standard deep copy for other compatible types
+                         else {
+                             *target_ptr = makeCopyOfValue(&value_to_assign);
+                         }
 
-                 if (target_ptr->max_length > 0) { // Target is fixed-length string
-                     size_t source_len = strlen(source_str);
-                     // Determine actual number of chars to copy (min of source len and target max len)
-                     size_t copy_len = (source_len > (size_t)target_ptr->max_length) ? (size_t)target_ptr->max_length : source_len;
+                         // --- Cleanup ---
+                         freeValue(&rhs_val);
+                         if (value_was_promoted) {
+                             freeValue(&value_to_assign);
+                         }
 
-                     // Allocate buffer for fixed size + null terminator
-                     target_ptr->s_val = malloc((size_t)target_ptr->max_length + 1);
-                     if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
+                     } // --- <<<< End else (not string index assign) >>>> ---
 
-                     // Copy the potentially truncated string
-                     strncpy(target_ptr->s_val, source_str, copy_len);
-                     target_ptr->s_val[copy_len] = '\0'; // Ensure null termination
-
-                     #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG ASSIGN] Fixed String Assignment: Copied %zu chars ('%s') into fixed length %d buffer for LHS '%s'.\n", copy_len, target_ptr->s_val, target_ptr->max_length, lhs_name_debug);
-                     #endif
-                 } else { // Target is dynamic string
-                     target_ptr->s_val = strdup(source_str);
-                     if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
-                 }
-                 target_ptr->type = TYPE_STRING; // Ensure type is correct
-            }
-            // Case: Assigning single-char STRING to CHAR variable
-            else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING) {
-                if (value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
-                    target_ptr->c_val = value_to_assign.s_val[0];
-                    target_ptr->type = TYPE_CHAR; // Ensure type is correct
-                } else {
-                     fprintf(stderr, "Runtime error: Cannot assign multi-character or empty string to CHAR variable '%s'.\n", lhs_name_debug);
-                     freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER();
-                }
-            }
-            // Case: Assigning Integer to Enum (assign ordinal)
-            else if (target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) {
-                // Add bounds check if possible (needs access to type definition)
-                // AST* typeDef = target_ptr->type_def; // Requires type_def to be stored in Value
-                // if (typeDef && ...) { check bounds ... }
-                target_ptr->enum_val.ordinal = (int)value_to_assign.i_val;
-                // Keep existing enum_name and type TYPE_ENUM
-                target_ptr->type = TYPE_ENUM; // Ensure type is set
-            }
-            // Case: Assigning Enum to Integer (assign ordinal)
-            else if (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) {
-                target_ptr->i_val = value_to_assign.enum_val.ordinal;
-                target_ptr->type = TYPE_INTEGER; // Set type to INTEGER
-                // Free enum name if it was copied into value_to_assign during promotion (unlikely here)
-                 if (value_was_promoted && value_to_assign.enum_val.enum_name) {
-                    // free(value_to_assign.enum_val.enum_name); // Be careful here
-                 }
-            }
-            // Default: Perform a standard deep copy for other compatible types
-            else {
-                // This handles Int=Int, Real=Real, Bool=Bool, Record=Record, Array=Array, Set=Set etc.
-                // It relies on makeCopyOfValue to handle these correctly.
-                *target_ptr = makeCopyOfValue(&value_to_assign);
-            }
-
-            // --- Cleanup ---
-            // Free the original RHS value returned by eval
-            freeValue(&rhs_val);
-            // If promotion created a separate temporary value, free that too
-            if (value_was_promoted) {
-                freeValue(&value_to_assign);
-            }
-
-            break; // End case AST_ASSIGN
-          } // End case AST_ASSIGN
+                     break; // End case AST_ASSIGN
+                } // End switch block
         case AST_CASE: {
                    // Evaluate the case expression
                    Value caseValue = eval(node->left);
@@ -2601,12 +2644,16 @@ Value* resolveLValueToPtr(AST* lvalueNode) {
                 return &(baseValuePtr->array_val[offset]);
 
             } else if (baseValuePtr->type == TYPE_STRING) {
-                // --- String Character Access (Complicated for LValue pointer) ---
-                // Returning a direct pointer isn't feasible as strings are contiguous chars.
-                // Assignment to string chars needs special handling within the assignment logic itself.
-                fprintf(stderr, "Runtime error: Cannot get direct pointer for assignment to string character index.\n");
-                EXIT_FAILURE_HANDLER(); // Or handle differently in assignment logic
-                 return NULL; // Should not be reached
+                // --- String Character Access ---
+                // For L-Value resolution, we return a pointer to the *base string's Value* struct.
+                // The caller (AST_ASSIGN) MUST detect this specific case and handle modification.
+                #ifdef DEBUG
+                const char* base_name = lvalueNode->left->token ? lvalueNode->left->token->value : "?"; // Get base var name for debug
+                fprintf(stderr, "[DEBUG RESOLVE_LVAL] String index access LValue ('%s[?]'). Returning pointer to base string Value* %p\n",
+                        base_name, (void*)baseValuePtr);
+                #endif
+                // NOTE: We don't evaluate or check the index here. The caller must do it.
+                return baseValuePtr; // <<< RETURN POINTER TO BASE STRING VALUE >>> // Modified Line
             } else {
                 fprintf(stderr, "Runtime error: Attempted array/string access on non-array/string type (%s).\n", varTypeToString(baseValuePtr->type));
                 EXIT_FAILURE_HANDLER();

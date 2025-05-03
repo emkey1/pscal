@@ -1,0 +1,69 @@
+PROGRAM ColorPalette256Demo;
+
+USES Crt; // Assumes CRT contains ClrScr, GotoXY, TextColorE, TextColor, Write, WriteLn, ReadKey, NormVideo
+
+CONST
+  // Define standard colors for resetting text easily
+  LightGray = 7;
+
+VAR
+  row, col   : Integer; // Loop counters for grid
+  colorIndex : Byte;    // Use Byte for 0-255 range
+  startX, startY : Integer; // Starting position for the grid
+  colorsPerRow : Integer; // How many swatches per line
+
+BEGIN
+  ClrScr; // Clear the terminal screen
+
+  GotoXY(1, 1);
+  WriteLn('pscal 256-Color Palette Demonstration');
+  WriteLn('--------------------------------------');
+  WriteLn('(Requires a terminal emulator supporting 256 colors)');
+
+  startX := 2;       // Starting column
+  startY := 5;       // Starting row (below headers)
+  colorsPerRow := 16; // Display 16 colors per row
+
+  colorIndex := 0; // Start with color index 0
+
+  // Loop to create a 16x16 grid of colors
+  FOR row := 0 TO 15 DO
+  BEGIN
+    GotoXY(startX, startY + row); // Move to the start of the current grid row
+
+    FOR col := 0 TO (colorsPerRow - 1) DO
+    BEGIN
+      IF colorIndex <= 255 THEN
+      BEGIN
+        // 1. Set the extended color
+        TextColorE(colorIndex);
+
+        // 2. Print a sample block in that color
+        //    Using '##' is safe for most terminals.
+        //    If your terminal handles UTF-8 well, use Char(219) which is '█'
+        //    Write(Char(219), Char(219));
+        Write('##');
+
+        // 3. Reset color to default and print the index number
+        TextColor(LightGray); // Reset to standard light gray (7)
+        //    Write the number, padded to 3 spaces, with spaces around it
+        Write(' ', colorIndex:3, ' ');
+
+        // Move to the next color index
+        colorIndex := colorIndex + 1;
+      END;
+    END; // End FOR col
+    WriteLn; // Move to the next line in the console after each row of colors
+  END; // End FOR row
+
+  // Position cursor below the grid and wait for input
+  GotoXY(1, startY + 18);
+  WriteLn;
+  Write('Palette display complete. Press any key to exit.');
+  ReadKey; // Wait for user input
+  WriteLn;
+
+  // Reset terminal attributes before exiting
+  NormVideo;
+
+END.

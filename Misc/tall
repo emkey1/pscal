@@ -28,6 +28,7 @@ run "MathSuite"      "$PSCAL" "$TESTS/MathSuite01.p"
 run "BitwiseSuite"      "$PSCAL" "$TESTS/BitWiseSuite"
 run "TypeTestSuite"      "$PSCAL" "$TESTS/TypeTestSuite"
 run "FormattingTestSuite"      "$PSCAL" "$TESTS/FormattingTestSuite"
+run "FileIOSuite"      "$PSCAL" "$TESTS/FileIOSuite"
 
 # assorted one‑offs
 run "Assorted (tid)" "$PSCAL" "$TESTS/tid.p"

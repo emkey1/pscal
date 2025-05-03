@@ -518,9 +518,10 @@ begin
       if replay = #0 then Delay(10); // Handle potential extended key codes if ReadKey returns #0 first
     until (replay <> #0);
 
-    ClrScr; // Clear screen before repeating loop or ending
 
   // Loop condition for replaying
   until not ( (UpCase(replay) = 'Y') or (replay = #10) or (replay = #13) ); // Y, Enter, or Return repeats
+
+  writeln;
 
 end. // End main program
