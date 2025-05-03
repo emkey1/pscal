@@ -664,7 +664,7 @@ Value eval(AST *node) {
             } else { // :width only
                 int effective_precision = PASCAL_DEFAULT_FLOAT_PRECISION;
                  // Use %g which is often closer to Pascal's default behavior than %f or %E alone
-                snprintf(buf, sizeof(buf), "%*.*g", width, effective_precision, val_to_format.r_val);
+                snprintf(buf, sizeof(buf), "%*.*E", width, effective_precision, val_to_format.r_val); // Use %E
             }
         } else if (val_to_format.type == TYPE_INTEGER || val_to_format.type == TYPE_BYTE || val_to_format.type == TYPE_WORD) {
             snprintf(buf, sizeof(buf), "%*lld", width, val_to_format.i_val);
