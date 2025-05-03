@@ -671,30 +671,95 @@ Value executeBuiltinLength(AST *node) {
 
 // Strings
 Value executeBuiltinCopy(AST *node) {
-    if (node->child_count != 3) { fprintf(stderr, "Runtime error: copy expects 3 arguments.\n"); EXIT_FAILURE_HANDLER(); }
+    // Check argument count
+    if (node->child_count != 3) {
+        fprintf(stderr, "Runtime error: copy expects 3 arguments.\n");
+        EXIT_FAILURE_HANDLER(); // Exit considered acceptable for fatal argument errors
+    }
+
+    // Evaluate arguments
     Value sourceVal = eval(node->children[0]);
     Value startVal  = eval(node->children[1]);
     Value countVal  = eval(node->children[2]);
-    if (sourceVal.type != TYPE_STRING || startVal.type != TYPE_INTEGER || countVal.type != TYPE_INTEGER) {
-        fprintf(stderr, "Runtime error: copy requires a string, an integer, and an integer.\n");
-        EXIT_FAILURE_HANDLER();
+    Value result = makeString(""); // Default return value on error or empty result
+
+    // Buffer for potential char source conversion
+    char char_source_buf[2];
+    const char *src_ptr = NULL;
+    size_t src_len = 0;
+
+    // --- Type checks and Source Preparation ---
+    if (startVal.type != TYPE_INTEGER || countVal.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: copy requires integer start index and count.\n");
+        goto cleanup; // Go to cleanup to free evaluated values
     }
-    long long start = startVal.i_val;
-    long long count = countVal.i_val;
-    if (start < 1 || count < 0) { fprintf(stderr, "Runtime error: copy: invalid start index or count.\n"); EXIT_FAILURE_HANDLER(); }
-    const char *src = sourceVal.s_val;
-    int src_len = (int)strlen(src);
-    if (start > src_len)
-        return makeString("");
-    if (start - 1 + count > src_len)
+
+    if (sourceVal.type == TYPE_STRING) {
+        src_ptr = sourceVal.s_val ? sourceVal.s_val : ""; // Handle NULL string pointer safely
+        src_len = strlen(src_ptr);
+    } else if (sourceVal.type == TYPE_CHAR) {
+        char_source_buf[0] = sourceVal.c_val;
+        char_source_buf[1] = '\0';
+        src_ptr = char_source_buf; // Point src_ptr to the temporary buffer
+        src_len = 1; // Source length is 1 for a char
+    } else {
+        fprintf(stderr, "Runtime error: copy requires a string or char source argument.\n");
+        goto cleanup; // Go to cleanup
+    }
+
+    // --- Get and validate start/count values ---
+    long long start_ll = startVal.i_val;
+    long long count_ll = countVal.i_val;
+
+    // Use size_t for indices and counts where appropriate after validation
+    if (start_ll < 1 || count_ll < 0) {
+        fprintf(stderr, "Runtime error: copy: invalid start index (%lld) or count (%lld).\n", start_ll, count_ll);
+        goto cleanup; // Go to cleanup
+    }
+    size_t start = (size_t)start_ll; // Convert after validation
+    size_t count = (size_t)count_ll; // Convert after validation
+
+
+    // --- Bounds checks and count adjustment ---
+    if (start > src_len) {
+        // Start is past the end, result is empty string (already set as default)
+        goto cleanup; // Go to cleanup
+    }
+    // Adjust count if it exceeds available characters from start position
+    // Note: start is 1-based, src_ptr is 0-based
+    if (start - 1 + count > src_len) {
         count = src_len - (start - 1);
-    char *substr = malloc(count + 1);
-    if (!substr) { fprintf(stderr, "Memory allocation error in copy().\n"); EXIT_FAILURE_HANDLER(); }
-    strncpy(substr, src + start - 1, count);
-    substr[count] = '\0';
-    Value retVal = makeString(substr);
-    free(substr);
-    return retVal;
+    }
+
+    // --- Copy Substring ---
+    if (count > 0) { // Only proceed if there's something to copy
+        char *substr = malloc(count + 1); // Use size_t count
+        if (!substr) {
+            fprintf(stderr, "Memory allocation error in copy().\n");
+            // No EXIT here, allow cleanup
+            goto cleanup; // Go to cleanup, result will be empty string
+        }
+
+        // Copy the substring
+        strncpy(substr, src_ptr + (start - 1), count); // Use size_t count
+        substr[count] = '\0'; // Ensure null termination
+
+        // Create result Value (free previous default empty string first)
+        freeValue(&result); // Free the "" allocated initially
+        result = makeString(substr); // makeString copies substr
+
+        // Free the temporary buffer
+        free(substr);
+    }
+    // If count is 0, the default empty string in 'result' is correct
+
+cleanup:
+    // Free evaluated arguments - ALWAYS do this before returning
+    freeValue(&sourceVal);
+    freeValue(&startVal);
+    freeValue(&countVal);
+
+    return result; // Return the actual result or the default empty string on error/empty case
 }
 
 Value executeBuiltinPos(AST *node) {

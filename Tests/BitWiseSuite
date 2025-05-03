@@ -154,7 +154,7 @@ begin
 
   // Test: a > b and b_a -> (4 > 2) and true -> true and true -> true
   b_expected := true;
-  b_res := i_a > i_b and b_a;
+  b_res := (i_a > i_b) and b_a; // Add parentheses
   AssertEqualBool(b_expected, b_res, 'a > b and b_a');
 
   // Test: not b_b and (a shr 1 = b) -> (not false) and ( (4 shr 1) = 2 ) -> true and (2 = 2) -> true and true -> true

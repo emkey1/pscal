@@ -6,11 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Helper function to check if a VarType is ordinal
-static bool isOrdinalType(VarType type) {
-    return (type == TYPE_INTEGER || type == TYPE_CHAR || type == TYPE_BOOLEAN ||
-            type == TYPE_ENUM || type == TYPE_BYTE || type == TYPE_WORD);
-}
+#define PASCAL_DEFAULT_FLOAT_PRECISION 6
 
 // Helper function to get the ordinal value from a Value struct
 // Returns true on success, false if the type is not ordinal. Stores value in out_ord.
@@ -645,119 +641,262 @@ Value eval(AST *node) {
         return makeInt(0);
 
     if (node->type == AST_FORMATTED_EXPR) {
-        // Evaluate the inner expression.
-        Value val = eval(node->left);
+        // Evaluate the inner expression (the value to be formatted)
+        Value val_to_format = eval(node->left);
 
-        // Extract the formatting info stored in node->token->value.
+        // Extract width and decimals from the formatting token
         int width = 0, decimals = -1;
-        sscanf(node->token->value, "%d,%d", &width, &decimals);
-
-        char buf[DEFAULT_STRING_CAPACITY];
-
-        if (val.type == TYPE_REAL) {
-            if (decimals >= 0)
-                snprintf(buf, sizeof(buf), "%*.*f", width, decimals, val.r_val);
-            else
-                snprintf(buf, sizeof(buf), "%*f", width, val.r_val);
-        } else if (val.type == TYPE_INTEGER) {
-            snprintf(buf, sizeof(buf), "%*lld", width, val.i_val);
-        } else if (val.type == TYPE_STRING) {
-            snprintf(buf, sizeof(buf), "%*s", width, val.s_val);
+        if (node->token && node->token->value) {
+            sscanf(node->token->value, "%d,%d", &width, &decimals);
         } else {
-            // For other types, simply use a default conversion.
-            snprintf(buf, sizeof(buf), "%*s", width, "???");
+             // Handle missing token case if necessary (shouldn't happen if parser is correct)
+             fprintf(stderr,"Warning: Missing formatting token in AST_FORMATTED_EXPR node %p during eval.\n", (void*)node);
         }
 
-        return makeString(buf);
-    }
+        char buf[DEFAULT_STRING_CAPACITY]; // Ensure this is large enough
+        buf[0] = '\0'; // Initialize buffer
+
+        // --- Apply Formatting Based on Type of val_to_format ---
+
+        if (val_to_format.type == TYPE_REAL) {
+            if (decimals >= 0) { // :width:decimals
+                snprintf(buf, sizeof(buf), "%*.*f", width, decimals, val_to_format.r_val);
+            } else { // :width only
+                int effective_precision = PASCAL_DEFAULT_FLOAT_PRECISION;
+                 // Use %g which is often closer to Pascal's default behavior than %f or %E alone
+                snprintf(buf, sizeof(buf), "%*.*g", width, effective_precision, val_to_format.r_val);
+            }
+        } else if (val_to_format.type == TYPE_INTEGER || val_to_format.type == TYPE_BYTE || val_to_format.type == TYPE_WORD) {
+            snprintf(buf, sizeof(buf), "%*lld", width, val_to_format.i_val);
+        } else if (val_to_format.type == TYPE_STRING) {
+            const char* source_str = val_to_format.s_val ? val_to_format.s_val : "";
+            int len = strlen(source_str);
+            int precision = len;
+            if (width > 0 && width < len) {
+                precision = width; // Truncate
+            }
+            snprintf(buf, sizeof(buf), "%*.*s", width, precision, source_str);
+        } else if (val_to_format.type == TYPE_BOOLEAN) {
+             const char* bool_str = val_to_format.i_val ? "TRUE" : "FALSE";
+             int len = strlen(bool_str);
+             int precision = len;
+             if (width > 0 && width < len) {
+                 precision = width; // Truncate
+             }
+             snprintf(buf, sizeof(buf), "%*.*s", width, precision, bool_str);
+        } else if (val_to_format.type == TYPE_CHAR) {
+             snprintf(buf, sizeof(buf), "%*c", width, val_to_format.c_val);
+        }
+        // Add other types (e.g., Enum) if needed
+        else {
+             // Default for unhandled types during formatting
+             snprintf(buf, sizeof(buf), "%*s", width, "?"); // Use "?" or similar
+        }
+
+        // Create the final string value
+        Value result = makeString(buf);
+
+        // Free the temporary inner value that was formatted
+        freeValue(&val_to_format);
+
+        // Return the Value containing the formatted string
+        return result;
+
+    } // End of the if (node->type == AST_FORMATTED_EXPR) block
 
     switch (node->type) {
         case AST_ARRAY_ACCESS: {
-            // Evaluate the base array/string expression
-            Value arrVal = eval(node->left); // This might be a deep copy if node->left was complex
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG EVAL] Evaluating AST_ARRAY_ACCESS.\n");
+            #endif
 
-            // Handle Array Element Access
-            if (arrVal.type == TYPE_ARRAY) {
-                if (!arrVal.array_val) {
-                     fprintf(stderr, "Runtime error: Array accessed before initialization or after being freed.\n");
-                     freeValue(&arrVal); // Free the temporary base value
-                     EXIT_FAILURE_HANDLER();
+            // --- Evaluate the base variable/expression (e.g., 's' or 'myArr') ---
+            Value baseVal = eval(node->left);
+            Value result = makeVoid(); // Default result
+
+            // --- Handle Based on Base Type ---
+            if (baseVal.type == TYPE_ARRAY) {
+                 // --- Array Element Evaluation Logic ---
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG EVAL ARR_ACCESS] Base is ARRAY. Resolving element pointer.\n");
+                 #endif
+                 // 1. Resolve the lvalue to get a pointer to the element's Value struct
+                 //    We call resolveLValueToPtr here because it handles multi-dim index calculation
+                 //    and bounds checking needed for *reading* the correct element.
+                 Value* elementPtr = resolveLValueToPtr(node); // Pass the original ARRAY_ACCESS node
+                 if (!elementPtr) {
+                      // Error should have been reported by resolveLValueToPtr or sub-evals
+                      fprintf(stderr, "Runtime error: Failed to resolve array element pointer during evaluation.\n");
+                      freeValue(&baseVal); // Free base value evaluated earlier
+                      return makeVoid(); // Return void/error value
+                 }
+
+                 // 2. Return a DEEP COPY of the value found at that pointer
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG EVAL ARR_ACCESS] Array element resolved. Type: %s. Returning copy.\n", varTypeToString(elementPtr->type));
+                 #endif
+                 result = makeCopyOfValue(elementPtr);
+
+                 // Ensure copied strings are not NULL
+                 if (result.type == TYPE_STRING && result.s_val == NULL) {
+                     result.s_val = strdup("");
+                     if (!result.s_val) { /* Malloc error */ freeValue(&baseVal); EXIT_FAILURE_HANDLER(); }
+                 }
+                 // --- End Array Element Logic ---
+
+            } else if (baseVal.type == TYPE_STRING) {
+                // --- NEW: String Element Evaluation Logic (No resolveLValueToPtr needed here) ---
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG EVAL ARR_ACCESS] Base is STRING. Evaluating index for read access.\n");
+                #endif
+                // 1. Check index count (must be 1 for string)
+                if (node->child_count != 1) {
+                     fprintf(stderr, "Runtime error: String indexing requires exactly one index.\n");
+                     freeValue(&baseVal);
+                     EXIT_FAILURE_HANDLER(); // Exit on structural error
                 }
-                if (node->child_count != arrVal.dimensions) {
-                    fprintf(stderr, "Runtime error: Expected %d index(es), got %d.\n",
-                            arrVal.dimensions, node->child_count);
-                    freeValue(&arrVal); // Free the temporary base value
-                    EXIT_FAILURE_HANDLER();
+                // 2. Evaluate index expression
+                Value indexVal = eval(node->children[0]);
+                if (indexVal.type != TYPE_INTEGER) {
+                    fprintf(stderr, "Runtime error: String index must be an integer.\n");
+                    freeValue(&indexVal);
+                    freeValue(&baseVal);
+                    EXIT_FAILURE_HANDLER(); // Exit on type error
                 }
+                long long idx_ll = indexVal.i_val;
+                freeValue(&indexVal); // Free evaluated index value
 
-                // Calculate indices (mallocs 'indices')
-                int *indices = malloc(sizeof(int) * arrVal.dimensions);
-                if (!indices) { /* Mem error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
-                for (int i = 0; i < node->child_count; i++) {
-                    if (!node->children[i]) { /* NULL index node check */ free(indices); freeValue(&arrVal); EXIT_FAILURE_HANDLER();}
-                    Value idxVal = eval(node->children[i]); // Evaluate index expression
-                    if (idxVal.type != TYPE_INTEGER) {
-                        fprintf(stderr, "Runtime error: Array index must be an integer.\n");
-                        freeValue(&idxVal); free(indices); freeValue(&arrVal); EXIT_FAILURE_HANDLER();
-                    }
-                    indices[i] = (int)idxVal.i_val;
-                    freeValue(&idxVal); // Free temporary index value
+                // 3. Bounds check (Pascal strings are 1-based)
+                const char *str_ptr = baseVal.s_val ? baseVal.s_val : "";
+                size_t len = strlen(str_ptr);
+                if (idx_ll < 1 || (size_t)idx_ll > len) {
+                     fprintf(stderr, "Runtime error: String index (%lld) out of bounds [1..%zu].\n", idx_ll, len);
+                     freeValue(&baseVal);
+                     EXIT_FAILURE_HANDLER(); // Exit on bounds error
                 }
+                size_t idx_0based = (size_t)idx_ll - 1; // Convert to 0-based index
 
-                // Calculate offset and perform bounds check
-                int offset = computeFlatOffset(&arrVal, indices);
-                int total_size = 1;
-                for (int i = 0; i < arrVal.dimensions; i++) { total_size *= (arrVal.upper_bounds[i] - arrVal.lower_bounds[i] + 1); }
-                if (offset < 0 || offset >= total_size) {
-                    fprintf(stderr, "Runtime error: Array index out of bounds (offset %d, size %d).\n", offset, total_size);
-                    free(indices); freeValue(&arrVal); EXIT_FAILURE_HANDLER();
-                }
+                // 4. Extract character and return as TYPE_CHAR Value
+                result = makeChar(str_ptr[idx_0based]);
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG EVAL ARR_ACCESS] String index %lld resolved to char '%c'.\n", idx_ll, result.c_val);
+                #endif
+                // --- End NEW String Logic ---
 
-                // --- MODIFICATION: Return a DEEP COPY of the element ---
-                // Original: Value result = arrVal.array_val[offset]; (Shallow copy)
-                Value result = makeCopyOfValue(&arrVal.array_val[offset]); // Deep copy
-                // --- END MODIFICATION ---
-
-                free(indices); // Free indices array
-                freeValue(&arrVal); // Free the temporary array value returned by eval(node->left)
-                return result; // Return the deep copy
+            } else {
+                // --- Error: Indexing applied to non-array/non-string type ---
+                fprintf(stderr, "Runtime error: Cannot apply indexing to type %s.\n", varTypeToString(baseVal.type));
+                 freeValue(&baseVal);
+                 EXIT_FAILURE_HANDLER(); // Exit on type error
             }
-            // Handle String/Char Element Access
-            else if (arrVal.type == TYPE_STRING) {
-                 // ... existing string access logic ...
-                 // Ensure result is created correctly (makeChar returns a value copy)
-                 // Remember to free arrVal at the end
-                 if (node->child_count != 1) { /* Error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
-                 Value indexVal = eval(node->children[0]);
-                 if (indexVal.type != TYPE_INTEGER) { /* Error */ freeValue(&indexVal); freeValue(&arrVal); EXIT_FAILURE_HANDLER();}
-                 long long idx = indexVal.i_val;
-                 freeValue(&indexVal); // Free index value
-                 int len = (arrVal.s_val) ? (int)strlen(arrVal.s_val) : 0;
-                 if (idx < 1 || idx > len) { /* Bounds error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
-                 char selected = arrVal.s_val[idx - 1];
-                 Value result = makeChar(selected); // makeChar creates a proper Value copy
-                 freeValue(&arrVal); // Free the temporary string value
-                 return result;
-            }
-             else if (arrVal.type == TYPE_CHAR) {
-                 // ... existing char access logic ...
-                 // Remember to free arrVal at the end
-                 if (node->child_count != 1) { /* Error */ freeValue(&arrVal); EXIT_FAILURE_HANDLER();}
-                 Value indexVal = eval(node->children[0]);
-                 if (indexVal.type != TYPE_INTEGER || indexVal.i_val != 1) { /* Error */ freeValue(&indexVal); freeValue(&arrVal); EXIT_FAILURE_HANDLER(); }
-                 freeValue(&indexVal);
-                 // Return a copy of the char value - makeCopyOfValue handles this simply
-                 Value result = makeCopyOfValue(&arrVal);
-                 freeValue(&arrVal); // Free the original char value evaluated
-                 return result;
-             }
-            else {
-                fprintf(stderr, "Runtime error: Attempted array/string access on incompatible type %s.\n", varTypeToString(arrVal.type));
-                freeValue(&arrVal); // Free the incompatible value
-                EXIT_FAILURE_HANDLER();
-            }
-            break; // Should be unreachable if all paths return/exit
+
+            // Free the evaluated base value (string, array struct copy, etc.)
+            freeValue(&baseVal);
+
+            return result; // Return the evaluated element (char or copied array element)
         } // End case AST_ARRAY_ACCESS
+        case AST_FORMATTED_EXPR: {
+            // Evaluate the inner expression.
+            Value val = eval(node->left); // Evaluate inner expr
+
+            int width = 0;
+            int decimals = -1; // Default precision
+            char format_str_debug[64] = ""; // Buffer for format info debug print
+
+            // Extract width/precision from node->token->value
+            if (node->token && node->token->value) {
+                 strncpy(format_str_debug, node->token->value, sizeof(format_str_debug)-1);
+                 format_str_debug[sizeof(format_str_debug)-1] = '\0';
+                 sscanf(node->token->value, "%d,%d", &width, &decimals);
+            } else {
+                 width = 0; decimals = -1;
+                 strcpy(format_str_debug, "<MISSING_TOKEN>");
+                 fprintf(stderr,"Warning: Missing formatting token in AST_FORMATTED_EXPR for node %p\n", (void*)node);
+            }
+
+            // Optional Debug Print
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG EVAL_FMT] START Node %p. Inner type: %s. ", (void*)node, varTypeToString(val.type));
+            if(val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) fprintf(stderr, "Inner i_val: %lld. ", val.i_val);
+            else if(val.type == TYPE_REAL) fprintf(stderr, "Inner r_val: %f. ", val.r_val);
+            else if(val.type == TYPE_CHAR) fprintf(stderr, "Inner c_val: '%c'. ", val.c_val);
+            else if(val.type == TYPE_BOOLEAN) fprintf(stderr, "Inner b_val: %lld (0=f,1=t). ", val.i_val);
+            else if(val.type == TYPE_STRING) fprintf(stderr, "Inner s_val: '%s'. ", val.s_val ? val.s_val : "<NULL>");
+            fprintf(stderr, "Format str read: '%s'. Parsed width=%d, decimals=%d.\n", format_str_debug, width, decimals);
+            #endif
+
+            char buf[DEFAULT_STRING_CAPACITY]; // Ensure this is large enough
+            buf[0] = '\0'; // Initialize buffer to empty string
+
+            // Check the type of the value to be formatted
+            if (val.type == TYPE_REAL) {
+                // <<< START Correction for Real Formatting >>>
+                if (decimals >= 0) { // :width:decimals uses fixed point
+                    snprintf(buf, sizeof(buf), "%*.*f", width, decimals, val.r_val);
+                } else { // :width uses floating point or scientific, %g is often suitable
+                    // Use PASCAL_DEFAULT_FLOAT_PRECISION (already defined)
+                    // Ensure width is reasonable if not specified (optional, snprintf handles width=0)
+                    if (width <= 0) width = PASCAL_DEFAULT_FLOAT_PRECISION + 7; // Example default width if none given
+                    snprintf(buf, sizeof(buf), "%*.*g", width, PASCAL_DEFAULT_FLOAT_PRECISION, val.r_val); // Use %g
+                }
+                // <<< END Correction for Real Formatting >>>
+            } else if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
+                snprintf(buf, sizeof(buf), "%*lld", width, val.i_val);
+            } else if (val.type == TYPE_STRING) {
+                // <<< START Correction for String Formatting >>>
+                const char* source_str = val.s_val ? val.s_val : "";
+                int len = strlen(source_str);
+                // Determine the number of characters to actually print (precision)
+                int precision = len; // Default: print whole string
+                // If width is specified and positive, it dictates the max characters
+                if (width > 0 && width < len) {
+                    precision = width; // Truncate to width
+                }
+                 // If width is 0 or negative, print the whole string (precision = len)
+                 // If width > len, print the whole string (precision = len), padding handled by width field
+
+                // Use width for padding, precision for max characters printed
+                snprintf(buf, sizeof(buf), "%*.*s", width, precision, source_str);
+                // <<< END Correction for String Formatting >>>
+            } else if (val.type == TYPE_BOOLEAN) {
+                 // <<< ADDED: Boolean Formatting >>>
+                 const char* bool_str = val.i_val ? "TRUE" : "FALSE";
+                 int len = strlen(bool_str);
+                 int precision = len;
+                 if (width > 0 && width < len) { // Handle potential truncation
+                     precision = width;
+                 }
+                 // Use width for padding, precision for max characters
+                 snprintf(buf, sizeof(buf), "%*.*s", width, precision, bool_str);
+                 // <<< END ADDED: Boolean Formatting >>>
+            } else if (val.type == TYPE_CHAR) {
+                 // <<< ADDED: Char Formatting >>>
+                 // %c pads with spaces according to width
+                 snprintf(buf, sizeof(buf), "%*c", width, val.c_val);
+                 // <<< END ADDED: Char Formatting >>>
+            }
+             // Add formatting for other types like ENUM if desired
+            else {
+                 // Default '???' for truly unhandled types
+#ifdef DEBUG
+                 fprintf(stderr, "[DEBUG EVAL_FMT] Unhandled inner type %s for formatting, using '?' '?\\?'\n", varTypeToString(val.type)); // Escaped trigraph
+#endif
+                 snprintf(buf, sizeof(buf), "%*s", width, "?" "??"); // Default output
+            }
+
+            // Optional Debug Print
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG EVAL_FMT] END Node %p. snprintf result buf: '%s'\n", (void*)node, buf);
+            #endif
+
+            // Free the evaluated inner value ('val')
+            freeValue(&val);
+
+            // Create the result string Value (makeString copies buf)
+            Value result = makeString(buf);
+
+            return result; // Return the Value containing the formatted string
+        } // End case AST_FORMATTED_EXPR
         case AST_ARRAY_LITERAL: {
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG] Evaluating AST_ARRAY_LITERAL\n");
@@ -1586,79 +1725,162 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             executeWithScope(node->right, true);
             break;
         case AST_ASSIGN: {
-             Value rhsValue = eval(node->right); // Evaluate RHS (e.g., cRed -> cRedValue)
+               Value rhs_val = eval(node->right); // Evaluate RHS - Need to free this later
 
-             #ifdef DEBUG
-             if(rhsValue.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] rhsValue evaluated. Name: '%s' (addr=%p)\n", rhsValue.enum_val.enum_name ? rhsValue.enum_val.enum_name : "<NULL>", (void*)rhsValue.enum_val.enum_name);
-             #endif
+               // --- Get pointer to LHS target ---
+               // Use resolveLValueToPtr for ALL LHS nodes now, it handles simple VARs too
+               Value* target_ptr = resolveLValueToPtr(node->left);
+               if (!target_ptr) {
+                   // Error logged in resolveLValueToPtr or lookupSymbol
+                   freeValue(&rhs_val); // Free the evaluated RHS
+                   EXIT_FAILURE_HANDLER();
+               }
+            
+               // --- Get LHS name string (for potential error/debug messages) ---
+               // Get this *after* resolving target_ptr to ensure node->left is valid
+               const char* lhs_name_debug = node->left->token ? node->left->token->value : "<complex LValue>";
 
-             // --- Create another explicit deep copy ---
-             // This copy will be passed to updateSymbol or used for complex assignment
-             Value valueForUpdate = makeCopyOfValue(&rhsValue);
-             #ifdef DEBUG
-             if(valueForUpdate.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] valueForUpdate (extra copy) created. Name: '%s' (addr=%p)\n", valueForUpdate.enum_val.enum_name ? valueForUpdate.enum_val.enum_name : "<NULL>", (void*)valueForUpdate.enum_val.enum_name);
-             #endif
-             // --- End explicit deep copy ---
+               // --- Type Check/Promotion ---
+               // resolveLValueToPtr also checks for const assignment attempts
 
-             // Check if target is simple variable or complex lvalue
-             if (node->left->type == AST_VARIABLE) {
-                 // Simple variable assignment
-                  #ifdef DEBUG
-                  fprintf(stderr, "[DEBUG ASSIGN] Calling updateSymbol for '%s' with valueForUpdate...\n", node->left->token->value);
-                  #endif
-                 // Pass the *new explicit copy* to updateSymbol
-                 updateSymbol(node->left->token->value, valueForUpdate);
-             } else {
-                  // Complex LValue (Record field, array element)
-                  Value* targetPtr = resolveLValueToPtr(node->left);
-                  if (!targetPtr) {
-                      // Error handled by resolve, clean up values before exit
-                      freeValue(&rhsValue);
-                      freeValue(&valueForUpdate); // Free the extra copy too
-                      EXIT_FAILURE_HANDLER();
-                  }
+               // --- Type Check/Promotion (Simplified Example) ---
+               Value value_to_assign = rhs_val; // Start with original RHS value
+               bool value_was_promoted = false;
 
-                  // --- Perform assignment directly to targetPtr ---
-                  // Use valueForUpdate as the source, apply promotions if needed
-                  Value finalValue = valueForUpdate; // Start with the extra copy
-                  bool needToFreeFinal = false;    // Flag if promotion creates *another* value
+               if (target_ptr->type != value_to_assign.type) {
+                   // Allow compatible assignments (e.g., INTEGER to REAL)
+                   if (target_ptr->type == TYPE_REAL && value_to_assign.type == TYPE_INTEGER) {
+                       #ifdef DEBUG
+                       fprintf(stderr, "[DEBUG ASSIGN] Promoting INTEGER RHS (%lld) to REAL for assignment.\n", value_to_assign.i_val);
+                       #endif
+                       value_to_assign = makeReal((double)value_to_assign.i_val);
+                       value_was_promoted = true; // A new Value struct was created
+                   }
+                   // Allow assigning single-char STRING to CHAR
+                   else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING && value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
+                        // No promotion needed here, just assign the char later
+                   }
+                   // Allow assigning INTEGER to compatible ordinal types (BYTE, WORD, BOOLEAN, CHAR)
+                   else if ((target_ptr->type == TYPE_BYTE || target_ptr->type == TYPE_WORD || target_ptr->type == TYPE_BOOLEAN || target_ptr->type == TYPE_CHAR) && value_to_assign.type == TYPE_INTEGER) {
+                       // No promotion needed, direct assignment of i_val/c_val handles it, but add range checks if desired
+                   }
+                    // Allow assigning ENUM <= INTEGER or INTEGER <= ENUM (ordinal comparison)
+                   else if ((target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) || (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) ) {
+                       // Assign ordinals directly, type tag remains target_ptr->type
+                   }
+                   else if (target_ptr->type == TYPE_STRING && value_to_assign.type == TYPE_CHAR && value_to_assign.s_val ) {
+                        // No promotion needed here, just assign the char later
+                   }
 
-                  // <<<< Placeholder: INSERT TYPE CHECKING / PROMOTION LOGIC HERE >>>>
-                  // This logic modifies 'finalValue' if promotion is needed, setting needToFreeFinal=true.
-                  // E.g., if targetPtr->type == TYPE_REAL and finalValue.type == TYPE_INTEGER:
-                  //      finalValue = makeReal((double)finalValue.i_val); needToFreeFinal = true;
-                  // (Ensure compatibility checks prevent invalid assignments)
+                   // --- Add other compatible promotions/checks as needed ---
 
-                  // Free old value pointed to by targetPtr
-                  freeValue(targetPtr);
-
-                  // Assign deep copy of finalValue (which might be the promoted value or still valueForUpdate)
-                  // to the location pointed to by targetPtr
-                  *targetPtr = makeCopyOfValue(&finalValue);
-
-                  // Free the potentially promoted 'finalValue' if it's different from 'valueForUpdate'
-                  if (needToFreeFinal) {
-                      freeValue(&finalValue);
-                  }
-                  // valueForUpdate itself will be freed below.
-             }
-
-
-             // Free the original RHS value returned by eval()
-             #ifdef DEBUG
-             if(rhsValue.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] Freeing original rhsValue (Name addr %p)\n", (void*)rhsValue.enum_val.enum_name);
-             #endif
-             freeValue(&rhsValue);
-
-             // Free the explicit deep copy we made ('valueForUpdate')
-              #ifdef DEBUG
-             if(valueForUpdate.type == TYPE_ENUM) fprintf(stderr, "[DEBUG ASSIGN] Freeing valueForUpdate (extra copy) (Name addr %p)\n", (void*)valueForUpdate.enum_val.enum_name);
-             #endif
-             freeValue(&valueForUpdate);
+                   else { // Incompatible types
+                        const char* lhs_name = node->left->token ? node->left->token->value : "<complex LValue>";
+                        fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for LHS '%s'.\n",
+                                varTypeToString(rhs_val.type), varTypeToString(target_ptr->type), lhs_name);
+                        freeValue(&rhs_val); // Free original RHS value
+                        if (value_was_promoted) freeValue(&value_to_assign); // Free temp promoted value
+                        EXIT_FAILURE_HANDLER();
+                   }
+               }
+               // --- End Type Check/Promotion ---
 
 
-             break;
-         } // End case AST_ASSIGN
+               // --- Perform Assignment ---
+            // 1. Free existing value CONTENTS at the target location
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG ASSIGN] Freeing old value at targetPtr for LHS '%s' (Type: %s)\n", lhs_name_debug, varTypeToString(target_ptr->type));
+            #endif
+            freeValue(target_ptr); // Frees heap data *within* the target Value struct
+
+            // 2. Assign a DEEP COPY of the potentially promoted value_to_assign
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG ASSIGN] Assigning deep copy of value_to_assign (Type: %s) to targetPtr (Target Type: %s)\n",
+                    varTypeToString(value_to_assign.type), varTypeToString(target_ptr->type));
+            #endif
+
+            // --- Specific Type Handling During Assignment ---
+
+            // Case: Assigning String or Char TO a String Variable
+            if (target_ptr->type == TYPE_STRING && (value_to_assign.type == TYPE_STRING || value_to_assign.type == TYPE_CHAR)) {
+                 const char* source_str = NULL;
+                 char char_buf[2]; // Temp buffer if source is char
+
+                 if (value_to_assign.type == TYPE_STRING) {
+                     source_str = value_to_assign.s_val ? value_to_assign.s_val : "";
+                 } else { // value_to_assign.type == TYPE_CHAR
+                     char_buf[0] = value_to_assign.c_val;
+                     char_buf[1] = '\0';
+                     source_str = char_buf;
+                 }
+
+                 if (target_ptr->max_length > 0) { // Target is fixed-length string
+                     size_t source_len = strlen(source_str);
+                     // Determine actual number of chars to copy (min of source len and target max len)
+                     size_t copy_len = (source_len > (size_t)target_ptr->max_length) ? (size_t)target_ptr->max_length : source_len;
+
+                     // Allocate buffer for fixed size + null terminator
+                     target_ptr->s_val = malloc((size_t)target_ptr->max_length + 1);
+                     if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
+
+                     // Copy the potentially truncated string
+                     strncpy(target_ptr->s_val, source_str, copy_len);
+                     target_ptr->s_val[copy_len] = '\0'; // Ensure null termination
+
+                     #ifdef DEBUG
+                     fprintf(stderr, "[DEBUG ASSIGN] Fixed String Assignment: Copied %zu chars ('%s') into fixed length %d buffer for LHS '%s'.\n", copy_len, target_ptr->s_val, target_ptr->max_length, lhs_name_debug);
+                     #endif
+                 } else { // Target is dynamic string
+                     target_ptr->s_val = strdup(source_str);
+                     if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
+                 }
+                 target_ptr->type = TYPE_STRING; // Ensure type is correct
+            }
+            // Case: Assigning single-char STRING to CHAR variable
+            else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING) {
+                if (value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
+                    target_ptr->c_val = value_to_assign.s_val[0];
+                    target_ptr->type = TYPE_CHAR; // Ensure type is correct
+                } else {
+                     fprintf(stderr, "Runtime error: Cannot assign multi-character or empty string to CHAR variable '%s'.\n", lhs_name_debug);
+                     freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER();
+                }
+            }
+            // Case: Assigning Integer to Enum (assign ordinal)
+            else if (target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) {
+                // Add bounds check if possible (needs access to type definition)
+                // AST* typeDef = target_ptr->type_def; // Requires type_def to be stored in Value
+                // if (typeDef && ...) { check bounds ... }
+                target_ptr->enum_val.ordinal = (int)value_to_assign.i_val;
+                // Keep existing enum_name and type TYPE_ENUM
+                target_ptr->type = TYPE_ENUM; // Ensure type is set
+            }
+            // Case: Assigning Enum to Integer (assign ordinal)
+            else if (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) {
+                target_ptr->i_val = value_to_assign.enum_val.ordinal;
+                target_ptr->type = TYPE_INTEGER; // Set type to INTEGER
+                // Free enum name if it was copied into value_to_assign during promotion (unlikely here)
+                 if (value_was_promoted && value_to_assign.enum_val.enum_name) {
+                    // free(value_to_assign.enum_val.enum_name); // Be careful here
+                 }
+            }
+            // Default: Perform a standard deep copy for other compatible types
+            else {
+                // This handles Int=Int, Real=Real, Bool=Bool, Record=Record, Array=Array, Set=Set etc.
+                // It relies on makeCopyOfValue to handle these correctly.
+                *target_ptr = makeCopyOfValue(&value_to_assign);
+            }
+
+            // --- Cleanup ---
+            // Free the original RHS value returned by eval
+            freeValue(&rhs_val);
+            // If promotion created a separate temporary value, free that too
+            if (value_was_promoted) {
+                freeValue(&value_to_assign);
+            }
+
+            break; // End case AST_ASSIGN
+          } // End case AST_ASSIGN
         case AST_CASE: {
                    // Evaluate the case expression
                    Value caseValue = eval(node->left);
@@ -1969,8 +2191,6 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                  }
                  // If first arg is not AST_VARIABLE, it cannot be a file variable, proceed with console output
             }
-            // --- END: Original File Variable Check Logic ---
-
 
             // --- Apply ANSI color codes ONLY if writing to stdout ---
             if (!isFileOp) { // <<< Only apply colors if output is stdout
