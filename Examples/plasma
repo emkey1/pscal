@@ -1,0 +1,98 @@
+PROGRAM Plasma256Color;
+
+USES Crt; // Assumes Sin, Sqrt, GotoXY, ClrScr, Write, WriteLn, TextColorE, TextColor, TextBackground, NormVideo, ReadKey, ScreenCols, ScreenRows
+
+CONST
+  DrawChar = '#'; // Character to draw (# or @ are often good choices)
+  DefaultFgColor = 7;
+  DefaultBgColor = 0;
+
+VAR
+  Row, Col     : Integer;
+  Width, Height: Integer;
+  x, y         : Real; // Use real for calculations
+  val1, val2, val3, finalVal : Real;
+  ColorIndex   : Byte; // Use Byte for 0-255 range
+  InvWidth, InvHeight : Real; // For scaling coordinates
+
+BEGIN
+  ClrScr;
+  HideCursor; // Optional
+
+  Width  := ScreenCols;
+  Height := ScreenRows;
+
+  // Pre-calculate scaling factors
+  IF Width > 0 THEN InvWidth := 1.0 / Width ELSE InvWidth := 0;
+  IF Height > 0 THEN InvHeight := 1.0 / Height ELSE InvHeight := 0;
+
+  GotoXY(1, 1);
+  WriteLn('Generating 256-Color Plasma Effect (', Width, 'x', Height, ')...');
+  // Delay(500); // Optional short pause
+
+  // Ensure default background is set
+  TextBackground(DefaultBgColor);
+
+  // Loop through screen coordinates
+  FOR Row := 1 TO Height DO
+  BEGIN
+    // GotoXY(1, Row); // Might not be needed if terminal wraps Write correctly
+
+    FOR Col := 1 TO Width DO
+    BEGIN
+      // Scale coordinates for smoother patterns across screen size
+      x := Col * InvWidth * 16.0; // Multiply by factors to control wave frequency
+      y := Row * InvHeight * 8.0;
+
+      // Simple plasma calculation using built-in Sin and Sqrt
+      // Experiment with divisors and multipliers for different visual effects
+      val1 := Sin(x);
+      val2 := Sin(y / 2.0);
+      val3 := Sin(Sqrt(x*x + y*y) / 2.0); // Wave based on distance from corner
+
+      // Combine waves (average to roughly -1 to +1), then shift/scale to 0-255
+      finalVal := (val1 + val2 + val3) / 3.0; // Average waves
+      finalVal := (finalVal + 1.0) * 127.5;   // Shift range to 0..2, scale to 0..255
+
+      // Clamp the value to the valid Byte range [0..255]
+      IF finalVal < 0 THEN
+        ColorIndex := 0
+      ELSE IF finalVal > 255 THEN
+        ColorIndex := 255
+      ELSE
+        ColorIndex := Trunc(finalVal); // Assign truncated integer to byte
+
+      // Avoid color 0 if background is 0 (use dark grey instead)
+      IF (ColorIndex = 0) and (DefaultBgColor = 0) THEN
+         ColorIndex := 16;
+
+      // Set color and draw the character for this pixel
+      TextColorE(ColorIndex);
+      Write(DrawChar); // Write character, relying on terminal wrap or next Write
+
+    END; // End FOR Col
+
+    // Optional: Ensure newline if Write doesn't wrap reliably,
+    // but might interfere with precise positioning if needed later.
+    // IF Row < Height THEN WriteLn;
+
+  END; // End FOR Row
+
+  // Reset attributes and position cursor at the bottom
+  NormVideo; // Use NormVideo (ESC[0m) to reset all attributes
+  // Optional: Explicitly reset colors to defaults again
+  // TextColor(DefaultFgColor);
+  // TextBackground(DefaultBgColor);
+
+  GotoXY(1, Height + 1); // Position below drawing
+  ShowCursor; // Optional
+  WriteLn; // Ensure cursor is on a new line
+  Write('Plasma complete. Press any key to exit.');
+  ReadKey;
+  WriteLn;
+
+  // Optional final cleanup
+  // NormVideo;
+  // ClrScr;
+
+END.

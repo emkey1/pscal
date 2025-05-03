@@ -935,6 +935,9 @@ Value executeBuiltinOrd(AST *node) {
     else if (arg.type == TYPE_INTEGER) {
         return makeInt(arg.i_val); // Ordinal of an integer is itself
     }
+    else if (arg.type == TYPE_BYTE) {
+        return makeInt(arg.i_val); // Ordinal of an integer is itself
+    }
     // Handle other ordinal types if you add them (e.g., Byte, Word)
     // else if (arg.type == TYPE_BYTE) { ... }
 

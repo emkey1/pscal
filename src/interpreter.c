@@ -2202,6 +2202,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             int startIndex = 0;     // Start processing args from index 0 by default
             Value fileVal;          // To hold evaluated file variable if present
             bool isFileOp = false;  // Flag to track if writing to file
+            bool colorWasSet = false; // <<< ADD Flag
 
             // --- START: Original File Variable Check Logic ---
             // Check if the first argument *might* be a file variable
@@ -2266,6 +2267,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 // 5. Print sequence to stdout
                 printf("%s", escape_sequence);
                 fflush(stdout); // Flush color code immediately might help
+                colorWasSet = true; // <<< SET Flag: Colors were applied
             } // End if (!isFileOp) for colors
 
             // --- Loop through arguments to print (start index adjusted for file ops) ---
@@ -2296,6 +2298,11 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             // Handle WriteLn vs Write
             if (node->type == AST_WRITELN) {
                 fprintf(output, "\n"); // Add newline to the correct output stream
+            }
+            
+            if (colorWasSet) { // <<< Check Flag
+                printf("\x1B[0m"); // ANSI Reset Code
+                // colorWasSet = false; // Optional: Reset flag
             }
 
             fflush(output); // Flush the output stream (stdout or file)
