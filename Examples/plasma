@@ -20,7 +20,7 @@ BEGIN
   HideCursor; // Optional
 
   Width  := ScreenCols;
-  Height := ScreenRows;
+  Height := ScreenRows - 2;
 
   // Pre-calculate scaling factors
   IF Width > 0 THEN InvWidth := 1.0 / Width ELSE InvWidth := 0;
@@ -84,9 +84,8 @@ BEGIN
   // TextColor(DefaultFgColor);
   // TextBackground(DefaultBgColor);
 
-  GotoXY(1, Height + 1); // Position below drawing
+  GotoXY(1, Height + 3); // Position below drawing
   ShowCursor; // Optional
-  WriteLn; // Ensure cursor is on a new line
   Write('Plasma complete. Press any key to exit.');
   ReadKey;
   WriteLn;
