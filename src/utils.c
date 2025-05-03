@@ -30,6 +30,7 @@ const char *varTypeToString(VarType type) {
         case TYPE_MEMORYSTREAM: return "MEMORY_STREAM";
         case TYPE_ENUM:         return "ENUM";
         case TYPE_SET:          return "SET";
+        case TYPE_POINTER:      return "POINTER";
         default:                return "UNKNOWN_VAR_TYPE";
     }
 }
@@ -90,7 +91,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_AND:           return "AND";
         case TOKEN_OR:            return "OR";
         case TOKEN_SHL:           return "SHL";
-        case TOKEN_SHR:           return "SHR";     
+        case TOKEN_SHR:           return "SHR";
         case TOKEN_TRUE:          return "TRUE";
         case TOKEN_FALSE:         return "FALSE";
         case TOKEN_NOT:           return "NOT";
@@ -105,22 +106,30 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_INITIALIZATION:return "INITIALIZATION";
         case TOKEN_IN:            return "IN";
         case TOKEN_BREAK:         return "BREAK";
-        case TOKEN_OUT:           return "OUT"; 
+        case TOKEN_OUT:           return "OUT";
+        case TOKEN_SET:           return "SET";
+        case TOKEN_CARET:         return "CARET";   // <<< ADDED
+        case TOKEN_NIL:           return "NIL";     // <<< ADDED
         default:
-            return "INVALID_TOKEN";
+            // Create a small buffer to handle potentially large unknown enum values
+            // Although, this function should ideally cover all defined TokenType values.
+            // If an unknown value appears, it indicates a potential issue elsewhere.
+            static char unknown_buf[32];
+            snprintf(unknown_buf, sizeof(unknown_buf), "INVALID_TOKEN (%d)", type);
+            return unknown_buf;
     }
 }
 
 const char *astTypeToString(ASTNodeType type) {
     switch (type) {
-        case AST_NOOP:           return "NOOP"; 
+        case AST_NOOP:           return "NOOP";
         case AST_PROGRAM:        return "PROGRAM";
         case AST_BLOCK:          return "BLOCK";
         case AST_CONST_DECL:     return "CONST_DECL";
         case AST_TYPE_DECL:      return "TYPE_DECL";
         case AST_VAR_DECL:       return "VAR_DECL";
         case AST_ASSIGN:         return "ASSIGN";
-        case AST_BINARY_OP:      return "BINARY_OP"; 
+        case AST_BINARY_OP:      return "BINARY_OP";
         case AST_UNARY_OP:       return "UNARY_OP";
         case AST_NUMBER:         return "NUMBER";
         case AST_STRING:         return "STRING";
@@ -156,8 +165,11 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_ENUM_TYPE:      return "TYPE_ENUM";
         case AST_ENUM_VALUE:     return "ENUM_VALUE";
         case AST_SET:            return "SET";
-        case AST_BREAK:          return "BREAK";
         case AST_ARRAY_LITERAL:  return "ARRAY_LITERAL";
+        case AST_BREAK:          return "BREAK";
+        case AST_POINTER_TYPE:   return "POINTER_TYPE";
+        case AST_DEREFERENCE:    return "DEREFERENCE";
+        case AST_NIL:            return "NIL";
         default:                 return "UNKNOWN_AST_TYPE";
     }
 }
@@ -192,7 +204,8 @@ FieldValue *copyRecord(FieldValue *orig) {
              EXIT_FAILURE_HANDLER();
         }
 
-        new_field->value = makeCopyOfValue(&curr->value);
+        // --- Recursively copy the field's value ---
+        new_field->value = makeCopyOfValue(&curr->value); // Use makeCopyOfValue
 
         new_field->next = NULL;
         *ptr = new_field;
@@ -204,7 +217,13 @@ FieldValue *copyRecord(FieldValue *orig) {
 FieldValue *createEmptyRecord(AST *recordType) {
     // Resolve type references if necessary
     if (recordType && recordType->type == AST_TYPE_REFERENCE) {
-        recordType = recordType->right; // Follow the link
+        // Look up the referenced type definition
+        AST* resolvedType = lookupType(recordType->token->value);
+        if (!resolvedType) {
+             fprintf(stderr, "Error in createEmptyRecord: Could not resolve type reference '%s'.\n", recordType->token->value);
+             return NULL;
+        }
+        recordType = resolvedType; // Use the resolved definition node
     }
 
     // Check if we have a valid RECORD_TYPE node
@@ -274,20 +293,26 @@ FieldValue *createEmptyRecord(AST *recordType) {
     return head; // Return the head of the linked list of fields
 }
 
+
 void freeFieldValue(FieldValue *fv) {
-    while (fv) {
-        FieldValue *next = fv->next;
-        free(fv->name);
-        if (fv->value.type == TYPE_STRING)
-            free(fv->value.s_val);
-        free(fv);
-        fv = next;
+    FieldValue *current = fv;
+    while (current) {
+        FieldValue *next = current->next; // Store next pointer before freeing current node's contents
+        if (current->name) {
+            free(current->name); // Free the duplicated field name
+        }
+        // Recursively free the value stored in the field
+        freeValue(&current->value);
+        // Free the FieldValue struct itself
+        free(current);
+        current = next; // Move to the next node
     }
 }
 
 // Value constructors
 Value makeInt(long long val) {
     Value v;
+    memset(&v, 0, sizeof(Value)); // Initialize all fields to 0/NULL
     v.type = TYPE_INTEGER;
     v.i_val = val;
     return v;
@@ -295,6 +320,7 @@ Value makeInt(long long val) {
 
 Value makeReal(double val) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_REAL;
     v.r_val = val;
     return v;
@@ -302,6 +328,7 @@ Value makeReal(double val) {
 
 Value makeByte(unsigned char val) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_BYTE;
     v.i_val = val;  // Store the byte in the integer field.
     return v;
@@ -309,159 +336,134 @@ Value makeByte(unsigned char val) {
 
 Value makeWord(unsigned int val) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_WORD;
-    v.i_val = val;  // Store the word value in the same field (ensure it stays within 16 bits if needed)
+    // Use i_val, ensuring it handles potential size differences if long long > unsigned int
+    v.i_val = val;
     return v;
 }
 
 Value makeString(const char *val) {
     Value v;
+    memset(&v, 0, sizeof(Value)); // Initialize all fields
     v.type = TYPE_STRING;
     v.max_length = -1; // Indicate dynamic string (no fixed limit relevant here)
 
     if (val != NULL) {
-        size_t len = strlen(val);
-        v.s_val = malloc(len + 1); // Allocate exact size needed + null terminator
+        v.s_val = strdup(val); // Use strdup for clean duplication
         if (!v.s_val) {
-            fprintf(stderr, "FATAL: Memory allocation failed in makeString (dynamic alloc)\n");
+            fprintf(stderr, "FATAL: Memory allocation failed in makeString (strdup)\n");
             EXIT_FAILURE_HANDLER();
         }
-        strcpy(v.s_val, val); // Copy the whole string
     } else {
         // Handle NULL input -> create an empty string
-        v.s_val = malloc(1);
+        v.s_val = strdup("");
         if (!v.s_val) {
-            fprintf(stderr, "FATAL: Memory allocation failed in makeString (null input)\n");
+            fprintf(stderr, "FATAL: Memory allocation failed in makeString (strdup empty)\n");
             EXIT_FAILURE_HANDLER();
         }
-        v.s_val[0] = '\0';
     }
-
-#ifdef DEBUG
-    // Optional: Keep debug print if useful
-    // DEBUG_PRINT("[DEBUG] makeString: input='%s', allocated_len=%zu, value='%s'\n",
-    //             val ? val : "NULL", v.s_val ? strlen(v.s_val) : 0, v.s_val ? v.s_val : "NULL");
-#endif
-
     return v;
 }
 
 Value makeChar(char c) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_CHAR;
     v.c_val = c;
-    v.max_length = 1;
-
-#ifdef DEBUG
-    DEBUG_PRINT("[DEBUG] makeChar: char='%c'\n", c);
-#endif
-
+    v.max_length = 1; // Character has a fixed length of 1
     return v;
 }
 
 Value makeBoolean(int b) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_BOOLEAN;
-    v.i_val = b ? 1 : 0;
+    v.i_val = b ? 1 : 0; // Store as 0 or 1
     return v;
 }
 
 Value makeFile(FILE *f) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_FILE;
     v.f_val = f;
-    v.filename = NULL;
+    v.filename = NULL; // Filename is associated via assign()
     return v;
 }
 
 Value makeRecord(FieldValue *rec) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_RECORD;
-    v.record_val = rec;
+    v.record_val = rec; // Takes ownership of the FieldValue list
     return v;
 }
 
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def) {
     Value v;
+    memset(&v, 0, sizeof(Value)); // Initialize all fields
     v.type = TYPE_ARRAY;
     v.dimensions = dimensions;
+    v.lower_bounds = NULL; // Allocate below
+    v.upper_bounds = NULL; // Allocate below
+    v.array_val = NULL;    // Allocate below
+    v.element_type = element_type;
+    v.element_type_def = type_def; // Store link to element type definition
+
+    if (dimensions <= 0) {
+         fprintf(stderr, "Warning: makeArrayND called with zero or negative dimensions.\n");
+         return v; // Return initialized empty array struct
+    }
+
+    // Allocate bounds arrays
     v.lower_bounds = malloc(sizeof(int) * dimensions);
     v.upper_bounds = malloc(sizeof(int) * dimensions);
-    v.element_type = element_type;
-
-    int total_size = 1;
-
-#ifdef DEBUG
-    if (dumpExec) {
-        fprintf(stderr, "[DEBUG] makeArrayND: Creating %d-D array, element_type=%s\n",
-                dimensions, varTypeToString(element_type));
+    if (!v.lower_bounds || !v.upper_bounds) {
+        fprintf(stderr, "Memory allocation error for bounds in makeArrayND.\n");
+        free(v.lower_bounds); // Free potentially allocated lower bounds
+        EXIT_FAILURE_HANDLER();
     }
-#endif
 
+    // Calculate total size and copy bounds
+    int total_size = 1;
     for (int i = 0; i < dimensions; i++) {
         v.lower_bounds[i] = lower_bounds[i];
         v.upper_bounds[i] = upper_bounds[i];
         int size_i = (upper_bounds[i] - lower_bounds[i] + 1);
-        total_size *= size_i;
-
-#ifdef DEBUG
-        if (dumpExec) {
-            fprintf(stderr,
-                    "[DEBUG] makeArrayND: Dimension %d => lower_bound=%d, upper_bound=%d, size=%d\n",
-                    i+1, lower_bounds[i], upper_bounds[i], size_i);
+        if (size_i <= 0) {
+             fprintf(stderr, "Error: Invalid array dimension size (%d..%d) in makeArrayND.\n", lower_bounds[i], upper_bounds[i]);
+             free(v.lower_bounds); free(v.upper_bounds);
+             EXIT_FAILURE_HANDLER();
         }
-#endif
+        // Check for potential integer overflow when calculating total_size
+        if (__builtin_mul_overflow(total_size, size_i, &total_size)) {
+             fprintf(stderr, "Error: Array size exceeds limits in makeArrayND.\n");
+             free(v.lower_bounds); free(v.upper_bounds);
+             EXIT_FAILURE_HANDLER();
+        }
     }
 
+    // Allocate array for Value elements
     v.array_val = malloc(sizeof(Value) * total_size);
     if (!v.array_val) {
-        fprintf(stderr, "Memory allocation error in makeArrayND.\n");
+        fprintf(stderr, "Memory allocation error for array data in makeArrayND.\n");
+        free(v.lower_bounds); free(v.upper_bounds);
         EXIT_FAILURE_HANDLER();
     }
 
-#ifdef DEBUG
-    if (dumpExec) {
-        fprintf(stderr, "[DEBUG] makeArrayND: total_size=%d\n", total_size);
-    }
-#endif
-
+    // Initialize each element with its default value
     for (int i = 0; i < total_size; i++) {
-        switch (element_type) {
-            case TYPE_INTEGER:
-                v.array_val[i] = makeInt(0);
-                break;
-            case TYPE_REAL:
-                v.array_val[i] = makeReal(0.0);
-                break;
-            case TYPE_STRING:
-                v.array_val[i] = makeString("");
-                break;
-            case TYPE_RECORD:
-                v.array_val[i] = makeValueForType(TYPE_RECORD, type_def);
-                break;
-            case TYPE_FILE:
-                v.array_val[i] = makeFile(NULL);
-                break;
-            case TYPE_BOOLEAN:
-                v.array_val[i] = makeBoolean(0);
-                break;
-            default:
-                v.array_val[i] = makeValueForType(element_type, NULL);
-                break;
-        }
+        // Pass the element type definition node for complex types like records
+        v.array_val[i] = makeValueForType(element_type, type_def);
     }
-
-#ifdef DEBUG
-    if (dumpExec) {
-        fprintf(stderr, "[DEBUG] makeArrayND: Finished initializing array.\n");
-    }
-#endif
 
     return v;
 }
 
 Value makeVoid(void) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_VOID;
     return v;
 }
@@ -470,169 +472,85 @@ Value makeValueForType(VarType type, AST *type_def) {
     Value v;
     memset(&v, 0, sizeof(Value)); // Initialize struct to zero/NULL
     v.type = type;
+    // Store base type node link for pointers early
+    if (type == TYPE_POINTER && type_def && type_def->type == AST_POINTER_TYPE) {
+        v.base_type_node = type_def->right; // Right child holds the base type
+    }
 
     switch(type) {
-        case TYPE_INTEGER:
-            v.i_val = 0;
-            break;
-        case TYPE_REAL:
-            v.r_val = 0.0;
-            break;
-        case TYPE_STRING: {
-            v.s_val = NULL;      // Initialize pointer to NULL
-            v.max_length = -1; // Default to dynamic string (-1 or 0 can indicate dynamic)
-
-            // Check if a type definition AST node was provided
-            if (type_def != NULL) {
-                AST* actualTypeDef = type_def; // Start with the provided node
-
-                // Resolve the type if it's a reference to another defined type
-                if (actualTypeDef->type == AST_TYPE_REFERENCE) {
-                    // Assuming lookupType finds the actual definition AST
-                    actualTypeDef = lookupType(actualTypeDef->token->value);
-                     if (!actualTypeDef) {
-                          // Handle error: referenced type not found. Default to dynamic string.
-                          fprintf(stderr, "Warning: Could not resolve type reference '%s' during string initialization. Defaulting to dynamic.\n",
-                                   type_def->token ? type_def->token->value : "<unknown>");
-                          actualTypeDef = NULL; // Prevent using invalid pointer below
-                     }
-                }
-
-                // Now check if the resolved definition represents 'string[N]'
-                // This relies on the parser creating an AST_VARIABLE node for 'string'
-                // and putting the length AST (e.g., AST_NUMBER) in its 'right' child.
-                if (actualTypeDef &&
-                    actualTypeDef->type == AST_VARIABLE &&
-                    actualTypeDef->token &&
-                    strcasecmp(actualTypeDef->token->value, "string") == 0 &&
-                    actualTypeDef->right != NULL)
-                {
-                    AST* lenNode = actualTypeDef->right; // Node representing the length
-                    Value lenVal = makeInt(0);          // Temp Value to hold evaluated length
-                    bool length_ok = false;            // Flag to track if length was valid
-
-                    // Currently, only support simple integer constants for length
-                    // (Evaluating complex constant expressions here can be risky)
-                    if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
-                        // Use atoll for safety, although length shouldn't exceed int range typically
-                        long long parsed_len = atoll(lenNode->token->value);
-                        if (parsed_len > 0 && parsed_len <= 2147483647) { // Check positive and reasonable upper bound
-                            lenVal = makeInt(parsed_len);
-                            length_ok = true;
-                        } else {
-                             fprintf(stderr, "Warning: Fixed string length constant %lld is out of valid range (1..%d). Defaulting to dynamic string.\n", parsed_len, 2147483647);
-                        }
-                    } else {
-                         fprintf(stderr, "Warning: Fixed string length is not a simple integer constant. Defaulting to dynamic string.\n");
-                    }
-
-                    // If we got a valid positive length, set up the fixed-size string
-                    if (length_ok) {
-                        v.max_length = (int)lenVal.i_val; // Store the fixed length
-                        #ifdef DEBUG
-                        fprintf(stderr, "[DEBUG makeValueForType] Setting fixed string length to %d\n", v.max_length);
-                        #endif
-
-                        // Allocate buffer for fixed size + null terminator
-                        // Use calloc for zero-initialization (ensures empty string initially)
-                        v.s_val = calloc(v.max_length + 1, 1);
-                        if (!v.s_val) {
-                            fprintf(stderr, "FATAL: calloc failed for fixed string buffer in makeValueForType (size %d)\n", v.max_length + 1);
-                            EXIT_FAILURE_HANDLER();
-                        }
-                    }
-                    // If length wasn't valid (not const int, <=0), v.max_length remains -1 (dynamic)
-                }
-                 // If actualTypeDef wasn't 'string[N]', v.max_length remains -1
-            } // End if(type_def != NULL)
-
-            // If, after all checks, it's still determined to be dynamic (max_length == -1),
-            // allocate storage for an empty dynamic string.
+        case TYPE_INTEGER: v.i_val = 0; break;
+        case TYPE_REAL:    v.r_val = 0.0; break;
+        case TYPE_STRING:
+            v.s_val = NULL;
+            v.max_length = -1; // Default dynamic
+            AST* actualTypeDef = type_def;
+            if (actualTypeDef && actualTypeDef->type == AST_TYPE_REFERENCE) {
+                actualTypeDef = lookupType(actualTypeDef->token->value);
+            }
+            if (actualTypeDef && actualTypeDef->type == AST_VARIABLE && actualTypeDef->token &&
+                strcasecmp(actualTypeDef->token->value, "string") == 0 && actualTypeDef->right) {
+                 // Fixed length string definition found
+                 AST* lenNode = actualTypeDef->right;
+                 if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
+                    long long parsed_len = atoll(lenNode->token->value);
+                    if (parsed_len > 0 && parsed_len <= 255) { // Standard Pascal max length
+                         v.max_length = (int)parsed_len;
+                         v.s_val = calloc(v.max_length + 1, 1); // Allocate and zero-fill
+                         if (!v.s_val) { fprintf(stderr, "FATAL: calloc failed for fixed string\n"); EXIT_FAILURE_HANDLER(); }
+                    } else { fprintf(stderr, "Warning: Fixed string length %lld invalid. Using dynamic.\n", parsed_len); }
+                 } else { fprintf(stderr, "Warning: Fixed string length not constant integer. Using dynamic.\n"); }
+            }
+            // If still dynamic or initialization failed, allocate empty dynamic string
             if (v.max_length == -1) {
-                 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG makeValueForType] Initializing as dynamic empty string.\n");
-                 #endif
-                 v.s_val = strdup(""); // Use strdup for empty string
-                 if (!v.s_val) {
-                     fprintf(stderr, "FATAL: strdup(\"\") failed for dynamic string in makeValueForType\n");
-                     EXIT_FAILURE_HANDLER();
-                 }
+                 v.s_val = strdup("");
+                 if (!v.s_val) { fprintf(stderr, "FATAL: strdup failed for dynamic string\n"); EXIT_FAILURE_HANDLER(); }
             }
-            break; // End case TYPE_STRING
-        } // End block for case TYPE_STRING
-        case TYPE_CHAR:
-            v.c_val = '\0'; // Default char value (null char)
             break;
-        case TYPE_BOOLEAN:
-            v.i_val = 0; // false
-            break;
-        case TYPE_FILE:
-            v.f_val = NULL;
-            v.filename = NULL;
-            break;
+        case TYPE_CHAR:    v.c_val = '\0'; v.max_length = 1; break;
+        case TYPE_BOOLEAN: v.i_val = 0; break; // False
+        case TYPE_FILE:    v.f_val = NULL; v.filename = NULL; break;
         case TYPE_RECORD:
-            // Resolve type references if necessary
-            if (type_def && type_def->type == AST_TYPE_REFERENCE) {
-                type_def = type_def->right; // Follow the link to the actual definition
-            }
-            // Create the initial structure for the record fields
-            v.record_val = createEmptyRecord(type_def);
-            // Check if createEmptyRecord failed (it returns NULL on error now)
-            if (!v.record_val && type_def != NULL && type_def->type == AST_RECORD_TYPE) {
-                 fprintf(stderr, "Error: createEmptyRecord returned NULL unexpectedly in makeValueForType.\n");
-                 // EXIT_FAILURE_HANDLER(); // Exit or allow NULL record_val? Allowing NULL for now.
-            }
-            break;
+             v.record_val = createEmptyRecord(type_def);
+             break;
         case TYPE_ARRAY:
-            // Initialize array fields to NULL/0 - actual allocation happens later if needed
-            v.dimensions = 0;
-            v.lower_bounds = NULL;
-            v.upper_bounds = NULL;
-            v.array_val = NULL;
-            v.element_type = TYPE_VOID; // Mark as uninitialized element type
-            v.element_type_def = NULL; // No definition link yet
+            // Initialization with bounds happens in makeArrayND or during assignment
+            v.dimensions = 0; v.lower_bounds = NULL; v.upper_bounds = NULL;
+            v.array_val = NULL; v.element_type = TYPE_VOID; v.element_type_def = NULL;
             break;
-        case TYPE_MEMORYSTREAM:
-            v.mstream = createMStream(); // Assumes createMStream handles its errors
-            break;
+        case TYPE_MEMORYSTREAM: v.mstream = createMStream(); break;
         case TYPE_ENUM:
-             // Initialize enum fields
-             v.enum_val.ordinal = 0; // Default to the first ordinal value (usually 0)
-             // Get the type name from the definition node if possible
-             v.enum_val.enum_name = (type_def && type_def->token && type_def->token->value) ? strdup(type_def->token->value) : strdup("<unknown_enum>");
-              // <<< ADD DEBUG PRINT HERE >>>
-              #ifdef DEBUG
-              fprintf(stderr, "[DEBUG MAKEVAL ENUM] Initializing enum. TypeDef Token: '%s'. strdup result: '%s' (addr=%p)\n",
-                      (type_def && type_def->token && type_def->token->value) ? type_def->token->value : "<NO_TYPEDEF_TOKEN>",
-                      v.enum_val.enum_name ? v.enum_val.enum_name : "<NULL>",
-                      (void*)v.enum_val.enum_name);
-              #endif
-              // <<< END DEBUG PRINT >>>
-             if (!v.enum_val.enum_name) { // Check strdup
-                  fprintf(stderr, "FATAL: strdup failed for enum_name in makeValueForType\n");
-                  EXIT_FAILURE_HANDLER();
-             }
+             v.enum_val.ordinal = 0;
+             // Get type name from type_def if possible
+              AST* enumDefNode = type_def;
+              if (enumDefNode && enumDefNode->type == AST_TYPE_REFERENCE) {
+                  enumDefNode = lookupType(enumDefNode->token->value);
+              }
+             v.enum_val.enum_name = (enumDefNode && enumDefNode->token && enumDefNode->token->value) ? strdup(enumDefNode->token->value) : strdup("<unknown_enum>");
+             if (!v.enum_val.enum_name) { fprintf(stderr, "FATAL: strdup failed for enum name\n"); EXIT_FAILURE_HANDLER(); }
              break;
-        case TYPE_BYTE:
-            v.i_val = 0;
+        case TYPE_BYTE:    v.i_val = 0; break;
+        case TYPE_WORD:    v.i_val = 0; break;
+        case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; break;
+        case TYPE_POINTER:
+            v.ptr_val = NULL; // Initialize pointer to nil
+            // v.base_type_node was already set before the switch
             break;
-        case TYPE_WORD:
-            v.i_val = 0;
-            break;
-        case TYPE_SET:
-            v.set_val.set_size = 0;
-            v.set_val.set_values = NULL;
-             break;
-        case TYPE_VOID:
-            // No data to assign; memset already handled
-            break;
+        case TYPE_VOID:    /* No value needed */ break;
         default:
-            fprintf(stderr, "Error creating default value for unhandled type %s\n", varTypeToString(type));
-            // EXIT_FAILURE_HANDLER(); // Exit might be too harsh, allows program to continue potentially
-            break; // Ensure switch is exited
+            fprintf(stderr, "Warning: makeValueForType called with unhandled type %d\n", type);
+            break;
     }
     return v;
 }
+
+Value makeMStream(MStream *ms) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_MEMORYSTREAM;
+    v.mstream = ms; // Takes ownership or shares pointer based on usage context
+    return v;
+}
+
 // Token
 /* Create a new token */
 Token *newToken(TokenType type, const char *value) {
@@ -643,6 +561,11 @@ Token *newToken(TokenType type, const char *value) {
     }
     token->type = type;
     token->value = value ? strdup(value) : NULL;  // Deep copy the string!
+    if (value && !token->value) { // Check strdup result
+        fprintf(stderr, "Memory allocation error (strdup value) in newToken\n");
+        free(token);
+        EXIT_FAILURE_HANDLER();
+    }
     return token;
 }
 
@@ -650,12 +573,12 @@ Token *newToken(TokenType type, const char *value) {
 Token *copyToken(const Token *token) {
     if (!token) return NULL;
     Token *new_token = malloc(sizeof(Token));
-    if (!new_token) { fprintf(stderr, "Memory allocation error\n"); EXIT_FAILURE_HANDLER(); }
+    if (!new_token) { fprintf(stderr, "Memory allocation error in copyToken (Token struct)\n"); EXIT_FAILURE_HANDLER(); }
     *new_token = *token; // Copy basic fields
     // Deep copy the string value if it exists
     new_token->value = token->value ? strdup(token->value) : NULL; // Use strdup, check for NULL
     if (token->value && !new_token->value) { // Check if strdup failed
-         fprintf(stderr, "Memory allocation error (strdup in copyToken)\n");
+         fprintf(stderr, "Memory allocation error (strdup value) in copyToken\n");
          free(new_token); // Free the partially allocated token
          EXIT_FAILURE_HANDLER();
     }
@@ -665,69 +588,26 @@ Token *copyToken(const Token *token) {
 /* Free a token */
 void freeToken(Token *token) {
     if (!token) return;
-    // --- ADD THIS CHECK AND FREE ---
     if (token->value) {
-#ifdef DEBUG // Optional: Use a separate define for free-specific logs
-         fprintf(stderr, "[DEBUG] Freeing token value '%s' at %p\n", token->value, (void*)token->value);
-#endif
         free(token->value); // Free the duplicated string
         token->value = NULL; // Prevent double-free
     }
-    // --- END ADDITION ---
-#ifdef DEBUG // Optional: Use a separate define for free-specific logs
-     fprintf(stderr, "[DEBUG] Freeing token struct at %p\n", (void*)token);
-#endif
     free(token); // Free the token struct itself
 }
 
 void freeProcedureTable(void) {
     Procedure *proc = procedure_table;
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] Starting freeProcedureTable.\n");
-#endif
     while (proc) {
         Procedure *next = proc->next;
-
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]  Processing procedure entry: '%s' (AST Node: %p)\n",
-                proc->name ? proc->name : "NULL", (void*)proc->proc_decl);
-#endif
-
-        // --- ADDED CHECK FOR BUILT-INS ---
-        // Only free the AST node if it's a dummy node for a built-in.
-        // User-defined procedure ASTs are part of the main tree and freed there.
+        // Free dummy AST nodes ONLY for built-ins
         if (proc->name && isBuiltin(proc->name)) {
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]   -> '%s' is a built-in. Freeing associated dummy AST node %p.\n",
-                    proc->name, (void*)proc->proc_decl);
-#endif
-            freeAST(proc->proc_decl); // Free the dummy AST node
-        } else {
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]   -> '%s' is user-defined or name is NULL. AST node %p will be freed with main tree.\n",
-                    proc->name ? proc->name : "NULL", (void*)proc->proc_decl);
-#endif
-            // Do not free proc->proc_decl here for user-defined procedures
+            freeAST(proc->proc_decl);
         }
-        // --- END ADDED CHECK ---
-
-        // Free the procedure name and the Procedure struct itself
-        if (proc->name) {
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]   Freeing procedure name '%s' at %p.\n", proc->name, (void*)proc->name);
-#endif
-            free(proc->name);
-        }
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]   Freeing Procedure struct itself at %p.\n", (void*)proc);
-#endif
+        if (proc->name) free(proc->name);
         free(proc);
         proc = next;
     }
     procedure_table = NULL;
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] Finished freeProcedureTable.\n");
-#endif
 }
 
 void freeTypeTable(void) {
@@ -735,18 +615,11 @@ void freeTypeTable(void) {
     while (entry) {
         TypeEntry *next = entry->next;
         free(entry->name); // Free the duplicated type name
-
+        // AST node (entry->typeAST) is freed separately by freeTypeTableASTNodes
         free(entry); // Free the TypeEntry struct itself
         entry = next;
     }
     type_table = NULL;
-}
-
-Value makeMStream(MStream *ms) {
-    Value v;
-    v.type = TYPE_MEMORYSTREAM;
-    v.mstream = ms;
-    return v;
 }
 
 void freeValue(Value *v) {
@@ -785,6 +658,13 @@ void freeValue(Value *v) {
                 fprintf(stderr, "[DEBUG]   Enum name pointer is NULL, nothing to free.\n");
 #endif
             }
+            break;
+        case TYPE_POINTER:
+            // freeValue for a pointer *only* resets the pointer Value struct.
+            // It does NOT free the memory pointed to by v->ptr_val.
+            // That is the job of dispose() or FreeMem().
+            v->ptr_val = NULL;
+            v->base_type_node = NULL; // Clear base type link
             break;
 
         case TYPE_STRING:
@@ -1136,111 +1016,122 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
 // buildUnitSymbolTable traverses the unit's interface AST node and builds a linked list
 // of Symbols for all exported constants, variables, and procedures/functions.
 Symbol *buildUnitSymbolTable(AST *interface_ast) {
-    if (!interface_ast) return NULL;
-    
+    if (!interface_ast || interface_ast->type != AST_COMPOUND) return NULL;
+
     Symbol *unitSymbols = NULL;
-    
+    Symbol **tail = &unitSymbols; // Pointer-to-pointer for efficient list appending
+
     // Iterate over all declarations in the interface.
     for (int i = 0; i < interface_ast->child_count; i++) {
         AST *decl = interface_ast->children[i];
         if (!decl) continue;
-        
+
+        Symbol *sym = NULL; // Symbol to potentially add
+
         switch(decl->type) {
             case AST_CONST_DECL: {
                 if (!decl->token) break;
+                Value v = eval(decl->left); // evaluated constant expression
+                sym = malloc(sizeof(Symbol)); /* null check */
+                if (!sym) { fprintf(stderr, "Malloc failed (Symbol) in buildUnitSymbolTable\n"); freeValue(&v); EXIT_FAILURE_HANDLER(); }
 
-                Value v = eval(decl->left);  // evaluated constant expression
+                sym->name = strdup(decl->token->value); /* null check */
+                if (!sym->name) { fprintf(stderr, "Malloc failed (name) in buildUnitSymbolTable\n"); free(sym); freeValue(&v); EXIT_FAILURE_HANDLER(); }
 
-                Symbol *sym = malloc(sizeof(Symbol));
-                if (!sym) {
-                    fprintf(stderr, "Memory allocation error in buildUnitSymbolTable\n");
-                    EXIT_FAILURE_HANDLER();
-                }
+                sym->value = malloc(sizeof(Value)); /* null check */
+                if (!sym->value) { fprintf(stderr, "Malloc failed (Value) in buildUnitSymbolTable\n"); free(sym->name); free(sym); freeValue(&v); EXIT_FAILURE_HANDLER(); }
 
-                sym->name = strdup(decl->token->value);
-                sym->value = malloc(sizeof(Value));
-                if (!sym->value) {
-                    fprintf(stderr, "Memory allocation error in buildUnitSymbolTable\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                *sym->value = makeCopyOfValue(&v);      // deep copy the evaluated value
-                setTypeValue(sym->value, v.type);       // ensure type tag is set correctly
-                sym->type = v.type;
-
-                if (v.type == TYPE_ENUM) {
-                    sym->value->enum_meta = v.enum_meta;
-                }
-
-                sym->next = unitSymbols;
-                unitSymbols = sym;
+                *sym->value = makeCopyOfValue(&v); // deep copy the evaluated value
+                sym->type = v.type;                // Use evaluated value's type
+                sym->type_def = decl->right;       // Link to type node if present
+                sym->is_const = true;              // Mark as constant
+                sym->is_alias = false;
+                sym->is_local_var = false;
+                sym->next = NULL;
+                freeValue(&v); // Free the temporary value from eval
                 break;
             }
             case AST_VAR_DECL: {
+                 // Interface VARs typically represent external linkage in other systems.
+                 // Here, we can add them to the unit's symbol table, but they won't
+                 // have actual storage allocated unless the implementation part defines them.
+                 // The main purpose here is to make their name and type known.
                  for (int j = 0; j < decl->child_count; j++) {
                      AST *varNode = decl->children[j];
                      if (!varNode || !varNode->token) continue;
-                     // --- ADD DEBUG PRINT ---
-                     DEBUG_PRINT("[DEBUG] buildUnitSymbolTable: Found VAR '%s' with type %s in interface.\n",
-                                 varNode->token->value, varTypeToString(decl->var_type));
-                     // --- END DEBUG PRINT ---
-                     Symbol *sym = malloc(sizeof(Symbol)); /* ... null check ... */
-                     sym->name = strdup(varNode->token->value);
-                     sym->type = decl->var_type;
-                     sym->type_def = decl->right; // <<< Store type def link
-                     sym->value = malloc(sizeof(Value)); /* ... null check ... */
-                     *sym->value = makeValueForType(sym->type, sym->type_def); // Pass type_def
-                     sym->next = unitSymbols;
-                     unitSymbols = sym;
+                     DEBUG_PRINT("[DEBUG BUILD_UNIT_SYM] Adding interface VAR '%s' (type %s)\n", varNode->token->value, varTypeToString(decl->var_type));
+                     Symbol *varSym = malloc(sizeof(Symbol)); /* null check */
+                     if (!varSym) { /* error */ }
+                     varSym->name = strdup(varNode->token->value); /* null check */
+                      if (!varSym->name) { /* error */ }
+                     varSym->type = decl->var_type;
+                     varSym->type_def = decl->right; // Store type def link
+                     varSym->value = NULL; // Interface VARs don't have values initially
+                     varSym->is_const = false;
+                     varSym->is_alias = false;
+                     varSym->is_local_var = false; // Not local to the unit's execution scope yet
+                     varSym->next = NULL;
+
+                     // Append to list
+                     *tail = varSym;
+                     tail = &varSym->next;
                  }
-                 break;
+                 // Skip adding to list via 'sym' below
+                 continue; // Process next declaration
              }
             case AST_PROCEDURE_DECL:
             case AST_FUNCTION_DECL: {
-                // For routines, use the declaration's token as the name.
                 if (!decl->token) break;
-                Symbol *sym = malloc(sizeof(Symbol));
-                if (!sym) {
-                    fprintf(stderr, "Memory allocation error in buildUnitSymbolTable\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-                sym->name = strdup(decl->token->value);
+                sym = malloc(sizeof(Symbol)); /* null check */
+                 if (!sym) { /* error */ }
+                sym->name = strdup(decl->token->value); /* null check */
+                 if (!sym->name) { /* error */ }
+
+                // Determine type (return type for functions, VOID for procedures)
                 if (decl->type == AST_FUNCTION_DECL && decl->right) {
-                    // decl->right holds the return type node.
-                    sym->type = decl->right->var_type;
+                    sym->type = decl->right->var_type; // Use pre-annotated type
+                    sym->type_def = decl->right;      // Link to return type node
                 } else {
-                    // For procedures, use TYPE_VOID (or a dummy type as desired).
                     sym->type = TYPE_VOID;
+                    sym->type_def = NULL;
                 }
-                sym->value = malloc(sizeof(Value));
-                if (!sym->value) {
-                    fprintf(stderr, "Memory allocation error in buildUnitSymbolTable\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-                *sym->value = makeValueForType(sym->type, NULL);
-                sym->next = unitSymbols;
-                unitSymbols = sym;
+                sym->value = NULL; // Procedures/functions don't have a 'value' in this context
+                sym->is_const = false;
+                sym->is_alias = false;
+                sym->is_local_var = false;
+                sym->next = NULL;
                 break;
             }
             default:
-                // Skip other declaration types (e.g. AST_TYPE_DECL is handled separately in linkUnit())
+                // Skip other declaration types (e.g. TYPE_DECL)
                 break;
+        } // End switch
+
+        // Append the created symbol (if any) to the list
+        if (sym) {
+            *tail = sym;
+            tail = &sym->next;
         }
-    }
-    
+    } // End for loop
+
     return unitSymbols;
 }
 
 Value makeEnum(const char *enum_name, int ordinal) {
     Value v;
+    memset(&v, 0, sizeof(Value));
     v.type = TYPE_ENUM;
-    v.enum_val.enum_name = enum_name ? strdup(enum_name) : NULL;
+    v.enum_val.enum_name = enum_name ? strdup(enum_name) : NULL; // Duplicate the name
+     if (enum_name && !v.enum_val.enum_name) { // Check strdup result
+         fprintf(stderr, "FATAL: strdup failed for enum_name in makeEnum\n");
+         EXIT_FAILURE_HANDLER();
+     }
     v.enum_val.ordinal = ordinal;
     return v;
 }
 
-// Helper function to get terminal dimensions
-// Returns 0 on success, -1 on error. Fills rows and cols.
+
+// getTerminalSize remains the same
 int getTerminalSize(int *rows, int *cols) {
     // Default values in case of error or non-TTY
     *rows = 24; // Default height
@@ -1248,13 +1139,13 @@ int getTerminalSize(int *rows, int *cols) {
 
     // Check if stdout is a terminal
     if (!isatty(STDOUT_FILENO)) {
-        fprintf(stderr, "Warning: Cannot get terminal size (stdout is not a TTY).\n");
+       // fprintf(stderr, "Warning: Cannot get terminal size (stdout is not a TTY).\n");
         return 0; // Return default size for non-TTY
     }
 
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
-        perror("getTerminalSize: ioctl(TIOCGWINSZ) failed");
+        // perror("getTerminalSize: ioctl(TIOCGWINSZ) failed"); // Suppress error message?
         return -1; // Indicate an error occurred
     }
 
@@ -1264,7 +1155,7 @@ int getTerminalSize(int *rows, int *cols) {
         *cols = ws.ws_col;
     } else {
         // ioctl succeeded but returned 0 size, use defaults
-        fprintf(stderr, "Warning: ioctl(TIOCGWINSZ) returned zero size, using defaults.\n");
+       // fprintf(stderr, "Warning: ioctl(TIOCGWINSZ) returned zero size, using defaults.\n");
     }
 
     return 0; // Success

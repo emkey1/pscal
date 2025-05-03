@@ -15,8 +15,8 @@ static Keyword keywords[] = {
     {"function", TOKEN_FUNCTION}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
     {"in", TOKEN_IN}, // Added IN
     {"initialization", TOKEN_INITIALIZATION},
-    {"interface", TOKEN_INTERFACE}, {"mod", TOKEN_MOD}, {"not", TOKEN_NOT},
-    {"of", TOKEN_OF}, {"or", TOKEN_OR},
+    {"interface", TOKEN_INTERFACE}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
+    {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
     {"out", TOKEN_OUT}, // Added OUT
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
     {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
@@ -225,223 +225,169 @@ Token *getNextToken(Lexer *lexer) {
             skipWhitespace(lexer);
             continue;
         }
-        
-        if (lexer->current_char == '#') {
-            // Potential hexadecimal constant - call number()
-            return number(lexer);
-        }
 
-        // Handle single-line comments (// ...)
-        if (lexer->current_char == '/' && lexer->text[lexer->pos + 1] == '/') {
+        // Skip single-line comments (// ...)
+        if (lexer->current_char == '/' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '/') {
             while (lexer->current_char && lexer->current_char != '\n')
                 advance(lexer);
+            if (lexer->current_char == '\n') // Consume the newline as well
+                advance(lexer);
             continue;
         }
 
-        // Handle brace-delimited comments { ... }
+        // Skip brace-delimited comments { ... }
         if (lexer->current_char == '{') {
             advance(lexer);  // Skip '{'
-            while (lexer->current_char && lexer->current_char != '}')
-                advance(lexer);
-            if (lexer->current_char == '}')
-                advance(lexer);  // Skip '}'
-            continue;
+            int comment_level = 1; // Handle nested comments like (* { nested } *)
+            while (lexer->current_char && comment_level > 0) {
+                 if (lexer->current_char == '}') {
+                     comment_level--;
+                     advance(lexer);
+                 } else if (lexer->current_char == '{') { // Detect nested start
+                      comment_level++;
+                      advance(lexer);
+                 } else {
+                     advance(lexer);
+                 }
+            }
+             // Check if comment was terminated
+             if (comment_level > 0) {
+                  fprintf(stderr, "Lexer error at line %d, column %d: Unterminated brace comment.\n", lexer->line, lexer->column);
+                  // Optionally return an error token or advance past the problematic char
+             }
+            continue; // Resume token search
         }
 
-        // Handle left bracket token '['
-        if (lexer->current_char == '[') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_LBRACKET;
-            token->value = strdup("[");
-            return token;
+         // Skip parenthesis/star comments (* ... *) - Added Nested Handling
+         if (lexer->current_char == '(' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '*') {
+             advance(lexer); // Skip '('
+             advance(lexer); // Skip '*'
+             int comment_level = 1;
+             while (lexer->current_char && comment_level > 0) {
+                 if (lexer->current_char == '*' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == ')') {
+                      comment_level--;
+                      advance(lexer); // Skip '*'
+                      advance(lexer); // Skip ')'
+                 } else if (lexer->current_char == '(' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '*') { // Detect nested start
+                      comment_level++;
+                      advance(lexer); // Skip '('
+                      advance(lexer); // Skip '*'
+                 } else {
+                     advance(lexer);
+                 }
+             }
+             // Check if comment was terminated
+             if (comment_level > 0) {
+                 fprintf(stderr, "Lexer error at line %d, column %d: Unterminated parenthesis-star comment.\n", lexer->line, lexer->column);
+             }
+             continue; // Resume token search
+         }
+
+        // Handle Hex Constant (# followed by hex digits)
+        if (lexer->current_char == '#') {
+            // Check if the next char is a hex digit. number() will handle validation.
+             if (lexer->pos + 1 < strlen(lexer->text) && isHexDigit(lexer->text[lexer->pos+1])) {
+                  return number(lexer); // Parses #...
+             } else {
+                  // If '#' is not followed by a hex digit, treat as UNKNOWN
+                  char bad_char[2] = {lexer->current_char, '\0'};
+                  advance(lexer);
+                  return newToken(TOKEN_UNKNOWN, bad_char);
+             }
         }
 
-        // Handle right bracket token ']'
-        if (lexer->current_char == ']') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_RBRACKET;
-            token->value = strdup("]");
-            return token;
-        }
-
-        // Identifiers (and keywords)
-        if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_')
+        // Handle Identifiers and Keywords
+        if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {
             return identifier(lexer);
+        }
 
-        // Numbers (integer or real)
-        if (isdigit((unsigned char)lexer->current_char))
+        // Handle Integer or Real Constants (starting with a digit)
+        if (isdigit((unsigned char)lexer->current_char)) {
             return number(lexer);
+        }
 
-        // String literals
-        if (lexer->current_char == '\'')
+        // Handle String Literals
+        if (lexer->current_char == '\'') {
             return stringLiteral(lexer);
+        }
 
-        // Handle colon and assign operator ":="
+        // --- Operators and Punctuation ---
+
+        // Caret (Pointer symbol)
+        if (lexer->current_char == '^') { // <<< ADDED
+            advance(lexer);
+            return newToken(TOKEN_CARET, "^");
+        }
+
+        // Colon or Assign
         if (lexer->current_char == ':') {
             advance(lexer);
             if (lexer->current_char == '=') {
                 advance(lexer);
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_ASSIGN;
-                token->value = strdup(":=");
-                return token;
+                return newToken(TOKEN_ASSIGN, ":=");
             } else {
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_COLON;
-                token->value = strdup(":");
-                return token;
+                return newToken(TOKEN_COLON, ":");
             }
         }
 
         // Semicolon
         if (lexer->current_char == ';') {
             advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_SEMICOLON;
-            token->value = strdup(";");
-            return token;
+            return newToken(TOKEN_SEMICOLON, ";");
         }
 
         // Comma
         if (lexer->current_char == ',') {
             advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_COMMA;
-            token->value = strdup(",");
-            return token;
+            return newToken(TOKEN_COMMA, ",");
         }
 
-        // Equal sign
-        if (lexer->current_char == '=') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_EQUAL;
-            token->value = strdup("=");
-            return token;
-        }
-
-        // Greater than and greater or equal
-        if (lexer->current_char == '>') {
-            advance(lexer);
-            if (lexer->current_char == '=') {
-                advance(lexer);
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_GREATER_EQUAL;
-                token->value = strdup(">=");
-                return token;
-            } else {
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_GREATER;
-                token->value = strdup(">");
-                return token;
-            }
-        }
-
-        // Less than, less or equal, or not equal
-        if (lexer->current_char == '<') {
-            advance(lexer);
-            if (lexer->current_char == '=') {
-                advance(lexer);
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_LESS_EQUAL;
-                token->value = strdup("<=");
-                return token;
-            } else if (lexer->current_char == '>') {
-                advance(lexer);
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_NOT_EQUAL;
-                token->value = strdup("<>");
-                return token;
-            } else {
-                Token *token = malloc(sizeof(Token));
-                token->type = TOKEN_LESS;
-                token->value = strdup("<");
-                return token;
-            }
-        }
-
-        // Handle dot or dot-dot (..)
+        // Period or DotDot
         if (lexer->current_char == '.') {
             advance(lexer);
             if (lexer->current_char == '.') {
                 advance(lexer);
                 return newToken(TOKEN_DOTDOT, "..");
+            } else {
+                return newToken(TOKEN_PERIOD, ".");
             }
-            return newToken(TOKEN_PERIOD, ".");
         }
 
-        // Plus
-        if (lexer->current_char == '+') {
+        // Simple operators: +, -, *, /
+        if (lexer->current_char == '+') { advance(lexer); return newToken(TOKEN_PLUS, "+"); }
+        if (lexer->current_char == '-') { advance(lexer); return newToken(TOKEN_MINUS, "-"); }
+        if (lexer->current_char == '*') { advance(lexer); return newToken(TOKEN_MUL, "*"); }
+        if (lexer->current_char == '/') { advance(lexer); return newToken(TOKEN_SLASH, "/"); }
+
+        // Parentheses and Brackets
+        if (lexer->current_char == '(') { advance(lexer); return newToken(TOKEN_LPAREN, "("); }
+        if (lexer->current_char == ')') { advance(lexer); return newToken(TOKEN_RPAREN, ")"); }
+        if (lexer->current_char == '[') { advance(lexer); return newToken(TOKEN_LBRACKET, "["); }
+        if (lexer->current_char == ']') { advance(lexer); return newToken(TOKEN_RBRACKET, "]"); }
+
+        // Relational Operators: =, <, >
+        if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_EQUAL, "="); }
+        if (lexer->current_char == '<') {
             advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_PLUS;
-            token->value = strdup("+");
-            return token;
+            if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_LESS_EQUAL, "<="); }
+            if (lexer->current_char == '>') { advance(lexer); return newToken(TOKEN_NOT_EQUAL, "<>"); }
+            return newToken(TOKEN_LESS, "<");
         }
-
-        // Minus
-        if (lexer->current_char == '-') {
+        if (lexer->current_char == '>') {
             advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_MINUS;
-            token->value = strdup("-");
-            return token;
+            if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_GREATER_EQUAL, ">="); }
+            return newToken(TOKEN_GREATER, ">");
         }
 
-        // Multiplication
-        if (lexer->current_char == '*') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_MUL;
-            token->value = strdup("*");
-            return token;
-        }
+        // If character is not recognized by any rule above
+        char unknown_char_str[2] = {lexer->current_char, '\0'};
+        fprintf(stderr, "Lexer error at line %d, column %d: Unrecognized character '%s'\n",
+                lexer->line, lexer->column, unknown_char_str);
+        advance(lexer); // Consume the unknown character to prevent infinite loop
+        return newToken(TOKEN_UNKNOWN, unknown_char_str); // Return an UNKNOWN token
 
-        // Division
-        if (lexer->current_char == '/') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_SLASH;
-            token->value = strdup("/");
-            return token;
-        }
+    } // End while (lexer->current_char)
 
-        // Left parenthesis
-        if (lexer->current_char == '(') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_LPAREN;
-            token->value = strdup("(");
-            return token;
-        }
-
-        // Right parenthesis
-        if (lexer->current_char == ')') {
-            advance(lexer);
-            Token *token = malloc(sizeof(Token));
-            token->type = TOKEN_RPAREN;
-            token->value = strdup(")");
-            return token;
-        }
-        
-        if (isdigit((unsigned char)lexer->current_char)) {
-            return number(lexer);
-        } else if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {
-            return identifier(lexer);
-        } else if (lexer->current_char == '\'') {
-            return stringLiteral(lexer);
-        }
-
-        // If we reach here, the character is unrecognized.
-        fprintf(stderr, "Lexer error at line %d, column %d: unrecognized character '%c'\n",
-                lexer->line, lexer->column, lexer->current_char);
-        advance(lexer);
-    }
-    // If no characters left, return EOF token.
-    Token *token = malloc(sizeof(Token));
-    token->type = TOKEN_EOF;
-    token->value = strdup("EOF");
-    return token;
+    // End of input reached
+    return newToken(TOKEN_EOF, "EOF");
 }

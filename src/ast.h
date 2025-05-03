@@ -5,20 +5,20 @@
 
 typedef struct AST {
     ASTNodeType type;
-    Token *token;            /* For names, field names, etc. */
+    Token *token;            /* For names, field names, type names, nil, ^, etc. */
     List *unit_list;         // List of unit names (for 'uses' clause)
     Symbol *symbol_table;    // Symbol table for the unit (if applicable)
-    int var_type;            /* For declarations */
+    VarType var_type;        // <<< RENAMED from int to VarType for clarity >>>
     int by_ref;              /* 1 if parameter passed by reference */
-    struct AST *left;
-    struct AST *right;
-    struct AST *extra;
-    struct AST **children;
-    struct AST *parent;
+    struct AST *left;        // Left child or operand
+    struct AST *right;       // Right child, type node, return type, base type (for POINTER_TYPE)
+    struct AST *extra;       // Else branch (IF), body (FOR), implementation decls (UNIT), function block
+    struct AST **children;   // Children nodes (compound statements, params, args, array indices, record fields)
+    struct AST *parent;      // Pointer to parent node
     int child_count;
     int child_capacity;
-    int i_val;
-    bool is_global_scope;
+    int i_val;               // Used for enum ordinal value storage in AST_ENUM_VALUE
+    bool is_global_scope;    // Flag for block nodes
 } AST;
 
 AST *newASTNode(ASTNodeType type, Token *token);
@@ -35,7 +35,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode);
 AST *copyAST(AST *node);
 bool verifyASTLinks(AST *node, AST *expectedParent);
 void freeTypeTableASTNodes(void);
-AST* findDeclarationInScope(const char* varName, AST* currentScopeNode); // Defined in original ast.c
-AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode); // Defined in original ast.c
+AST* findDeclarationInScope(const char* varName, AST* currentScopeNode);
+AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode);
 VarType getBuiltinReturnType(const char* name);
 #endif // AST_H

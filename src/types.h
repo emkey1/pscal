@@ -17,7 +17,7 @@ typedef enum {
     TYPE_VOID, TYPE_INTEGER, TYPE_REAL, TYPE_STRING,
     TYPE_RECORD, TYPE_FILE, TYPE_BYTE, TYPE_WORD, TYPE_ENUM,
     TYPE_ARRAY, TYPE_BOOLEAN, TYPE_CHAR, TYPE_MEMORYSTREAM,
-    TYPE_SET 
+    TYPE_SET, TYPE_POINTER
 } VarType;
 
 typedef struct MStream {
@@ -52,7 +52,11 @@ typedef struct ValueStruct {
             char *enum_name; // Name of the enumerated type
             int ordinal;     // Ordinal value
         } enum_val;
+        struct ValueStruct *ptr_val; // Pointer to another Value (for heap data)
     };
+    AST *base_type_node; // AST node defining the type this pointer points to
+                         // Needed for new(), dispose(), dereferencing type checks.
+
     char *filename;
     int lower_bound;    // For single-dimensional arrays
     int upper_bound;    // For single-dimensional arrays
@@ -90,7 +94,7 @@ typedef enum {
     TOKEN_USES, TOKEN_EOF, TOKEN_HEX_CONST, TOKEN_UNKNOWN, TOKEN_UNIT,
     TOKEN_INTERFACE, TOKEN_IMPLEMENTATION, TOKEN_INITIALIZATION, TOKEN_ENUM,
     TOKEN_IN, TOKEN_XOR, TOKEN_BREAK, TOKEN_OUT, TOKEN_SHL, TOKEN_SHR,
-    TOKEN_SET
+    TOKEN_SET,TOKEN_CARET, TOKEN_NIL
 } TokenType;
 
 typedef struct {
@@ -147,7 +151,10 @@ typedef enum {
     AST_ENUM_VALUE,
     AST_SET,
     AST_ARRAY_LITERAL,
-    AST_BREAK
+    AST_BREAK,
+    AST_POINTER_TYPE, // <<< Represents a pointer type definition (^TypeName)
+    AST_DEREFERENCE,  // <<< Represents dereferencing a pointer (ptr^)
+    AST_NIL           // <<< Represents the 'nil' literal
 } ASTNodeType;
 
 // Define the function pointer type for built-in handlers
