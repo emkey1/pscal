@@ -80,6 +80,10 @@ Value executeBuiltinTextBackground(AST *node); // Existing 16-color
 Value executeBuiltinTextColorE(AST *node); // <--- ADD for 256 foreground
 Value executeBuiltinTextBackgroundE(AST *node); // <--- ADD for 256 background
 
+// Pointers/Memory Management
+Value executeBuiltinNew(AST *node);
+Value executeBuiltinDispose(AST *node);
+
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine
     BUILTIN_TYPE_PROCEDURE, // Built-in, does not return a value usable in expressions

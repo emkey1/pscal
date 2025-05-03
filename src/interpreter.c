@@ -795,6 +795,40 @@ Value eval(AST *node) {
 
             return result; // Return the evaluated element (char or copied array element)
         } // End case AST_ARRAY_ACCESS
+        case AST_NIL:
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG EVAL] Evaluating AST_NIL.\n");
+                 #endif
+                 return makeNil(); // Return a Value representing nil (Type POINTER, ptr_val NULL)
+        case AST_DEREFERENCE: // <<< ADD Placeholder Case for Dereference >>>
+              #ifdef DEBUG
+              fprintf(stderr, "[DEBUG EVAL] Evaluating AST_DEREFERENCE (Not Yet Implemented).\n");
+              #endif
+              // --- Implementation needed later ---
+              // 1. Evaluate node->left (should be a pointer value)
+              Value ptrVal = eval(node->left);
+              // 2. Check if ptrVal.type is TYPE_POINTER
+              if (ptrVal.type != TYPE_POINTER) {
+                   fprintf(stderr, "Runtime error: Cannot dereference a non-pointer type (%s).\n", varTypeToString(ptrVal.type));
+                   freeValue(&ptrVal); // Free the non-pointer value
+                   EXIT_FAILURE_HANDLER();
+              }
+              // 3. Check if pointer is nil (ptrVal.ptr_val == NULL)
+              if (ptrVal.ptr_val == NULL) {
+                   fprintf(stderr, "Runtime error: Attempted to dereference a nil pointer.\n");
+                   // Do not free ptrVal here, as it's the nil pointer itself (no heap data)
+                   EXIT_FAILURE_HANDLER();
+              }
+              // 4. Return a *copy* of the value pointed to (*ptrVal.ptr_val)
+              Value dereferencedValue = makeCopyOfValue(ptrVal.ptr_val);
+              // 5. Free the pointer value obtained in step 1 (it was just the address container)
+              //    (No need to free ptrVal itself if it was simple nil or came from symbol table direct access,
+              //     but if eval(node->left) returned a allocated copy, it needs freeing.
+              //     This depends on how variable lookup returns values. Assuming lookup doesn't return heap copy here).
+              // Let's skip freeing ptrVal for now, assuming it's directly from symbol or nil.
+              return dereferencedValue;
+              // --- End Implementation ---
+             // return makeVoid(); // Placeholder return
         case AST_FORMATTED_EXPR: {
             // Evaluate the inner expression.
             Value val = eval(node->left); // Evaluate inner expr
@@ -1161,7 +1195,21 @@ Value eval(AST *node) {
                      fprintf(stderr, "Runtime error: Invalid operands for %s. Left: %s, Right: %s\n", tokenTypeToString(op), varTypeToString(left.type), varTypeToString(right.type));
                      freeValue(&left); freeValue(&right); EXIT_FAILURE_HANDLER();
                  }
+            } else if (left.type == TYPE_POINTER && right.type == TYPE_POINTER &&
+                       (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL))
+                       {
+               #ifdef DEBUG
+               fprintf(stderr, "[DEBUG EVAL_BINARY_OP] Comparing pointers: left=%p, right=%p\n", (void*)left.ptr_val, (void*)right.ptr_val);
+               #endif
+               bool are_equal = (left.ptr_val == right.ptr_val);
+               if (op == TOKEN_EQUAL) {
+                   result = makeBoolean(are_equal);
+               } else { // TOKEN_NOT_EQUAL
+                   result = makeBoolean(!are_equal);
+               }
+                           // Result type is BOOLEAN
             }
+        
             // --- Stage 3: Handle remaining operators (+, -, *, /, comparisons) using type combination checks ---
             else {
                 // --- Check 1: Integer/Ordinal Operations ---

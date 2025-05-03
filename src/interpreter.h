@@ -13,6 +13,7 @@ void executeWithScope(AST *node, bool is_global_scope);
 void processLocalDeclarations(AST* declarationsNode);
 
 Value makeCopyOfValue(Value *src);
+
 // Memory
 FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);

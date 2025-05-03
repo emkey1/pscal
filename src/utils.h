@@ -31,6 +31,7 @@ Value makeInt(long long val);
 Value makeReal(double val);
 Value makeByte(unsigned char val);
 Value makeWord(unsigned int val);
+Value makeNil(void);
 Value makeString(const char *val);
 Value makeChar(char c);
 Value makeBoolean(int b);

@@ -31,6 +31,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"cos",       executeBuiltinCos},
     {"dec",       executeBuiltinDec},         // Include Dec
     {"delay",     executeBuiltinDelay},
+    {"dispose",   executeBuiltinDispose},
     {"eof",       executeBuiltinEOF},
     {"exp",       executeBuiltinExp},
     {"halt",      executeBuiltinHalt},
@@ -46,6 +47,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"mstreamfree", executeBuiltinMstreamFree},
     {"mstreamloadfromfile", executeBuiltinMstreamLoadFromFile},
     {"mstreamsavetofile", executeBuiltinMstreamSaveToFile}, // Corrected name based on registration
+    {"new",       executeBuiltinNew},
     {"ord",       executeBuiltinOrd},
     {"paramcount", executeBuiltinParamcount},
     {"paramstr",  executeBuiltinParamstr},
@@ -2232,4 +2234,160 @@ Value executeBuiltinTextBackground(AST *node) {
 
     // DO NOT PRINT ANYTHING HERE
     return makeVoid();
+}
+
+// --- Implementation for new(pointer_variable) ---
+Value executeBuiltinNew(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: new() expects exactly one argument (a pointer variable).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    AST *lvalueNode = node->children[0];
+    // Ensure the argument is a valid LValue (variable, field access, array access that results in a pointer)
+    if (lvalueNode->type != AST_VARIABLE && lvalueNode->type != AST_FIELD_ACCESS && lvalueNode->type != AST_ARRAY_ACCESS) {
+        fprintf(stderr, "Runtime error: Argument to new() must be a modifiable pointer variable.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Get a pointer to the *Value struct* of the pointer variable itself
+    Value *pointerVarValuePtr = resolveLValueToPtr(lvalueNode);
+    if (!pointerVarValuePtr) {
+        // Error should have been reported by resolveLValueToPtr
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Check if the variable is actually a pointer type
+    if (pointerVarValuePtr->type != TYPE_POINTER) {
+        fprintf(stderr, "Runtime error: Argument to new() must be of pointer type. Got %s.\n", varTypeToString(pointerVarValuePtr->type));
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Get the AST node defining the base type this pointer points to
+    AST *baseTypeNode = pointerVarValuePtr->base_type_node;
+    if (!baseTypeNode) {
+        // This indicates an issue during parsing or type annotation for the pointer variable
+        fprintf(stderr, "Runtime error: Cannot determine base type for pointer variable in new(). Missing type definition link.\n");
+        // Optionally dump symbol table or AST for debugging
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Determine the actual VarType enum of the base type
+    // This might involve resolving type references if baseTypeNode is AST_TYPE_REFERENCE
+    VarType baseVarType = TYPE_VOID;
+    AST* actualBaseTypeDef = baseTypeNode; // Start with the direct link
+
+    if (actualBaseTypeDef->type == AST_TYPE_REFERENCE && actualBaseTypeDef->token) {
+        actualBaseTypeDef = lookupType(actualBaseTypeDef->token->value);
+        if (!actualBaseTypeDef) {
+             fprintf(stderr, "Runtime error: Cannot resolve base type '%s' during new().\n", baseTypeNode->token->value);
+             EXIT_FAILURE_HANDLER();
+        }
+         baseVarType = actualBaseTypeDef->var_type;
+    } else if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
+        // Handle built-in type names directly linked
+        const char* typeName = actualBaseTypeDef->token->value;
+        if (strcasecmp(typeName, "integer")==0) baseVarType=TYPE_INTEGER;
+        else if (strcasecmp(typeName, "real")==0) baseVarType=TYPE_REAL;
+        else if (strcasecmp(typeName, "char")==0) baseVarType=TYPE_CHAR;
+        else if (strcasecmp(typeName, "string")==0) baseVarType=TYPE_STRING;
+        else if (strcasecmp(typeName, "boolean")==0) baseVarType=TYPE_BOOLEAN;
+        // ... add other built-in types ...
+        else {
+             fprintf(stderr, "Runtime error: Unknown base type identifier '%s' during new().\n", typeName);
+             EXIT_FAILURE_HANDLER();
+        }
+    } else {
+         // If it's ARRAY_TYPE, RECORD_TYPE, etc., use its var_type directly
+         baseVarType = actualBaseTypeDef->var_type;
+    }
+
+
+    if (baseVarType == TYPE_VOID) {
+        fprintf(stderr, "Runtime error: Cannot determine valid base type VarType during new(). AST Node type was %s\n", astTypeToString(actualBaseTypeDef->type));
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Allocate memory for the new Value structure on the heap ---
+    Value *newValue = malloc(sizeof(Value));
+    if (!newValue) {
+        fprintf(stderr, "Memory allocation failed for new value in new().\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Initialize the allocated Value structure based on the base type ---
+    // Use makeValueForType, passing the base type enum and the actual definition AST node
+    *newValue = makeValueForType(baseVarType, actualBaseTypeDef);
+    // makeValueForType handles initializing strings, records, arrays etc. correctly.
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG NEW] Allocated new Value* at %p for base type %s. Initialized content.\n",
+            (void*)newValue, varTypeToString(baseVarType));
+    #endif
+
+    // --- Update the pointer variable to point to the newly allocated Value ---
+    // IMPORTANT: Dispose of any *previous* memory the pointer might have pointed to?
+    // Standard Pascal's new() does NOT implicitly dispose the old value.
+    // If the pointer variable already pointed somewhere, that memory is now leaked
+    // unless the user explicitly disposed it beforehand. We will follow this behavior.
+    pointerVarValuePtr->ptr_val = newValue; // Store the address of the heap-allocated Value
+
+    return makeVoid(); // new() is a procedure
+}
+
+// --- Implementation for dispose(pointer_variable) ---
+Value executeBuiltinDispose(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: dispose() expects exactly one argument (a pointer variable).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    AST *lvalueNode = node->children[0];
+    // Ensure the argument is a valid LValue
+     if (lvalueNode->type != AST_VARIABLE && lvalueNode->type != AST_FIELD_ACCESS && lvalueNode->type != AST_ARRAY_ACCESS) {
+        fprintf(stderr, "Runtime error: Argument to dispose() must be a modifiable pointer variable.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Get a pointer to the *Value struct* of the pointer variable itself
+    Value *pointerVarValuePtr = resolveLValueToPtr(lvalueNode);
+     if (!pointerVarValuePtr) {
+        // Error should have been reported by resolveLValueToPtr
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Check if the variable is actually a pointer type
+    if (pointerVarValuePtr->type != TYPE_POINTER) {
+        fprintf(stderr, "Runtime error: Argument to dispose() must be of pointer type. Got %s.\n", varTypeToString(pointerVarValuePtr->type));
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Get the address stored in the pointer variable
+    Value *valueToDispose = pointerVarValuePtr->ptr_val;
+
+    // Check if the pointer is already nil
+    if (valueToDispose == NULL) {
+        // Standard Pascal allows disposing nil without error.
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG DISPOSE] Attempted to dispose a nil pointer. Doing nothing.\n");
+        #endif
+        return makeVoid();
+    }
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG DISPOSE] Disposing Value* at address %p (pointed to by pointer variable).\n",
+            (void*)valueToDispose);
+    #endif
+
+    // --- Free the contents of the pointed-to Value struct ---
+    // This handles freeing strings, record fields, arrays within the disposed data.
+    freeValue(valueToDispose);
+
+    // --- Free the Value struct itself that was allocated by new() ---
+    free(valueToDispose);
+
+    // --- Set the original pointer variable back to nil ---
+    pointerVarValuePtr->ptr_val = NULL;
+
+    return makeVoid(); // dispose() is a procedure
 }

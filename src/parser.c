@@ -224,26 +224,44 @@ AST *lvalue(Parser *parser) {
     AST *node = newASTNode(AST_VARIABLE, token); // Uses copy
     eat(parser, TOKEN_IDENTIFIER); // Consumes original identifier
 
-    while (parser->current_token && (parser->current_token->type == TOKEN_PERIOD || parser->current_token->type == TOKEN_LBRACKET)) {
+    while (parser->current_token &&
+           (parser->current_token->type == TOKEN_PERIOD ||
+            parser->current_token->type == TOKEN_LBRACKET ||
+            parser->current_token->type == TOKEN_CARET)) { // <<< ADDED CARET CHECK >>>
+
         if (parser->current_token->type == TOKEN_PERIOD) {
-            eat(parser, TOKEN_PERIOD); Token *field = copyToken(parser->current_token);
-            if(!field || field->type != TOKEN_IDENTIFIER){errorParser(parser,"Expected field name"); if(field)freeToken(field); return node;} // Return partial node
-            eat(parser,TOKEN_IDENTIFIER); AST *fa=newASTNode(AST_FIELD_ACCESS,field); freeToken(field);
-            setLeft(fa,node); node=fa;
-        } else { // LBRACKET
-            eat(parser, TOKEN_LBRACKET); AST *aa=newASTNode(AST_ARRAY_ACCESS,NULL); setLeft(aa,node);
+            // Field Access Logic (existing)
+            eat(parser, TOKEN_PERIOD);
+            Token *field = copyToken(parser->current_token);
+            if(!field || field->type != TOKEN_IDENTIFIER){ errorParser(parser,"Expected field name"); if(field) freeToken(field); /* Return partial node? */ return node; }
+            eat(parser, TOKEN_IDENTIFIER);
+            AST *fa = newASTNode(AST_FIELD_ACCESS, field); freeToken(field);
+            setLeft(fa, node); // Previous node becomes left child
+            node = fa;         // Update node to the field access node
+        } else if (parser->current_token->type == TOKEN_LBRACKET) {
+            // Array Access Logic (existing)
+            eat(parser, TOKEN_LBRACKET);
+            AST *aa = newASTNode(AST_ARRAY_ACCESS, NULL);
+            setLeft(aa, node); // Previous node becomes left child
             do {
-                AST *idx=expression(parser); // <<< Use expression() for index
-                if(!idx || idx->type == AST_NOOP){errorParser(parser,"Bad index expression"); freeAST(aa); return node;} // Propagate error, free partial access node
-                addChild(aa,idx);
-                if(parser->current_token && parser->current_token->type==TOKEN_COMMA)eat(parser,TOKEN_COMMA);
+                AST *idx = expression(parser);
+                if(!idx || idx->type == AST_NOOP){ errorParser(parser,"Bad index expression"); freeAST(aa); /* Return partial node? */ return node; }
+                addChild(aa, idx); // Add index as child
+                if(parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA);
                 else break;
             } while(1);
-            if(!parser->current_token || parser->current_token->type != TOKEN_RBRACKET){errorParser(parser,"Expected ']' after array indices"); return node;} // Return partial node
-            eat(parser,TOKEN_RBRACKET);
-            node=aa;
+            if(!parser->current_token || parser->current_token->type != TOKEN_RBRACKET){ errorParser(parser,"Expected ']' after array indices"); /* Return partial node? */ return node; }
+            eat(parser, TOKEN_RBRACKET);
+            node = aa; // Update node to the array access node
+        } else { // TOKEN_CARET - Pointer Dereference <<< ADDED >>>
+            eat(parser, TOKEN_CARET); // Consume '^'
+            AST *derefNode = newASTNode(AST_DEREFERENCE, NULL); // No token associated with deref op itself
+            setLeft(derefNode, node); // The node *being dereferenced* is the left child
+            // Type annotation will set the var_type of derefNode later
+            setTypeAST(derefNode, TYPE_VOID); // Placeholder type
+            node = derefNode; // Update node to the dereference node
         }
-    }
+    } // End while loop for ., [, ^
     return node;
 }
 
@@ -997,184 +1015,138 @@ AST *constDeclaration(Parser *parser) {
 
 AST *typeSpecifier(Parser *parser, int allowAnonymous) {
     AST *node = NULL;
-    Token *typeToken = parser->current_token; // Store current token at the start
+    // *** Store the token TYPE and the initial token pointer at the start ***
+    TokenType initialTokenType = parser->current_token ? parser->current_token->type : TOKEN_UNKNOWN;
+    Token *initialToken = parser->current_token; // Store for potential use if needed (e.g., for RECORD, basic types)
 
-    if (!typeToken) {
+    if (initialTokenType == TOKEN_UNKNOWN) {
         errorParser(parser, "Unexpected end of input in typeSpecifier");
-        return NULL; // Return NULL on error
+        return NULL;
     }
 
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG typeSpecifier] Entry: Token Type=%s, Value='%s'\n",
-            tokenTypeToString(typeToken->type), typeToken->value ? typeToken->value : "NULL");
+            tokenTypeToString(initialTokenType), initialToken->value ? initialToken->value : "NULL");
     #endif
 
-    if (typeToken->type == TOKEN_RECORD) {
+    // --- Check based on the initial token's type ---
+    if (initialTokenType == TOKEN_CARET) {
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG typeSpecifier] Detected RECORD\n");
+        fprintf(stderr, "[DEBUG typeSpecifier] Detected CARET (^), parsing pointer type...\n");
         #endif
-        // --- Keep existing RECORD parsing logic ---
-        node = newASTNode(AST_RECORD_TYPE, typeToken); eat(parser, TOKEN_RECORD);
+        node = parsePointerType(parser); // This consumes ^ and the base type identifier
+        if (!node) {
+            return NULL; // Error already reported by parsePointerType
+        }
+        // *** Pointer type successfully parsed, RETURN IMMEDIATELY ***
+        return node;
+
+    } else if (initialTokenType == TOKEN_RECORD) {
+        // Use the initialToken captured at the start
+        node = newASTNode(AST_RECORD_TYPE, initialToken);
+        eat(parser, TOKEN_RECORD); // Consume the RECORD keyword itself
+
+        // (Rest of existing RECORD parsing logic - it calls typeSpecifier recursively)
         while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
             AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
-            while (1) { if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) { errorParser(parser,"Expected field identifier"); freeAST(fieldDecl); return node; } AST *varNode = newASTNode(AST_VARIABLE, parser->current_token); eat(parser, TOKEN_IDENTIFIER); addChild(fieldDecl, varNode); if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA); else break; }
+            while (1) { /* Parse field identifiers */ if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) { errorParser(parser,"Expected field identifier"); freeAST(fieldDecl); return node; } AST *varNode = newASTNode(AST_VARIABLE, parser->current_token); eat(parser, TOKEN_IDENTIFIER); addChild(fieldDecl, varNode); if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA); else break; }
             if (!parser->current_token || parser->current_token->type != TOKEN_COLON) { errorParser(parser,"Expected :"); freeAST(fieldDecl); return node; } eat(parser, TOKEN_COLON);
             AST *fieldType = typeSpecifier(parser, 1); if (!fieldType || fieldType->type == AST_NOOP) { errorParser(parser,"Bad field type"); freeAST(fieldDecl); return node; }
-            setTypeAST(fieldDecl, fieldType->var_type); setRight(fieldDecl, fieldType); addChild(node, fieldDecl);
+            setTypeAST(fieldDecl, fieldType->var_type);
+            setRight(fieldDecl, fieldType); addChild(node, fieldDecl);
             if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) { eat(parser, TOKEN_SEMICOLON); if (parser->current_token && parser->current_token->type == TOKEN_END) break; }
             else if (!parser->current_token || parser->current_token->type != TOKEN_END) { errorParser(parser, "Expected ; or END in record"); break; }
         }
-        if (!parser->current_token || parser->current_token->type != TOKEN_END) { errorParser(parser,"Expected END for record"); return node; } eat(parser, TOKEN_END); setTypeAST(node, TYPE_RECORD);
-        // --- End RECORD logic ---
-    }
-    else if (typeToken->type == TOKEN_ARRAY) {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG typeSpecifier] Detected ARRAY\n");
-        #endif
-        // --- Keep existing ARRAY parsing logic ---
-        node = parseArrayType(parser); // Calls expression internally
-        if(node) setTypeAST(node, TYPE_ARRAY); // Set type if parse succeeded
-        // --- End ARRAY logic ---
-    }
-    else if (typeToken->type == TOKEN_SET) {
-         #ifdef DEBUG
-         fprintf(stderr, "[DEBUG typeSpecifier] Detected SET\n");
-         #endif
-         eat(parser, TOKEN_SET); // Consume 'set'
+        if (!parser->current_token || parser->current_token->type != TOKEN_END) { errorParser(parser,"Expected END for record"); return node; }
+        eat(parser, TOKEN_END);
+        setTypeAST(node, TYPE_RECORD);
+        // Flow continues to the end, return node
 
-         if (!parser->current_token || parser->current_token->type != TOKEN_OF) {
-             errorParser(parser, "Expected 'of' after 'set'");
-             return NULL; // Or return NOOP node
-         }
-         eat(parser, TOKEN_OF); // Consume 'of'
+    } else if (initialTokenType == TOKEN_ARRAY) {
+        // ARRAY logic (parseArrayType consumes tokens)
+        node = parseArrayType(parser);
+        if(node) setTypeAST(node, TYPE_ARRAY);
+        // Flow continues to the end, return node
 
-         // Parse the base type (must be an ordinal type)
-         // Allow anonymous base types? Standard Pascal usually requires named ordinal types here.
-         // Let's allow anonymous for now by passing allowAnonymous=1.
+    } else if (initialTokenType == TOKEN_SET) {
+        // SET logic (eats SET, OF, base type)
+         eat(parser, TOKEN_SET);
+         if (!parser->current_token || parser->current_token->type != TOKEN_OF) { errorParser(parser, "Expected 'of' after 'set'"); return NULL; }
+         eat(parser, TOKEN_OF);
          AST *baseTypeNode = typeSpecifier(parser, 1);
-         if (!baseTypeNode || baseTypeNode->type == AST_NOOP) {
-             errorParser(parser, "Invalid base type specified for set");
-             return NULL; // Or return NOOP node
-         }
-
-         // --- Type Check: Ensure base type is ordinal ---
-         // (This check ideally happens during semantic analysis, but a basic check here is good)
+         if (!baseTypeNode || baseTypeNode->type == AST_NOOP) { errorParser(parser, "Invalid base type specified for set"); return NULL; }
          VarType baseVarType = baseTypeNode->var_type;
-         bool isOrdinal = (baseVarType == TYPE_INTEGER || baseVarType == TYPE_CHAR ||
-                           baseVarType == TYPE_BOOLEAN || baseVarType == TYPE_ENUM ||
-                           baseVarType == TYPE_BYTE || baseVarType == TYPE_WORD);
+         bool isOrdinal = (baseVarType == TYPE_INTEGER || baseVarType == TYPE_CHAR || baseVarType == TYPE_BOOLEAN || baseVarType == TYPE_ENUM || baseVarType == TYPE_BYTE || baseVarType == TYPE_WORD);
+         if (!isOrdinal) { errorParser(parser, "Set base type must be an ordinal type"); freeAST(baseTypeNode); return NULL; }
+         node = newASTNode(AST_ARRAY_TYPE, NULL); // Reusing ARRAY_TYPE structure
+         setTypeAST(node, TYPE_SET);
+         setRight(node, baseTypeNode);
+        // Flow continues to the end, return node
 
-         if (!isOrdinal) {
-             errorParser(parser, "Set base type must be an ordinal type (Integer, Char, Boolean, Enum, Byte, Word)");
-             freeAST(baseTypeNode); // Free the invalid base type node
-             return NULL; // Or return NOOP node
-         }
-         // --- End Type Check ---
-
-         // Create a node to represent the SET type.
-         // We can reuse AST_ARRAY_TYPE conceptually, storing the base type in 'right'.
-         // Or create a dedicated AST_SET_TYPE if preferred. Let's use AST_ARRAY_TYPE for now.
-         node = newASTNode(AST_ARRAY_TYPE, NULL); // Using ARRAY_TYPE node structure
-         setTypeAST(node, TYPE_SET);             // *** Set VarType to TYPE_SET ***
-         setRight(node, baseTypeNode);           // Store base type node in 'right'
-
-         #ifdef DEBUG
-         fprintf(stderr, "[DEBUG typeSpecifier] Created SET type node. Base type: %s\n", varTypeToString(baseTypeNode->var_type));
-         #endif
-     }
-    else if (typeToken->type == TOKEN_IDENTIFIER) {
-        char *typeName = typeToken->value;
-        char *typeNameCopy = strdup(typeName); // <<< FIX: Copy the type name string
+    } else if (initialTokenType == TOKEN_IDENTIFIER) {
+        // IDENTIFIER logic for basic types, user types, string[N]
+        // Use initialToken for newASTNode calls
+        char *typeName = initialToken->value; // Use value from initialToken
+        char *typeNameCopy = strdup(typeName);
         if (!typeNameCopy) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
 
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG typeSpecifier] Detected IDENTIFIER: '%s'\n", typeNameCopy);
-        #endif
-
-        // --- Check for STRING type first ---
         if (strcasecmp(typeNameCopy, "string") == 0) {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG typeSpecifier] Matched basic type: STRING\n");
-            #endif
-            node = newASTNode(AST_VARIABLE, typeToken); // Uses copy of original 'string' token
+            node = newASTNode(AST_VARIABLE, initialToken); // Use initialToken
             setTypeAST(node, TYPE_STRING);
-            eat(parser, TOKEN_IDENTIFIER); // Consume 'string' identifier
-            // Check for fixed-length string specifier: string[length]
+            eat(parser, TOKEN_IDENTIFIER); // Consume 'string'
+            // Parse optional fixed length
             if (parser->current_token && parser->current_token->type == TOKEN_LBRACKET) {
-                 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG typeSpecifier] Parsing fixed string length...\n");
-                 #endif
-                eat(parser, TOKEN_LBRACKET);
-                AST *lengthNode = expression(parser); // Parse the length expression
-                if(!lengthNode || lengthNode->type == AST_NOOP) { errorParser(parser,"Bad string len expression"); free(typeNameCopy); return node;} // Cleanup copy on error
-                if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) { errorParser(parser,"Expected ] after string length"); free(typeNameCopy); return node;}
-                eat(parser, TOKEN_RBRACKET);
-                setRight(node, lengthNode); // Attach length expression node
+                 eat(parser, TOKEN_LBRACKET);
+                 AST *lengthNode = expression(parser);
+                 if(!lengthNode || lengthNode->type == AST_NOOP) { errorParser(parser,"Bad string len expression"); free(typeNameCopy); freeAST(node); return NULL;}
+                 if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) { errorParser(parser,"Expected ] after string length"); free(typeNameCopy); freeAST(node); freeAST(lengthNode); return NULL;}
+                 eat(parser, TOKEN_RBRACKET);
+                 setRight(node, lengthNode);
             }
-        }
-        // --- Check other basic types ---
-        else {
+        } else {
             VarType basicType = TYPE_VOID;
-            if (strcasecmp(typeNameCopy, "integer") == 0 || strcasecmp(typeNameCopy, "longint") == 0 || strcasecmp(typeNameCopy, "cardinal") == 0) basicType = TYPE_INTEGER;
-            else if (strcasecmp(typeNameCopy, "real") == 0) basicType = TYPE_REAL;
-            else if (strcasecmp(typeNameCopy, "char") == 0) basicType = TYPE_CHAR;
-            else if (strcasecmp(typeNameCopy, "byte") == 0) basicType = TYPE_BYTE;
-            else if (strcasecmp(typeNameCopy, "word") == 0) basicType = TYPE_WORD;
-            else if (strcasecmp(typeNameCopy, "boolean") == 0) basicType = TYPE_BOOLEAN;
-            else if (strcasecmp(typeNameCopy, "file") == 0 || strcasecmp(typeNameCopy, "text") == 0) basicType = TYPE_FILE;
-            else if (strcasecmp(typeNameCopy, "mstream") == 0) basicType = TYPE_MEMORYSTREAM;
+            // ... (checks for integer, real, char, etc.) ...
+             if (strcasecmp(typeNameCopy, "integer") == 0 || strcasecmp(typeNameCopy, "longint") == 0 || strcasecmp(typeNameCopy, "cardinal") == 0) basicType = TYPE_INTEGER;
+             else if (strcasecmp(typeNameCopy, "real") == 0) basicType = TYPE_REAL;
+             else if (strcasecmp(typeNameCopy, "char") == 0) basicType = TYPE_CHAR;
+             else if (strcasecmp(typeNameCopy, "byte") == 0) basicType = TYPE_BYTE;
+             else if (strcasecmp(typeNameCopy, "word") == 0) basicType = TYPE_WORD;
+             else if (strcasecmp(typeNameCopy, "boolean") == 0) basicType = TYPE_BOOLEAN;
+             else if (strcasecmp(typeNameCopy, "file") == 0 || strcasecmp(typeNameCopy, "text") == 0) basicType = TYPE_FILE;
+             else if (strcasecmp(typeNameCopy, "mstream") == 0) basicType = TYPE_MEMORYSTREAM;
 
             if (basicType != TYPE_VOID) {
-                // Matched a basic type identifier
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG typeSpecifier] Matched basic type: %s\n", varTypeToString(basicType));
-                #endif
-                node = newASTNode(AST_VARIABLE, typeToken); // Uses copy of original token
+                node = newASTNode(AST_VARIABLE, initialToken); // Use initialToken
                 setTypeAST(node, basicType);
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG typeSpecifier] BEFORE eat for basic type '%s'\n", typeNameCopy); // Use copy
-                #endif
-                eat(parser, TOKEN_IDENTIFIER); // <<< CONSUME THE IDENTIFIER
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG typeSpecifier] AFTER eat for basic type '%s'. Next token: %s\n",
-                        typeNameCopy, // <<< FIX: Use the copied string here
-                        tokenTypeToString(parser->current_token ? parser->current_token->type : TOKEN_EOF)); // Check for NULL token
-                #endif
+                eat(parser, TOKEN_IDENTIFIER); // Consume the type identifier
             } else {
-                // Assume it's a user-defined type reference
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG typeSpecifier] Assuming user-defined type reference: '%s'\n", typeNameCopy); // Use copy
-                #endif
-                AST *userType = lookupType(typeNameCopy); // Look up using copy
+                // User-defined type reference
+                AST *userType = lookupType(typeNameCopy);
                 if (!userType) {
-                    char err_msg[128]; snprintf(err_msg, sizeof(err_msg), "Undefined type '%s'", typeNameCopy); // Use copy
+                    char err_msg[128]; snprintf(err_msg, sizeof(err_msg), "Undefined type '%s'", typeNameCopy);
                     errorParser(parser, err_msg);
-                    free(typeNameCopy); // Free copy before returning
-                    return NULL; // Error recovery
+                    free(typeNameCopy);
+                    return NULL;
                 }
-                node = newASTNode(AST_TYPE_REFERENCE, typeToken); // Uses copy of original token
-                setTypeAST(node, userType->var_type); // Copy VarType from definition
-                node->right = userType; // Direct link to the definition AST
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG typeSpecifier] BEFORE eat for user type '%s'\n", typeNameCopy); // Use copy
-                #endif
-                eat(parser, TOKEN_IDENTIFIER); // <<< CONSUME THE IDENTIFIER
-                #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG typeSpecifier] AFTER eat for user type '%s'. Next token: %s\n",
-                        typeNameCopy, // <<< FIX: Use the copied string here
-                        tokenTypeToString(parser->current_token ? parser->current_token->type : TOKEN_EOF)); // Check for NULL token
-                #endif
+                node = newASTNode(AST_TYPE_REFERENCE, initialToken); // Use initialToken
+                setTypeAST(node, userType->var_type);
+                node->right = userType; // Link to definition
+                eat(parser, TOKEN_IDENTIFIER); // Consume the type identifier
             }
         }
-        free(typeNameCopy); // <<< FIX: Free the copied type name string
+        free(typeNameCopy);
+        // Flow continues to the end, return node
+
     } else {
-        errorParser(parser, "Expected type identifier, ARRAY, or RECORD");
-        return NULL; // Return NULL on error
+        // Error: Unexpected token starting a type specifier
+        errorParser(parser, "Expected type identifier, '^', ARRAY, RECORD, or SET");
+        return NULL;
     }
 
-    if (!node) { // Should not happen if logic above is correct
+    // If node is still NULL after all checks, something went wrong internally
+    if (!node) {
         errorParser(parser, "Internal error: typeSpecifier failed to create node");
-        return newASTNode(AST_NOOP, NULL);
+        return NULL;
     }
 
     return node; // Return the created type specifier node
@@ -2306,51 +2278,188 @@ AST *term(Parser *parser) {
 // factor: Parses literals, variables, function calls, NOT, parenthesized expressions, set constructors.
 // factor ::= literal | variable | function_call | '(' expression ')' | NOT factor | '[' set_elements ']'
 AST *factor(Parser *parser) {
-    Token *token = parser->current_token;
+    // *** Use initial token type and pointer like in typeSpecifier ***
+    Token *initialToken = parser->current_token;
+    TokenType initialTokenType = initialToken ? initialToken->type : TOKEN_UNKNOWN;
     AST *node = NULL;
-    if (!token) { errorParser(parser, "Unexpected end of input in factor"); return newASTNode(AST_NOOP, NULL); }
+
+    if (initialTokenType == TOKEN_UNKNOWN) {
+        errorParser(parser, "Unexpected end of input in factor");
+        return newASTNode(AST_NOOP, NULL);
+    }
 
     #ifdef DEBUG
     // Optional: Add logging if needed
-    // if (dumpExec) fprintf(stderr, "[DEBUG_FACTOR] Entry: Token %s ('%s')\n", tokenTypeToString(token->type), token->value ? token->value : "NULL");
+    // if (dumpExec) fprintf(stderr, "[DEBUG_FACTOR] Entry: Token %s ('%s')\n", tokenTypeToString(initialTokenType), initialToken->value ? initialToken->value : "NULL");
     #endif
 
-    if (token->type == TOKEN_TRUE || token->type == TOKEN_FALSE) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_BOOLEAN, c); freeToken(c); setTypeAST(node, TYPE_BOOLEAN); }
-    else if (token->type == TOKEN_NOT) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_UNARY_OP, c); freeToken(c); AST* op = factor(parser); if(!op || op->type == AST_NOOP){ errorParser(parser,"Exp operand after NOT"); return node;} setLeft(node, op); setTypeAST(node, TYPE_BOOLEAN); }
-    else if (token->type == TOKEN_PLUS || token->type == TOKEN_MINUS) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_UNARY_OP, c); freeToken(c); AST* op = factor(parser); if(!op || op->type == AST_NOOP){ errorParser(parser,"Exp operand after unary +/-"); return node;} setLeft(node, op); setTypeAST(node, op->var_type); } // Type check later
-    else if (token->type == TOKEN_INTEGER_CONST || token->type == TOKEN_HEX_CONST || token->type == TOKEN_REAL_CONST) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_NUMBER, c); freeToken(c); setTypeAST(node, (node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER); }
-    else if (token->type == TOKEN_STRING_CONST) { Token* c = copyToken(token); eat(parser, token->type); node = newASTNode(AST_STRING, c); freeToken(c); setTypeAST(node, TYPE_STRING); }
-    else if (token->type == TOKEN_IDENTIFIER) {
-        node = lvalue(parser); // Parses var[.field[index]] etc. *without* consuming lparen for calls
-        if (!node || node->type == AST_NOOP) return newASTNode(AST_NOOP, NULL); // Propagate error
-        // Check if it's actually a function call
-        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN && node->type == AST_VARIABLE) {
-             node->type = AST_PROCEDURE_CALL; eat(parser, TOKEN_LPAREN);
-             if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
-                 AST* args = exprList(parser); // exprList calls expression
-                 if (!args || args->type == AST_NOOP) { errorParser(parser,"Bad arg list"); return node; } // Return partial node on arg error
-                 if (args->type == AST_COMPOUND && args->child_count > 0) { node->children = args->children; node->child_count = args->child_count; node->child_capacity=args->child_capacity; args->children = NULL; args->child_count = 0; args->child_capacity=0; for(int i=0; i < node->child_count; i++){ if(node->children[i]) node->children[i]->parent = node; } }
-                 else { node->children = NULL; node->child_count = 0; node->child_capacity=0;}
-                 if(args) freeAST(args); // Use freeAST
-             } else { node->children = NULL; node->child_count = 0; node->child_capacity=0;}
-             if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) { errorParser(parser,"Expected ) after args"); return node;} eat(parser, TOKEN_RPAREN);
-             // Function return type is annotated later
-        } else if (node->type == AST_VARIABLE) { // Could be var, enum const, or param-less func
-             Procedure *proc = lookupProcedure(node->token->value);
-             if (proc != NULL && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
-                 node->type = AST_PROCEDURE_CALL; node->children = NULL; node->child_count = 0; node->child_capacity=0;
-                 // Set return type early if possible
-                 if (proc->proc_decl->right) node->var_type = proc->proc_decl->right->var_type; else node->var_type = TYPE_VOID;
-             } else if (proc != NULL) { // Procedure used as factor
-                  char error_msg[128]; snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", node->token->value); errorParser(parser, error_msg); return newASTNode(AST_NOOP, NULL);
-             }
-        }
-    } else if (token->type == TOKEN_LPAREN) { eat(parser, TOKEN_LPAREN); node = expression(parser); if (!node || node->type == AST_NOOP) { /* error reported below */ return newASTNode(AST_NOOP, NULL);} if(!parser->current_token || parser->current_token->type != TOKEN_RPAREN){errorParser(parser,"Expected )"); return node;} eat(parser, TOKEN_RPAREN); }
-    else if (token->type == TOKEN_LBRACKET) { node = parseSetConstructor(parser); if (!node || node->type == AST_NOOP) { /* error reported below */ return newASTNode(AST_NOOP, NULL); } setTypeAST(node, TYPE_SET); }
-    else { errorParser(parser, "Unexpected token in factor"); return newASTNode(AST_NOOP, NULL); }
+    if (initialTokenType == TOKEN_NIL) {
+        Token* c = copyToken(initialToken); // Copy the initial NIL token
+        eat(parser, TOKEN_NIL);             // Consume NIL, frees original initialToken
+        node = newASTNode(AST_NIL, c);      // Create node with the copy
+        freeToken(c);                       // Free the copy
+        setTypeAST(node, TYPE_POINTER);
+        return node; // <<< RETURN IMMEDIATELY
 
-    if (!node) { errorParser(parser, "Internal error: factor resulted in NULL node"); return newASTNode(AST_NOOP, NULL); }
-    return node;
+    } else if (initialTokenType == TOKEN_TRUE || initialTokenType == TOKEN_FALSE) {
+        Token* c = copyToken(initialToken);
+        eat(parser, initialTokenType); // Eat TRUE or FALSE
+        node = newASTNode(AST_BOOLEAN, c); freeToken(c);
+        setTypeAST(node, TYPE_BOOLEAN);
+        return node; // <<< RETURN IMMEDIATELY
+
+    } else if (initialTokenType == TOKEN_NOT) {
+        Token* c = copyToken(initialToken);
+        eat(parser, TOKEN_NOT); // Eat NOT
+        node = newASTNode(AST_UNARY_OP, c); freeToken(c);
+        // Recursively call factor - this will get the *next* token correctly
+        AST* op = factor(parser);
+        if(!op || op->type == AST_NOOP){ errorParser(parser,"Exp operand after NOT"); freeAST(node); return newASTNode(AST_NOOP, NULL);}
+        setLeft(node, op);
+        setTypeAST(node, TYPE_BOOLEAN);
+        return node; // <<< RETURN IMMEDIATELY
+
+    } else if (initialTokenType == TOKEN_PLUS || initialTokenType == TOKEN_MINUS) {
+        Token* c = copyToken(initialToken);
+        eat(parser, initialTokenType); // Eat unary +/-
+        node = newASTNode(AST_UNARY_OP, c); freeToken(c);
+        // Recursively call factor
+        AST* op = factor(parser);
+        if(!op || op->type == AST_NOOP){ errorParser(parser,"Exp operand after unary +/-"); freeAST(node); return newASTNode(AST_NOOP, NULL);}
+        setLeft(node, op);
+        // Type depends on operand, set during annotation or eval
+        setTypeAST(node, op->var_type); // Tentative type
+        return node; // <<< RETURN IMMEDIATELY
+
+    } else if (initialTokenType == TOKEN_INTEGER_CONST || initialTokenType == TOKEN_HEX_CONST || initialTokenType == TOKEN_REAL_CONST) {
+        Token* c = copyToken(initialToken);
+        eat(parser, initialTokenType); // Eat the number token
+        node = newASTNode(AST_NUMBER, c); freeToken(c);
+        setTypeAST(node, (initialTokenType == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER);
+        return node; // <<< RETURN IMMEDIATELY
+
+    } else if (initialTokenType == TOKEN_STRING_CONST) {
+        Token* c = copyToken(initialToken);
+        eat(parser, initialTokenType); // Eat the string token
+        node = newASTNode(AST_STRING, c); freeToken(c);
+        setTypeAST(node, TYPE_STRING);
+        return node; // <<< RETURN IMMEDIATELY
+
+    } else if (initialTokenType == TOKEN_IDENTIFIER) {
+        // IDENTIFIER case: call lvalue, which handles ., [], ^ and eats tokens internally
+        node = lvalue(parser); // lvalue consumes the identifier and potential subsequent tokens
+        if (!node || node->type == AST_NOOP) return newASTNode(AST_NOOP, NULL);
+
+        // Check if it's a function call (lvalue doesn't handle the LPAREN)
+        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN && node->type == AST_VARIABLE) {
+             // It's a function call with arguments
+             node->type = AST_PROCEDURE_CALL; // Change type
+             eat(parser, TOKEN_LPAREN);      // Eat '('
+             if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+                 AST* args = exprList(parser); // Parse argument list
+                 if (!args || args->type == AST_NOOP) { errorParser(parser,"Bad arg list"); return node; }
+                 // Transfer arguments safely (ensure your existing logic is robust)
+                 if (args && args->type == AST_COMPOUND && args->child_count > 0) {
+                      node->children = args->children; node->child_count = args->child_count; node->child_capacity = args->child_capacity;
+                      args->children = NULL; args->child_count = 0; args->child_capacity = 0;
+                      for(int i=0; i < node->child_count; i++) if(node->children[i]) node->children[i]->parent = node;
+                  } else { node->children = NULL; node->child_count = 0; node->child_capacity=0; }
+                  if(args) freeAST(args); // Free compound wrapper
+             } else { node->children = NULL; node->child_count = 0; node->child_capacity=0; } // Empty arg list '()'
+             if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) { errorParser(parser,"Expected ) after args"); return node;}
+             eat(parser, TOKEN_RPAREN); // Eat ')'
+             // Type annotation will set the function's return type later
+        }
+        // Check if lvalue returned a simple variable that might be a parameter-less function
+        else if (node->type == AST_VARIABLE) {
+             Procedure *proc = node->token ? lookupProcedure(node->token->value) : NULL;
+             if (proc && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
+                 node->type = AST_PROCEDURE_CALL; // Change type to parameter-less call
+                 node->children = NULL; node->child_count = 0; node->child_capacity = 0;
+                 // Set return type early if possible
+                 if (proc->proc_decl->right) setTypeAST(node, proc->proc_decl->right->var_type);
+                 else setTypeAST(node, TYPE_VOID);
+             } else if (proc) { // Procedure used as value error
+                  char error_msg[128]; snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", node->token->value); errorParser(parser, error_msg); freeAST(node); return newASTNode(AST_NOOP, NULL);
+             }
+             // Otherwise, it's just a variable/constant reference handled by lvalue
+        }
+        // If lvalue returned DEREFERENCE, FIELD_ACCESS, ARRAY_ACCESS, it's used as is.
+        // No immediate return needed here as lvalue consumed the relevant tokens.
+        // Flow continues to end.
+
+    } else if (initialTokenType == TOKEN_LPAREN) {
+        eat(parser, TOKEN_LPAREN); // Eat '('
+        node = expression(parser); // Parse sub-expression
+        if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser,"Expected )");
+            // If error, free the parsed sub-expression?
+            freeAST(node);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_RPAREN); // Eat ')'
+        // Flow continues to end, return node
+
+    } else if (initialTokenType == TOKEN_LBRACKET) {
+        // Parse set constructor '[ ... ]'
+        node = parseSetConstructor(parser); // Consumes tokens internally
+        if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
+        setTypeAST(node, TYPE_SET);
+        // Flow continues to end, return node
+
+    } else {
+        errorParser(parser, "Unexpected token in factor");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    // If node is still NULL after all checks, something went wrong internally
+    if (!node) {
+        errorParser(parser, "Internal error: factor resulted in NULL node");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    return node; // Return the created node
 }
 
+// --- Function to specifically parse ^TypeName ---
+AST *parsePointerType(Parser *parser) {
+    eat(parser, TOKEN_CARET); // Consume '^'
 
+    // The next token *must* be a type identifier
+    if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Expected type identifier after '^'");
+        return NULL; // Indicate error
+    }
+
+    // --- Create a temporary node representing the base type identifier ---
+    // This is needed to look up the type definition later during annotation.
+    // We use AST_VARIABLE temporarily, but it signifies a type name here.
+    // Alternatively, could use AST_TYPE_REFERENCE directly if preferred. Let's use VARIABLE for now.
+    AST *baseTypeNameNode = newASTNode(AST_VARIABLE, parser->current_token); // Uses copy of token
+    if (!baseTypeNameNode) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+    // Set its var_type based on lookup or built-in check (optional here, annotation will do it)
+    VarType baseVt = TYPE_VOID; // Placeholder
+    if (strcasecmp(baseTypeNameNode->token->value, "integer") == 0) baseVt = TYPE_INTEGER;
+    else if (strcasecmp(baseTypeNameNode->token->value, "real") == 0) baseVt = TYPE_REAL;
+    // ... add other built-ins ...
+    else {
+        AST* lookedUpType = lookupType(baseTypeNameNode->token->value);
+        if (lookedUpType) baseVt = lookedUpType->var_type;
+    }
+    setTypeAST(baseTypeNameNode, baseVt); // Set tentative base type
+
+    eat(parser, TOKEN_IDENTIFIER); // Consume the base type identifier
+
+    // --- Create the AST_POINTER_TYPE node ---
+    AST *pointerTypeNode = newASTNode(AST_POINTER_TYPE, NULL); // No specific token for the pointer type itself
+    if (!pointerTypeNode) { freeAST(baseTypeNameNode); EXIT_FAILURE_HANDLER(); }
+
+    // Set the base type node as the 'right' child (consistent with array/record having base type in right)
+    setRight(pointerTypeNode, baseTypeNameNode);
+
+    // Set the overall type of this node to TYPE_POINTER
+    setTypeAST(pointerTypeNode, TYPE_POINTER);
+
+    return pointerTypeNode;
+}

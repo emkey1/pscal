@@ -461,6 +461,15 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     return v;
 }
 
+Value makeNil(void) {
+    Value v;
+    memset(&v, 0, sizeof(Value)); // Initialize all fields
+    v.type = TYPE_POINTER;
+    v.ptr_val = NULL;
+    v.base_type_node = NULL; // nil doesn't have a specific base type
+    return v;
+}
+
 Value makeVoid(void) {
     Value v;
     memset(&v, 0, sizeof(Value));
@@ -468,40 +477,96 @@ Value makeVoid(void) {
     return v;
 }
 
-Value makeValueForType(VarType type, AST *type_def) {
+Value makeValueForType(VarType type, AST *type_def_param) { // Renamed param for clarity
     Value v;
     memset(&v, 0, sizeof(Value)); // Initialize struct to zero/NULL
     v.type = type;
-    // Store base type node link for pointers early
-    if (type == TYPE_POINTER && type_def && type_def->type == AST_POINTER_TYPE) {
-        v.base_type_node = type_def->right; // Right child holds the base type
+    v.base_type_node = NULL; // Initialize base type node to NULL
+
+    AST* actual_type_def = type_def_param; // Use a temporary variable
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG makeValueForType] Entry: Type=%s, type_def_param=%p (Type: %s)\n",
+            varTypeToString(type), (void*)type_def_param,
+            type_def_param ? astTypeToString(type_def_param->type) : "NULL");
+    fflush(stderr); // Flush to ensure message appears before potential crash
+#endif
+
+    // --- Resolve TYPE_REFERENCE if necessary ---
+    // This is important for getting the *actual* definition node (e.g., POINTER_TYPE, RECORD_TYPE)
+    if (actual_type_def && actual_type_def->type == AST_TYPE_REFERENCE) {
+        const char* ref_name = actual_type_def->token ? actual_type_def->token->value : "<unknown>";
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG makeValueForType] Resolving TYPE_REFERENCE '%s'\n", ref_name);
+        fflush(stderr);
+#endif
+        // Assuming lookupType returns the actual definition AST node (e.g., the AST_POINTER_TYPE node)
+        actual_type_def = lookupType(ref_name);
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG makeValueForType] lookupType('%s') returned %p (Type: %s)\n",
+                ref_name, (void*)actual_type_def,
+                actual_type_def ? astTypeToString(actual_type_def->type) : "NULL");
+        fflush(stderr);
+#endif
+        if (!actual_type_def) {
+             fprintf(stderr, "Warning: Could not resolve type reference '%s' during value initialization.\n",
+                     type_def_param->token ? type_def_param->token->value : "<unknown>");
+             // Keep actual_type_def as NULL if lookup fails
+        }
+    }
+    // Now actual_type_def points to the real definition (or is NULL if unresolved/not applicable)
+
+
+    // --- Set base_type_node specifically for pointers using the resolved definition ---
+    if (type == TYPE_POINTER) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG makeValueForType] Setting base type for POINTER. actual_type_def=%p (Type: %s)\n",
+                (void*)actual_type_def, actual_type_def ? astTypeToString(actual_type_def->type) : "NULL");
+        fflush(stderr);
+#endif
+        // Check if the *resolved* definition node is AST_POINTER_TYPE
+        if (actual_type_def && actual_type_def->type == AST_POINTER_TYPE) {
+            // The 'right' child of the AST_POINTER_TYPE node is the base type definition
+            v.base_type_node = actual_type_def->right; // Assign the base type AST node
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG makeValueForType] -> Base type node set to %p (Type: %s, Token: '%s')\n",
+                    (void*)v.base_type_node,
+                    v.base_type_node ? astTypeToString(v.base_type_node->type) : "NULL",
+                    (v.base_type_node && v.base_type_node->token) ? v.base_type_node->token->value : "N/A");
+            fflush(stderr);
+#endif
+        } else {
+            // This case indicates an inconsistency. We expected a POINTER type,
+            // but the definition resolved to something else or was NULL.
+            fprintf(stderr, "Warning: Mismatch during pointer initialization. Expected AST_POINTER_TYPE definition, found %s.\n",
+                    actual_type_def ? astTypeToString(actual_type_def->type) : "NULL");
+             v.base_type_node = NULL; // Ensure it remains NULL
+        }
     }
 
+
+    // --- Initialize Value based on Type ---
     switch(type) {
         case TYPE_INTEGER: v.i_val = 0; break;
         case TYPE_REAL:    v.r_val = 0.0; break;
         case TYPE_STRING:
             v.s_val = NULL;
             v.max_length = -1; // Default dynamic
-            AST* actualTypeDef = type_def;
-            if (actualTypeDef && actualTypeDef->type == AST_TYPE_REFERENCE) {
-                actualTypeDef = lookupType(actualTypeDef->token->value);
-            }
-            if (actualTypeDef && actualTypeDef->type == AST_VARIABLE && actualTypeDef->token &&
-                strcasecmp(actualTypeDef->token->value, "string") == 0 && actualTypeDef->right) {
-                 // Fixed length string definition found
-                 AST* lenNode = actualTypeDef->right;
+            // Use the potentially resolved actual_type_def for fixed length check
+            if (actual_type_def && actual_type_def->type == AST_VARIABLE && actual_type_def->token &&
+                strcasecmp(actual_type_def->token->value, "string") == 0 && actual_type_def->right) {
+                 AST* lenNode = actual_type_def->right;
                  if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
                     long long parsed_len = atoll(lenNode->token->value);
                     if (parsed_len > 0 && parsed_len <= 255) { // Standard Pascal max length
                          v.max_length = (int)parsed_len;
                          v.s_val = calloc(v.max_length + 1, 1); // Allocate and zero-fill
                          if (!v.s_val) { fprintf(stderr, "FATAL: calloc failed for fixed string\n"); EXIT_FAILURE_HANDLER(); }
-                    } else { fprintf(stderr, "Warning: Fixed string length %lld invalid. Using dynamic.\n", parsed_len); }
+                    } else { fprintf(stderr, "Warning: Fixed string length %lld invalid or too large. Using dynamic.\n", parsed_len); }
                  } else { fprintf(stderr, "Warning: Fixed string length not constant integer. Using dynamic.\n"); }
             }
-            // If still dynamic or initialization failed, allocate empty dynamic string
-            if (v.max_length == -1) {
+            // Allocate if still dynamic or if fixed allocation failed
+            if (v.max_length == -1 && !v.s_val) {
                  v.s_val = strdup("");
                  if (!v.s_val) { fprintf(stderr, "FATAL: strdup failed for dynamic string\n"); EXIT_FAILURE_HANDLER(); }
             }
@@ -510,30 +575,36 @@ Value makeValueForType(VarType type, AST *type_def) {
         case TYPE_BOOLEAN: v.i_val = 0; break; // False
         case TYPE_FILE:    v.f_val = NULL; v.filename = NULL; break;
         case TYPE_RECORD:
-             v.record_val = createEmptyRecord(type_def);
+             // Pass the resolved definition to createEmptyRecord
+             v.record_val = createEmptyRecord(actual_type_def);
+             // createEmptyRecord handles NULL or incorrect actual_type_def
              break;
         case TYPE_ARRAY:
-            // Initialization with bounds happens in makeArrayND or during assignment
+            // Actual initialization with bounds/elements happens elsewhere (makeArrayND or assignment)
             v.dimensions = 0; v.lower_bounds = NULL; v.upper_bounds = NULL;
-            v.array_val = NULL; v.element_type = TYPE_VOID; v.element_type_def = NULL;
+            v.array_val = NULL; v.element_type = TYPE_VOID;
+            // Store link to the *actual* array type definition node if resolved
+            v.element_type_def = (actual_type_def && actual_type_def->type == AST_ARRAY_TYPE) ? actual_type_def : NULL;
             break;
         case TYPE_MEMORYSTREAM: v.mstream = createMStream(); break;
         case TYPE_ENUM:
              v.enum_val.ordinal = 0;
-             // Get type name from type_def if possible
-              AST* enumDefNode = type_def;
-              if (enumDefNode && enumDefNode->type == AST_TYPE_REFERENCE) {
-                  enumDefNode = lookupType(enumDefNode->token->value);
-              }
-             v.enum_val.enum_name = (enumDefNode && enumDefNode->token && enumDefNode->token->value) ? strdup(enumDefNode->token->value) : strdup("<unknown_enum>");
-             if (!v.enum_val.enum_name) { fprintf(stderr, "FATAL: strdup failed for enum name\n"); EXIT_FAILURE_HANDLER(); }
+             // Use the resolved definition for the name
+             v.enum_val.enum_name = (actual_type_def && actual_type_def->token && actual_type_def->token->value) ? strdup(actual_type_def->token->value) : strdup("<unknown_enum>");
+             if (!v.enum_val.enum_name) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
              break;
         case TYPE_BYTE:    v.i_val = 0; break;
         case TYPE_WORD:    v.i_val = 0; break;
         case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; break;
         case TYPE_POINTER:
             v.ptr_val = NULL; // Initialize pointer to nil
-            // v.base_type_node was already set before the switch
+            // v.base_type_node should have been set before the switch
+#ifdef DEBUG
+            if (v.base_type_node == NULL) {
+                 fprintf(stderr, "[DEBUG makeValueForType] Pointer initialized, but base_type_node is NULL.\n");
+                 fflush(stderr);
+            }
+#endif
             break;
         case TYPE_VOID:    /* No value needed */ break;
         default:

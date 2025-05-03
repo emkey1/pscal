@@ -11,6 +11,8 @@ typedef struct {
     Token *current_token;
 } Parser;
 
+AST *parsePointerType(Parser *parser); 
+
 // Define Procedure structure
 typedef struct Procedure {
     char *name;
@@ -50,7 +52,6 @@ AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
 AST *term(Parser *parser);
-AST *factor(Parser *parser);
 AST *unitParser(Parser *parser, int recursion_depth);
 AST *enumDeclaration(Parser *parser);
 Procedure *lookupProcedure(const char *name);

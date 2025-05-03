@@ -94,453 +94,241 @@ Symbol *lookupLocalSymbol(const char *name) {
 }
 
 void updateSymbol(const char *name, Value val) {
-    Symbol *sym = lookupSymbol(name);
-    
+    Symbol *sym = lookupSymbol(name); // Handles not found error
+
 #ifdef DEBUG
     fprintf(stderr, "[DEBUG_UPDATE_CHECK] Called updateSymbol for: '%s'. Symbol found: %p. is_const: %d. Incoming value type: %s\n",
-        name,
-        (void*)sym,
-        sym ? sym->is_const : -1, // Print is_const status if sym found
-        varTypeToString(val.type));
- // Optionally add a way to print the call stack or caller function if possible
+            name, (void*)sym, sym ? sym->is_const : -1, varTypeToString(val.type));
 #endif
-    
+
+    if (!sym) {
+        // lookupSymbol already exited if not found, but defensive check
+        fprintf(stderr,"Internal Error: updateSymbol called for non-existent symbol '%s'.\n", name);
+        EXIT_FAILURE_HANDLER(); // Should not happen if lookupSymbol works
+        return;
+    }
     if (sym->is_const) {
         fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n", name);
         EXIT_FAILURE_HANDLER();
     }
-    
-#ifdef DEBUG
-    // This first switch is only for DEBUG printing the incoming value 'val'
-    // It should NOT contain assignment logic or use 'sym' as 'sym' is not declared yet.
-    DEBUG_PRINT("[DEBUG] updateSymbol: updating symbol '%s' to ", name);
-    if (!sym) {
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG_UPDATE] updateSymbol: FAILED to find symbol '%s'\n", name);
-         // Handle error (though lookupSymbol usually exits on failure)
-#endif
-    } else {
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG_UPDATE] updateSymbol: Entry for Name='%s', FoundSymType=%s, IncomingValueType=%s\n",
-                name,                           // e.g., "relendpos"
-                varTypeToString(sym->type),     // What type did lookupSymbol return? Is it VOID here?
-                varTypeToString(val.type));     // Type of the value being assigned (INTEGER from Min)
-#endif
+    // Ensure the symbol has a value structure to update
+    if (!sym->value) {
+        fprintf(stderr, "Runtime error: Symbol '%s' has NULL value pointer during update. Cannot assign.\n", name);
+        // Attempt to allocate and initialize? Or is this an internal error?
+        // Let's treat it as an error for now, as variables should be initialized.
+         sym->value = malloc(sizeof(Value));
+         if (!sym->value) {
+             fprintf(stderr, "FATAL: Memory allocation failed trying to recover NULL value pointer for '%s'\n", name);
+             EXIT_FAILURE_HANDLER();
+         }
+         // Initialize *minimally* before attempting assignment below
+         memset(sym->value, 0, sizeof(Value));
+         sym->value->type = sym->type; // Set the type based on the symbol table entry
+         fprintf(stderr, "Warning: Initialized previously NULL value pointer for symbol '%s' during update.\n", name);
+         // If initialized here, default values might be missing (e.g., for records/arrays)
+         // Consider using makeValueForType if type_def is available:
+         // *(sym->value) = makeValueForType(sym->type, sym->type_def);
     }
-    switch(val.type) {
-        case TYPE_STRING:
-            DEBUG_PRINT("TYPE_STRING \"%s\"", val.s_val ? val.s_val : "null");
-            break;
-        case TYPE_CHAR:
-             // Ensure this only prints info about 'val', doesn't try to use 'sym'
-            DEBUG_PRINT("TYPE_CHAR '%c' (ord %d)", val.c_val, (int)val.c_val);
-            break;
-        case TYPE_INTEGER:
-            DEBUG_PRINT("TYPE_INTEGER %lld", val.i_val);
-            break;
-        case TYPE_BOOLEAN:
-            DEBUG_PRINT("TYPE_BOOLEAN %s", val.i_val ? "true" : "false");
-            break;
-        case TYPE_SET: {
-            // Target symbol is a SET
-            if (val.type == TYPE_SET) {
-                // Assigning SET to SET
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG UPDATE SET] Assigning set to symbol '%s'.\n", sym->name);
-                #endif
 
-                // 1. Free the *contents* of the old set value stored in the symbol.
-                //    freeValue handles freeing the set_values array if it exists.
-                freeValue(sym->value);
 
-                // 2. Perform a deep copy of the new set value ('val') and assign it
-                //    to the symbol's value struct. makeCopyOfValue now handles sets.
-                //    This overwrites the entire sym->value struct with the new deep copy.
-                *sym->value = makeCopyOfValue(&val);
+    // --- Type Compatibility Check ---
 
-                // 3. Ensure the type is correctly set (though makeCopyOfValue should preserve it)
-                sym->value->type = TYPE_SET;
-
-            } else {
-                // Assigning a non-set type to a SET is an error
-                fprintf(stderr, "Runtime error: type mismatch in set assignment for '%s'. Expected TYPE_SET, got %s.\n", sym->name, varTypeToString(val.type));
-                EXIT_FAILURE_HANDLER();
-            }
-            break; // End case TYPE_SET
+    bool types_compatible = false;
+    if (sym->type == val.type) {
+        types_compatible = true; // Same types are always compatible
+    } else if (sym->type == TYPE_POINTER) {
+        // Target is POINTER. Allow assigning POINTER or NIL.
+        if (val.type == TYPE_POINTER) { // NIL is also TYPE_POINTER
+            types_compatible = true;
+            // Add stricter base type check here if desired for non-nil assignments:
+            // if (val.ptr_val != NULL && sym->value->base_type_node != val.base_type_node) {
+            //    fprintf(stderr, "Runtime error: Incompatible pointer types in assignment to '%s'.\n", name);
+            //    EXIT_FAILURE_HANDLER();
+            // }
         }
-        // Add other cases for debug printing if needed
-        default:
-            DEBUG_PRINT("Type %s", varTypeToString(val.type));
-            break;
-    }
-    DEBUG_PRINT("\n");
-#endif
+    } else if (val.type == TYPE_POINTER) {
+        // Assigning POINTER/NIL to a non-pointer type is always an error.
+        types_compatible = false;
+    } else {
+        // Check other compatible non-pointer assignments
+        if (sym->type == TYPE_REAL && val.type == TYPE_INTEGER) types_compatible = true;
+        else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
+        else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
+        else if (sym->type == TYPE_WORD && val.type == TYPE_INTEGER) types_compatible = true;
+        else if (sym->type == TYPE_BYTE && val.type == TYPE_INTEGER) types_compatible = true;
+        else if (sym->type == TYPE_BOOLEAN && val.type == TYPE_INTEGER) types_compatible = true; // Allow Int (0/1) to Bool
+        else if (sym->type == TYPE_INTEGER && val.type == TYPE_BOOLEAN) types_compatible = true; // Allow Bool (0/1) to Int
+        else if (sym->type == TYPE_CHAR && val.type == TYPE_INTEGER) types_compatible = true; // Allow Int Ordinal to Char
+        else if (sym->type == TYPE_INTEGER && val.type == TYPE_CHAR) types_compatible = true; // Allow Char Ordinal to Int
+        else if (sym->type == TYPE_INTEGER && (val.type == TYPE_BYTE || val.type == TYPE_WORD)) types_compatible = true; // Allow Byte/Word to Int
+        // Add array/record compatibility checks if needed (usually types must match exactly)
+        else if (sym->type == TYPE_ARRAY && val.type == TYPE_ARRAY) types_compatible = true; // Basic check, deeper check needed
+        else if (sym->type == TYPE_RECORD && val.type == TYPE_RECORD) types_compatible = true; // Basic check, deeper check needed
+        else if (sym->type == TYPE_SET && val.type == TYPE_SET) types_compatible = true; // Basic check
+        else if (sym->type == TYPE_ENUM && val.type == TYPE_ENUM) {
+             // Allow assigning enums if they are the same underlying type (check name)
+             if (sym->value && val.enum_val.enum_name && sym->value->enum_val.enum_name &&
+                 strcmp(sym->value->enum_val.enum_name, val.enum_val.enum_name) == 0) {
+                 types_compatible = true;
+             } else if (!sym->value->enum_val.enum_name || !val.enum_val.enum_name) {
+                  #ifdef DEBUG
+                  fprintf(stderr, "Warning: Assigning enums with missing type names for '%s'. Assuming compatible.\n", name);
+                  #endif
+                  types_compatible = true; // Allow if names missing, rely on ordinal
+             } else {
+                 // Mismatched enum types
+                  types_compatible = false;
+             }
+        }
+         else if (sym->type == TYPE_ENUM && val.type == TYPE_INTEGER) types_compatible = true; // Allow Int Ordinal to Enum
 
-    // Look up the symbol in the symbol table
-    //Symbol *sym = lookupSymbol(name);
-    if (!sym) {
-        fprintf(stderr, "Runtime error: variable '%s' not declared.\n", name);
+    }
+
+    if (!types_compatible) {
+        fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for LHS '%s'.\n",
+                varTypeToString(val.type), varTypeToString(sym->type), name);
         EXIT_FAILURE_HANDLER();
     }
+    // --- End Type Compatibility Check ---
 
-    // Optional: Print debug message if types don't match but are compatible
-    // (Keep the existing compatible type check logic)
-    if (sym->type != val.type) {
-        if (!((sym->type == TYPE_REAL && val.type == TYPE_INTEGER) ||
-              (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) || // Added NULL check for val.s_val
-              (sym->type == TYPE_WORD && val.type == TYPE_INTEGER) ||
-              (sym->type == TYPE_BYTE && val.type == TYPE_INTEGER) ||
-              (sym->type == TYPE_BOOLEAN && val.type == TYPE_INTEGER) || // Added Boolean/Int check
-              (sym->type == TYPE_CHAR && val.type == TYPE_INTEGER))) { // Added Char/Int check
-            // Print only if types are truly incompatible according to your rules
-#ifdef DEBUG
-            fprintf(stderr, "Debug: Type conversion warning for '%s': expected %s, got %s\n",
-                    name, varTypeToString(sym->type), varTypeToString(val.type));
-#endif
-        }
-    }
 
     // --- Main Assignment Logic ---
     // This switch operates on the TYPE OF THE SYMBOL being assigned TO (sym->type)
     switch (sym->type) {
         case TYPE_INTEGER:
-            // Allow assignment from Integer, Real (truncated), Byte, Word, Boolean, Char (ordinal)
-             if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) {
-                 sym->value->i_val = val.i_val; // Copy integer value (0/1 for bool)
-             } else if (val.type == TYPE_CHAR) {
-                 sym->value->i_val = (long long)val.c_val; // Assign ordinal value of char
-             } else if (val.type == TYPE_REAL) {
-                 sym->value->i_val = (long long)val.r_val; // Truncate real
-             } else {
-                  // Type mismatch if none of the above
-                  fprintf(stderr, "Runtime error: Type mismatch assigning to INTEGER. Cannot assign %s.\n", varTypeToString(val.type));
-                  EXIT_FAILURE_HANDLER();
-             }
+            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) { sym->value->i_val = val.i_val; }
+            else if (val.type == TYPE_CHAR) { sym->value->i_val = (long long)val.c_val; }
+            else if (val.type == TYPE_REAL) { sym->value->i_val = (long long)val.r_val; }
+            else { /* Should have been caught */ }
             break;
         case TYPE_REAL:
-            // Assign REAL or INTEGER (promoted) to REAL
             sym->value->r_val = (val.type == TYPE_REAL) ? val.r_val : (double)val.i_val;
             break;
         case TYPE_BYTE:
+            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
+                // TODO: Add range check for byte (0-255)
+                 if (val.i_val < 0 || val.i_val > 255) fprintf(stderr, "Warning: Overflow assigning %lld to BYTE variable '%s'.\n", val.i_val, name);
+                 sym->value->i_val = (val.i_val & 0xFF); // Mask to byte range
+            } else { /* Should have been caught */ }
+            break;
         case TYPE_WORD:
-            // Assign INTEGER to BYTE/WORD (potential range issues ignored here)
-            if (val.type == TYPE_INTEGER || val.type == sym->type) {
-                sym->value->i_val = val.i_val;
-             } else {
-                fprintf(stderr, "Runtime error: type mismatch in %s assignment.\n",
-                        (sym->type == TYPE_BYTE) ? "byte" : "word");
-                EXIT_FAILURE_HANDLER();
-            }
+            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
+                // TODO: Add range check for word (0-65535)
+                 if (val.i_val < 0 || val.i_val > 65535) fprintf(stderr, "Warning: Overflow assigning %lld to WORD variable '%s'.\n", val.i_val, name);
+                 sym->value->i_val = (val.i_val & 0xFFFF); // Mask to word range
+            } else { /* Should have been caught */ }
             break;
         case TYPE_STRING:
-             // Free existing string value if any
-            if (sym->value->s_val) {
-                free(sym->value->s_val);
-                sym->value->s_val = NULL; // Avoid double free if strdup fails
-            }
+             // Free existing string value first
+            if (sym->value->s_val) { free(sym->value->s_val); sym->value->s_val = NULL; }
+            const char* source_str = NULL; char char_buf[2];
+            if (val.type == TYPE_STRING) { source_str = val.s_val; }
+            else if (val.type == TYPE_CHAR) { char_buf[0] = val.c_val; char_buf[1] = '\0'; source_str = char_buf; }
+            else { /* Should have been caught */ }
+            if (!source_str) source_str = ""; // Safety for NULL source
 
-            const char* source_str = NULL;
-            char char_buf[2]; // Buffer for converting char to string
-
-            if (val.type == TYPE_STRING) {
-                source_str = val.s_val;
-            } else if (val.type == TYPE_CHAR) {
-                // Handle assigning a CHAR to a STRING
-                char_buf[0] = val.c_val;
-                char_buf[1] = '\0';
-                source_str = char_buf;
-            } else {
-                 fprintf(stderr, "Runtime error: Type mismatch assigning to STRING. Cannot assign %s.\n", varTypeToString(val.type));
-                 EXIT_FAILURE_HANDLER();
-            }
-
-            // Handle fixed-length strings
-            if (sym->value->max_length > 0) {
-                size_t source_len = source_str ? strlen(source_str) : 0;
+            if (sym->value->max_length > 0) { // Fixed-length string
+                size_t source_len = strlen(source_str);
                 size_t copy_len = (source_len > (size_t)sym->value->max_length) ? (size_t)sym->value->max_length : source_len;
-
-                // Allocate exactly max_length + 1
                 sym->value->s_val = malloc((size_t)sym->value->max_length + 1);
-                if (!sym->value->s_val) {
-                    fprintf(stderr, "FATAL: Memory allocation failed in updateSymbol (fixed string).\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-                if (source_str) {
-                    strncpy(sym->value->s_val, source_str, copy_len);
-                }
-                sym->value->s_val[copy_len] = '\0'; // Ensure null termination
-
-            } else { // Handle dynamic strings
-                sym->value->s_val = source_str ? strdup(source_str) : strdup("");
-                if (!sym->value->s_val) {
-                    fprintf(stderr, "FATAL: Memory allocation failed in updateSymbol (dynamic string strdup).\n");
-                    EXIT_FAILURE_HANDLER();
-                }
+                if (!sym->value->s_val) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+                strncpy(sym->value->s_val, source_str, copy_len);
+                sym->value->s_val[copy_len] = '\0';
+            } else { // Dynamic string
+                sym->value->s_val = strdup(source_str);
+                if (!sym->value->s_val) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
             }
             break;
-
         case TYPE_RECORD:
-            if (val.type == TYPE_RECORD) {
-                // Free existing record fields first if necessary
-                if (sym->value->record_val) {
-                    freeFieldValue(sym->value->record_val); // Assumes freeFieldValue handles deep free
-                }
-                sym->value->record_val = copyRecord(val.record_val); // Assumes copyRecord handles deep copy
-                if (!sym->value->record_val && val.record_val) { // Check if copy failed potentially
-                     fprintf(stderr, "FATAL: Failed to copy record value in updateSymbol.\n");
-                     EXIT_FAILURE_HANDLER();
-                }
-            } else {
-                fprintf(stderr, "Runtime error: type mismatch in record assignment.\n");
-                EXIT_FAILURE_HANDLER();
-            }
-            break;
+             if (val.type == TYPE_RECORD) {
+                 freeValue(sym->value); // Free old fields/data
+                 *sym->value = makeCopyOfValue(&val); // Deep copy
+                 sym->value->type = TYPE_RECORD;
+             } else { /* Should have been caught */ }
+             break;
         case TYPE_BOOLEAN:
-            // Assign BOOLEAN or INTEGER (0=false, non-zero=true) to BOOLEAN
-            if (val.type == TYPE_BOOLEAN) {
-                sym->value->i_val = val.i_val;
-            } else if (val.type == TYPE_INTEGER) {
-                sym->value->i_val = (val.i_val != 0) ? 1 : 0;
-            } else {
-                fprintf(stderr, "Runtime error: type mismatch in boolean assignment.\n");
-                EXIT_FAILURE_HANDLER();
-            }
+            if (val.type == TYPE_BOOLEAN) { sym->value->i_val = val.i_val; }
+            else if (val.type == TYPE_INTEGER) { sym->value->i_val = (val.i_val != 0) ? 1 : 0; }
+            else { /* Should have been caught */ }
             break;
         case TYPE_FILE:
-            if (val.type == TYPE_FILE) {
-                sym->value->f_val = val.f_val; // Note: Shallow copy of FILE pointer
-                if (sym->value->filename) free(sym->value->filename);
-                sym->value->filename = val.filename ? strdup(val.filename) : NULL;
-            } else {
-                fprintf(stderr, "Runtime error: type mismatch in file assignment.\n");
-                EXIT_FAILURE_HANDLER();
-            }
-            break;
-        case TYPE_ARRAY: {
-                    // Ensure incoming value is also an array
-                    if (val.type != TYPE_ARRAY) {
-                        fprintf(stderr, "Runtime error: type mismatch in array assignment (expected ARRAY, got %s).\n", varTypeToString(val.type));
-                        EXIT_FAILURE_HANDLER();
-                    }
-                    // Check if dimensions match (optional but recommended)
-                    if (sym->value && sym->value->array_val && sym->value->dimensions != val.dimensions) {
-                         fprintf(stderr, "Runtime error: Array dimension mismatch in assignment for '%s' (expected %d, got %d).\n", sym->name, sym->value->dimensions, val.dimensions);
-                         // Consider freeing existing sym->value array data here if necessary before exiting
-                         EXIT_FAILURE_HANDLER();
-                    }
-
-                    // --- Correctly Free Existing Array Data (if any) ---
-                    if (sym->value && sym->value->array_val) {
-        #ifdef DEBUG
-                        fprintf(stderr,"[DEBUG_UPDATE] Freeing old array for '%s'\n", sym->name);
-        #endif
-                        int old_total_size = 1;
-                        // Check if bounds arrays exist before accessing them
-                        if (sym->value->dimensions > 0 && sym->value->lower_bounds && sym->value->upper_bounds) {
-                             for (int i = 0; i < sym->value->dimensions; i++) {
-                                 old_total_size *= (sym->value->upper_bounds[i] - sym->value->lower_bounds[i] + 1);
-                             }
-                        } else {
-                            old_total_size = 0; // Cannot determine size if info missing
-                        }
-
-                        for (int i = 0; i < old_total_size; i++) {
-                            freeValue(&sym->value->array_val[i]); // Deep free elements
-                        }
-                        free(sym->value->array_val);
-                        free(sym->value->lower_bounds); // Free the bounds arrays
-                        free(sym->value->upper_bounds);
-                        sym->value->array_val = NULL;
-                        sym->value->lower_bounds = NULL;
-                        sym->value->upper_bounds = NULL;
-                        sym->value->dimensions = 0;
-                    }
-
-                    // --- Allocate and Copy New Array Data ---
-        #ifdef DEBUG
-                     fprintf(stderr,"[DEBUG_UPDATE] Allocating and copying new array for '%s'\n", sym->name);
-        #endif
-                     // Calculate correct total size using incoming value's multi-dim info
-                     int new_total_size = 1;
-                     if (val.dimensions <= 0 || !val.lower_bounds || !val.upper_bounds) {
-                         fprintf(stderr, "Runtime error: Invalid dimensions or bounds in source array for assignment to '%s'.\n", sym->name);
-                         EXIT_FAILURE_HANDLER(); // Exit, cannot proceed
-                     }
-                     for (int i = 0; i < val.dimensions; i++) {
-                         new_total_size *= (val.upper_bounds[i] - val.lower_bounds[i] + 1);
-                     }
-
-                     // Allocate space for the Value structs
-                     sym->value->array_val = malloc(sizeof(Value) * new_total_size);
-                     if (!sym->value->array_val) { fprintf(stderr, "Memory allocation error in array assignment (array_val).\n"); EXIT_FAILURE_HANDLER(); }
-
-                     // Allocate and copy bounds arrays
-                     sym->value->lower_bounds = malloc(sizeof(int) * val.dimensions);
-                     sym->value->upper_bounds = malloc(sizeof(int) * val.dimensions);
-                     if (!sym->value->lower_bounds || !sym->value->upper_bounds) { fprintf(stderr, "Memory allocation error in array assignment (bounds).\n"); EXIT_FAILURE_HANDLER(); }
-
-                     memcpy(sym->value->lower_bounds, val.lower_bounds, sizeof(int) * val.dimensions);
-                     memcpy(sym->value->upper_bounds, val.upper_bounds, sizeof(int) * val.dimensions);
-
-                     // Copy metadata
-                     sym->value->dimensions = val.dimensions;
-                     sym->value->element_type = val.element_type;
-                     sym->value->element_type_def = val.element_type_def; // Copy type def link
-
-                     // Deep copy each element
-                     for (int i = 0; i < new_total_size; i++) {
-                         sym->value->array_val[i] = makeCopyOfValue(&val.array_val[i]);
-                     }
-                     sym->value->type = TYPE_ARRAY; // Ensure type is set correctly
-                    break;
-                } 
+             // Error - should have been caught by type check unless adding specific FILE logic
+             fprintf(stderr, "Runtime error: Direct assignment of FILE variables is not supported.\n");
+             EXIT_FAILURE_HANDLER();
+             break;
+        case TYPE_ARRAY:
+             if (val.type == TYPE_ARRAY) {
+                 // TODO: Add dimension/bounds/type compatibility checks here if needed before copy
+                 freeValue(sym->value); // Frees old array data/bounds
+                 *sym->value = makeCopyOfValue(&val); // Deep copy
+                 sym->value->type = TYPE_ARRAY;
+             } else { /* Should have been caught */ }
+             break;
         case TYPE_CHAR:
-            if (val.type == TYPE_CHAR) {
-                // Assigning CHAR to CHAR
-                sym->value->c_val = val.c_val;
-                sym->value->type = TYPE_CHAR; // Explicitly set type
-            }
-            else if (val.type == TYPE_STRING) {
-                // Assigning non-empty STRING to CHAR (take first char)
-                if (val.s_val && val.s_val[0] != '\0') {
-                    // Ensure string has exactly one char for strictness (optional)
-                    // if (strlen(val.s_val) != 1) {
-                    //    fprintf(stderr, "Runtime error: Assigning multi-char string to char.\n");
-                    //    EXIT_FAILURE_HANDLER();
-                    // }
-                    sym->value->c_val = val.s_val[0]; // Copy character
-                    sym->value->type = TYPE_CHAR;     // <<< FIX: Set type to CHAR
-                } else {
-                    fprintf(stderr, "Runtime error: Cannot assign empty string to char.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-            }
-            else if (val.type == TYPE_INTEGER) {
-                // Assigning INTEGER to CHAR (use integer as ordinal value)
-                sym->value->c_val = (char)val.i_val; // Cast integer ordinal to char
-                sym->value->type = TYPE_CHAR;     // <<< FIX: Set type to CHAR
-            }
-            else {
-                // Any other type is a mismatch
-                fprintf(stderr, "Runtime error: Type mismatch assigning to CHAR. Cannot assign %s.\n", varTypeToString(val.type));
-                EXIT_FAILURE_HANDLER();
-            }
-            // Free old string value IF the symbol *was* storing a string before
-            // This is complex - safer to handle freeing during value destruction
-            // or ensure makeValueForType initializes properly. We'll assume
-            // previous value was handled or was not a string.
-            break; // End case TYPE_CHAR
-
-        case TYPE_MEMORYSTREAM:
-            if (val.type == TYPE_MEMORYSTREAM) {
-                 // Free existing stream if necessary? Depends on ownership semantics.
-                 // if (sym->value->mstream) freeMemoryStream(sym->value->mstream);
-                 sym->value->mstream = val.mstream; // Shallow copy of pointer
-            } else {
-                fprintf(stderr, "Runtime error: type mismatch in memory stream assignment.\n");
-                EXIT_FAILURE_HANDLER();
-            }
+            if (val.type == TYPE_CHAR) { sym->value->c_val = val.c_val; }
+            else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) { sym->value->c_val = val.s_val[0]; }
+            else if (val.type == TYPE_INTEGER) { sym->value->c_val = (char)val.i_val; } // Assign char by ordinal
+            else { /* Should have been caught */ }
+            sym->value->type = TYPE_CHAR; // Ensure type is CHAR
             break;
-        case TYPE_ENUM: {
-            // Target symbol is an ENUM
-            if (val.type == TYPE_ENUM) {
-                // Assigning ENUM to ENUM
-
-                // --- MODIFICATION: Force strdup approach ---
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG UPDATE ENUM] Forcing strdup for symbol '%s'. Incoming name: '%s'\n",
-                        sym->name, val.enum_val.enum_name ? val.enum_val.enum_name : "<NULL>");
-                #endif
-
-                // 1. Free the existing name in the symbol's value struct, if any.
-                //    Check pointer before freeing for safety.
-                if (sym->value && sym->value->enum_val.enum_name) {
-                     #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG UPDATE ENUM] Freeing old name '%s' at %p for symbol '%s'\n",
-                             sym->value->enum_val.enum_name, (void*)sym->value->enum_val.enum_name, sym->name);
-                     #endif
-                    free(sym->value->enum_val.enum_name);
-                    sym->value->enum_val.enum_name = NULL; // Avoid dangling pointer
-                }
-
-                // 2. Duplicate the name from the source value ('val').
-                //    Check source pointer before strdup.
-                sym->value->enum_val.enum_name = val.enum_val.enum_name ? strdup(val.enum_val.enum_name) : NULL;
-
-                // 3. Check if strdup failed (if source was not NULL)
-                if (val.enum_val.enum_name && !sym->value->enum_val.enum_name) {
-                     fprintf(stderr, "FATAL: strdup failed for enum name in updateSymbol (forced copy)\n");
-                     EXIT_FAILURE_HANDLER();
-                 }
-                 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG UPDATE ENUM] Symbol '%s' new name pointer: %p ('%s')\n",
-                         sym->name, (void*)sym->value->enum_val.enum_name,
-                         sym->value->enum_val.enum_name ? sym->value->enum_val.enum_name : "<NULL>");
-                 #endif
-                 // --- End Force strdup approach ---
-
-
-                // Assign ordinal value (always do this if types are compatible)
-                sym->value->enum_val.ordinal = val.enum_val.ordinal;
-                sym->value->type = TYPE_ENUM; // Ensure type is correct
-
-            } else if (val.type == TYPE_INTEGER) {
-                // Assigning INTEGER to ENUM (logic remains the same)
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG UPDATE ENUM] Assigning Integer %lld as ordinal to Enum '%s'\n", val.i_val, sym->name);
-                #endif
-                // Add bounds check if possible
-                AST* typeDef = sym->type_def;
-                if (typeDef && typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
-                if (typeDef && typeDef->type == AST_ENUM_TYPE) {
-                    int highOrdinal = typeDef->child_count - 1;
-                    if (val.i_val < 0 || val.i_val > highOrdinal) {
-                        fprintf(stderr, "Runtime error: Integer value %lld out of range for enum type '%s'.\n", val.i_val, sym->value->enum_val.enum_name ? sym->value->enum_val.enum_name : sym->name);
-                        EXIT_FAILURE_HANDLER();
-                    }
-                }
-                sym->value->enum_val.ordinal = (int)val.i_val; // Assign ordinal
-                sym->value->type = TYPE_ENUM; // Ensure type is correct
-                // enum_name remains unchanged when assigning integer
-            } else {
-                // Assigning other types to ENUM is an error
-                fprintf(stderr, "Runtime error: type mismatch in enum assignment for '%s'. Expected TYPE_ENUM or TYPE_INTEGER, got %s.\n", sym->name, varTypeToString(val.type));
-                EXIT_FAILURE_HANDLER();
-            }
-            break; // End case TYPE_ENUM
-        } // End TYPE_ENUM block
+        case TYPE_MEMORYSTREAM:
+             if (val.type == TYPE_MEMORYSTREAM) {
+                  // Shallow copy pointer - Requires careful memory management by user
+                  sym->value->mstream = val.mstream;
+             } else { /* Should have been caught */ }
+             break;
+        case TYPE_ENUM:
+             if (val.type == TYPE_ENUM) {
+                  // Free old name if exists
+                 if (sym->value->enum_val.enum_name) { free(sym->value->enum_val.enum_name); sym->value->enum_val.enum_name = NULL;}
+                 // Copy name (strdup)
+                 sym->value->enum_val.enum_name = val.enum_val.enum_name ? strdup(val.enum_val.enum_name) : NULL;
+                 if (val.enum_val.enum_name && !sym->value->enum_val.enum_name) { /* Malloc error */ EXIT_FAILURE_HANDLER();}
+                 // Copy ordinal
+                 sym->value->enum_val.ordinal = val.enum_val.ordinal;
+             } else if (val.type == TYPE_INTEGER) {
+                 // Assign INTEGER to ENUM (assign ordinal, check bounds)
+                  AST* typeDef = sym->type_def; // Use the target symbol's type definition
+                  if (typeDef && typeDef->type == AST_TYPE_REFERENCE) typeDef = lookupType(typeDef->token->value); // Resolve reference
+                  if (typeDef && typeDef->type == AST_ENUM_TYPE) {
+                      int highOrdinal = typeDef->child_count - 1;
+                      if (val.i_val < 0 || val.i_val > highOrdinal) {
+                          fprintf(stderr, "Runtime error: Integer value %lld out of range for enum type '%s'.\n", val.i_val, sym->value->enum_val.enum_name ? sym->value->enum_val.enum_name : sym->name);
+                          EXIT_FAILURE_HANDLER();
+                      }
+                  } else { /* Warning or error if cannot check bounds */ }
+                  sym->value->enum_val.ordinal = (int)val.i_val;
+                  // Keep existing enum_name
+             } else { /* Should have been caught */ }
+             sym->value->type = TYPE_ENUM; // Ensure type is ENUM
+             break;
         case TYPE_SET:
-            {
-                // Target symbol is a SET
-                if (val.type == TYPE_SET) {
-                    // Assigning SET to SET
-                    #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG UPDATE SET] Assigning set to symbol '%s'.\n", sym->name);
-                    #endif
+             if (val.type == TYPE_SET) {
+                 // Free existing set contents
+                 freeValue(sym->value);
+                 *sym->value = makeCopyOfValue(&val); // Deep copy
+                 sym->value->type = TYPE_SET;
+             } else { /* Should have been caught */ }
+             break;
+        case TYPE_POINTER:
+            // Type check already ensured val.type is TYPE_POINTER (incl. nil)
+            // Perform shallow copy of the pointer value (address or NULL)
+            sym->value->ptr_val = val.ptr_val;
 
-                    // 1. Free the *contents* of the old set value stored in the symbol.
-                    //    freeValue handles freeing the set_values array if it exists.
-                    freeValue(sym->value);
+            // --- REMOVED THE INCORRECT COPY OF base_type_node ---
+            // The base type is fixed by the variable's declaration and
+            // should not change during assignment. Assigning nil should
+            // definitely not clear the base type information.
+            // sym->value->base_type_node = val.base_type_node; // <<< REMOVE THIS LINE >>>
 
-                    // 2. Perform a deep copy of the new set value ('val') and assign it
-                    //    to the symbol's value struct. makeCopyOfValue now handles sets.
-                    //    This overwrites the entire sym->value struct with the new deep copy.
-                    *sym->value = makeCopyOfValue(&val);
-
-                    // 3. Ensure the type is correctly set (though makeCopyOfValue should preserve it)
-                    sym->value->type = TYPE_SET;
-
-                } else {
-                    // Assigning a non-set type to a SET is an error
-                    fprintf(stderr, "Runtime error: type mismatch in set assignment for '%s'. Expected TYPE_SET, got %s.\n", sym->name, varTypeToString(val.type));
-                    EXIT_FAILURE_HANDLER();
-                }
-                break; // End case TYPE_SET
-            }
-            // <<< ADD THIS CASE END >>> // Or verify it exists
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG UPDATE] Assigning pointer value %p to symbol '%s'\n", (void*)val.ptr_val, name);
+            #endif
+            break;
 
         default:
-            fprintf(stderr, "Runtime error: unhandled type (%s) in updateSymbol assignment.\n", varTypeToString(sym->type));
+            // Should not happen if type system is complete
+            fprintf(stderr, "Runtime error: unhandled target type (%s) in updateSymbol assignment logic.\n", varTypeToString(sym->type));
             EXIT_FAILURE_HANDLER();
     } // End switch (sym->type)
 }
