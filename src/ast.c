@@ -234,11 +234,13 @@ void freeAST(AST *node) {
 
 // --- dumpASTFromRoot Function ---
 void dumpASTFromRoot(AST *node) {
+    printf("===== Dumping AST From Root START =====\n");
     if (!node) return;
     while (node->parent != NULL) {
         node = node->parent;
     }
     dumpAST(node, 0);
+    printf("===== Dumping AST From Root END =====\n");
 }
 
 // --- printIndent Helper ---
@@ -620,6 +622,19 @@ AST *copyAST(AST *node) {
     AST *copiedLeft = copyAST(node->left);
     AST *copiedRight = copyAST(node->right);
     AST *copiedExtra = copyAST(node->extra);
+    
+#ifdef DEBUG
+// ADDED: Debug print after copying right child
+if (node->type == AST_POINTER_TYPE || node->type == AST_TYPE_REFERENCE) {
+    fprintf(stderr, "[DEBUG copyAST] Copied Node %p (Type %s). Original->right=%p. Copied Node %p->right set to %p (Type %s).\n",
+            (void*)node, astTypeToString(node->type), (void*)node->right,
+            (void*)newNode, (void*)copiedRight, copiedRight ? astTypeToString(copiedRight->type) : "NULL");
+    if (node->type == AST_POINTER_TYPE && copiedRight) {
+         fprintf(stderr, "[DEBUG copyAST]   Base type node copied for POINTER_TYPE is at %p (Type %s)\n", (void*)copiedRight, astTypeToString(copiedRight->type));
+    }
+    fflush(stderr);
+}
+#endif
 
     newNode->left = copiedLeft; if (newNode->left) newNode->left->parent = newNode;
     newNode->right = copiedRight; if (newNode->right) newNode->right->parent = newNode;

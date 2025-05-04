@@ -1565,193 +1565,73 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
 }
 
 static void processDeclarations(AST *decl, bool is_global_block) {
+    // Check if decl is a valid COMPOUND node containing declarations
+    if (!decl || decl->type != AST_COMPOUND) {
+         if (decl && decl->type != AST_NOOP) { /* Warning or ignore */ }
+         return; // Nothing to process
+     }
+
+    // Iterate through all top-level declaration nodes (VAR_DECL, CONST_DECL, TYPE_DECL...)
     for (int i = 0; i < decl->child_count; i++) {
-        AST *d = decl->children[i];
-        if (d->type != AST_VAR_DECL) continue;
+        AST *d = decl->children[i]; // d is a VAR_DECL group, CONST_DECL, TYPE_DECL etc.
+        if (!d) continue;
 
-        for (int j = 0; j < d->child_count; j++) {
-            AST *varNode = d->children[j];
-            const char *varname = varNode->token->value;
+        // Handle VAR_DECL specifically
+        if (d->type == AST_VAR_DECL) {
+            // d->child_count > 0 holds the VARIABLE nodes (names)
+            // d->right holds the type definition node (e.g., TYPE_REFERENCE to PInt)
+            // d->var_type holds the resolved VarType enum (e.g., TYPE_POINTER)
 
-            if (is_global_block) {
-                insertGlobalSymbol(varname, d->var_type, d->right);
-                DEBUG_PRINT("[DEBUG] insertGlobalSymbol('%s', type=%s)\n", varname, varTypeToString(d->var_type));
-            } else {
-                insertLocalSymbol(varname, d->var_type, d->right, true);
-                DEBUG_PRINT("[DEBUG] insertLocalSymbol('%s', type=%s)\n", varname, varTypeToString(d->var_type));
-            }
+            for (int j = 0; j < d->child_count; j++) {
+                AST *varNode = d->children[j]; // The AST_VARIABLE node for the name (e.g., p1)
+                if (!varNode || !varNode->token) continue; // Skip invalid variable nodes
 
-            Symbol *sym = lookupSymbol(varname);
-            if (!sym) {
-                fprintf(stderr, "Internal error: Symbol '%s' not found after insertion.\n", varname);
-                EXIT_FAILURE_HANDLER();
-            }
+                const char *varname = varNode->token->value; // e.g., "p1"
+                VarType varType = d->var_type;         // e.g., TYPE_POINTER
+                AST* typeDefNode = d->right;           // e.g., TYPE_REFERENCE("pint")
 
-            if (sym->value == NULL) {
-                sym->value = malloc(sizeof(Value));
-                if (!sym->value) {
-                    fprintf(stderr, "Memory allocation failed for symbol value\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-                *sym->value = makeValueForType(sym->type, d->right);
-            }
-
-            if (d->var_type == TYPE_RECORD && d->right) {
-                *sym->value = makeRecord(createEmptyRecord(d->right));
-            }
-
-            else if (d->var_type == TYPE_ARRAY && d->right) {
-                AST *typeDefinitionNode = d->right; // This could be ARRAY_TYPE or TYPE_REFERENCE
-                AST *actualArrayTypeNode = NULL;    // <<< DECLARE THE VARIABLE HERE
-
-                // Resolve if it's a reference
-                if (typeDefinitionNode->type == AST_TYPE_REFERENCE) {
-                    // Assuming the parser correctly links the reference to the actual definition
-                    // via the 'right' pointer of the AST_TYPE_REFERENCE node.
-                    actualArrayTypeNode = typeDefinitionNode->right;
-                } else if (typeDefinitionNode->type == AST_ARRAY_TYPE) {
-                    // It's an inline definition
-                    actualArrayTypeNode = typeDefinitionNode;
+                // --- Insert the symbol ---
+                // insertGlobal/LocalSymbol now handles allocation AND initialization via makeValueForType
+                if (is_global_block) {
+                    insertGlobalSymbol(varname, varType, typeDefNode);
+                    #ifdef DEBUG
+                    // Keep this print if desired
+                    // fprintf(stderr, "[DEBUG] processDeclarations: Called insertGlobalSymbol('%s', type=%s)\n", varname, varTypeToString(varType));
+                    #endif
                 } else {
-                    // Error: Unexpected node type
-                    fprintf(stderr, "Internal error: Unexpected node type (%s) for array variable '%s'. Expected ARRAY_TYPE or TYPE_REFERENCE.\n",
-                                     astTypeToString(typeDefinitionNode->type),
-                                     d->children[0]->token->value);
-                    dumpASTFromRoot(d);
-                    EXIT_FAILURE_HANDLER();
+                    insertLocalSymbol(varname, varType, typeDefNode, true); // true indicates it's a local variable
+                     #ifdef DEBUG
+                    // fprintf(stderr, "[DEBUG] processDeclarations: Called insertLocalSymbol('%s', type=%s)\n", varname, varTypeToString(varType));
+                    #endif
                 }
 
-                // Check if we successfully found/resolved the AST_ARRAY_TYPE node
-                if (!actualArrayTypeNode || actualArrayTypeNode->type != AST_ARRAY_TYPE) {
-                    fprintf(stderr, "Internal error: Failed to find or resolve AST_ARRAY_TYPE node for '%s'. Found %s instead.\n",
-                                     d->children[0]->token->value,
-                                     actualArrayTypeNode ? astTypeToString(actualArrayTypeNode->type) : "NULL");
-                    dumpASTFromRoot(d); // Dump AST for context
-                    EXIT_FAILURE_HANDLER();
-                }
+                // --- REMOVED Redundant/Harmful Initialization Block ---
+                // The symbol's value (including base_type_node for pointers)
+                // is now fully initialized by insertGlobal/LocalSymbol -> makeValueForType.
+                // No further initialization is needed here.
 
-
-                // Get dimensions and bounds from the children of the AST_ARRAY_TYPE node
-                int dimensions = actualArrayTypeNode->child_count;
-                if (dimensions <= 0) {
-                     fprintf(stderr, "Runtime error: Array declaration has no dimensions for '%s'.\n", d->children[0]->token->value);
-                     EXIT_FAILURE_HANDLER();
-                }
-                int *lower_bounds = malloc(sizeof(int) * dimensions);
-                int *upper_bounds = malloc(sizeof(int) * dimensions);
-                 if (!lower_bounds || !upper_bounds) {
-                     fprintf(stderr, "Memory allocation failed for array bounds\n");
-                     EXIT_FAILURE_HANDLER();
-                 }
-
-                for (int dim = 0; dim < dimensions; dim++) {
-                    AST *subrange = actualArrayTypeNode->children[dim];
-                    if (!subrange || subrange->type != AST_SUBRANGE) {
-                         fprintf(stderr, "Internal error: Expected AST_SUBRANGE in array type for '%s'.\n", d->children[0]->token->value);
-                         free(lower_bounds);
-                         free(upper_bounds);
-                         EXIT_FAILURE_HANDLER();
-                    }
-                    lower_bounds[dim] = (int)eval(subrange->left).i_val;
-                    upper_bounds[dim] = (int)eval(subrange->right).i_val;
-                     if (lower_bounds[dim] > upper_bounds[dim]) {
-                         fprintf(stderr, "Runtime error: Array lower bound (%d) > upper bound (%d) for dimension %d of '%s'.\n",
-                                 lower_bounds[dim], upper_bounds[dim], dim + 1, d->children[0]->token->value);
-                         free(lower_bounds);
-                         free(upper_bounds);
-                         EXIT_FAILURE_HANDLER();
-                     }
-                }
-
-                // Get the element type node from the RIGHT pointer of the AST_ARRAY_TYPE node
-                VarType elemType = TYPE_VOID;
-                AST *elemTypeNode = actualArrayTypeNode->right; // Correct node for element type
-
-                if (!elemTypeNode) { // Check if element type node exists
-                    fprintf(stderr, "Runtime error: Array element type definition is missing for '%s'.\n", d->children[0]->token->value);
-                    free(lower_bounds);
-                    free(upper_bounds);
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                // Determine VarType based on the element type node
-                 if (elemTypeNode->type == AST_VARIABLE && elemTypeNode->token) {
-                     const char *elemTypeStr = elemTypeNode->token->value;
-                     if (strcasecmp(elemTypeStr, "integer") == 0) elemType = TYPE_INTEGER;
-                     else if (strcasecmp(elemTypeStr, "real") == 0) elemType = TYPE_REAL;
-                     else if (strcasecmp(elemTypeStr, "string") == 0) elemType = TYPE_STRING;
-                     else if (strcasecmp(elemTypeStr, "char") == 0) elemType = TYPE_CHAR;
-                     else if (strcasecmp(elemTypeStr, "boolean") == 0) elemType = TYPE_BOOLEAN;
-                     // ... add other built-in types ...
-                     else {
-                        AST* userTypeDefinition = lookupType(elemTypeStr); // Check if it's a named type
-                        if(userTypeDefinition) {
-                           elemType = userTypeDefinition->var_type;
-                           elemTypeNode = userTypeDefinition; // Use the actual definition node
-                        } else {
-                           fprintf(stderr, "Runtime error: Unknown array element type '%s' for variable '%s'.\n", elemTypeStr, d->children[0]->token->value);
-                           free(lower_bounds);
-                           free(upper_bounds);
-                           EXIT_FAILURE_HANDLER();
-                        }
-                     }
-                 } else if (elemTypeNode->type == AST_TYPE_REFERENCE && elemTypeNode->token) {
-                     AST* userTypeDefinition = lookupType(elemTypeNode->token->value);
-                     if(userTypeDefinition) {
-                        elemType = userTypeDefinition->var_type;
-                        elemTypeNode = userTypeDefinition; // Use the actual definition node
-                     } else {
-                        fprintf(stderr, "Runtime error: Undefined array element type '%s' for variable '%s'.\n", elemTypeNode->token->value, d->children[0]->token->value);
-                        free(lower_bounds);
-                        free(upper_bounds);
-                        EXIT_FAILURE_HANDLER();
-                     }
-                 } else if (elemTypeNode->type == AST_RECORD_TYPE) { // Handle arrays of anonymous records
-                    elemType = TYPE_RECORD;
-                    // elemTypeNode already points to the record definition
-                 } else if (elemTypeNode->type == AST_ARRAY_TYPE) { // Handle arrays of anonymous arrays
-                     elemType = TYPE_ARRAY;
-                     // elemTypeNode already points to the array definition
-                 }
-                 else {
-                    fprintf(stderr, "Runtime error: Invalid array element type definition structure for '%s'. Node type: %s\n",
-                            d->children[0]->token->value, astTypeToString(elemTypeNode->type));
-                     free(lower_bounds);
-                     free(upper_bounds);
-                    EXIT_FAILURE_HANDLER();
-                 }
-
-                // Ensure sym->value is allocated before dereferencing
-                if (sym->value == NULL) {
-                     sym->value = malloc(sizeof(Value));
-                     if (!sym->value) {
-                         fprintf(stderr, "Memory allocation failed for symbol value\n");
-                         EXIT_FAILURE_HANDLER();
-                     }
-                     sym->value->type = TYPE_ARRAY;
-                }
-
-                // Call makeArrayND with resolved info
-                *sym->value = makeArrayND(dimensions, lower_bounds, upper_bounds, elemType, elemTypeNode);
-
-                free(lower_bounds);
-                free(upper_bounds);
-            }
-            else if (d->var_type == TYPE_STRING && d->right && d->right->right) {
-                if (d->right->right && d->right->right->token &&
-                    d->right->right->token->type == TOKEN_INTEGER_CONST) {
-                    sym->value->max_length = atoi(d->right->right->token->value);
-                }
-
-#ifdef DEBUG
-                printf("[DEBUG] String %s has Length = %d\n", sym->name, sym->value->max_length);
-#endif
-                if (sym->value->s_val && strlen(sym->value->s_val) > sym->value->max_length)
-                    sym->value->s_val[sym->value->max_length] = '\0';
-            }
+            } // End loop over variable names (j)
+        } // End if VAR_DECL
+        else if (d->type == AST_CONST_DECL) {
+             // Constant evaluation and insertion happens during parsing (declarations function)
+             // No processing needed here during execution walk?
+             // If constants needed re-evaluation for locals, it would go here.
         }
-    }
+        else if (d->type == AST_TYPE_DECL) {
+            // Type declarations are handled during parsing (insertType)
+            // No processing needed here during execution walk.
+        }
+        // Add handling for nested PROCEDURE/FUNCTION declarations if/when implemented
+        else if (d->type == AST_PROCEDURE_DECL || d->type == AST_FUNCTION_DECL) {
+             // Add to procedure table if not already done by parser?
+             // Or handle scoping for nested calls if implemented.
+             #ifdef DEBUG
+             fprintf(stderr, "[DEBUG processDeclarations] Skipping nested procedure/function '%s'\n", d->token ? d->token->value : "?");
+             #endif
+        }
+    } // End loop over declarations (i)
 }
+
 
 //ExecStatus executeWithScope(AST *node, bool is_global_scope) { // Example new signature
 void executeWithScope(AST *node, bool is_global_scope)  {
@@ -1772,206 +1652,85 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             executeWithScope(node->right, true);
             break;
         case AST_ASSIGN: {
-                     Value rhs_val = eval(node->right); // Evaluate RHS - Need to free this later
+            // 1. Evaluate Right-Hand Side
+            Value rhs_val = eval(node->right);
 
-                     // --- Get pointer to LHS target ---
-                     // Use resolveLValueToPtr for ALL LHS nodes now, it handles simple VARs too
-                     Value* target_ptr = resolveLValueToPtr(node->left);
-                     if (!target_ptr) {
-                         // Error logged in resolveLValueToPtr or lookupSymbol
-                         freeValue(&rhs_val); // Free the evaluated RHS
+            // 2. Resolve Left-Hand Side Pointer (get target Value* location)
+            //    We still need resolveLValueToPtr for array/field assignments,
+            //    but updateSymbol handles the simple variable case internally.
+            //    For consistency, let's just get the name for simple vars,
+            //    and handle complex LValues if needed (though updateSymbol doesn't support them yet).
+
+            AST* lhsNode = node->left;
+            const char* lhs_name = NULL; // Name for simple variable updateSymbol
+
+            if (lhsNode->type == AST_VARIABLE && lhsNode->token) {
+                 lhs_name = lhsNode->token->value;
+
+                 // --- Call updateSymbol for simple variable assignment ---
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG ASSIGN] Calling updateSymbol for LHS '%s'\n", lhs_name);
+                 #endif
+                 updateSymbol(lhs_name, rhs_val);
+
+            } else if (lhsNode->type == AST_FIELD_ACCESS ||
+                       lhsNode->type == AST_ARRAY_ACCESS ||
+                       lhsNode->type == AST_DEREFERENCE) {
+                 // --- Handle complex LValues (array element, field, dereference) ---
+                 Value* target_ptr = resolveLValueToPtr(lhsNode); // Find the target Value struct
+                 if (!target_ptr) {
+                     // Error already reported by resolveLValueToPtr
+                     freeValue(&rhs_val); // Free RHS value before exiting
+                     EXIT_FAILURE_HANDLER();
+                 }
+
+                 // Perform type compatibility check (simplified example)
+                 if (target_ptr->type != rhs_val.type) {
+                      // TODO: Implement proper type checking and promotion/coercion here
+                      //       For now, we might just copy if basic types allow, or error.
+                      // Example: Allow integer to real
+                      if (!(target_ptr->type == TYPE_REAL && rhs_val.type == TYPE_INTEGER) &&
+                          !(target_ptr->type == TYPE_POINTER && rhs_val.type == TYPE_POINTER) && /* Allow pointer assign */
+                          /* Add other compatible assignments */
+                          !(target_ptr->type == TYPE_CHAR && rhs_val.type == TYPE_STRING && rhs_val.s_val && strlen(rhs_val.s_val)==1) &&
+                          !(target_ptr->type == TYPE_STRING && rhs_val.type == TYPE_CHAR)
+                         )
+                      {
+                         fprintf(stderr, "Runtime error: Type mismatch for complex assignment (LHS: %s, RHS: %s)\n",
+                                 varTypeToString(target_ptr->type), varTypeToString(rhs_val.type));
+                         freeValue(&rhs_val);
                          EXIT_FAILURE_HANDLER();
-                     }
+                      }
+                 }
 
-                     // --- Get LHS name string (for potential error/debug messages) ---
-                     // Get this *after* resolving target_ptr to ensure node->left is valid
-                     const char* lhs_name_debug = node->left->token ? node->left->token->value : "<complex LValue>"; // Using your variable name
+                 // Free existing contents of the target location
+                 freeValue(target_ptr);
 
-                     // --- <<<< ADDED: Check if assignment is TO a string index >>>> ---
-                     bool is_string_index_assign = false;
-                     if (node->left->type == AST_ARRAY_ACCESS // Original LHS node is index access
-                         && target_ptr->type == TYPE_STRING // AND resolved pointer points to a STRING
-                         && node->left->child_count == 1) { // AND there's exactly one index
-                         is_string_index_assign = true;
-                     }
-                     // --- <<<< END ADDED CHECK >>>> ---
+                 // Perform a deep copy into the target location
+                 *target_ptr = makeCopyOfValue(&rhs_val);
+                 // Ensure the type is correctly set after copy (makeCopyOfValue should do this)
+                 target_ptr->type = target_ptr->type; // Re-assert original target type if needed after generic copy
 
-                     Value value_to_assign = rhs_val; // Start with original RHS value
-                     bool value_was_promoted = false;
+                 // Special handling might be needed here for fixed strings, etc.
+                 // if not fully handled by makeCopyOfValue/freeValue.
 
-                     // --- <<<< ADDED: Handle String Index Assign SEPARATELY >>>> ---
-                     if (is_string_index_assign) {
-                         // --- Special Handling for String Index Assignment ---
-                         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Handling String Index Assignment (LHS Base Type: %s).\n",
-                                 varTypeToString(target_ptr->type));
-                         #endif
+            } else {
+                 // If lvalue is not variable, field, array, or dereference
+                 fprintf(stderr, "Runtime error: Invalid LValue target for assignment (Type: %s).\n", astTypeToString(lhsNode->type));
+                 freeValue(&rhs_val);
+                 EXIT_FAILURE_HANDLER();
+            }
 
-                         // 1. Evaluate Index
-                         AST* index_node = node->left->children[0];
-                         Value index_val = eval(index_node);
-                         if (index_val.type != TYPE_INTEGER) {
-                              fprintf(stderr, "Runtime error: String index must be an integer.\n");
-                              freeValue(&rhs_val); freeValue(&index_val); EXIT_FAILURE_HANDLER();
-                         }
-                         long long idx_ll = index_val.i_val;
-                         freeValue(&index_val); // Free evaluated index
+            // 3. Free the temporary RHS value (unless it was moved, e.g., for strings in updateSymbol)
+            // Note: updateSymbol now handles freeing the passed value if it duplicates it.
+            // For complex LValues where we used makeCopyOfValue, we need to free rhs_val here.
+             if (lhsNode->type != AST_VARIABLE) { // Only free if updateSymbol wasn't called
+                 freeValue(&rhs_val);
+             }
 
-                         // 2. Check RHS type & Get Character to Assign
-                         if (rhs_val.type != TYPE_CHAR && !(rhs_val.type == TYPE_STRING && rhs_val.s_val && strlen(rhs_val.s_val) == 1)) {
-                             fprintf(stderr, "Runtime error: Assignment to string index requires CHAR or single-char STRING value.\n");
-                             freeValue(&rhs_val); EXIT_FAILURE_HANDLER();
-                         }
-                         char char_to_assign = (rhs_val.type == TYPE_CHAR) ? rhs_val.c_val : rhs_val.s_val[0];
+            break; // End case AST_ASSIGN
+        }
 
-                         // 3. Bounds Check & Modification
-                         // <<< Use target_ptr->s_val directly >>>
-                         size_t len = target_ptr->s_val ? strlen(target_ptr->s_val) : 0;
-
-                         // Debug Prints using target_ptr->s_val
-                         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Attempting assign: LHS='%s', Index=%lld, Char='%c'\n", lhs_name_debug, idx_ll, char_to_assign); // Using your var name lhs_name_debug
-                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Target Buffer Ptr: %p, Content BEFORE strlen/check: \"%s\"\n",
-                                 (void*)target_ptr->s_val, target_ptr->s_val ? target_ptr->s_val : "<NULL>"); // Use target_ptr->s_val
-                         fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Calculated strlen = %zu\n", len);
-                         #endif
-
-                         if (idx_ll < 1 || (size_t)idx_ll > len) { // Bounds check
-                             fprintf(stderr, "Runtime error: String index (%lld) out of bounds [1..%zu] for assignment to '%s'.\n", idx_ll, len, lhs_name_debug); // Use correct name var
-                             freeValue(&rhs_val); EXIT_FAILURE_HANDLER();
-                         }
-                         size_t idx_0based = (size_t)idx_ll - 1;
-
-                         // 4. Modify Character in Buffer directly
-                         if (target_ptr->s_val) { // Check pointer before dereferencing
-                             #ifdef DEBUG
-                             fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Modifying buffer at index %zu ('%c') to '%c'\n", idx_0based, target_ptr->s_val[idx_0based], char_to_assign);
-                             #endif
-                             target_ptr->s_val[idx_0based] = char_to_assign; // <<< Use target_ptr->s_val >>>
-                             #ifdef DEBUG
-                             // Check strlen IMMEDIATELY after write
-                             size_t len_after_write = strlen(target_ptr->s_val); // <<< Use target_ptr->s_val >>>
-                             fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Buffer content AFTER modification: \"%s\" (New strlen: %zu)\n", target_ptr->s_val, len_after_write); // <<< Use target_ptr->s_val >>>
-                             #endif
-                         } else { /* Should not happen if len > 0 */ }
-
-                         // 5. Cleanup RHS value only (target was modified in place)
-                         freeValue(&rhs_val);
-
-                     } else {
-                         // --- <<<< Handling for ALL OTHER Assignments >>>> ---
-                         // (This block should match the logic you provided previously)
-
-                         // Type Check/Promotion
-                         if (target_ptr->type != value_to_assign.type) {
-                             // Allow compatible assignments (e.g., INTEGER to REAL)
-                             if (target_ptr->type == TYPE_REAL && value_to_assign.type == TYPE_INTEGER) {
-                                 #ifdef DEBUG
-                                 fprintf(stderr, "[DEBUG ASSIGN] Promoting INTEGER RHS (%lld) to REAL for assignment.\n", value_to_assign.i_val);
-                                 #endif
-                                 value_to_assign = makeReal((double)value_to_assign.i_val);
-                                 value_was_promoted = true; // A new Value struct was created
-                             }
-                             // Allow assigning single-char STRING to CHAR
-                             else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING && value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
-                                  // No promotion needed here, just assign the char later
-                             }
-                             // Allow assigning INTEGER to compatible ordinal types (BYTE, WORD, BOOLEAN, CHAR)
-                             else if ((target_ptr->type == TYPE_BYTE || target_ptr->type == TYPE_WORD || target_ptr->type == TYPE_BOOLEAN || target_ptr->type == TYPE_CHAR) && value_to_assign.type == TYPE_INTEGER) {
-                                  // No promotion needed
-                             }
-                             // Allow assigning ENUM <=> INTEGER (ordinal comparison)
-                             else if ((target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) || (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) ) {
-                                  // No promotion needed
-                             }
-                             // Allow assigning CHAR to STRING
-                             else if (target_ptr->type == TYPE_STRING && value_to_assign.type == TYPE_CHAR /* Removed && value_to_assign.s_val from your code as CHAR has no s_val */ ) {
-                                   // No promotion needed here
-                             }
-                             // --- Add other compatible promotions/checks as needed ---
-                             else { // Incompatible types
-                                  // Use the variable name you declared earlier: lhs_name_debug
-                                  fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for LHS '%s'.\n",
-                                          varTypeToString(rhs_val.type), varTypeToString(target_ptr->type), lhs_name_debug);
-                                  freeValue(&rhs_val); // Free original RHS value
-                                  if (value_was_promoted) freeValue(&value_to_assign); // Free temp promoted value
-                                  EXIT_FAILURE_HANDLER();
-                             }
-                         } // --- End Type Check/Promotion ---
-
-
-                         // --- Perform Assignment ---
-                         // 1. Free existing value CONTENTS at the target location
-                         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG ASSIGN] Freeing old value at targetPtr for LHS '%s' (Type: %s)\n", lhs_name_debug, varTypeToString(target_ptr->type));
-                         #endif
-                         freeValue(target_ptr); // Frees heap data *within* the target Value struct
-
-                         // 2. Assign a DEEP COPY of the potentially promoted value_to_assign
-                         #ifdef DEBUG
-                         fprintf(stderr, "[DEBUG ASSIGN] Regular Assign: Assigning value (Type: %s) to targetPtr (Target Type: %s) for LHS '%s'\n",
-                                 varTypeToString(value_to_assign.type), varTypeToString(target_ptr->type), lhs_name_debug);
-                         #endif
-
-                         // --- Specific Type Handling During Assignment (Based on your provided code) ---
-
-                         // Case: Assigning String or Char TO a String Variable
-                         if (target_ptr->type == TYPE_STRING && (value_to_assign.type == TYPE_STRING || value_to_assign.type == TYPE_CHAR)) {
-                              const char* source_str = NULL; char char_buf[2];
-                              if (value_to_assign.type == TYPE_STRING) { source_str = value_to_assign.s_val ? value_to_assign.s_val : ""; }
-                              else { char_buf[0] = value_to_assign.c_val; char_buf[1] = '\0'; source_str = char_buf; }
-
-                              if (target_ptr->max_length > 0) { // Target is fixed-length string
-                                   size_t source_len = strlen(source_str);
-                                   size_t copy_len = (source_len > (size_t)target_ptr->max_length) ? (size_t)target_ptr->max_length : source_len;
-                                   target_ptr->s_val = malloc((size_t)target_ptr->max_length + 1);
-                                   if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
-                                   strncpy(target_ptr->s_val, source_str, copy_len); target_ptr->s_val[copy_len] = '\0';
-                                   #ifdef DEBUG
-                                   fprintf(stderr, "[DEBUG ASSIGN] Fixed String Assignment: Copied %zu chars ('%s') into fixed length %d buffer for LHS '%s'.\n", copy_len, target_ptr->s_val, target_ptr->max_length, lhs_name_debug);
-                                   #endif
-                              } else { // Target is dynamic string
-                                   target_ptr->s_val = strdup(source_str);
-                                   if (!target_ptr->s_val) { /* Malloc Error */ freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER(); }
-                              }
-                              target_ptr->type = TYPE_STRING; // Ensure type is correct
-                         }
-                         // Case: Assigning single-char STRING to CHAR variable
-                         else if (target_ptr->type == TYPE_CHAR && value_to_assign.type == TYPE_STRING) {
-                              if (value_to_assign.s_val && strlen(value_to_assign.s_val) == 1) {
-                                   target_ptr->c_val = value_to_assign.s_val[0];
-                                   target_ptr->type = TYPE_CHAR; // Ensure type is correct
-                              } else {
-                                   fprintf(stderr, "Runtime error: Cannot assign multi-character or empty string to CHAR variable '%s'.\n", lhs_name_debug);
-                                   freeValue(&rhs_val); if (value_was_promoted) freeValue(&value_to_assign); EXIT_FAILURE_HANDLER();
-                              }
-                         }
-                         // Case: Assigning Integer to Enum (assign ordinal)
-                         else if (target_ptr->type == TYPE_ENUM && value_to_assign.type == TYPE_INTEGER) {
-                              target_ptr->enum_val.ordinal = (int)value_to_assign.i_val;
-                              target_ptr->type = TYPE_ENUM; // Ensure type is set
-                         }
-                         // Case: Assigning Enum to Integer (assign ordinal)
-                         else if (target_ptr->type == TYPE_INTEGER && value_to_assign.type == TYPE_ENUM) {
-                              target_ptr->i_val = value_to_assign.enum_val.ordinal;
-                              target_ptr->type = TYPE_INTEGER; // Set type to INTEGER
-                              if (value_was_promoted && value_to_assign.enum_val.enum_name) { /* free? */ }
-                         }
-                         // Default: Perform a standard deep copy for other compatible types
-                         else {
-                             *target_ptr = makeCopyOfValue(&value_to_assign);
-                         }
-
-                         // --- Cleanup ---
-                         freeValue(&rhs_val);
-                         if (value_was_promoted) {
-                             freeValue(&value_to_assign);
-                         }
-
-                     } // --- <<<< End else (not string index assign) >>>> ---
-
-                     break; // End case AST_ASSIGN
-                } // End switch block
         case AST_CASE: {
                    // Evaluate the case expression
                    Value caseValue = eval(node->left);
@@ -2748,6 +2507,41 @@ Value* resolveLValueToPtr(AST* lvalueNode) {
             fprintf(stderr, "Runtime error: Field '%s' not found in record.\n", targetFieldName);
             EXIT_FAILURE_HANDLER();
             break; // Keep compiler happy
+        }
+        case AST_DEREFERENCE: {
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG RESOLVE_LVAL] Resolving DEREFERENCE node...\n");
+            #endif
+            // 1. Evaluate the pointer expression itself (node->left)
+            Value pointerValue = eval(lvalueNode->left);
+
+            // 2. Check if it's actually a pointer
+            if (pointerValue.type != TYPE_POINTER) {
+                fprintf(stderr, "Runtime error: Attempting to dereference a non-pointer type (%s) in LValue.\n", varTypeToString(pointerValue.type));
+                freeValue(&pointerValue); // Free temporary value
+                EXIT_FAILURE_HANDLER();
+            }
+
+            // 3. Check if the pointer is nil
+            if (pointerValue.ptr_val == NULL) {
+                fprintf(stderr, "Runtime error: Attempting assignment via a nil pointer.\n");
+                // Don't free pointerValue if it was nil (no heap data)
+                EXIT_FAILURE_HANDLER();
+            }
+
+            // 4. The target for assignment is the Value struct pointed to by ptr_val
+            Value* targetValuePtr = pointerValue.ptr_val;
+
+            // 5. Free the temporary pointerValue struct returned by eval (it just held the address)
+            //    Do NOT free the memory it points to (*targetValuePtr)
+            //    Since pointerValue holds no heap data itself (just the ptr_val address),
+            //    we don't need freeValue here.
+
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG RESOLVE_LVAL] Dereference resolved to heap Value* address: %p\n", (void*)targetValuePtr);
+            #endif
+
+            return targetValuePtr; // Return the pointer TO THE HEAP-ALLOCATED VALUE
         }
 
         default:

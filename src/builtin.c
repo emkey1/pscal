@@ -2244,93 +2244,84 @@ Value executeBuiltinNew(AST *node) {
     }
 
     AST *lvalueNode = node->children[0];
-    // Ensure the argument is a valid LValue (variable, field access, array access that results in a pointer)
-    if (lvalueNode->type != AST_VARIABLE && lvalueNode->type != AST_FIELD_ACCESS && lvalueNode->type != AST_ARRAY_ACCESS) {
-        fprintf(stderr, "Runtime error: Argument to new() must be a modifiable pointer variable.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-
-    // Get a pointer to the *Value struct* of the pointer variable itself
     Value *pointerVarValuePtr = resolveLValueToPtr(lvalueNode);
     if (!pointerVarValuePtr) {
-        // Error should have been reported by resolveLValueToPtr
+        fprintf(stderr, "Runtime error: Argument to new() could not be resolved to a memory location.\n");
         EXIT_FAILURE_HANDLER();
     }
 
-    // Check if the variable is actually a pointer type
     if (pointerVarValuePtr->type != TYPE_POINTER) {
         fprintf(stderr, "Runtime error: Argument to new() must be of pointer type. Got %s.\n", varTypeToString(pointerVarValuePtr->type));
         EXIT_FAILURE_HANDLER();
     }
 
-    // Get the AST node defining the base type this pointer points to
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG new] executeBuiltinNew for '%s': pointerVarValuePtr=%p, pointerVarValuePtr->base_type_node=%p\n",
+             lvalueNode->token ? lvalueNode->token->value : "?",
+             (void*)pointerVarValuePtr,
+             pointerVarValuePtr ? (void*)pointerVarValuePtr->base_type_node : NULL);
+    fflush(stderr);
+    #endif
+
     AST *baseTypeNode = pointerVarValuePtr->base_type_node;
+    // <<< ORIGINAL CRASH POINT / CHECK >>>
     if (!baseTypeNode) {
-        // This indicates an issue during parsing or type annotation for the pointer variable
         fprintf(stderr, "Runtime error: Cannot determine base type for pointer variable in new(). Missing type definition link.\n");
-        // Optionally dump symbol table or AST for debugging
         EXIT_FAILURE_HANDLER();
     }
+    // <<< END ORIGINAL CHECK >>>
 
-    // Determine the actual VarType enum of the base type
-    // This might involve resolving type references if baseTypeNode is AST_TYPE_REFERENCE
+
+    // --- Determine the actual VarType enum and definition node of the base type ---
     VarType baseVarType = TYPE_VOID;
-    AST* actualBaseTypeDef = baseTypeNode; // Start with the direct link
+    AST* actualBaseTypeDef = baseTypeNode;
 
-    if (actualBaseTypeDef->type == AST_TYPE_REFERENCE && actualBaseTypeDef->token) {
-        actualBaseTypeDef = lookupType(actualBaseTypeDef->token->value);
-        if (!actualBaseTypeDef) {
-             fprintf(stderr, "Runtime error: Cannot resolve base type '%s' during new().\n", baseTypeNode->token->value);
-             EXIT_FAILURE_HANDLER();
-        }
-         baseVarType = actualBaseTypeDef->var_type;
-    } else if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
-        // Handle built-in type names directly linked
+    if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
         const char* typeName = actualBaseTypeDef->token->value;
-        if (strcasecmp(typeName, "integer")==0) baseVarType=TYPE_INTEGER;
-        else if (strcasecmp(typeName, "real")==0) baseVarType=TYPE_REAL;
-        else if (strcasecmp(typeName, "char")==0) baseVarType=TYPE_CHAR;
-        else if (strcasecmp(typeName, "string")==0) baseVarType=TYPE_STRING;
-        else if (strcasecmp(typeName, "boolean")==0) baseVarType=TYPE_BOOLEAN;
-        // ... add other built-in types ...
+        if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "real")==0) { baseVarType=TYPE_REAL; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "char")==0) { baseVarType=TYPE_CHAR; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "string")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "boolean")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "byte")==0) { baseVarType=TYPE_BYTE; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "word")==0) { baseVarType=TYPE_WORD; actualBaseTypeDef = NULL; }
         else {
-             fprintf(stderr, "Runtime error: Unknown base type identifier '%s' during new().\n", typeName);
-             EXIT_FAILURE_HANDLER();
+            AST* lookedUpType = lookupType(typeName);
+            if (!lookedUpType) {
+                 fprintf(stderr, "Runtime error: Cannot resolve base type identifier '%s' during new().\n", typeName);
+                 EXIT_FAILURE_HANDLER();
+            }
+            actualBaseTypeDef = lookedUpType;
+            baseVarType = actualBaseTypeDef->var_type;
         }
     } else {
-         // If it's ARRAY_TYPE, RECORD_TYPE, etc., use its var_type directly
          baseVarType = actualBaseTypeDef->var_type;
     }
 
-
     if (baseVarType == TYPE_VOID) {
-        fprintf(stderr, "Runtime error: Cannot determine valid base type VarType during new(). AST Node type was %s\n", astTypeToString(actualBaseTypeDef->type));
+        fprintf(stderr, "Runtime error: Cannot determine valid base type VarType during new(). AST Node type was %s\n",
+                actualBaseTypeDef ? astTypeToString(actualBaseTypeDef->type) : (baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL"));
         EXIT_FAILURE_HANDLER();
     }
 
     // --- Allocate memory for the new Value structure on the heap ---
     Value *newValue = malloc(sizeof(Value));
     if (!newValue) {
-        fprintf(stderr, "Memory allocation failed for new value in new().\n");
+        fprintf(stderr, "Memory allocation failed for new value structure in new().\n");
         EXIT_FAILURE_HANDLER();
     }
 
     // --- Initialize the allocated Value structure based on the base type ---
-    // Use makeValueForType, passing the base type enum and the actual definition AST node
     *newValue = makeValueForType(baseVarType, actualBaseTypeDef);
-    // makeValueForType handles initializing strings, records, arrays etc. correctly.
 
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG NEW] Allocated new Value* at %p for base type %s. Initialized content.\n",
             (void*)newValue, varTypeToString(baseVarType));
+    fflush(stderr);
     #endif
 
     // --- Update the pointer variable to point to the newly allocated Value ---
-    // IMPORTANT: Dispose of any *previous* memory the pointer might have pointed to?
-    // Standard Pascal's new() does NOT implicitly dispose the old value.
-    // If the pointer variable already pointed somewhere, that memory is now leaked
-    // unless the user explicitly disposed it beforehand. We will follow this behavior.
-    pointerVarValuePtr->ptr_val = newValue; // Store the address of the heap-allocated Value
+    pointerVarValuePtr->ptr_val = newValue;
 
     return makeVoid(); // new() is a procedure
 }
