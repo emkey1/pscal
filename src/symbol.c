@@ -182,7 +182,41 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_REAL: sym->value->r_val = (val.type == TYPE_REAL) ? val.r_val : (double)val.i_val; break;
         case TYPE_BYTE: if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) { if (val.i_val < 0 || val.i_val > 255) fprintf(stderr, "Warning: Overflow assigning %lld to BYTE variable '%s'.\n", val.i_val, name); sym->value->i_val = (val.i_val & 0xFF); } break;
         case TYPE_WORD: if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) { if (val.i_val < 0 || val.i_val > 65535) fprintf(stderr, "Warning: Overflow assigning %lld to WORD variable '%s'.\n", val.i_val, name); sym->value->i_val = (val.i_val & 0xFFFF); } break;
-        case TYPE_STRING: if (sym->value->s_val) { free(sym->value->s_val); sym->value->s_val = NULL; } const char* source_str = NULL; char char_buf[2]; if (val.type == TYPE_STRING) { source_str = val.s_val; } else if (val.type == TYPE_CHAR) { char_buf[0] = val.c_val; char_buf[1] = '\0'; source_str = char_buf; } if (!source_str) source_str = ""; if (sym->value->max_length > 0) { size_t source_len = strlen(source_str); size_t copy_len = (source_len > (size_t)sym->value->max_length) ? (size_t)sym->value->max_length : source_len; sym->value->s_val = malloc((size_t)sym->value->max_length + 1); /*...*/ if (!sym->value->s_val) { /* Malloc Error */ EXIT_FAILURE_HANDLER(); } strncpy(sym->value->s_val, source_str, copy_len); sym->value->s_val[copy_len] = '\0'; } else { sym->value->s_val = strdup(source_str); /*...*/ if (!sym->value->s_val) { /* Malloc Error */ EXIT_FAILURE_HANDLER(); } } break;
+        case TYPE_STRING:
+            // Free existing string data if present
+            if (sym->value->s_val) {
+                free(sym->value->s_val);
+                sym->value->s_val = NULL;
+            }
+            // Prepare source string (handle incoming CHAR or STRING)
+            const char* source_str = NULL;
+            char char_buf[2];
+            if (val.type == TYPE_STRING) {
+                source_str = val.s_val;
+            } else if (val.type == TYPE_CHAR) { // Allow assigning CHAR to STRING
+                char_buf[0] = val.c_val;
+                char_buf[1] = '\0';
+                source_str = char_buf;
+            }
+            if (!source_str) source_str = ""; // Handle NULL source
+
+            // Handle fixed vs dynamic length copy
+            if (sym->value->max_length > 0) { // Target is fixed-length string
+                size_t source_len = strlen(source_str);
+                size_t copy_len = (source_len > (size_t)sym->value->max_length) ? (size_t)sym->value->max_length : source_len;
+                sym->value->s_val = malloc((size_t)sym->value->max_length + 1);
+                if (!sym->value->s_val) { /* Malloc Error */ EXIT_FAILURE_HANDLER(); }
+                strncpy(sym->value->s_val, source_str, copy_len);
+                sym->value->s_val[copy_len] = '\0';
+            } else { // Target is dynamic string
+                sym->value->s_val = strdup(source_str);
+                if (!sym->value->s_val) { /* Malloc Error */ EXIT_FAILURE_HANDLER(); }
+            }
+
+            // <<< FIX: Add this line >>>
+            sym->value->type = TYPE_STRING; // Ensure the type field is correctly set
+
+            break; // End of TYPE_STRING case
         case TYPE_RECORD: freeValue(sym->value); *sym->value = makeCopyOfValue(&val); sym->value->type = TYPE_RECORD; break;
         case TYPE_BOOLEAN: if (val.type == TYPE_BOOLEAN) { sym->value->i_val = val.i_val; } else if (val.type == TYPE_INTEGER) { sym->value->i_val = (val.i_val != 0) ? 1 : 0; } break;
         case TYPE_FILE: fprintf(stderr, "Runtime error: Direct assignment of FILE variables is not supported.\n"); EXIT_FAILURE_HANDLER(); break;

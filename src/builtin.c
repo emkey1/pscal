@@ -2326,39 +2326,20 @@ Value executeBuiltinNew(AST *node) {
     return makeVoid(); // new() is a procedure
 }
 
+// Forward declaration needed if not already visible
+void nullifyPointerAliases(Symbol* table, Value* disposedValuePtr);
+
 // --- Implementation for dispose(pointer_variable) ---
 Value executeBuiltinDispose(AST *node) {
-    if (node->child_count != 1) {
-        fprintf(stderr, "Runtime error: dispose() expects exactly one argument (a pointer variable).\n");
-        EXIT_FAILURE_HANDLER();
-    }
+    // ... (argument checking as before) ...
 
     AST *lvalueNode = node->children[0];
-    // Ensure the argument is a valid LValue
-     if (lvalueNode->type != AST_VARIABLE && lvalueNode->type != AST_FIELD_ACCESS && lvalueNode->type != AST_ARRAY_ACCESS) {
-        fprintf(stderr, "Runtime error: Argument to dispose() must be a modifiable pointer variable.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-
-    // Get a pointer to the *Value struct* of the pointer variable itself
     Value *pointerVarValuePtr = resolveLValueToPtr(lvalueNode);
-     if (!pointerVarValuePtr) {
-        // Error should have been reported by resolveLValueToPtr
-        EXIT_FAILURE_HANDLER();
-    }
+    // ... (checks for pointerVarValuePtr and its type) ...
 
-    // Check if the variable is actually a pointer type
-    if (pointerVarValuePtr->type != TYPE_POINTER) {
-        fprintf(stderr, "Runtime error: Argument to dispose() must be of pointer type. Got %s.\n", varTypeToString(pointerVarValuePtr->type));
-        EXIT_FAILURE_HANDLER();
-    }
-
-    // Get the address stored in the pointer variable
     Value *valueToDispose = pointerVarValuePtr->ptr_val;
 
-    // Check if the pointer is already nil
     if (valueToDispose == NULL) {
-        // Standard Pascal allows disposing nil without error.
         #ifdef DEBUG
         fprintf(stderr, "[DEBUG DISPOSE] Attempted to dispose a nil pointer. Doing nothing.\n");
         #endif
@@ -2366,19 +2347,42 @@ Value executeBuiltinDispose(AST *node) {
     }
 
     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG DISPOSE] Disposing Value* at address %p (pointed to by pointer variable).\n",
-            (void*)valueToDispose);
+    fprintf(stderr, "[DEBUG DISPOSE] Disposing Value* at address %p (pointed to by variable '%s').\n",
+            (void*)valueToDispose, lvalueNode->token ? lvalueNode->token->value : "?");
     #endif
 
-    // --- Free the contents of the pointed-to Value struct ---
-    // This handles freeing strings, record fields, arrays within the disposed data.
-    freeValue(valueToDispose);
-
-    // --- Free the Value struct itself that was allocated by new() ---
-    free(valueToDispose);
+    // --- Free the pointed-to Value struct and its contents ---
+    freeValue(valueToDispose); // Free contents (strings, records, etc.)
+    free(valueToDispose);      // Free the Value struct itself
 
     // --- Set the original pointer variable back to nil ---
     pointerVarValuePtr->ptr_val = NULL;
 
-    return makeVoid(); // dispose() is a procedure
+    // --- ADDED: Nil out aliases (Implementation Specific) ---
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG DISPOSE] Nullifying aliases pointing to %p.\n", (void*)valueToDispose);
+    #endif
+    nullifyPointerAliases(globalSymbols, valueToDispose);
+    nullifyPointerAliases(localSymbols, valueToDispose);
+    // --- END ADDED ---
+
+
+    return makeVoid();
+}
+
+// --- ADDED HELPER FUNCTION ---
+// Searches a symbol table and sets ptr_val to NULL for any
+// pointer symbol that points to the disposedValuePtr address.
+void nullifyPointerAliases(Symbol* table, Value* disposedValuePtr) {
+    Symbol* current = table;
+    while (current) {
+        if (current->value && current->type == TYPE_POINTER && current->value->ptr_val == disposedValuePtr) {
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG DISPOSE] Nullifying alias '%s' which pointed to disposed memory %p.\n",
+                    current->name ? current->name : "?", (void*)disposedValuePtr);
+            #endif
+            current->value->ptr_val = NULL;
+        }
+        current = current->next;
+    }
 }

@@ -29,6 +29,7 @@ run "BitwiseSuite"      "$PSCAL" "$TESTS/BitWiseSuite"
 run "TypeTestSuite"      "$PSCAL" "$TESTS/TypeTestSuite"
 run "FormattingTestSuite"      "$PSCAL" "$TESTS/FormattingTestSuite"
 run "FileIOSuite"      "$PSCAL" "$TESTS/FileIOSuite"
+run "PointerTortureTest"      "$PSCAL" "$TESTS/PointerTortureTest"
 
 # assorted one‑offs
 run "Assorted (tid)" "$PSCAL" "$TESTS/tid.p"

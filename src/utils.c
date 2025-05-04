@@ -36,6 +36,7 @@ const char *varTypeToString(VarType type) {
 }
 
 const char *tokenTypeToString(TokenType type) {
+    static char unknown_buf[32];
     switch (type) {
         case TOKEN_PROGRAM:       return "PROGRAM";
         case TOKEN_VAR:           return "VAR";
@@ -114,7 +115,6 @@ const char *tokenTypeToString(TokenType type) {
             // Create a small buffer to handle potentially large unknown enum values
             // Although, this function should ideally cover all defined TokenType values.
             // If an unknown value appears, it indicates a potential issue elsewhere.
-            static char unknown_buf[32];
             snprintf(unknown_buf, sizeof(unknown_buf), "INVALID_TOKEN (%d)", type);
             return unknown_buf;
     }
