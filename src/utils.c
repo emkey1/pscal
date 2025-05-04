@@ -486,6 +486,8 @@ Value makeValueForType(VarType type, AST *type_def_param) {
     // Directly use the passed-in AST node which should be from the
     // copied structure linked to the VAR_DECL.
     AST* node_to_inspect = type_def_param;
+    AST* actual_type_def = node_to_inspect; // Use this for type-specific details after resolving reference
+
 
     #ifdef DEBUG
     // (Keep initial debug print)
@@ -544,28 +546,79 @@ Value makeValueForType(VarType type, AST *type_def_param) {
     switch(type) {
         case TYPE_INTEGER: v.i_val = 0; break;
         case TYPE_REAL:    v.r_val = 0.0; break;
-        case TYPE_STRING:
+        case TYPE_STRING: { // Use braces for local variable scope
             v.s_val = NULL;
             v.max_length = -1; // Default dynamic
-            // Use type_def_param for fixed length check (passed from VAR_DECL)
-            if (type_def_param && type_def_param->type == AST_VARIABLE && type_def_param->token &&
-                strcasecmp(type_def_param->token->value, "string") == 0 && type_def_param->right) {
-                 // ... (rest of fixed string logic using type_def_param remains the same) ...
-                 AST* lenNode = type_def_param->right;
+            long long parsed_len = -1; // Flag to check if length was determined
+
+            // Check if the type definition is string[N]
+            // Use 'actual_type_def' here as we need the potentially resolved definition
+            if (actual_type_def && actual_type_def->type == AST_VARIABLE && actual_type_def->token &&
+                strcasecmp(actual_type_def->token->value, "string") == 0 && actual_type_def->right)
+            {
+                 AST* lenNode = actual_type_def->right;
+
+                 // --- MODIFICATION START: Handle Constant Integer Literal OR Constant Identifier ---
                  if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
-                    long long parsed_len = atoll(lenNode->token->value);
-                    if (parsed_len > 0 && parsed_len <= 255) {
-                         v.max_length = (int)parsed_len;
-                         v.s_val = calloc(v.max_length + 1, 1);
-                         if (!v.s_val) { fprintf(stderr, "FATAL: calloc failed for fixed string\n"); EXIT_FAILURE_HANDLER(); }
-                    } else { fprintf(stderr, "Warning: Fixed string length %lld invalid or too large. Using dynamic.\n", parsed_len); }
-                 } else { fprintf(stderr, "Warning: Fixed string length not constant integer. Using dynamic.\n"); }
-            }
+                     // Case 1: Length is a literal integer (e.g., string[10])
+                     parsed_len = atoll(lenNode->token->value);
+                 }
+                 else if (lenNode->type == AST_VARIABLE && lenNode->token && lenNode->token->value) {
+                     // Case 2: Length is an identifier (e.g., string[MAX_LEN])
+                     const char *const_name = lenNode->token->value;
+                     #ifdef DEBUG
+                     fprintf(stderr, "[DEBUG makeValueForType] String length specified by identifier '%s'. Looking up constant...\n", const_name);
+                     #endif
+                     Symbol *constSym = lookupSymbol(const_name); // Lookup the constant symbol
+                     // NOTE: Assumes constant is already defined globally or locally *before* this type is used.
+
+                     if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INTEGER) {
+                          parsed_len = constSym->value->i_val; // Use the constant's integer value
+                          #ifdef DEBUG
+                          fprintf(stderr, "[DEBUG makeValueForType] Found constant '%s' with value %lld.\n", const_name, parsed_len);
+                          #endif
+                     } else {
+                          fprintf(stderr, "Warning: Identifier '%s' used for string length is not a defined integer constant. Using dynamic.\n", const_name);
+                          // parsed_len remains -1, will default to dynamic
+                     }
+                 }
+                 else {
+                     // Case 3: Length expression is neither an integer literal nor a constant identifier
+                     fprintf(stderr, "Warning: Fixed string length not constant integer or identifier. Using dynamic.\n");
+                     // parsed_len remains -1, will default to dynamic
+                 }
+                 // --- MODIFICATION END ---
+
+
+                 // --- Process the parsed length (if valid) ---
+                 if (parsed_len != -1) { // Check if a valid length was found
+                      if (parsed_len > 0 && parsed_len <= 255) { // Standard Pascal max length
+                          v.max_length = (int)parsed_len;
+                          v.s_val = calloc(v.max_length + 1, 1); // Allocate and zero-fill
+                          if (!v.s_val) { fprintf(stderr, "FATAL: calloc failed for fixed string\n"); EXIT_FAILURE_HANDLER(); }
+                          #ifdef DEBUG
+                          fprintf(stderr, "[DEBUG makeValueForType] Allocated fixed string (max_length=%d).\n", v.max_length);
+                          #endif
+                      } else {
+                          fprintf(stderr, "Warning: Fixed string length %lld invalid or too large. Using dynamic.\n", parsed_len);
+                          // Fall through to dynamic allocation below
+                          v.max_length = -1; // Ensure dynamic if length was invalid
+                      }
+                 }
+                 // --- End processing parsed length ---
+
+            } // End if (actual_type_def is string[...])
+
+            // Allocate if still dynamic (max_length is -1) and s_val hasn't been allocated
             if (v.max_length == -1 && !v.s_val) {
-                 v.s_val = strdup("");
+                 v.s_val = strdup(""); // Initialize dynamic/default string
                  if (!v.s_val) { fprintf(stderr, "FATAL: strdup failed for dynamic string\n"); EXIT_FAILURE_HANDLER(); }
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG makeValueForType] Allocated dynamic string.\n");
+                 #endif
             }
-            break;
+            break; // End case TYPE_STRING
+        } // End brace for TYPE_STRING case scope
         case TYPE_CHAR:    v.c_val = '\0'; v.max_length = 1; break;
         case TYPE_BOOLEAN: v.i_val = 0; break; // False
         case TYPE_FILE:    v.f_val = NULL; v.filename = NULL; break;
