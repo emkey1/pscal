@@ -1,3 +1,4 @@
+#!/Users/mke/.bin/pscal
 program HangmanGameWithPointers;
 
 uses CRT;

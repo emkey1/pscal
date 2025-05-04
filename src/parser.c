@@ -522,10 +522,6 @@ AST *unitParser(Parser *parser, int recursion_depth) {
 }
 
 void errorParser(Parser *parser, const char *msg) {
-    extern AST *globalRoot;
-   // printf("===== Global AST Dump START ======\n");
-    //dumpAST(globalRoot, 0);
-  //  printf("===== Global AST Dump END ======\n");
     fprintf(stderr, "Parser error at line %d, column %d: %s (found token: %s)\n",
             parser->lexer->line, parser->lexer->column, msg,
             tokenTypeToString(parser->current_token->type));
