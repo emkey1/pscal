@@ -1655,82 +1655,112 @@ void executeWithScope(AST *node, bool is_global_scope)  {
         case AST_ASSIGN: {
             // 1. Evaluate Right-Hand Side
             Value rhs_val = eval(node->right);
-
-            // 2. Resolve Left-Hand Side Pointer (get target Value* location)
-            //    We still need resolveLValueToPtr for array/field assignments,
-            //    but updateSymbol handles the simple variable case internally.
-            //    For consistency, let's just get the name for simple vars,
-            //    and handle complex LValues if needed (though updateSymbol doesn't support them yet).
-
             AST* lhsNode = node->left;
-            const char* lhs_name = NULL; // Name for simple variable updateSymbol
+            Value* target_ptr = NULL; // Pointer to the Value to be modified
+            const char* lhs_name = NULL; // Name if simple variable
 
-            if (lhsNode->type == AST_VARIABLE && lhsNode->token) {
-                 lhs_name = lhsNode->token->value;
+            // --- Determine Assignment Type ---
+            bool is_simple_var_assign = (lhsNode->type == AST_VARIABLE && lhsNode->token);
+            bool is_string_index_assign = false;
+            bool is_complex_lvalue_assign = false;
 
-                 // --- Call updateSymbol for simple variable assignment ---
-                 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG ASSIGN] Calling updateSymbol for LHS '%s'\n", lhs_name);
-                 #endif
-                 updateSymbol(lhs_name, rhs_val);
+            if (!is_simple_var_assign) {
+                // For complex LValues, we need the target pointer first to check for string index
+                target_ptr = resolveLValueToPtr(lhsNode); // Find memory location for array[i], record.f, p^ etc.
+                if (!target_ptr) { /* Error handled in resolve */ freeValue(&rhs_val); EXIT_FAILURE_HANDLER(); }
 
-            } else if (lhsNode->type == AST_FIELD_ACCESS ||
-                       lhsNode->type == AST_ARRAY_ACCESS ||
-                       lhsNode->type == AST_DEREFERENCE) {
-                 // --- Handle complex LValues (array element, field, dereference) ---
-                 Value* target_ptr = resolveLValueToPtr(lhsNode); // Find the target Value struct
-                 if (!target_ptr) {
-                     // Error already reported by resolveLValueToPtr
-                     freeValue(&rhs_val); // Free RHS value before exiting
-                     EXIT_FAILURE_HANDLER();
-                 }
+                // Check if it's specifically a string index assignment
+                if (lhsNode->type == AST_ARRAY_ACCESS && target_ptr->type == TYPE_STRING && lhsNode->child_count == 1) {
+                    is_string_index_assign = true;
+                } else {
+                    // It's another complex LValue (array element, record field, dereferenced pointer)
+                    is_complex_lvalue_assign = true;
+                }
+            }
 
-                 // Perform type compatibility check (simplified example)
+            // --- Perform Assignment Based on Type ---
+
+            if (is_simple_var_assign) {
+                // --- Case 1: Simple Variable Assignment (e.g., p1 := nil, word := 'abc') ---
+                lhs_name = lhsNode->token->value;
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG ASSIGN] Calling updateSymbol for simple LHS '%s'\n", lhs_name);
+                #endif
+                updateSymbol(lhs_name, rhs_val);
+                // updateSymbol handles freeing old value, type checking, deep copies, and freeing rhs_val if consumed
+
+            } else if (is_string_index_assign) {
+                // --- Case 2: String Index Assignment (e.g., s[i] := 'c') ---
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG ASSIGN STR_IDX] Handling String Index Assignment (LHS Base Type: %s).\n",
+                        varTypeToString(target_ptr->type));
+                #endif
+                // target_ptr points to the base string's Value struct (from resolveLValueToPtr)
+                AST* index_node = lhsNode->children[0];
+                Value index_val = eval(index_node);
+                if (index_val.type != TYPE_INTEGER) { /* Error */ freeValue(&rhs_val); freeValue(&index_val); EXIT_FAILURE_HANDLER(); }
+                long long idx_ll = index_val.i_val;
+                freeValue(&index_val);
+
+                if (rhs_val.type != TYPE_CHAR && !(rhs_val.type == TYPE_STRING && rhs_val.s_val && strlen(rhs_val.s_val) == 1)) { /* Error */ freeValue(&rhs_val); EXIT_FAILURE_HANDLER(); }
+                char char_to_assign = (rhs_val.type == TYPE_CHAR) ? rhs_val.c_val : rhs_val.s_val[0];
+
+                size_t len = target_ptr->s_val ? strlen(target_ptr->s_val) : 0;
+                if (idx_ll < 1 || (size_t)idx_ll > len) { /* Bounds Error */ freeValue(&rhs_val); EXIT_FAILURE_HANDLER(); }
+                size_t idx_0based = (size_t)idx_ll - 1;
+
+                if (target_ptr->s_val) {
+                    target_ptr->s_val[idx_0based] = char_to_assign;
+                    // Ensure type remains string (should already be, but belt-and-suspenders)
+                    target_ptr->type = TYPE_STRING;
+                } else { /* Error: trying to index NULL string */ }
+
+                // Free RHS value only (target string buffer was modified in place)
+                freeValue(&rhs_val);
+
+            } else if (is_complex_lvalue_assign) {
+                // --- Case 3: Other Complex LValue Assignments (Array[i], Record.F, Ptr^) ---
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG ASSIGN COMPLEX] Handling Complex LValue Assign (LHS Type: %s, Target Type: %s)\n",
+                         astTypeToString(lhsNode->type), varTypeToString(target_ptr->type));
+                #endif
+                // target_ptr points to the actual Value to be modified (element, field, heap value)
+
+                 // Basic Type Compatibility Check (Expand as needed)
                  if (target_ptr->type != rhs_val.type) {
-                      // TODO: Implement proper type checking and promotion/coercion here
-                      //       For now, we might just copy if basic types allow, or error.
-                      // Example: Allow integer to real
-                      if (!(target_ptr->type == TYPE_REAL && rhs_val.type == TYPE_INTEGER) &&
-                          !(target_ptr->type == TYPE_POINTER && rhs_val.type == TYPE_POINTER) && /* Allow pointer assign */
-                          /* Add other compatible assignments */
-                          !(target_ptr->type == TYPE_CHAR && rhs_val.type == TYPE_STRING && rhs_val.s_val && strlen(rhs_val.s_val)==1) &&
-                          !(target_ptr->type == TYPE_STRING && rhs_val.type == TYPE_CHAR)
-                         )
-                      {
+                      if (!((target_ptr->type == TYPE_REAL && rhs_val.type == TYPE_INTEGER) ||
+                            (target_ptr->type == TYPE_POINTER && rhs_val.type == TYPE_POINTER) )) { // Allow any pointer assignment
                          fprintf(stderr, "Runtime error: Type mismatch for complex assignment (LHS: %s, RHS: %s)\n",
                                  varTypeToString(target_ptr->type), varTypeToString(rhs_val.type));
-                         freeValue(&rhs_val);
-                         EXIT_FAILURE_HANDLER();
+                         freeValue(&rhs_val); EXIT_FAILURE_HANDLER();
                       }
+                      // Add promotion logic here if needed before copying
                  }
 
-                 // Free existing contents of the target location
-                 freeValue(target_ptr);
+                // Free the *contents* of the location we are about to overwrite
+                freeValue(target_ptr);
 
-                 // Perform a deep copy into the target location
-                 *target_ptr = makeCopyOfValue(&rhs_val);
-                 // Ensure the type is correctly set after copy (makeCopyOfValue should do this)
-                 target_ptr->type = target_ptr->type; // Re-assert original target type if needed after generic copy
+                // Perform a *deep copy* of the RHS into the target location
+                // This correctly handles assigning records/arrays to elements/fields
+                *target_ptr = makeCopyOfValue(&rhs_val);
 
-                 // Special handling might be needed here for fixed strings, etc.
-                 // if not fully handled by makeCopyOfValue/freeValue.
+                // Crucially, ensure the TYPE field matches the original target type
+                // if makeCopyOfValue might have changed it (it shouldn't, but be safe)
+                 // target_ptr->type = target_ptr->type; // Redundant if makeCopy preserves type
+
+                // Free the temporary rhs_val now that makeCopyOfValue has copied it
+                freeValue(&rhs_val);
 
             } else {
-                 // If lvalue is not variable, field, array, or dereference
-                 fprintf(stderr, "Runtime error: Invalid LValue target for assignment (Type: %s).\n", astTypeToString(lhsNode->type));
-                 freeValue(&rhs_val);
+                 // Should not happen if logic above is correct
+                 fprintf(stderr, "Internal Error: Fell through assignment logic in executeWithScope.\n");
+                 freeValue(&rhs_val); // Cleanup RHS
                  EXIT_FAILURE_HANDLER();
             }
 
-            // 3. Free the temporary RHS value (unless it was moved, e.g., for strings in updateSymbol)
-            // Note: updateSymbol now handles freeing the passed value if it duplicates it.
-            // For complex LValues where we used makeCopyOfValue, we need to free rhs_val here.
-             if (lhsNode->type != AST_VARIABLE) { // Only free if updateSymbol wasn't called
-                 freeValue(&rhs_val);
-             }
-
             break; // End case AST_ASSIGN
         }
+
 
         case AST_CASE: {
                    // Evaluate the case expression
