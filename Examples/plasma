@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 PROGRAM Plasma256Color;
 
 USES Crt; // Assumes Sin, Sqrt, GotoXY, ClrScr, Write, WriteLn, TextColorE, TextColor, TextBackground, NormVideo, ReadKey, ScreenCols, ScreenRows

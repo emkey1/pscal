@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 program Quadratic;
 // From http://progopedia.com/implementation/turbo-pascal/
 

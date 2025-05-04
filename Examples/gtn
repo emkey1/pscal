@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 program GuessTheNumber;
 
 uses CRT; // Uses the CRT unit for screen control and ReadKey

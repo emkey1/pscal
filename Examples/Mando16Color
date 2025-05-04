@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 PROGRAM MandelbrotColorASCII;
 
 USES Crt;

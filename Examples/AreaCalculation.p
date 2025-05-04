@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 program AreaCalculation;
 uses CalculateArea,crt;
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 program DisplayWeather;
 
 uses CRT, SysUtils; // Assuming CRT for file ops, SysUtils for ParamStr etc.

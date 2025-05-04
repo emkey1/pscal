@@ -1,3 +1,4 @@
+#!/usr/bin/env pscal
 PROGRAM ColorPalette256Demo;
 
 USES Crt; // Assumes CRT contains ClrScr, GotoXY, TextColorE, TextColor, Write, WriteLn, ReadKey, NormVideo
