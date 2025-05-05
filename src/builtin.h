@@ -84,6 +84,11 @@ Value executeBuiltinTextBackgroundE(AST *node); // <--- ADD for 256 background
 Value executeBuiltinNew(AST *node);
 Value executeBuiltinDispose(AST *node);
 
+// SDL (Graphics, multimedia)
+Value executeBuiltinInitGraph(AST *node);
+Value executeBuiltinCloseGraph(AST *node);
+Value executeBuiltinGraphLoop(AST *node); 
+
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine
     BUILTIN_TYPE_PROCEDURE, // Built-in, does not return a value usable in expressions

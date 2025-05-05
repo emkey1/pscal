@@ -130,6 +130,9 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("textbackgrounde", AST_PROCEDURE_DECL); 
     registerBuiltinFunction("new", AST_PROCEDURE_DECL);
     registerBuiltinFunction("dispose", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("initgraph", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("closegraph", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("graphloop", AST_PROCEDURE_DECL);
 
     /* Initialize lexer and parser. */
     Lexer lexer;
@@ -263,6 +266,11 @@ int main(int argc, char *argv[]) {
 
     int result = runProgram(source, programName);
     free(source);
+    
+    if (gSdlInitialized) {
+        SDL_Quit();
+    }
+    
     return result;
 }
 #else
@@ -305,6 +313,11 @@ int main(int argc, char *argv[]) {
 
     int result = runProgram(source, JustFileName);
     free(source);
+    
+    if (gSdlInitialized) {
+        SDL_Quit();
+    }
+    
     return result;
 }
 #endif

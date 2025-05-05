@@ -4,6 +4,31 @@
 
 // The place where stuff that needs to be shared between files is placed
 #include "types.h"
+// SDL stuff
+#include <SDL2/SDL.h> 
+
+// ... (other includes and defines) ...
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ... (other extern variables like gCurrentTextColor etc.) ...
+
+// --- ADDED: SDL Graphics Globals ---
+extern SDL_Window* gSdlWindow;
+extern SDL_Renderer* gSdlRenderer;
+extern SDL_Color gSdlCurrentColor; // Store RGBA for current drawing color
+extern bool gSdlInitialized; 
+// --- END ADDED ---
+
+
+/* Symbol table globals */
+// ... (existing externs for symbol tables etc.) ...
+
+#ifdef __cplusplus
+}
+#endif
 
 #ifdef SUPPRESS_EXIT
     #define EXIT_FAILURE_HANDLER() fprintf(stderr, "Suppressed\n")

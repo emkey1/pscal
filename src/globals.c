@@ -18,6 +18,13 @@ bool gCurrentColorIsExt    = false;   // Default standard 16-color mode
 bool gCurrentBgIsExt       = false;   // Default standard 16-color mode (using 0-7 range)
 // --- End CRT State Variables ---
 
+// SDL Stuff
+SDL_Window* gSdlWindow = NULL;
+SDL_Renderer* gSdlRenderer = NULL;
+// Initialize default drawing color (e.g., white)
+SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // R, G, B, Alpha
+bool gSdlInitialized = false; // Don't start graphics if not needed
+
 int break_requested = 0;
 
 

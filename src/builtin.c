@@ -27,6 +27,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"assign",    executeBuiltinAssign},
     {"chr",       executeBuiltinChr},
     {"close",     executeBuiltinClose},
+    {"closegraph", executeBuiltinCloseGraph},
     {"copy",      executeBuiltinCopy},
     {"cos",       executeBuiltinCos},
     {"dec",       executeBuiltinDec},         // Include Dec
@@ -34,9 +35,11 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"dispose",   executeBuiltinDispose},
     {"eof",       executeBuiltinEOF},
     {"exp",       executeBuiltinExp},
+    {"graphloop", executeBuiltinGraphLoop}, 
     {"halt",      executeBuiltinHalt},
     {"high",      executeBuiltinHigh},
     {"inc",       executeBuiltinInc},
+    {"initgraph", executeBuiltinInitGraph}, 
     {"inttostr",  executeBuiltinIntToStr},
     {"ioresult",  executeBuiltinIOResult},
     {"keypressed", executeBuiltinKeyPressed},
@@ -2385,4 +2388,179 @@ void nullifyPointerAliases(Symbol* table, Value* disposedValuePtr) {
         }
         current = current->next;
     }
+}
+
+Value executeBuiltinInitGraph(AST *node) {
+    // --- Initialize SDL if not already done ---
+    if (!gSdlInitialized) {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG InitGraph] SDL not initialized. Calling SDL_Init().\n");
+        #endif
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) { // Check return value
+            fprintf(stderr, "Runtime error: Failed to initialize SDL in InitGraph: %s\n", SDL_GetError());
+            // Return or Halt - cannot proceed if SDL_Init fails
+            EXIT_FAILURE_HANDLER(); // Exit if SDL cannot initialize
+        }
+        gSdlInitialized = true;
+    }
+
+    // --- Argument checks (same as before) ---
+    if (node->child_count != 3) { /* ... error handling ... */ }
+    Value widthVal = eval(node->children[0]);
+    Value heightVal = eval(node->children[1]);
+    Value titleVal = eval(node->children[2]);
+    if (widthVal.type != TYPE_INTEGER || heightVal.type != TYPE_INTEGER || titleVal.type != TYPE_STRING) { /* ... error handling ... */ }
+
+    // Optional: Close previous window if reusing InitGraph
+    if (gSdlWindow || gSdlRenderer) {
+         fprintf(stderr, "Runtime Warning: InitGraph called while graphics mode already active. Closing previous window.\n");
+         if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+         if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+    }
+
+    int width = (int)widthVal.i_val;
+    int height = (int)heightVal.i_val;
+    const char* title = titleVal.s_val ? titleVal.s_val : "pscal Graphics";
+
+    // --- Create Window ---
+    gSdlWindow = SDL_CreateWindow(
+        title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height, SDL_WINDOW_SHOWN
+    );
+    if (!gSdlWindow) { // Check for error
+        fprintf(stderr, "Runtime error: Failed to create SDL window: %s\n", SDL_GetError());
+        freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Create Renderer ---
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!gSdlRenderer) { // Check for error
+        fprintf(stderr, "Runtime error: Failed to create SDL renderer: %s\n", SDL_GetError());
+        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
+        freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // --- Initial Draw ---
+    // Set background color (e.g., dark blue)
+    if (SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 100, 255) != 0) { // Check for error
+        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor failed: %s\n", SDL_GetError());
+    }
+    // Clear screen
+    if (SDL_RenderClear(gSdlRenderer) != 0) { // Check for error
+        fprintf(stderr, "Runtime Warning: SDL_RenderClear failed: %s\n", SDL_GetError());
+    }
+    // Present the cleared screen (THIS makes the window content visible)
+    SDL_RenderPresent(gSdlRenderer);
+    // Note: SDL_RenderPresent doesn't typically return an error code to check easily
+
+    // Set default drawing color (e.g., white) for subsequent draws
+    gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
+    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor (default) failed: %s\n", SDL_GetError());
+    }
+
+    // --- ADDED: Test Delay *inside* C function ---
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] Window/Renderer created. Adding SDL_Delay(2000).\n");
+    #endif
+    SDL_Delay(2000); // Pause execution for 2000 milliseconds (2 seconds) HERE
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] SDL_Delay(2000) finished.\n");
+    #endif
+    // --- END ADDED ---
+
+
+    // Free evaluated arguments
+    freeValue(&widthVal);
+    freeValue(&heightVal);
+    freeValue(&titleVal);
+
+    return makeVoid();
+}
+
+// Pascal: procedure CloseGraph;
+Value executeBuiltinCloseGraph(AST *node) {
+     if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: CloseGraph expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (gSdlRenderer) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
+    }
+    if (gSdlWindow) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+    }
+    
+    // Destroy renderer and window if they exist
+    if (gSdlRenderer) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
+    }
+    if (gSdlWindow) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+    }
+    // Note: We DO NOT set gSdlInitialized back to false here.
+    // SDL_Quit() in main handles full subsystem cleanup.
+    // Calling InitGraph again will just create new window/renderer.
+
+    return makeVoid();
+}
+
+Value executeBuiltinGraphLoop(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: graphloop expects 1 argument (milliseconds).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    Value msVal = eval(node->children[0]);
+    if (msVal.type != TYPE_INTEGER && msVal.type != TYPE_WORD && msVal.type != TYPE_BYTE) {
+         fprintf(stderr, "Runtime error: graphloop argument must be an integer-like type. Got %s\n", varTypeToString(msVal.type));
+         freeValue(&msVal);
+         EXIT_FAILURE_HANDLER();
+    }
+
+    long long ms = msVal.i_val;
+    freeValue(&msVal); // Free evaluated value
+
+    if (ms < 0) ms = 0; // Treat negative delay as 0
+
+    // Only poll events if SDL video is actually initialized
+    if (gSdlInitialized) {
+        Uint32 startTime = SDL_GetTicks();
+        Uint32 targetTime = startTime + (Uint32)ms; // Calculate end time
+        SDL_Event event; // Structure to hold event data
+
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG GraphLoop] Starting SDL Delay/Event Loop for %lld ms. Start: %u, Target: %u\n", ms, startTime, targetTime);
+        #endif
+
+        // Loop until target time is reached
+        while (SDL_GetTicks() < targetTime) {
+            // Process ALL pending events in the queue
+            while (SDL_PollEvent(&event)) {
+                 // Minimal handling for now: just process the queue.
+                 // Could add checks here later, e.g., if (event.type == SDL_QUIT) { /* handle quit */ }
+            }
+            // Prevent busy-waiting: Give a tiny bit of time back to the OS.
+            SDL_Delay(1); // Wait 1 millisecond
+        }
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG GraphLoop] Finished SDL Delay/Event Loop. End: %u\n", SDL_GetTicks());
+        #endif
+
+    } else {
+        // If SDL not initialized, graphloop maybe does nothing or warns?
+        // Let's just do nothing, as it's graphics-specific.
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG GraphLoop] SDL not initialized. graphloop(%lld) doing nothing.\n", ms);
+        #endif
+    }
+
+    return makeVoid();
 }
