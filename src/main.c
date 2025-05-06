@@ -133,6 +133,14 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("initgraph", AST_PROCEDURE_DECL);
     registerBuiltinFunction("closegraph", AST_PROCEDURE_DECL);
     registerBuiltinFunction("graphloop", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("getmaxx", AST_FUNCTION_DECL);
+    registerBuiltinFunction("getmaxy", AST_FUNCTION_DECL);
+    registerBuiltinFunction("setcolor", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("putpixel", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("updatescreen", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("drawrect", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("waitkeyevent", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL);
 
     /* Initialize lexer and parser. */
     Lexer lexer;

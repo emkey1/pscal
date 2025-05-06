@@ -87,7 +87,15 @@ Value executeBuiltinDispose(AST *node);
 // SDL (Graphics, multimedia)
 Value executeBuiltinInitGraph(AST *node);
 Value executeBuiltinCloseGraph(AST *node);
-Value executeBuiltinGraphLoop(AST *node); 
+Value executeBuiltinGraphLoop(AST *node);
+Value executeBuiltinGetMaxX(AST *node);
+Value executeBuiltinGetMaxY(AST *node);
+Value executeBuiltinSetColor(AST *node);
+Value executeBuiltinPutPixel(AST *node);
+Value executeBuiltinUpdateScreen(AST *node);
+Value executeBuiltinDrawRect(AST *node);
+Value executeBuiltinWaitKeyEvent(AST *node);
+Value executeBuiltinClearDevice(AST *node);
 
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine

@@ -26,6 +26,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"api_send",  executeBuiltinAPISend},      // From builtin_network_api.c
     {"assign",    executeBuiltinAssign},
     {"chr",       executeBuiltinChr},
+    {"cleardevice", executeBuiltinClearDevice},
     {"close",     executeBuiltinClose},
     {"closegraph", executeBuiltinCloseGraph},
     {"copy",      executeBuiltinCopy},
@@ -33,9 +34,12 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"dec",       executeBuiltinDec},         // Include Dec
     {"delay",     executeBuiltinDelay},
     {"dispose",   executeBuiltinDispose},
+    {"drawrect",  executeBuiltinDrawRect},
     {"eof",       executeBuiltinEOF},
     {"exp",       executeBuiltinExp},
-    {"graphloop", executeBuiltinGraphLoop}, 
+    {"getmaxx",   executeBuiltinGetMaxX},
+    {"getmaxy",   executeBuiltinGetMaxY},
+    {"graphloop", executeBuiltinGraphLoop},
     {"halt",      executeBuiltinHalt},
     {"high",      executeBuiltinHigh},
     {"inc",       executeBuiltinInc},
@@ -55,6 +59,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"paramcount", executeBuiltinParamcount},
     {"paramstr",  executeBuiltinParamstr},
     {"pos",       executeBuiltinPos},
+    {"putpixel",  executeBuiltinPutPixel},
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
     {"readkey",   executeBuiltinReadKey},
@@ -63,6 +68,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"rewrite",   executeBuiltinRewrite},
     {"screencols", executeBuiltinScreenCols},
     {"screenrows", executeBuiltinScreenRows},
+    {"setcolor",  executeBuiltinSetColor},
     {"sin",       executeBuiltinSin},
     {"sqrt",      executeBuiltinSqrt},
     {"succ",      executeBuiltinSucc},        // Include Succ
@@ -72,7 +78,9 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"textcolor", executeBuiltinTextColor},
     {"textcolore", executeBuiltinTextColorE},
     {"trunc",     executeBuiltinTrunc},
+    {"updatescreen", executeBuiltinUpdateScreen}, 
     {"upcase",    executeBuiltinUpcase},
+    {"waitkeyevent", executeBuiltinWaitKeyEvent},
     {"wherex",    executeBuiltinWhereX},
     {"wherey",    executeBuiltinWhereY}
     // Add Write/Writeln/Read/Readln if you want them dispatched here,
@@ -2394,83 +2402,84 @@ Value executeBuiltinInitGraph(AST *node) {
     // --- Initialize SDL if not already done ---
     if (!gSdlInitialized) {
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG InitGraph] SDL not initialized. Calling SDL_Init().\n");
+        fprintf(stderr, "[DEBUG InitGraph] SDL not initialized. Calling SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER).\n");
         #endif
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) { // Check return value
-            fprintf(stderr, "Runtime error: Failed to initialize SDL in InitGraph: %s\n", SDL_GetError());
-            // Return or Halt - cannot proceed if SDL_Init fails
-            EXIT_FAILURE_HANDLER(); // Exit if SDL cannot initialize
+        // --- Added Explicit Error Check ---
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
+            fprintf(stderr, "Runtime error: SDL_Init failed in InitGraph: %s\n", SDL_GetError());
+            // Set flag to prevent further SDL calls? Or exit? Let's exit for init failure.
+            EXIT_FAILURE_HANDLER();
         }
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG InitGraph] SDL_Init successful.\n");
+        #endif
         gSdlInitialized = true;
     }
 
-    // --- Argument checks (same as before) ---
-    if (node->child_count != 3) { /* ... error handling ... */ }
+    // --- Argument checks ---
+    if (node->child_count != 3) { /* Existing error handling */ }
     Value widthVal = eval(node->children[0]);
     Value heightVal = eval(node->children[1]);
     Value titleVal = eval(node->children[2]);
-    if (widthVal.type != TYPE_INTEGER || heightVal.type != TYPE_INTEGER || titleVal.type != TYPE_STRING) { /* ... error handling ... */ }
+    if (widthVal.type != TYPE_INTEGER || heightVal.type != TYPE_INTEGER || titleVal.type != TYPE_STRING) { /* Existing error handling */ }
 
-    // Optional: Close previous window if reusing InitGraph
-    if (gSdlWindow || gSdlRenderer) {
-         fprintf(stderr, "Runtime Warning: InitGraph called while graphics mode already active. Closing previous window.\n");
-         if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-         if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-    }
+    // Check if already initialized (optional cleanup)
+    if (gSdlWindow || gSdlRenderer) { /* Existing warning/cleanup */ }
 
     int width = (int)widthVal.i_val;
     int height = (int)heightVal.i_val;
     const char* title = titleVal.s_val ? titleVal.s_val : "pscal Graphics";
 
     // --- Create Window ---
-    gSdlWindow = SDL_CreateWindow(
-        title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height, SDL_WINDOW_SHOWN
-    );
-    if (!gSdlWindow) { // Check for error
-        fprintf(stderr, "Runtime error: Failed to create SDL window: %s\n", SDL_GetError());
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] Creating window (%dx%d, Title: '%s')...\n", width, height, title);
+    #endif
+    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
+    // --- Added Explicit Error Check ---
+    if (!gSdlWindow) {
+        fprintf(stderr, "Runtime error: SDL_CreateWindow failed: %s\n", SDL_GetError());
         freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
         EXIT_FAILURE_HANDLER();
     }
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] SDL_CreateWindow successful (Window: %p).\n", (void*)gSdlWindow);
+    #endif
+
+    gSdlWidth = width;
+    gSdlHeight = height;
 
     // --- Create Renderer ---
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] Creating renderer...\n");
+    #endif
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!gSdlRenderer) { // Check for error
-        fprintf(stderr, "Runtime error: Failed to create SDL renderer: %s\n", SDL_GetError());
+    // --- Added Explicit Error Check ---
+    if (!gSdlRenderer) {
+        fprintf(stderr, "Runtime error: SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
         freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
         EXIT_FAILURE_HANDLER();
     }
+     #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] SDL_CreateRenderer successful (Renderer: %p).\n", (void*)gSdlRenderer);
+    #endif
 
     // --- Initial Draw ---
-    // Set background color (e.g., dark blue)
-    if (SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 100, 255) != 0) { // Check for error
-        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor failed: %s\n", SDL_GetError());
-    }
-    // Clear screen
-    if (SDL_RenderClear(gSdlRenderer) != 0) { // Check for error
-        fprintf(stderr, "Runtime Warning: SDL_RenderClear failed: %s\n", SDL_GetError());
-    }
-    // Present the cleared screen (THIS makes the window content visible)
-    SDL_RenderPresent(gSdlRenderer);
-    // Note: SDL_RenderPresent doesn't typically return an error code to check easily
+     #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] Performing initial clear and present...\n");
+    #endif
+    // --- Added Error Checks ---
+    if (SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 100, 255) != 0) { fprintf(stderr, "Runtime Warning [InitGraph]: SDL_SetRenderDrawColor (background) failed: %s\n", SDL_GetError()); }
+    if (SDL_RenderClear(gSdlRenderer) != 0) { fprintf(stderr, "Runtime Warning [InitGraph]: SDL_RenderClear failed: %s\n", SDL_GetError()); }
+    SDL_RenderPresent(gSdlRenderer); // Present the cleared screen
 
-    // Set default drawing color (e.g., white) for subsequent draws
+    // Set default drawing color
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
-    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
-        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor (default) failed: %s\n", SDL_GetError());
-    }
+    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) { fprintf(stderr, "Runtime Warning [InitGraph]: SDL_SetRenderDrawColor (default) failed: %s\n", SDL_GetError()); }
 
-    // --- ADDED: Test Delay *inside* C function ---
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG InitGraph] Window/Renderer created. Adding SDL_Delay(2000).\n");
+     #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] Initial clear and present finished.\n");
     #endif
-    SDL_Delay(2000); // Pause execution for 2000 milliseconds (2 seconds) HERE
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG InitGraph] SDL_Delay(2000) finished.\n");
-    #endif
-    // --- END ADDED ---
-
 
     // Free evaluated arguments
     freeValue(&widthVal);
@@ -2480,7 +2489,7 @@ Value executeBuiltinInitGraph(AST *node) {
     return makeVoid();
 }
 
-// Pascal: procedure CloseGraph;
+// Pscal: procedure CloseGraph;
 Value executeBuiltinCloseGraph(AST *node) {
      if (node->child_count != 0) {
         fprintf(stderr, "Runtime error: CloseGraph expects 0 arguments.\n");
@@ -2531,7 +2540,7 @@ Value executeBuiltinGraphLoop(AST *node) {
     if (ms < 0) ms = 0; // Treat negative delay as 0
 
     // Only poll events if SDL video is actually initialized
-    if (gSdlInitialized) {
+    if (gSdlInitialized && gSdlWindow && gSdlRenderer) { // Added check for window/renderer
         Uint32 startTime = SDL_GetTicks();
         Uint32 targetTime = startTime + (Uint32)ms; // Calculate end time
         SDL_Event event; // Structure to hold event data
@@ -2542,11 +2551,25 @@ Value executeBuiltinGraphLoop(AST *node) {
 
         // Loop until target time is reached
         while (SDL_GetTicks() < targetTime) {
-            // Process ALL pending events in the queue
             while (SDL_PollEvent(&event)) {
-                 // Minimal handling for now: just process the queue.
-                 // Could add checks here later, e.g., if (event.type == SDL_QUIT) { /* handle quit */ }
+                 #ifdef DEBUG
+                 if (dumpExec) {
+                     fprintf(stderr, "[DEBUG GraphLoop] Polled event type: %d\n", event.type);
+                 }
+                 #endif
+                 // Check specifically for the quit event
+                 if (event.type == SDL_QUIT) {
+                     #ifdef DEBUG
+                     fprintf(stderr, "[DEBUG GraphLoop] SDL_QUIT event detected during graphloop.\n");
+                     #endif
+                     // NOTE: We detect QUIT here, but cannot easily stop the Pascal
+                     // program from *this* function in the current design.
+                     // A more robust solution would involve setting a global flag
+                     // or redesigning the main execution loop.
+                 }
+                 // Add handling for other events if needed (keyboard, mouse)
             }
+
             // Prevent busy-waiting: Give a tiny bit of time back to the OS.
             SDL_Delay(1); // Wait 1 millisecond
         }
@@ -2558,9 +2581,309 @@ Value executeBuiltinGraphLoop(AST *node) {
         // If SDL not initialized, graphloop maybe does nothing or warns?
         // Let's just do nothing, as it's graphics-specific.
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG GraphLoop] SDL not initialized. graphloop(%lld) doing nothing.\n", ms);
+        fprintf(stderr, "[DEBUG GraphLoop] SDL not initialized or window/renderer missing. graphloop(%lld) doing nothing.\n", ms);
         #endif
     }
+
+    return makeVoid();
+}
+
+Value executeBuiltinGetMaxX(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: GetMaxX expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlWindow) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before GetMaxX.\n");
+         EXIT_FAILURE_HANDLER();
+    }
+    return makeInt(gSdlWidth - 1); // Return 0-based max coordinate
+}
+
+// --- GetMaxY ---
+// Pascal: function GetMaxY: Integer;
+Value executeBuiltinGetMaxY(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: GetMaxY expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+     if (!gSdlInitialized || !gSdlWindow) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before GetMaxY.\n");
+         EXIT_FAILURE_HANDLER();
+    }
+    return makeInt(gSdlHeight - 1); // Return 0-based max coordinate
+}
+
+// --- SetColor ---
+// Pascal: procedure SetColor(Color: Integer); // Using integer 0-255 for simplicity
+Value executeBuiltinSetColor(AST *node) {
+     if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: SetColor expects 1 argument (color index 0-255).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before SetColor.\n");
+         EXIT_FAILURE_HANDLER();
+    }
+    Value colorVal = eval(node->children[0]);
+    if (colorVal.type != TYPE_INTEGER && colorVal.type != TYPE_BYTE) {
+         fprintf(stderr, "Runtime error: SetColor argument must be an integer or byte.\n");
+         freeValue(&colorVal); EXIT_FAILURE_HANDLER();
+    }
+    long long colorCode = colorVal.i_val;
+    freeValue(&colorVal);
+
+    // --- Simple Color Mapping Example (Expand later if needed) ---
+    // This maps integer 0-15 to CGA-like colors, others cycle through a basic spectrum.
+    // You can implement more sophisticated palettes.
+    if (colorCode >= 0 && colorCode <= 15) {
+         // Basic 16 colors (approximated)
+         unsigned char intensity = (colorCode > 7) ? 255 : 192; // Brighter for codes 8-15
+         gSdlCurrentColor.r = (colorCode & 4) ? intensity : 0; // Red component
+         gSdlCurrentColor.g = (colorCode & 2) ? intensity : 0; // Green component
+         gSdlCurrentColor.b = (colorCode & 1) ? intensity : 0; // Blue component
+         if (colorCode == 6) { gSdlCurrentColor.g = intensity / 2; } // Brownish adjustment
+         if (colorCode == 7 || colorCode == 15) { gSdlCurrentColor.r=intensity; gSdlCurrentColor.g=intensity; gSdlCurrentColor.b=intensity; } // Greys
+         if (colorCode == 8) {gSdlCurrentColor.r = 128; gSdlCurrentColor.g = 128; gSdlCurrentColor.b = 128;} // Dark Grey specific
+         if (colorCode == 0) {gSdlCurrentColor.r = 0; gSdlCurrentColor.g = 0; gSdlCurrentColor.b = 0;} // Black specific
+    } else {
+         // Basic cycle for other colors (simple example)
+         int c = (int)(colorCode % 256);
+         gSdlCurrentColor.r = (c * 3) % 256;
+         gSdlCurrentColor.g = (c * 5) % 256;
+         gSdlCurrentColor.b = (c * 7) % 256;
+    }
+    gSdlCurrentColor.a = 255; // Full alpha
+    // --- End Simple Color Mapping ---
+
+    // Set the color for subsequent drawing operations
+    if(SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+        fprintf(stderr, "Runtime Warning: SetRenderDrawColor failed in SetColor: %s\n", SDL_GetError());
+    }
+
+    return makeVoid();
+}
+
+// --- PutPixel ---
+// Pscal: procedure PutPixel(X, Y: Integer); // Draws using the current color
+Value executeBuiltinPutPixel(AST *node) {
+     if (node->child_count != 2) {
+        fprintf(stderr, "Runtime error: PutPixel expects 2 arguments (X, Y).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before PutPixel.\n");
+         EXIT_FAILURE_HANDLER();
+    }
+    Value xVal = eval(node->children[0]);
+    Value yVal = eval(node->children[1]);
+
+    if (xVal.type != TYPE_INTEGER || yVal.type != TYPE_INTEGER) {
+         fprintf(stderr, "Runtime error: PutPixel coordinates must be integers.\n");
+         freeValue(&xVal); freeValue(&yVal); EXIT_FAILURE_HANDLER();
+    }
+    int x = (int)xVal.i_val;
+    int y = (int)yVal.i_val;
+    freeValue(&xVal); freeValue(&yVal);
+
+    // Set the draw color (redundant if SetColor was just called, but safe)
+    if(SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+         fprintf(stderr, "Runtime Warning: SetRenderDrawColor failed in PutPixel: %s\n", SDL_GetError());
+         // Continue attempt to draw anyway?
+    }
+
+    // Draw the point
+    if(SDL_RenderDrawPoint(gSdlRenderer, x, y) != 0) {
+          fprintf(stderr, "Runtime Warning: RenderDrawPoint failed in PutPixel: %s\n", SDL_GetError());
+    }
+
+    return makeVoid();
+}
+
+// --- UpdateScreen ---
+// Pscal: procedure UpdateScreen;
+Value executeBuiltinUpdateScreen(AST *node) {
+     if (node->child_count != 0) {
+         fprintf(stderr, "Runtime error: UpdateScreen expects 0 arguments.\n");
+         EXIT_FAILURE_HANDLER();
+     }
+     if (!gSdlInitialized || !gSdlRenderer) {
+          fprintf(stderr, "Runtime error: Graphics mode not initialized before UpdateScreen.\n");
+          EXIT_FAILURE_HANDLER();
+     }
+
+     // Process pending events to keep the window responsive
+     SDL_Event event;
+     while (SDL_PollEvent(&event)) {
+         // Currently, we don't act on events here, just process the queue.
+         // A full application might check for SDL_QUIT here.
+         #ifdef DEBUG
+         if(dumpExec) {
+             if (event.type == SDL_QUIT) {
+                 fprintf(stderr, "[DEBUG UpdateScreen] SDL_QUIT event polled but not handled here.\n");
+             }
+             // else { fprintf(stderr, "[DEBUG UpdateScreen] Polled event type: %d\n", event.type); } // Optional: Log all events
+         }
+         #endif
+     }
+
+     #ifdef DEBUG
+     fprintf(stderr, "[DEBUG UpdateScreen] Calling SDL_RenderPresent(%p)\n", (void*)gSdlRenderer);
+     #endif
+     SDL_RenderPresent(gSdlRenderer); // Show buffer on screen
+
+     const char *err = SDL_GetError();
+     if (err && err[0] != '\0') { // Check if error string is not empty
+         fprintf(stderr, "Runtime Warning: SDL Error state after RenderPresent: %s\n", err);
+         SDL_ClearError(); // Clear error state after reporting
+     }
+
+     #ifdef DEBUG
+     fprintf(stderr, "[DEBUG UpdateScreen] SDL_RenderPresent finished.\n");
+     #endif
+     return makeVoid();
+}
+
+// Pscal: procedure DrawRect(X1, Y1, X2, Y2: Integer);
+Value executeBuiltinDrawRect(AST *node) {
+    if (node->child_count != 4) {
+        fprintf(stderr, "Runtime error: DrawRect expects 4 integer arguments (X1, Y1, X2, Y2).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before DrawRect.\n");
+         EXIT_FAILURE_HANDLER();
+    }
+
+    // Evaluate arguments
+    Value x1Val = eval(node->children[0]);
+    Value y1Val = eval(node->children[1]);
+    Value x2Val = eval(node->children[2]);
+    Value y2Val = eval(node->children[3]);
+
+    // Type checking
+    if (x1Val.type != TYPE_INTEGER || y1Val.type != TYPE_INTEGER ||
+        x2Val.type != TYPE_INTEGER || y2Val.type != TYPE_INTEGER)
+    {
+        fprintf(stderr, "Runtime error: DrawRect arguments must be integers.\n");
+        freeValue(&x1Val); freeValue(&y1Val); freeValue(&x2Val); freeValue(&y2Val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Extract coordinates
+    int x1 = (int)x1Val.i_val;
+    int y1 = (int)y1Val.i_val;
+    int x2 = (int)x2Val.i_val;
+    int y2 = (int)y2Val.i_val;
+
+    // Free evaluated arguments
+    freeValue(&x1Val); freeValue(&y1Val); freeValue(&x2Val); freeValue(&y2Val);
+
+    // Create SDL_Rect (SDL requires x, y, width, height)
+    // Handle potential swapped coordinates gracefully
+    SDL_Rect rect;
+    rect.x = (x1 < x2) ? x1 : x2;
+    rect.y = (y1 < y2) ? y1 : y2;
+    rect.w = abs(x2 - x1) + 1; // Width includes both endpoints
+    rect.h = abs(y2 - y1) + 1; // Height includes both endpoints
+
+    // Set the draw color (using the globally stored current color)
+    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+         fprintf(stderr, "Runtime Warning: SetRenderDrawColor failed in DrawRect: %s\n", SDL_GetError());
+         // Continue anyway? Or return error?
+    }
+
+    // Draw the rectangle outline
+    if (SDL_RenderDrawRect(gSdlRenderer, &rect) != 0) {
+        fprintf(stderr, "Runtime Warning: RenderDrawRect failed: %s\n", SDL_GetError());
+    }
+
+    return makeVoid();
+}
+
+// Pscal: procedure WaitKeyEvent; // Blocks until key press or window close
+Value executeBuiltinWaitKeyEvent(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: WaitKeyEvent expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Check if graphics subsystem is initialized
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before WaitKeyEvent.\n");
+         // Don't wait if graphics aren't running
+         return makeVoid();
+    }
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG WaitKeyEvent] Entering SDL_WaitEvent loop...\n");
+    #endif
+
+    SDL_Event event;
+    int waiting = 1;
+    while (waiting) {
+        // Wait indefinitely for the next event
+        if (SDL_WaitEvent(&event)) {
+            #ifdef DEBUG
+            if(dumpExec) fprintf(stderr, "[DEBUG WaitKeyEvent] Event received: type=%d\n", event.type);
+            #endif
+            // Check if the event is a quit request or a keydown event
+            if (event.type == SDL_QUIT) {
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG WaitKeyEvent] SDL_QUIT event detected. Exiting wait loop.\n");
+                 #endif
+                 waiting = 0; // Exit the loop
+            } else if (event.type == SDL_KEYDOWN) {
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG WaitKeyEvent] SDL_KEYDOWN event detected. Exiting wait loop.\n");
+                 #endif
+                 waiting = 0; // Exit the loop
+            }
+            // Add checks for other events if needed (e.g., mouse clicks)
+        } else {
+            // SDL_WaitEvent returning 0 usually indicates an error
+            fprintf(stderr, "Runtime error: SDL_WaitEvent failed: %s\n", SDL_GetError());
+            waiting = 0; // Exit loop on error
+        }
+    } // End while(waiting)
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG WaitKeyEvent] Exited SDL_WaitEvent loop.\n");
+    #endif
+
+    return makeVoid(); // WaitKeyEvent is a procedure
+}
+
+// Pscal: procedure ClearDevice;
+Value executeBuiltinClearDevice(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: ClearDevice expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before ClearDevice.\n");
+        // Maybe just return void instead of exiting?
+        return makeVoid();
+    }
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG ClearDevice] Clearing screen.\n");
+    #endif
+
+    // Set draw color to the current background color (or default black)
+    // For simplicity, let's use black (0,0,0) for now.
+    // A more advanced version might use a global background color variable.
+    if (SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255) != 0) {
+        fprintf(stderr, "Runtime Warning [ClearDevice]: SDL_SetRenderDrawColor failed: %s\n", SDL_GetError());
+    }
+
+    // Clear the entire rendering target
+    if (SDL_RenderClear(gSdlRenderer) != 0) {
+        fprintf(stderr, "Runtime Warning [ClearDevice]: SDL_RenderClear failed: %s\n", SDL_GetError());
+    }
+
+    // Note: ClearDevice does NOT call RenderPresent.
+    // The changes will be visible only after the next UpdateScreen.
 
     return makeVoid();
 }

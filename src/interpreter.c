@@ -5,6 +5,7 @@
 #include "globals.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #define PASCAL_DEFAULT_FLOAT_PRECISION 6
 
@@ -2465,12 +2466,19 @@ Value* resolveLValueToPtr(AST* lvalueNode) {
             if (baseValuePtr->type == TYPE_ARRAY) {
                 // --- Array Element Access ---
                 if (!baseValuePtr->array_val) { /* Error: Array not initialized */ }
+#ifdef DEBUG
+fprintf(stderr, "[DEBUG RESOLVE_LVAL] Array Access Check:\n");
+fprintf(stderr, "  lvalueNode->child_count = %d\n", lvalueNode->child_count);
+fprintf(stderr, "  baseValuePtr->dimensions = %d\n", baseValuePtr->dimensions);
+fflush(stderr); // Ensure output is seen before potential crash
+#endif
                 if (lvalueNode->child_count != baseValuePtr->dimensions) { /* Error: Index count mismatch */ }
 
                 // Calculate indices
                 int* indices = malloc(sizeof(int) * baseValuePtr->dimensions);
                 if (!indices) { /* Mem Error */ }
                 for (int i = 0; i < lvalueNode->child_count; i++) {
+                    assert(i < baseValuePtr->dimensions);
                     Value idxVal = eval(lvalueNode->children[i]); // Eval index expressions
                     if (idxVal.type != TYPE_INTEGER) { /* Index Type Error */ free(indices); freeValue(&idxVal); EXIT_FAILURE_HANDLER(); }
                     indices[i] = (int)idxVal.i_val;

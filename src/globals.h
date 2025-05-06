@@ -7,20 +7,20 @@
 // SDL stuff
 #include <SDL2/SDL.h> 
 
-// ... (other includes and defines) ...
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // ... (other extern variables like gCurrentTextColor etc.) ...
 
-// --- ADDED: SDL Graphics Globals ---
+// --- SDL Graphics Globals ---
 extern SDL_Window* gSdlWindow;
 extern SDL_Renderer* gSdlRenderer;
 extern SDL_Color gSdlCurrentColor; // Store RGBA for current drawing color
-extern bool gSdlInitialized; 
-// --- END ADDED ---
+extern bool gSdlInitialized;
+extern int gSdlWidth;
+extern int gSdlHeight;
+// --- END SDL ---
 
 
 /* Symbol table globals */
