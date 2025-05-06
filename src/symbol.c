@@ -226,7 +226,6 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_ENUM: if (val.type == TYPE_ENUM) { freeValue(sym->value); sym->value->enum_val.enum_name = val.enum_val.enum_name ? strdup(val.enum_val.enum_name) : NULL; /*...*/ sym->value->enum_val.ordinal = val.enum_val.ordinal; } else if (val.type == TYPE_INTEGER) { /* Ordinal check needed */ sym->value->enum_val.ordinal = (int)val.i_val; } sym->value->type = TYPE_ENUM; break;
         case TYPE_SET: freeValue(sym->value); *sym->value = makeCopyOfValue(&val); sym->value->type = TYPE_SET; break;
 
-        // --- Modified TYPE_POINTER case ---
         case TYPE_POINTER:
             // Assign the incoming pointer address (which might be NULL)
             sym->value->ptr_val = val.ptr_val;
@@ -238,7 +237,6 @@ void updateSymbol(const char *name, Value val) {
             fflush(stderr);
             #endif
             break;
-        // --- End Modified TYPE_POINTER case ---
 
         default:
             fprintf(stderr, "Runtime error: unhandled target type (%s) in updateSymbol assignment logic.\n", varTypeToString(sym->type));

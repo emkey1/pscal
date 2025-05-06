@@ -2393,19 +2393,56 @@ Value makeCopyOfValue(Value *src) {
         }
         case TYPE_ARRAY: {
             int total = 1;
-            v.lower_bounds = malloc(sizeof(int) * src->dimensions);
-            v.upper_bounds = malloc(sizeof(int) * src->dimensions);
-            for (int i = 0; i < src->dimensions; i++) {
-                v.lower_bounds[i] = src->lower_bounds[i];
-                v.upper_bounds[i] = src->upper_bounds[i];
-                total *= (v.upper_bounds[i] - v.lower_bounds[i] + 1);
+            // <<< ADD/VERIFY THIS >>>
+            v.dimensions = src->dimensions;
+            // <<< END ADD/VERIFY >>>
+
+            // Check if dimensions > 0 before mallocing bounds/data
+            if (v.dimensions > 0 && src->lower_bounds && src->upper_bounds) {
+                v.lower_bounds = malloc(sizeof(int) * src->dimensions);
+                v.upper_bounds = malloc(sizeof(int) * src->dimensions);
+                // Add null checks for malloc results
+                if (!v.lower_bounds || !v.upper_bounds) { /* Handle error */ }
+
+                for (int i = 0; i < src->dimensions; i++) {
+                    v.lower_bounds[i] = src->lower_bounds[i];
+                    v.upper_bounds[i] = src->upper_bounds[i];
+                    // Check for valid bounds before calculating total_size
+                    int size_i = (v.upper_bounds[i] - v.lower_bounds[i] + 1);
+                    if (size_i <= 0) { total = 0; break; } // Invalid bounds -> empty array effectively
+                    if (__builtin_mul_overflow(total, size_i, &total)) { total = -1; break; } // Check overflow
+                }
+            } else {
+                // If dimensions is 0 or bounds are missing, ensure size is 0
+                total = 0;
+                v.lower_bounds = NULL;
+                v.upper_bounds = NULL;
             }
-            v.array_val = malloc(sizeof(Value) * total);
-            for (int i = 0; i < total; i++) {
-                v.array_val[i] = makeCopyOfValue(&src->array_val[i]);
+
+            // Allocate and copy array data only if total size is valid
+            v.array_val = NULL; // Initialize to NULL
+            if (total > 0 && src->array_val) {
+                 v.array_val = malloc(sizeof(Value) * total);
+                 if (!v.array_val) { /* Handle error */ }
+                 for (int i = 0; i < total; i++) {
+                     v.array_val[i] = makeCopyOfValue(&src->array_val[i]);
+                 }
+            } else if (total < 0) {
+                 fprintf(stderr, "Error: Array size overflow during copy.\n");
+                 // Handle error - maybe set dimensions to 0?
+                 v.dimensions = 0;
+                 free(v.lower_bounds); v.lower_bounds = NULL;
+                 free(v.upper_bounds); v.upper_bounds = NULL;
+            } else {
+                 // total is 0, ensure array_val is NULL (already done)
             }
-            break;
-        }
+
+            // Copy element type definition link
+            v.element_type_def = src->element_type_def; // Assuming shallow copy is ok for AST node link
+            v.element_type = src->element_type; // Copy element type enum
+
+            break; // <<< Make sure break is here >>>
+        } // End case TYPE_ARRAY
         case TYPE_CHAR:
             // Already handled by shallow copy
             break;
