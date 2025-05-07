@@ -21,11 +21,9 @@ extern SDL_Color gSdlCurrentColor; // Store RGBA for current drawing color
 extern bool gSdlInitialized;
 extern int gSdlWidth;
 extern int gSdlHeight;
+extern TTF_Font* gSdlFont;
+extern int gSdlFontSize;
 // --- END SDL ---
-
-
-/* Symbol table globals */
-// ... (existing externs for symbol tables etc.) ...
 
 #ifdef __cplusplus
 }

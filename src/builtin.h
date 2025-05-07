@@ -97,6 +97,13 @@ Value executeBuiltinDrawRect(AST *node);
 Value executeBuiltinWaitKeyEvent(AST *node);
 Value executeBuiltinClearDevice(AST *node);
 Value executeBuiltinSetRGBColor(AST *node);
+Value executeBuiltinDrawLine(AST *node);
+Value executeBuiltinFillRect(AST *node);
+Value executeBuiltinDrawCircle(AST *node);
+Value executeBuiltinOutTextXY(AST *node);
+Value executeBuiltinGetMouseState(AST *node);
+Value executeBuiltinInitTextSystem(AST *node); // For loading font
+Value executeBuiltinQuitTextSystem(AST *node); // For closing font
 
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine

@@ -142,6 +142,13 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("waitkeyevent", AST_PROCEDURE_DECL);
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL);
     registerBuiltinFunction("setrgbcolor", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("drawline", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("fillrect", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("drawcircle", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("inittextsystem", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("outtextxy", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("quittextsystem", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("getmousestate", AST_PROCEDURE_DECL);
 
     /* Initialize lexer and parser. */
     Lexer lexer;
@@ -277,8 +284,22 @@ int main(int argc, char *argv[]) {
     free(source);
     
     if (gSdlInitialized) {
+        if (gSdlFont) { // If a font was loaded
+            TTF_CloseFont(gSdlFont);
+            gSdlFont = NULL;
+        }
+        if (gSdlInitialized) { // Assuming gSdlInitialized tracks TTF_Init status too, or add separate flag
+            TTF_Quit(); // Quit SDL_ttf subsystem
+        }
+        // This SDL_Quit is for the main SDL system
+        if (gSdlInitialized) { // Check this flag for the main SDL_Quit
+            SDL_Quit();
+        }
+        
         SDL_Quit();
     }
+    
+    
     
     return result;
 }
@@ -324,6 +345,18 @@ int main(int argc, char *argv[]) {
     free(source);
     
     if (gSdlInitialized) {
+        if (gSdlFont) { // If a font was loaded
+            TTF_CloseFont(gSdlFont);
+            gSdlFont = NULL;
+        }
+        if (gSdlInitialized) { // Assuming gSdlInitialized tracks TTF_Init status too, or add separate flag
+            TTF_Quit(); // Quit SDL_ttf subsystem
+        }
+        // This SDL_Quit is for the main SDL system
+        if (gSdlInitialized) { // Check this flag for the main SDL_Quit
+            SDL_Quit();
+        }
+        
         SDL_Quit();
     }
     

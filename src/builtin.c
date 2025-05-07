@@ -34,16 +34,21 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"dec",       executeBuiltinDec},         // Include Dec
     {"delay",     executeBuiltinDelay},
     {"dispose",   executeBuiltinDispose},
+    {"drawcircle", executeBuiltinDrawCircle},
+    {"drawline", executeBuiltinDrawLine},
     {"drawrect",  executeBuiltinDrawRect},
     {"eof",       executeBuiltinEOF},
     {"exp",       executeBuiltinExp},
+    {"fillrect", executeBuiltinFillRect},
     {"getmaxx",   executeBuiltinGetMaxX},
     {"getmaxy",   executeBuiltinGetMaxY},
+    {"getmousestate", executeBuiltinGetMouseState},
     {"graphloop", executeBuiltinGraphLoop},
     {"halt",      executeBuiltinHalt},
     {"high",      executeBuiltinHigh},
     {"inc",       executeBuiltinInc},
-    {"initgraph", executeBuiltinInitGraph}, 
+    {"initgraph", executeBuiltinInitGraph},
+    {"inittextsystem", executeBuiltinInitTextSystem},
     {"inttostr",  executeBuiltinIntToStr},
     {"ioresult",  executeBuiltinIOResult},
     {"keypressed", executeBuiltinKeyPressed},
@@ -56,10 +61,12 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"mstreamsavetofile", executeBuiltinMstreamSaveToFile}, // Corrected name based on registration
     {"new",       executeBuiltinNew},
     {"ord",       executeBuiltinOrd},
+    {"outtextxy", executeBuiltinOutTextXY},
     {"paramcount", executeBuiltinParamcount},
     {"paramstr",  executeBuiltinParamstr},
     {"pos",       executeBuiltinPos},
     {"putpixel",  executeBuiltinPutPixel},
+    {"quittextsystem", executeBuiltinQuitTextSystem},
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
     {"readkey",   executeBuiltinReadKey},
@@ -1601,6 +1608,63 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
 
         dummy->child_count = 3;
         dummy->var_type = TYPE_VOID; // It's a procedure
+    } else if (strcasecmp(name, "drawline") == 0) {
+        dummy->child_capacity = 4; dummy->children = malloc(sizeof(AST*) * 4); /* check */
+        const char* pnames[] = {"_dl_x1", "_dl_y1", "_dl_x2", "_dl_y2"};
+        for(int i=0; i<4; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 4; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "fillrect") == 0) {
+        dummy->child_capacity = 4; dummy->children = malloc(sizeof(AST*) * 4); /* check */
+        const char* pnames[] = {"_fr_x1", "_fr_y1", "_fr_x2", "_fr_y2"}; // or x,y,w,h depending on your preference
+        for(int i=0; i<4; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 4; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "drawcircle") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
+        const char* pnames[] = {"_dc_cx", "_dc_cy", "_dc_r"};
+        for(int i=0; i<3; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "inittextsystem") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_its_font"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1);
+        dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_its_size"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2);
+        dummy->children[1] = p2;
+        dummy->child_count = 2; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "outtextxy") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_ot_x"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1);
+        dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_ot_y"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2);
+        dummy->children[1] = p2;
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_STRING);
+        Token* p3n = newToken(TOKEN_IDENTIFIER, "_ot_s"); AST* v3 = newASTNode(AST_VARIABLE, p3n); freeToken(p3n); addChild(p3,v3);
+        dummy->children[2] = p3;
+        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "getmousestate") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
+        const char* pnames[] = {"_gms_x", "_gms_y", "_gms_b"};
+        for(int i=0; i<3; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER); p->by_ref = 1; // VAR parameters
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
     } else if (strcmp(name, "textcolore") == 0 || strcmp(name, "textbackgrounde") == 0 ) {
         // Param: byte/integer
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST *)); if (!dummy->children) { /* Error */ }
@@ -2961,6 +3025,323 @@ Value executeBuiltinSetRGBColor(AST *node) {
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG SetRGBColor] Set color to R:%d G:%d B:%d\n", gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b);
     #endif
+
+    return makeVoid();
+}
+
+Value executeBuiltinInitTextSystem(AST *node) {
+    if (node->child_count != 2) {
+        fprintf(stderr, "Runtime error: InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized) {
+        fprintf(stderr, "Runtime error: SDL Graphics not initialized before InitTextSystem.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    Value fontNameVal = eval(node->children[0]);
+    Value fontSizeVal = eval(node->children[1]);
+
+    if (fontNameVal.type != TYPE_STRING || fontSizeVal.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: InitTextSystem argument type mismatch.\n");
+        freeValue(&fontNameVal); freeValue(&fontSizeVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    const char* font_path = fontNameVal.s_val;
+    int font_size = (int)fontSizeVal.i_val;
+
+    if (TTF_Init() == -1) {
+        fprintf(stderr, "Runtime error: SDL_ttf initialization failed: %s\n", TTF_GetError());
+        freeValue(&fontNameVal); freeValue(&fontSizeVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (gSdlFont) { // Close previous font if any
+        TTF_CloseFont(gSdlFont);
+        gSdlFont = NULL;
+    }
+
+    gSdlFont = TTF_OpenFont(font_path, font_size);
+    if (!gSdlFont) {
+        fprintf(stderr, "Runtime error: Failed to load font '%s': %s\n", font_path, TTF_GetError());
+        TTF_Quit(); // Clean up TTF system if font loading failed
+        freeValue(&fontNameVal); freeValue(&fontSizeVal);
+        EXIT_FAILURE_HANDLER();
+    }
+    gSdlFontSize = font_size;
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitTextSystem] Loaded font '%s' at size %d.\n", font_path, font_size);
+    #endif
+
+    freeValue(&fontNameVal);
+    freeValue(&fontSizeVal);
+    return makeVoid();
+}
+
+Value executeBuiltinQuitTextSystem(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: QuitTextSystem expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (gSdlFont) {
+        TTF_CloseFont(gSdlFont);
+        gSdlFont = NULL;
+    }
+    TTF_Quit(); // Quit the SDL_ttf subsystem
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG QuitTextSystem] SDL_ttf system quit.\n");
+    #endif
+    return makeVoid();
+}
+
+
+Value executeBuiltinDrawLine(AST *node) {
+    if (node->child_count != 4) {
+        fprintf(stderr, "Runtime error: DrawLine expects 4 integer arguments (x1, y1, x2, y2).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before DrawLine.\n");
+        return makeVoid(); // Or EXIT
+    }
+
+    Value x1_val = eval(node->children[0]);
+    Value y1_val = eval(node->children[1]);
+    Value x2_val = eval(node->children[2]);
+    Value y2_val = eval(node->children[3]);
+
+    if (x1_val.type != TYPE_INTEGER || y1_val.type != TYPE_INTEGER ||
+        x2_val.type != TYPE_INTEGER || y2_val.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: DrawLine arguments must be integers.\n");
+        freeValue(&x1_val); freeValue(&y1_val); freeValue(&x2_val); freeValue(&y2_val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    int x1 = (int)x1_val.i_val;
+    int y1 = (int)y1_val.i_val;
+    int x2 = (int)x2_val.i_val;
+    int y2 = (int)y2_val.i_val;
+
+    freeValue(&x1_val); freeValue(&y1_val); freeValue(&x2_val); freeValue(&y2_val);
+
+    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor failed in DrawLine: %s\n", SDL_GetError());
+    }
+    if (SDL_RenderDrawLine(gSdlRenderer, x1, y1, x2, y2) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_RenderDrawLine failed: %s\n", SDL_GetError());
+    }
+    return makeVoid();
+}
+
+Value executeBuiltinFillRect(AST *node) {
+    if (node->child_count != 4) {
+        fprintf(stderr, "Runtime error: FillRect expects 4 integer arguments (x1, y1, x2, y2).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+     if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before FillRect.\n");
+        return makeVoid();
+    }
+
+    Value x1_val = eval(node->children[0]);
+    Value y1_val = eval(node->children[1]);
+    Value x2_val = eval(node->children[2]);
+    Value y2_val = eval(node->children[3]);
+
+    if (x1_val.type != TYPE_INTEGER || y1_val.type != TYPE_INTEGER ||
+        x2_val.type != TYPE_INTEGER || y2_val.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: FillRect arguments must be integers.\n");
+        freeValue(&x1_val); freeValue(&y1_val); freeValue(&x2_val); freeValue(&y2_val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    SDL_Rect rect;
+    rect.x = (int)x1_val.i_val;
+    rect.y = (int)y1_val.i_val;
+    rect.w = (int)x2_val.i_val - rect.x +1; // Assuming x2,y2 is bottom-right inclusive
+    rect.h = (int)y2_val.i_val - rect.y +1; // Width/Height calculation might need adjustment based on x1,y1,x2,y2 meaning (corner vs w/h)
+                                        // If x1,y1 is top-left and x2,y2 is width,height:
+                                        // rect.w = (int)x2_val.i_val; rect.h = (int)y2_val.i_val;
+                                        // For now, assuming x1,y1 and x2,y2 are opposite corners.
+
+    freeValue(&x1_val); freeValue(&y1_val); freeValue(&x2_val); freeValue(&y2_val);
+
+    // Normalize rect if x1 > x2 or y1 > y2
+    if (rect.w < 0) { rect.x += rect.w; rect.w = -rect.w; }
+    if (rect.h < 0) { rect.y += rect.h; rect.h = -rect.h; }
+
+
+    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor failed in FillRect: %s\n", SDL_GetError());
+    }
+    if (SDL_RenderFillRect(gSdlRenderer, &rect) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_RenderFillRect failed: %s\n", SDL_GetError());
+    }
+    return makeVoid();
+}
+
+// Helper for DrawCircle (Midpoint Circle Algorithm)
+void DrawCirclePoints(int centerX, int centerY, int x, int y) {
+    SDL_RenderDrawPoint(gSdlRenderer, centerX + x, centerY + y);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX - x, centerY + y);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX + x, centerY - y);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX - x, centerY - y);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX + y, centerY + x);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX - y, centerY + x);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX + y, centerY - x);
+    SDL_RenderDrawPoint(gSdlRenderer, centerX - y, centerY - x);
+}
+
+Value executeBuiltinDrawCircle(AST *node) {
+    if (node->child_count != 3) {
+        fprintf(stderr, "Runtime error: DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before DrawCircle.\n");
+        return makeVoid();
+    }
+
+    Value cx_val = eval(node->children[0]);
+    Value cy_val = eval(node->children[1]);
+    Value r_val = eval(node->children[2]);
+
+    if (cx_val.type != TYPE_INTEGER || cy_val.type != TYPE_INTEGER || r_val.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: DrawCircle arguments must be integers.\n");
+        freeValue(&cx_val); freeValue(&cy_val); freeValue(&r_val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    int centerX = (int)cx_val.i_val;
+    int centerY = (int)cy_val.i_val;
+    int radius = (int)r_val.i_val;
+
+    freeValue(&cx_val); freeValue(&cy_val); freeValue(&r_val);
+
+    if (radius < 0) return makeVoid(); // Nothing to draw for negative radius
+
+    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor failed in DrawCircle: %s\n", SDL_GetError());
+    }
+
+    int x = radius;
+    int y = 0;
+    int err = 0;
+
+    while (x >= y) {
+        DrawCirclePoints(centerX, centerY, x, y);
+        if (err <= 0) {
+            y += 1;
+            err += 2*y + 1;
+        }
+        if (err > 0) {
+            x -= 1;
+            err -= 2*x + 1;
+        }
+    }
+    return makeVoid();
+}
+
+Value executeBuiltinOutTextXY(AST *node) {
+    if (node->child_count != 3) {
+        fprintf(stderr, "Runtime error: OutTextXY expects 3 arguments (X, Y: Integer; Text: String).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before OutTextXY.\n");
+        return makeVoid();
+    }
+    if (!gSdlFont) {
+        fprintf(stderr, "Runtime error: Text system (font) not initialized. Call InitTextSystem first.\n");
+        return makeVoid();
+    }
+
+    Value x_val = eval(node->children[0]);
+    Value y_val = eval(node->children[1]);
+    Value text_val = eval(node->children[2]);
+
+    if (x_val.type != TYPE_INTEGER || y_val.type != TYPE_INTEGER || text_val.type != TYPE_STRING) {
+        fprintf(stderr, "Runtime error: OutTextXY argument type mismatch.\n");
+        freeValue(&x_val); freeValue(&y_val); freeValue(&text_val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    int x = (int)x_val.i_val;
+    int y = (int)y_val.i_val;
+    const char* text_to_render = text_val.s_val ? text_val.s_val : "";
+
+    SDL_Surface* textSurface = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
+    if (!textSurface) {
+        fprintf(stderr, "Runtime error: TTF_RenderUTF8_Solid failed: %s\n", TTF_GetError());
+        goto cleanup;
+    }
+
+    SDL_Texture* textTexture = SDL_CreateTextureFromSurface(gSdlRenderer, textSurface);
+    if (!textTexture) {
+        fprintf(stderr, "Runtime error: SDL_CreateTextureFromSurface failed: %s\n", SDL_GetError());
+        SDL_FreeSurface(textSurface);
+        goto cleanup;
+    }
+
+    SDL_Rect destRect = { x, y, textSurface->w, textSurface->h };
+    SDL_RenderCopy(gSdlRenderer, textTexture, NULL, &destRect);
+
+    SDL_DestroyTexture(textTexture);
+    SDL_FreeSurface(textSurface);
+
+cleanup:
+    freeValue(&x_val);
+    freeValue(&y_val);
+    freeValue(&text_val);
+    return makeVoid();
+}
+
+Value executeBuiltinGetMouseState(AST *node) {
+    if (node->child_count != 3) {
+        fprintf(stderr, "Runtime error: GetMouseState expects 3 VAR arguments (X, Y: Integer; Buttons: Integer).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+     if (!gSdlInitialized) {
+        fprintf(stderr, "Runtime error: SDL not initialized before GetMouseState.\n");
+        // Optionally set VAR params to defaults (e.g., 0)
+        return makeVoid();
+    }
+
+    AST* x_arg_node = node->children[0];
+    AST* y_arg_node = node->children[1];
+    AST* buttons_arg_node = node->children[2];
+
+    // Ensure arguments are actual VAR parameters (parser should set by_ref)
+    // This check is more conceptual here; actual assignment relies on assignValueToLValue
+    // if (!x_arg_node->by_ref || !y_arg_node->by_ref || !buttons_arg_node->by_ref) {
+    //    fprintf(stderr, "Runtime error: GetMouseState arguments must be VAR parameters.\n");
+    //    EXIT_FAILURE_HANDLER();
+    // }
+
+    int mse_x, mse_y;
+    Uint32 sdl_buttons_state = SDL_GetMouseState(&mse_x, &mse_y);
+
+    // Map SDL button state to Pscal button state (bitmask)
+    // This mapping depends on how you define Pscal mouse button constants
+    int pscal_buttons = 0;
+    if (sdl_buttons_state & SDL_BUTTON_LMASK) pscal_buttons |= 1;  // Assuming Pscal 1 for Left
+    if (sdl_buttons_state & SDL_BUTTON_MMASK) pscal_buttons |= 2;  // Assuming Pscal 2 for Middle
+    if (sdl_buttons_state & SDL_BUTTON_RMASK) pscal_buttons |= 4;  // Assuming Pscal 4 for Right
+    // Add SDL_BUTTON_X1MASK and SDL_BUTTON_X2MASK if needed
+
+    Value val_x = makeInt(mse_x);
+    Value val_y = makeInt(mse_y);
+    Value val_buttons = makeInt(pscal_buttons);
+
+    assignValueToLValue(x_arg_node, val_x);
+    assignValueToLValue(y_arg_node, val_y);
+    assignValueToLValue(buttons_arg_node, val_buttons);
+
+    freeValue(&val_x);
+    freeValue(&val_y);
+    freeValue(&val_buttons);
 
     return makeVoid();
 }

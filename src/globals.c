@@ -23,8 +23,10 @@ SDL_Window* gSdlWindow = NULL;
 SDL_Renderer* gSdlRenderer = NULL;
 SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
 bool gSdlInitialized = false;
-int gSdlWidth = 0;          // <<< ADDED DEFINITION >>>
-int gSdlHeight = 0;         // <<< ADDED DEFINITION >>>
+int gSdlWidth = 0;
+int gSdlHeight = 0;
+TTF_Font* gSdlFont = NULL;
+int gSdlFontSize   = 16;   
 // SDL Stuff End
 
 int break_requested = 0;
