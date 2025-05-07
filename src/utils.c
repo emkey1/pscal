@@ -626,29 +626,48 @@ Value makeValueForType(VarType type, AST *type_def_param) {
              v.record_val = createEmptyRecord(type_def_param);
              break;
         case TYPE_ARRAY: {
-            // Initialize defaults
-            v.dimensions = 0; v.lower_bounds = NULL; v.upper_bounds = NULL;
-            v.array_val = NULL; v.element_type = TYPE_VOID;
+            // Initialize defaults for the Value struct 'v'
+            v.dimensions = 0;
+            v.lower_bounds = NULL;
+            v.upper_bounds = NULL;
+            v.array_val = NULL;
+            v.element_type = TYPE_VOID;
             v.element_type_def = NULL;
 
-            // Use the *resolved* actual_type_def node
-            if (actual_type_def && actual_type_def->type == AST_ARRAY_TYPE) {
+            // This is the AST node passed in, could be AST_TYPE_REFERENCE or AST_ARRAY_TYPE
+            AST* definition_node_for_array = type_def_param;
+
+            // If it's a named type (AST_TYPE_REFERENCE), resolve it
+            if (definition_node_for_array && definition_node_for_array->type == AST_TYPE_REFERENCE) {
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG makeValueForType ARRAY] type_def_param is TYPE_REFERENCE ('%s'). Looking up actual type.\n",
+                        definition_node_for_array->token ? definition_node_for_array->token->value : "?");
+                #endif
+                AST* resolved_type_ast = lookupType(definition_node_for_array->token->value);
+                if (!resolved_type_ast) {
+                     fprintf(stderr, "Error: Could not resolve array type reference '%s' in makeValueForType for array initialization.\n",
+                             definition_node_for_array->token ? definition_node_for_array->token->value : "?");
+                     // Let definition_node_for_array remain the unresolved reference;
+                     // the next check will likely fail, leading to the warning.
+                } else {
+                    definition_node_for_array = resolved_type_ast; // Use the looked-up definition
+                }
+            }
+
+            // Now, definition_node_for_array should point to the actual AST_ARRAY_TYPE node
+            if (definition_node_for_array && definition_node_for_array->type == AST_ARRAY_TYPE) {
                  #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG makeValueForType] Initializing ARRAY from AST_ARRAY_TYPE node %p.\n", (void*)actual_type_def);
+                 fprintf(stderr, "[DEBUG makeValueForType] Initializing ARRAY from (resolved) AST_ARRAY_TYPE node %p.\n", (void*)definition_node_for_array);
                  #endif
 
-                 int dims = actual_type_def->child_count;
-                 AST* elemTypeDefNode = actual_type_def->right; // Get element type AST
+                 int dims = definition_node_for_array->child_count; // Number of subrange children in AST_ARRAY_TYPE
+                 AST* elemTypeDefNode = definition_node_for_array->right; // Element type AST from AST_ARRAY_TYPE
                  VarType elemType = TYPE_VOID;
 
-                 // Determine element type (complex logic needed, simplified here)
-                 if(elemTypeDefNode) { /* ... logic to determine elemType based on elemTypeDefNode ... */
-                     // This needs to handle built-in types, named types (via lookupType), etc.
-                     // For now, let's assume elemTypeDefNode->var_type was set by annotateTypes,
-                     // or implement the fallback logic as before if needed.
-                      elemType = elemTypeDefNode->var_type; // Requires type annotation to have run
-                       if (elemType == TYPE_VOID) {
-                            // Attempt fallback if annotation didn't set it
+                 // Determine element VarType
+                 if(elemTypeDefNode) {
+                     elemType = elemTypeDefNode->var_type; // Relies on prior type annotation
+                       if (elemType == TYPE_VOID) { // Fallback if not annotated
                              if (elemTypeDefNode->type == AST_VARIABLE && elemTypeDefNode->token) {
                                  const char *tn = elemTypeDefNode->token->value;
                                  if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INTEGER;
@@ -658,47 +677,80 @@ Value makeValueForType(VarType type, AST *type_def_param) {
                                  else if (strcasecmp(tn, "byte") == 0) elemType = TYPE_BYTE;
                                  else if (strcasecmp(tn, "word") == 0) elemType = TYPE_WORD;
                                  else if (strcasecmp(tn, "string") == 0) elemType = TYPE_STRING;
-                                 else { // Assume user-defined type
+                                 else { // User-defined type
                                      AST* userTypeDef = lookupType(tn);
                                      if (userTypeDef) elemType = userTypeDef->var_type;
+                                     // Ensure elemTypeDefNode points to the actual definition for makeArrayND
+                                     if (userTypeDef) elemTypeDefNode = userTypeDef;
                                  }
+                             } else if (elemTypeDefNode->type == AST_RECORD_TYPE) { // Array of anonymous records
+                                elemType = TYPE_RECORD;
+                             } else if (elemTypeDefNode->type == AST_ARRAY_TYPE) { // Array of anonymous arrays
+                                elemType = TYPE_ARRAY;
                              }
                        }
                  }
 
                  if (dims > 0 && elemType != TYPE_VOID) {
-                     int *lbs = malloc(sizeof(int) * dims);
-                     int *ubs = malloc(sizeof(int) * dims);
-                     if (!lbs || !ubs) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+                     int *lbs = (int*)malloc(sizeof(int) * dims);
+                     int *ubs = (int*)malloc(sizeof(int) * dims);
+                     if (!lbs || !ubs) {
+                         fprintf(stderr, "Memory allocation error for bounds in makeValueForType.\n");
+                         if(lbs) free(lbs); if(ubs) free(ubs);
+                         EXIT_FAILURE_HANDLER();
+                     }
 
                      bool bounds_ok = true;
-                     // Extract bounds (ASSUMES CONSTANT BOUNDS)
+                     // Extract bounds from the children of definition_node_for_array (which are AST_SUBRANGE)
                      for (int i = 0; i < dims; i++) {
-                         AST *subrange = actual_type_def->children[i];
-                         if (!subrange || subrange->type != AST_SUBRANGE || !subrange->left || !subrange->right) { bounds_ok = false; break; }
-                         Value low_val = eval(subrange->left); // Evaluate bounds
+                         AST *subrange = definition_node_for_array->children[i];
+                         if (!subrange || subrange->type != AST_SUBRANGE || !subrange->left || !subrange->right) {
+                             bounds_ok = false; break;
+                         }
+                         // Evaluate bounds - assuming they are constant integer expressions
+                         Value low_val = eval(subrange->left);
                          Value high_val = eval(subrange->right);
-                         // Basic check for integer bounds
+                         // For now, strictly expect integer bounds for simplicity
                          if (low_val.type == TYPE_INTEGER && high_val.type == TYPE_INTEGER) {
                              lbs[i] = (int)low_val.i_val;
                              ubs[i] = (int)high_val.i_val;
-                         } else { bounds_ok = false; /* TODO: Support other ordinal bounds */ }
-                         freeValue(&low_val); freeValue(&high_val);
-                         if (!bounds_ok || lbs[i] > ubs[i]) { bounds_ok = false; break; }
+                         } else {
+                             // TODO: Support char or other ordinal bounds if necessary by converting to integer ordinals
+                             fprintf(stderr, "Runtime error: Array bounds must be integer constants for now in makeValueForType. Dim %d has types %s..%s\n", i, varTypeToString(low_val.type), varTypeToString(high_val.type));
+                             bounds_ok = false;
+                         }
+                         freeValue(&low_val);
+                         freeValue(&high_val);
+                         if (!bounds_ok || lbs[i] > ubs[i]) {
+                             bounds_ok = false; break;
+                         }
                      }
 
                      if (bounds_ok) {
-                         // Call makeArrayND using resolved info
+                         // Pass the element type definition node (elemTypeDefNode) to makeArrayND.
+                         // This is important for initializing elements that are themselves complex types (records, other arrays).
                          v = makeArrayND(dims, lbs, ubs, elemType, elemTypeDefNode);
-                     } else { fprintf(stderr, "Error: Failed to initialize array due to invalid bounds.\n"); }
-                     free(lbs); free(ubs);
-                 } else { fprintf(stderr, "Warning: Invalid dimension count or element type for array.\n"); }
-            } else { fprintf(stderr, "Warning: Cannot initialize array value. Type definition missing or not array type.\n"); }
+                     } else {
+                         fprintf(stderr, "Error: Failed to initialize array in makeValueForType due to invalid or non-integer bounds.\n");
+                         // v will retain dimensions = 0
+                     }
+                     free(lbs);
+                     free(ubs);
+                 } else {
+                     fprintf(stderr, "Warning: Invalid dimension count (%d) or element type (%s) for array in makeValueForType.\n", dims, varTypeToString(elemType));
+                     // v will retain dimensions = 0
+                 }
+            } else {
+                 // This warning will now include the type of the node that was expected to be AST_ARRAY_TYPE
+                 fprintf(stderr, "Warning: Cannot initialize array value. Type definition missing, not an array type, or could not be resolved. (Actual node type for definition: %s)\n",
+                         definition_node_for_array ? astTypeToString(definition_node_for_array->type) : "NULL");
+                 // v will have dimensions = 0 as initialized if this path is taken
+            }
 
-             #ifdef DEBUG
-             fprintf(stderr, "[DEBUG makeValueForType - ARRAY CASE EXIT] Returning Value: type=%s, dimensions=%d\n", varTypeToString(v.type), v.dimensions);
-             #endif
-             break;
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG makeValueForType - ARRAY CASE EXIT] Returning Value: type=%s, dimensions=%d\n", varTypeToString(v.type), v.dimensions);
+            #endif
+            break;
         } // End TYPE_ARRAY case
         case TYPE_MEMORYSTREAM: v.mstream = createMStream(); break;
         case TYPE_ENUM:
