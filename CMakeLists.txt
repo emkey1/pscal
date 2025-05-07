@@ -34,58 +34,89 @@ install(TARGETS pscal dscal RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 # SDL Support
 
 # --- Find SDL2 (Core) ---
+# Assuming SDL2 is found correctly by find_package on both platforms
 find_package(SDL2 REQUIRED)
 message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
 message(STATUS "SDL2_LIBRARIES = ${SDL2_LIBRARIES}")
 
-# --- Find SDL2_ttf ---
-find_package(SDL2_ttf REQUIRED)
-message(STATUS "CMake's SDL2_TTF_INCLUDE_DIRS = ${SDL2_TTF_INCLUDE_DIRS}") # Original attempt
-message(STATUS "CMake's SDL2_TTF_LIBRARIES = ${SDL2_TTF_LIBRARIES}")     # Original attempt
+# --- Platform-Specific SDL2_ttf Configuration ---
+set(PLATFORM_SDL2_TTF_INCLUDE_DIRS "") # Initialize common variable
+set(PLATFORM_SDL2_TTF_LIBRARIES "")    # Initialize common variable
+if(APPLE)
+    message(STATUS "Platform: Apple macOS - Finding SDL2_ttf...")
+    # Try CMake's find_package first on macOS
+    find_package(SDL2_ttf QUIET) # Use QUIET initially, check results below
 
-# Attempt to get SDL2_ttf paths from Homebrew if CMake's find_package is insufficient
-set(EFFECTIVE_SDL2_TTF_INCLUDE_DIRS ${SDL2_TTF_INCLUDE_DIRS}) # Start with CMake's version
-set(EFFECTIVE_SDL2_TTF_LIBRARIES ${SDL2_TTF_LIBRARIES})   # Start with CMake's version
+    set(PLATFORM_SDL2_TTF_INCLUDE_DIRS ${SDL2_TTF_INCLUDE_DIRS})
+    set(PLATFORM_SDL2_TTF_LIBRARIES ${SDL2_TTF_LIBRARIES})
 
-if(APPLE) # Only run brew specific things on Apple systems
-    execute_process(
-        COMMAND brew --prefix sdl2_ttf
-        OUTPUT_VARIABLE SDL2_TTF_BREW_PREFIX
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE SDL2_TTF_BREW_RESULT
-        ERROR_QUIET # Suppress brew command errors if brew is not found, etc.
-    )
-    if(SDL2_TTF_BREW_RESULT EQUAL 0 AND SDL2_TTF_BREW_PREFIX AND EXISTS "${SDL2_TTF_BREW_PREFIX}/include/SDL2/SDL_ttf.h")
-        message(STATUS "Found SDL2_ttf via brew --prefix: ${SDL2_TTF_BREW_PREFIX}")
-        set(EFFECTIVE_SDL2_TTF_INCLUDE_DIRS "${SDL2_TTF_BREW_PREFIX}/include")
-        # For linking, we often still rely on SDL2_TTF_LIBRARIES which might be populated
-        # correctly by find_package even if include_dirs isn't, or we link directly.
-        # If SDL2_TTF_LIBRARIES is empty, explicitly set it too:
-        if(NOT EFFECTIVE_SDL2_TTF_LIBRARIES)
-            set(EFFECTIVE_SDL2_TTF_LIBRARIES "${SDL2_TTF_BREW_PREFIX}/lib/libSDL2_ttf.dylib") # Or just SDL2_ttf if link_directories is used
-            # It's often better to let find_package handle LIBRARIES if possible,
-            # or use find_library command if this direct path is too brittle.
-            # For now, let's assume SDL2_TTF_LIBRARIES was correctly set by find_package for linking,
-            # and only override include dirs if brew gives a better path.
-            # If SDL2_TTF_LIBRARIES remains empty, linking will fail later.
+    # Fallback using Homebrew if CMake's find_package didn't populate variables well
+    if(NOT SDL2_TTF_FOUND OR NOT PLATFORM_SDL2_TTF_INCLUDE_DIRS)
+        message(STATUS "CMake find_package for SDL2_ttf yielded no include dirs or package not found, trying brew --prefix...")
+        execute_process(
+            COMMAND brew --prefix sdl2_ttf
+            OUTPUT_VARIABLE SDL2_TTF_BREW_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE SDL2_TTF_BREW_RESULT
+            ERROR_QUIET # Suppress brew errors if not found
+        )
+        if(SDL2_TTF_BREW_RESULT EQUAL 0 AND SDL2_TTF_BREW_PREFIX AND EXISTS "${SDL2_TTF_BREW_PREFIX}/include/SDL2/SDL_ttf.h")
+            message(STATUS "Using SDL2_ttf include path from brew --prefix: ${SDL2_TTF_BREW_PREFIX}/include")
+            set(PLATFORM_SDL2_TTF_INCLUDE_DIRS "${SDL2_TTF_BREW_PREFIX}/include")
+
+            # ---- START CHANGE ----
+            # Explicitly find the library within the brew prefix using find_library
+            find_library(SDL2_TTF_LIBRARY_PATH_BREW NAMES SDL2_ttf PATHS "${SDL2_TTF_BREW_PREFIX}/lib" NO_DEFAULT_PATH)
+            if(SDL2_TTF_LIBRARY_PATH_BREW)
+                message(STATUS "Found SDL2_ttf library via brew path: ${SDL2_TTF_LIBRARY_PATH_BREW}")
+                set(PLATFORM_SDL2_TTF_LIBRARIES ${SDL2_TTF_LIBRARY_PATH_BREW}) # Use the full path found
+                mark_as_advanced(SDL2_TTF_LIBRARY_PATH_BREW) # Hide this intermediate var from basic cmake-gui
+            else()
+                # If find_library fails even in brew path, warn and fallback to name (might still fail link)
+                message(WARNING "Could not find SDL2_ttf library in brew path (${SDL2_TTF_BREW_PREFIX}/lib). Using name 'SDL2_ttf'.")
+                set(PLATFORM_SDL2_TTF_LIBRARIES "SDL2_ttf")
+            endif()
+            # ---- END CHANGE ----
+
+        else()
+            message(WARNING "Could not find SDL2_ttf via CMake or brew on macOS.")
+            # If we got here, both find_package and brew failed. Set library to name as last resort.
+            if(NOT PLATFORM_SDL2_TTF_LIBRARIES)
+                set(PLATFORM_SDL2_TTF_LIBRARIES "SDL2_ttf")
+            endif()
         endif()
-    else()
-        message(WARNING "Could not reliably determine SDL2_ttf path from brew, or header not found. Relying on CMake's find_package variables for SDL2_ttf.")
-        # EFFECTIVE_SDL2_TTF_INCLUDE_DIRS and EFFECTIVE_SDL2_TTF_LIBRARIES will retain their values from find_package
     endif()
+
+    # Final check for macOS - ensure we have something if REQUIRED
+    if(NOT PLATFORM_SDL2_TTF_INCLUDE_DIRS OR NOT PLATFORM_SDL2_TTF_LIBRARIES)
+         # If find_package was truly REQUIRED, this will trigger the failure
+         find_package(SDL2_ttf REQUIRED)
+         # If execution reaches here, find_package somehow succeeded without populating vars - raise error
+         message(FATAL_ERROR "SDL2_ttf is REQUIRED but could not be configured on macOS.")
+    endif()
+elseif(UNIX) # Catches Linux, BSD, etc. (but APPLE was handled above)
+    message(STATUS "Platform: Unix (Non-Apple)")
+    # For Linux, use the manually determined paths due to the previous issues
+    message(STATUS "Using manual paths for SDL2_ttf on Unix system.")
+    set(PLATFORM_SDL2_TTF_INCLUDE_DIRS "/usr/include")
+    set(PLATFORM_SDL2_TTF_LIBRARIES "SDL2_ttf")
+else()
+    message(FATAL_ERROR "Unsupported platform for SDL2_ttf configuration.")
 endif()
 
-message(STATUS "Effective SDL2_TTF_INCLUDE_DIRS = ${EFFECTIVE_SDL2_TTF_INCLUDE_DIRS}")
-message(STATUS "Effective SDL2_TTF_LIBRARIES = ${EFFECTIVE_SDL2_TTF_LIBRARIES}")
+message(STATUS "Final Platform SDL2_TTF Include Dirs = ${PLATFORM_SDL2_TTF_INCLUDE_DIRS}")
+message(STATUS "Final Platform SDL2_TTF Libraries = ${PLATFORM_SDL2_TTF_LIBRARIES}")
 
 # Apply SDL settings to ALL targets that need it
-target_include_directories(pscal PRIVATE ${SDL2_INCLUDE_DIRS} ${EFFECTIVE_SDL2_TTF_INCLUDE_DIRS})
-target_include_directories(dscal PRIVATE ${SDL2_INCLUDE_DIRS} ${EFFECTIVE_SDL2_TTF_INCLUDE_DIRS})
-target_include_directories(hscal PRIVATE ${SDL2_INCLUDE_DIRS} ${EFFECTIVE_SDL2_TTF_INCLUDE_DIRS})
+# Use the platform-specific variables determined above
+target_include_directories(pscal PRIVATE ${SDL2_INCLUDE_DIRS} ${PLATFORM_SDL2_TTF_INCLUDE_DIRS})
+target_include_directories(dscal PRIVATE ${SDL2_INCLUDE_DIRS} ${PLATFORM_SDL2_TTF_INCLUDE_DIRS})
+target_include_directories(hscal PRIVATE ${SDL2_INCLUDE_DIRS} ${PLATFORM_SDL2_TTF_INCLUDE_DIRS})
 
-target_link_libraries(pscal PRIVATE SDL2::SDL2 ${EFFECTIVE_SDL2_TTF_LIBRARIES})
-target_link_libraries(dscal PRIVATE SDL2::SDL2 ${EFFECTIVE_SDL2_TTF_LIBRARIES})
-target_link_libraries(hscal PRIVATE SDL2::SDL2 ${EFFECTIVE_SDL2_TTF_LIBRARIES})
+# Link SDL2 using its target (if found), link SDL2_ttf using the platform variable
+target_link_libraries(pscal PRIVATE SDL2::SDL2 ${PLATFORM_SDL2_TTF_LIBRARIES})
+target_link_libraries(dscal PRIVATE SDL2::SDL2 ${PLATFORM_SDL2_TTF_LIBRARIES})
+target_link_libraries(hscal PRIVATE SDL2::SDL2 ${PLATFORM_SDL2_TTF_LIBRARIES})
 # --------------------------------------------------------------------------
 
 # --- Link m and curl (Applied to all targets as they need them) ---
