@@ -96,6 +96,7 @@ Value executeBuiltinUpdateScreen(AST *node);
 Value executeBuiltinDrawRect(AST *node);
 Value executeBuiltinWaitKeyEvent(AST *node);
 Value executeBuiltinClearDevice(AST *node);
+Value executeBuiltinSetRGBColor(AST *node);
 
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine

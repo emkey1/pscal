@@ -141,6 +141,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("drawrect", AST_PROCEDURE_DECL);
     registerBuiltinFunction("waitkeyevent", AST_PROCEDURE_DECL);
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("setrgbcolor", AST_PROCEDURE_DECL);
 
     /* Initialize lexer and parser. */
     Lexer lexer;

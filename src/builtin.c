@@ -69,6 +69,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"screencols", executeBuiltinScreenCols},
     {"screenrows", executeBuiltinScreenRows},
     {"setcolor",  executeBuiltinSetColor},
+    {"setrgbcolor", executeBuiltinSetRGBColor},
     {"sin",       executeBuiltinSin},
     {"sqrt",      executeBuiltinSqrt},
     {"succ",      executeBuiltinSucc},        // Include Succ
@@ -1578,6 +1579,28 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         setRight(dummy, retTypeNode);
         dummy->var_type = TYPE_MEMORYSTREAM; // Set function's return type
         
+    } else if (strcasecmp(name, "setrgbcolor") == 0) { // New built-in
+        dummy->child_capacity = 3;
+        dummy->children = malloc(sizeof(AST*) * 3);
+        if (!dummy->children) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+
+        // Param 1: R (Byte or Integer)
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_BYTE); // Or TYPE_INTEGER
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_rgb_r"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1);
+        dummy->children[0] = p1;
+
+        // Param 2: G (Byte or Integer)
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_BYTE); // Or TYPE_INTEGER
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_rgb_g"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2);
+        dummy->children[1] = p2;
+
+        // Param 3: B (Byte or Integer)
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_BYTE); // Or TYPE_INTEGER
+        Token* p3n = newToken(TOKEN_IDENTIFIER, "_rgb_b"); AST* v3 = newASTNode(AST_VARIABLE, p3n); freeToken(p3n); addChild(p3,v3);
+        dummy->children[2] = p3;
+
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID; // It's a procedure
     } else if (strcmp(name, "textcolore") == 0 || strcmp(name, "textbackgrounde") == 0 ) {
         // Param: byte/integer
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST *)); if (!dummy->children) { /* Error */ }
@@ -2884,6 +2907,60 @@ Value executeBuiltinClearDevice(AST *node) {
 
     // Note: ClearDevice does NOT call RenderPresent.
     // The changes will be visible only after the next UpdateScreen.
+
+    return makeVoid();
+}
+
+Value executeBuiltinSetRGBColor(AST *node) {
+    if (node->child_count != 3) {
+        fprintf(stderr, "Runtime error: SetRGBColor expects 3 arguments (R, G, B: Byte).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+         fprintf(stderr, "Runtime error: Graphics mode not initialized before SetRGBColor.\n");
+         EXIT_FAILURE_HANDLER(); // Or return makeVoid() if you want to allow it to fail silently
+    }
+
+    Value r_val = eval(node->children[0]);
+    Value g_val = eval(node->children[1]);
+    Value b_val = eval(node->children[2]);
+
+    // Type checking (allow Byte or Integer, then cast to Uint8 for SDL)
+    if ( (r_val.type != TYPE_INTEGER && r_val.type != TYPE_BYTE) ||
+         (g_val.type != TYPE_INTEGER && g_val.type != TYPE_BYTE) ||
+         (b_val.type != TYPE_INTEGER && b_val.type != TYPE_BYTE) ) {
+        fprintf(stderr, "Runtime error: SetRGBColor arguments must be Integer or Byte. Got R:%s G:%s B:%s\n",
+                varTypeToString(r_val.type), varTypeToString(g_val.type), varTypeToString(b_val.type));
+        freeValue(&r_val); freeValue(&g_val); freeValue(&b_val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    long long r_ll = r_val.i_val;
+    long long g_ll = g_val.i_val;
+    long long b_ll = b_val.i_val;
+
+    freeValue(&r_val);
+    freeValue(&g_val);
+    freeValue(&b_val);
+
+    // Clamp values to 0-255 and store in global SDL_Color
+    gSdlCurrentColor.r = (r_ll < 0) ? 0 : (r_ll > 255) ? 255 : (Uint8)r_ll;
+    gSdlCurrentColor.g = (g_ll < 0) ? 0 : (g_ll > 255) ? 255 : (Uint8)g_ll;
+    gSdlCurrentColor.b = (b_ll < 0) ? 0 : (b_ll > 255) ? 255 : (Uint8)b_ll;
+    gSdlCurrentColor.a = 255; // Full opacity
+
+    // Set the color for subsequent drawing operations in SDL
+    // This is crucial if PutPixel doesn't take color directly
+    if(SDL_SetRenderDrawColor(gSdlRenderer,
+                             gSdlCurrentColor.r,
+                             gSdlCurrentColor.g,
+                             gSdlCurrentColor.b,
+                             gSdlCurrentColor.a) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_SetRenderDrawColor failed in SetRGBColor: %s\n", SDL_GetError());
+    }
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SetRGBColor] Set color to R:%d G:%d B:%d\n", gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b);
+    #endif
 
     return makeVoid();
 }

@@ -1,0 +1,135 @@
+#!/usr/bin/env pscal
+PROGRAM SDLMandelbrotWithStatus;
+
+// USES System; // Implicit for Sqrt, Trunc, WriteLn etc. if not global
+
+CONST
+  WindowWidth   = 1024;
+  WindowHeight  = 768;
+  WindowTitle   = 'Mandelbrot Set (SDL)';
+//  MaxIterations = 255;
+  MaxIterations = 128;
+  StatusUpdateInterval = 20; // Print status every 20 rows
+
+VAR
+  Px, Py        : Integer; // Pixel coordinates
+  x0, y0        : Real;    // Coordinates in the complex plane
+  x, y          : Real;    // Current z value
+  xTemp         : Real;
+  Iteration     : Integer;
+  R, G, B       : Byte;
+
+  MinRe         : Real;
+  MaxRe         : Real;
+  MinIm         : Real;
+  MaxIm         : Real;
+
+  ReRange, ImRange : Real;
+  ScaleRe, ScaleIm : Real;
+  CurrentMaxX, CurrentMaxY : Integer;
+
+  StartTime, EndTime : Real; // For basic timing (optional)
+  TotalPixels, PixelsDone: Integer;
+  PercentDone, LastPercentDone: Integer;
+
+BEGIN
+  MinRe := -2.0;
+  MaxRe := 1.0;
+  MinIM := -1.2;
+
+  // Initial message to the terminal
+  WriteLn('Calculating Mandelbrot set for a ', WindowWidth, 'x', WindowHeight, ' window.');
+  WriteLn('The graphics window will no appear until the calculation is complete');
+  WriteLn('and UpdateScreen is called.');
+  WriteLn;
+  WriteLn('Progress updates will be shown here in the terminal.');
+  WriteLn('-----------------------------------------------------');
+  // You could add a Delay(1000) here if you want users to definitely see the message
+
+  InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  ClearDevice;
+
+  CurrentMaxX := GetMaxX;
+  CurrentMaxY := GetMaxY;
+
+  ReRange := MaxRe - MinRe;
+  MaxIm := MinIm + (ReRange * (CurrentMaxY + 1)) / (CurrentMaxX + 1);
+  ImRange := MaxIm - MinIm;
+
+  IF CurrentMaxX > 0 THEN ScaleRe := ReRange / CurrentMaxX ELSE ScaleRe := 0;
+  IF CurrentMaxY > 0 THEN ScaleIm := ImRange / CurrentMaxY ELSE ScaleIm := 0;
+
+  TotalPixels := (CurrentMaxX + 1) * (CurrentMaxY + 1);
+  PixelsDone := 0;
+  LastPercentDone := -1; // To ensure the first 0% update prints
+
+  // Main loop through each pixel
+  FOR Py := 0 TO CurrentMaxY DO
+  BEGIN
+    FOR Px := 0 TO CurrentMaxX DO
+    BEGIN
+      x0 := MinRe + (Px * ScaleRe);
+      y0 := MaxIm - (Py * ScaleIm);
+
+      x := 0.0;
+      y := 0.0;
+      Iteration := 0;
+
+      WHILE (x*x + y*y <= 4.0) AND (Iteration < MaxIterations) DO
+      BEGIN
+        xTemp := x*x - y*y + x0;
+        y     := 2*x*y + y0;
+        x     := xTemp;
+        Iteration := Iteration + 1;
+      END;
+
+      IF Iteration = MaxIterations THEN
+      BEGIN
+        R := 0; G := 0; B := 0;
+      END
+      ELSE
+      BEGIN
+        R := (Iteration * 5) MOD 256;
+        G := (Iteration * 7 + 85) MOD 256;
+        B := (Iteration * 11 + 170) MOD 256;
+      END;
+
+      SetRGBColor(R, G, B);
+      PutPixel(Px, Py);
+
+      PixelsDone := PixelsDone + 1;
+    END; // END FOR Px
+
+    // Status Update Logic
+    // Py is 0-indexed, CurrentMaxY is max index. (CurrentMaxY + 1) is total rows.
+    IF (Py + 1) MOD StatusUpdateInterval = 0 THEN // After every 'StatusUpdateInterval' rows
+    BEGIN
+        PercentDone := Trunc( (Py + 1) * 100.0 / (CurrentMaxY + 1) );
+        WriteLn('Processing row ', Py + 1, ' of ', CurrentMaxY + 1, '. Approximately ', PercentDone, '% complete...');
+    END
+    ELSE IF Py = CurrentMaxY THEN // Ensure a 100% message on the last row if not caught by interval
+    BEGIN
+        WriteLn('Processing row ', Py + 1, ' of ', CurrentMaxY + 1, '. Approximately 100% complete...');
+    END;
+
+    // Optional: More frequent percentage update (can be spammy)
+    // PercentDone := Trunc(PixelsDone * 100.0 / TotalPixels);
+    // IF PercentDone > LastPercentDone THEN // Only print if percentage changed
+    // BEGIN
+    //   WriteLn('Progress: ', PercentDone, '%');
+    //   LastPercentDone := PercentDone;
+    // END;
+
+  END; // END FOR Py
+
+  WriteLn('-----------------------------------------------------');
+  WriteLn('Calculation complete! Displaying Mandelbrot set.');
+
+  UpdateScreen;
+
+  // WriteLn('Mandelbrot set displayed. Press any key to exit.'); // Console message
+  GraphLoop(100);
+  ReadKey;
+
+  CloseGraph;
+END.
