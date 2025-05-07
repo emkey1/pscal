@@ -1722,46 +1722,87 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             } else if (is_complex_lvalue_assign) {
                 // --- Case 3: Other Complex LValue Assignments (Array[i], Record.F, Ptr^) ---
                 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG ASSIGN COMPLEX] Handling Complex LValue Assign (LHS Type: %s, Target Type: %s)\n",
-                         astTypeToString(lhsNode->type), varTypeToString(target_ptr->type));
+                fprintf(stderr, "[DEBUG ASSIGN COMPLEX] LHS AST Node Type: %s, Resolved Target Value Type: %s, RHS Value Type: %s\n",
+                         astTypeToString(lhsNode->type), varTypeToString(target_ptr->type), varTypeToString(rhs_val.type));
                 #endif
-                // target_ptr points to the actual Value to be modified (element, field, heap value)
 
-                 // Basic Type Compatibility Check (Expand as needed)
-                 if (target_ptr->type != rhs_val.type) {
-                      if (!((target_ptr->type == TYPE_REAL && rhs_val.type == TYPE_INTEGER) ||
-                            (target_ptr->type == TYPE_POINTER && rhs_val.type == TYPE_POINTER) )) { // Allow any pointer assignment
-                         fprintf(stderr, "Runtime error: Type mismatch for complex assignment (LHS: %s, RHS: %s)\n",
-                                 varTypeToString(target_ptr->type), varTypeToString(rhs_val.type));
-                         freeValue(&rhs_val); EXIT_FAILURE_HANDLER();
-                      }
-                      // Add promotion logic here if needed before copying
-                 }
+                VarType lhs_effective_type = target_ptr->type;
+                VarType rhs_effective_type = rhs_val.type;
 
-                // Free the *contents* of the location we are about to overwrite
-                freeValue(target_ptr);
+                if (lhs_effective_type == TYPE_BYTE && rhs_effective_type == TYPE_INTEGER) {
+                    // Assigning INTEGER to BYTE target
+                    long long val_to_assign = rhs_val.i_val;
+                    if (val_to_assign < 0 || val_to_assign > 255) {
+                        // This warning is good for catching Pscal logic errors if any.
+                        // The Pscal Mandelbrot code with ((X MOD 256 + 256) MOD 256) should prevent this.
+                        fprintf(stderr, "Warning: Overflow assigning INTEGER %lld to BYTE target. Value will be truncated/wrapped.\n", val_to_assign);
+                    }
+                    // For simple types like BYTE, we are not freeing sub-components of target_ptr
+                    // before overwriting i_val. We just directly assign.
+                    target_ptr->i_val = (val_to_assign & 0xFF); // Store the lower 8 bits
+                    target_ptr->type = TYPE_BYTE; // Ensure the target's type field remains BYTE
+                }
+                else if (lhs_effective_type == TYPE_WORD && rhs_effective_type == TYPE_INTEGER) {
+                    // Assigning INTEGER to WORD target
+                    long long val_to_assign = rhs_val.i_val;
+                    if (val_to_assign < 0 || val_to_assign > 65535) {
+                         fprintf(stderr, "Warning: Overflow assigning INTEGER %lld to WORD target. Value will be truncated/wrapped.\n", val_to_assign);
+                    }
+                    target_ptr->i_val = (val_to_assign & 0xFFFF);
+                    target_ptr->type = TYPE_WORD;
+                }
+                else if (lhs_effective_type == TYPE_REAL && rhs_effective_type == TYPE_INTEGER) {
+                    // Assigning INTEGER to REAL target: Promote
+                    target_ptr->r_val = (double)rhs_val.i_val;
+                    target_ptr->type = TYPE_REAL;
+                }
+                else if (lhs_effective_type == TYPE_POINTER && rhs_effective_type == TYPE_POINTER) {
+                    // Pointer assignment: shallow copy of address and base type node if compatible
+                    // The 'type_def' of the LHS pointer variable determines its fundamental base type.
+                    // If assigning nil, rhs_val.base_type_node might be NULL.
+                    // If assigning another pointer, their base_type_nodes should ideally be compatible
+                    // (a check for this is more advanced type system work).
+                    // For now, copy the pointer value and retain the LHS's original base_type_node
+                    // unless the RHS is a non-nil pointer with a more specific (or compatible) base type.
+                    // This area can get complex with strict type checking for pointers.
+                    // A simple address copy is often what's done, assuming Pscal type checker handled compatibility.
+                    AST* original_lhs_base_type_node = target_ptr->base_type_node; // Preserve original type info
+                    
+                    target_ptr->ptr_val = rhs_val.ptr_val; // Copy the address
+                    // If RHS is nil, its base_type_node is likely NULL.
+                    // If RHS is not nil, it carries its own base_type_node.
+                    // We should generally keep the LHS's declared base_type_node.
+                    target_ptr->base_type_node = original_lhs_base_type_node;
+                    target_ptr->type = TYPE_POINTER;
+                }
+                else if (lhs_effective_type == rhs_effective_type) {
+                    // Types are the same: perform a deep copy.
+                    // This handles Array := Array, Record := Record, String := String.
+                    freeValue(target_ptr); // Free existing contents of the target Value struct
+                    *target_ptr = makeCopyOfValue(&rhs_val); // Assign a deep copy of the new value
+                    // makeCopyOfValue should preserve the type, but ensure it:
+                    target_ptr->type = lhs_effective_type;
+                }
+                else {
+                    // Incompatible types for complex assignment
+                    fprintf(stderr, "Runtime error: Type mismatch for complex assignment (LHS target effective type: %s, RHS actual type: %s) for LValue AST node type %s.\n",
+                             varTypeToString(lhs_effective_type), varTypeToString(rhs_effective_type), astTypeToString(lhsNode->type));
+                    freeValue(&rhs_val); // Free RHS as it won't be used
+                    EXIT_FAILURE_HANDLER();
+                }
 
-                // Perform a *deep copy* of the RHS into the target location
-                // This correctly handles assigning records/arrays to elements/fields
-                *target_ptr = makeCopyOfValue(&rhs_val);
-
-                // Crucially, ensure the TYPE field matches the original target type
-                // if makeCopyOfValue might have changed it (it shouldn't, but be safe)
-                 // target_ptr->type = target_ptr->type; // Redundant if makeCopy preserves type
-
-                // Free the temporary rhs_val now that makeCopyOfValue has copied it
+                // Free the temporary RHS value that was evaluated, as its data
+                // has either been directly used (for simple types) or deep-copied.
                 freeValue(&rhs_val);
 
-            } else {
-                 // Should not happen if logic above is correct
-                 fprintf(stderr, "Internal Error: Fell through assignment logic in executeWithScope.\n");
+            } else { // Should not happen if logic above is correct (i.e. not simple, not string_index, not complex_lvalue)
+                 fprintf(stderr, "Internal Error: Unhandled assignment case in executeWithScope.\n");
                  freeValue(&rhs_val); // Cleanup RHS
                  EXIT_FAILURE_HANDLER();
             }
 
             break; // End case AST_ASSIGN
         }
-
 
         case AST_CASE: {
                    // Evaluate the case expression

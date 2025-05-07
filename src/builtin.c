@@ -2535,10 +2535,8 @@ Value executeBuiltinInitGraph(AST *node) {
         #ifdef DEBUG
         fprintf(stderr, "[DEBUG InitGraph] SDL not initialized. Calling SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER).\n");
         #endif
-        // --- Added Explicit Error Check ---
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
             fprintf(stderr, "Runtime error: SDL_Init failed in InitGraph: %s\n", SDL_GetError());
-            // Set flag to prevent further SDL calls? Or exit? Let's exit for init failure.
             EXIT_FAILURE_HANDLER();
         }
         #ifdef DEBUG
@@ -2548,25 +2546,48 @@ Value executeBuiltinInitGraph(AST *node) {
     }
 
     // --- Argument checks ---
-    if (node->child_count != 3) { /* Existing error handling */ }
+    if (node->child_count != 3) {
+        fprintf(stderr, "Runtime error: InitGraph expects 3 arguments (Width, Height: Integer; Title: String).\n");
+        // Clean up previously eval'd args if any were done before check
+        EXIT_FAILURE_HANDLER();
+    }
     Value widthVal = eval(node->children[0]);
     Value heightVal = eval(node->children[1]);
     Value titleVal = eval(node->children[2]);
-    if (widthVal.type != TYPE_INTEGER || heightVal.type != TYPE_INTEGER || titleVal.type != TYPE_STRING) { /* Existing error handling */ }
 
-    // Check if already initialized (optional cleanup)
-    if (gSdlWindow || gSdlRenderer) { /* Existing warning/cleanup */ }
+    if (widthVal.type != TYPE_INTEGER || heightVal.type != TYPE_INTEGER || titleVal.type != TYPE_STRING) {
+        fprintf(stderr, "Runtime error: InitGraph argument type mismatch.\n");
+        freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Check if already initialized (optional: cleanup or error)
+    if (gSdlWindow || gSdlRenderer) {
+        // This logic might be better in a CloseGraph if re-init is not desired
+        // For now, let's assume we can reinitialize or this is the first proper init.
+        #ifdef DEBUG
+        fprintf(stderr, "Warning [InitGraph]: Graphics system (window/renderer) already seems initialized. Recreating.\n");
+        #endif
+        if(gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+        if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+    }
 
     int width = (int)widthVal.i_val;
     int height = (int)heightVal.i_val;
-    const char* title = titleVal.s_val ? titleVal.s_val : "pscal Graphics";
+    const char* title = titleVal.s_val ? titleVal.s_val : "Pscal Graphics";
+
+    if (width <= 0 || height <= 0) {
+        fprintf(stderr, "Runtime error: InitGraph width and height must be positive.\n");
+        freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
+        EXIT_FAILURE_HANDLER();
+    }
 
     // --- Create Window ---
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG InitGraph] Creating window (%dx%d, Title: '%s')...\n", width, height, title);
     #endif
+    // Window is created SHOWN by default
     gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
-    // --- Added Explicit Error Check ---
     if (!gSdlWindow) {
         fprintf(stderr, "Runtime error: SDL_CreateWindow failed: %s\n", SDL_GetError());
         freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
@@ -2583,33 +2604,38 @@ Value executeBuiltinInitGraph(AST *node) {
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG InitGraph] Creating renderer...\n");
     #endif
-    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    // --- Added Explicit Error Check ---
+    // Consider making VSync configurable or testing without it for macOS issues
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED /* | SDL_RENDERER_PRESENTVSYNC */);
     if (!gSdlRenderer) {
         fprintf(stderr, "Runtime error: SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
         freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
         EXIT_FAILURE_HANDLER();
     }
-    InitializeTextureSystem();
-     #ifdef DEBUG
+    #ifdef DEBUG
     fprintf(stderr, "[DEBUG InitGraph] SDL_CreateRenderer successful (Renderer: %p).\n", (void*)gSdlRenderer);
     #endif
 
-    // --- Initial Draw ---
-     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG InitGraph] Performing initial clear and present...\n");
+    InitializeTextureSystem(); // Initialize our global texture array to NULLs
+
+    // --- Initial Clear and Present ---
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG InitGraph] Performing initial clear (to black) and present...\n");
     #endif
-    // --- Added Error Checks ---
-    if (SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 100, 255) != 0) { fprintf(stderr, "Runtime Warning [InitGraph]: SDL_SetRenderDrawColor (background) failed: %s\n", SDL_GetError()); }
-    if (SDL_RenderClear(gSdlRenderer) != 0) { fprintf(stderr, "Runtime Warning [InitGraph]: SDL_RenderClear failed: %s\n", SDL_GetError()); }
-    SDL_RenderPresent(gSdlRenderer); // Present the cleared screen
+    if (SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255) != 0) { // Clear to black
+        fprintf(stderr, "Runtime Warning [InitGraph]: SDL_SetRenderDrawColor (background) failed: %s\n", SDL_GetError());
+    }
+    if (SDL_RenderClear(gSdlRenderer) != 0) {
+        fprintf(stderr, "Runtime Warning [InitGraph]: SDL_RenderClear failed: %s\n", SDL_GetError());
+    }
+    SDL_RenderPresent(gSdlRenderer); // Present the cleared (black) screen immediately
 
-    // Set default drawing color
+    // Set default drawing color for subsequent Pscal SetRGBColor/PutPixel calls (e.g., to white)
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
-    if (SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a) != 0) { fprintf(stderr, "Runtime Warning [InitGraph]: SDL_SetRenderDrawColor (default) failed: %s\n", SDL_GetError()); }
+    // The Pscal program should call SetRGBColor explicitly before drawing if it wants a specific color.
+    // No need to call SDL_SetRenderDrawColor here again for the *default state*.
 
-     #ifdef DEBUG
+    #ifdef DEBUG
     fprintf(stderr, "[DEBUG InitGraph] Initial clear and present finished.\n");
     #endif
 
