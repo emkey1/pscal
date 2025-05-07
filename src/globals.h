@@ -8,6 +8,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
+#define MAX_SDL_TEXTURES 32 // Define a maximum number of textures
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -23,6 +25,10 @@ extern int gSdlWidth;
 extern int gSdlHeight;
 extern TTF_Font* gSdlFont;
 extern int gSdlFontSize;
+extern SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES]; // Array to hold texture pointers
+extern int gSdlTextureWidths[MAX_SDL_TEXTURES];   // Store widths
+extern int gSdlTextureHeights[MAX_SDL_TEXTURES];
+extern bool gSdlTtfInitialized;
 // --- END SDL ---
 
 #ifdef __cplusplus

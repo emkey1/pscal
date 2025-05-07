@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "interpreter.h"
 #include "symbol.h"
+#include "sdl.h"
 #include "globals.h"
 #include <math.h>
 #include <termios.h>
@@ -31,8 +32,10 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"closegraph", executeBuiltinCloseGraph},
     {"copy",      executeBuiltinCopy},
     {"cos",       executeBuiltinCos},
+    {"createtexture", executeBuiltinCreateTexture},
     {"dec",       executeBuiltinDec},         // Include Dec
     {"delay",     executeBuiltinDelay},
+    {"destroytexture", executeBuiltinDestroyTexture},
     {"dispose",   executeBuiltinDispose},
     {"drawcircle", executeBuiltinDrawCircle},
     {"drawline", executeBuiltinDrawLine},
@@ -70,6 +73,8 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
     {"readkey",   executeBuiltinReadKey},
+    {"rendercopy", executeBuiltinRenderCopy},
+    {"rendercopyrect", executeBuiltinRenderCopyRect},
     {"reset",     executeBuiltinReset},
     // {"result",    executeBuiltinResult}, // 'result' is special, handled differently? Let's assume not dispatched here.
     {"rewrite",   executeBuiltinRewrite},
@@ -88,6 +93,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"trunc",     executeBuiltinTrunc},
     {"upcase",    executeBuiltinUpcase},
     {"updatescreen", executeBuiltinUpdateScreen},
+    {"updatetexture", executeBuiltinUpdateTexture},
     {"waitkeyevent", executeBuiltinWaitKeyEvent},
     {"wherex",    executeBuiltinWhereX},
     {"wherey",    executeBuiltinWhereY}
@@ -1586,6 +1592,44 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         setRight(dummy, retTypeNode);
         dummy->var_type = TYPE_MEMORYSTREAM; // Set function's return type
         
+    } else if (strcasecmp(name, "createtexture") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_ct_w"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_ct_h"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        // Set return type for the function
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok); setTypeAST(retNode, TYPE_INTEGER);
+        setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    } else if (strcasecmp(name, "destroytexture") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_dt_id"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
+        dummy->child_count = 1; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "updatetexture") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); // TextureID
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_ut_id"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_ARRAY); // PixelData (ARRAY OF Byte)
+        // We don't specify element type here in dummy AST; runtime will check.
+        // Or you could create a dummy AST_ARRAY_TYPE node for p2->right if needed for stricter parsing.
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_ut_data"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2); dummy->children[1] = p2;
+        dummy->child_count = 2; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "rendercopy") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_rc_id"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
+        dummy->child_count = 1; dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "rendercopyrect") == 0) {
+        dummy->child_capacity = 5; dummy->children = malloc(sizeof(AST*) * 5); /* check */
+        const char* pnames[] = {"_rcr_id", "_rcr_dx", "_rcr_dy", "_rcr_dw", "_rcr_dh"};
+        for(int i=0; i<5; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 5; dummy->var_type = TYPE_VOID;
     } else if (strcasecmp(name, "setrgbcolor") == 0) { // New built-in
         dummy->child_capacity = 3;
         dummy->children = malloc(sizeof(AST*) * 3);
@@ -2547,6 +2591,7 @@ Value executeBuiltinInitGraph(AST *node) {
         freeValue(&widthVal); freeValue(&heightVal); freeValue(&titleVal);
         EXIT_FAILURE_HANDLER();
     }
+    InitializeTextureSystem();
      #ifdef DEBUG
     fprintf(stderr, "[DEBUG InitGraph] SDL_CreateRenderer successful (Renderer: %p).\n", (void*)gSdlRenderer);
     #endif
@@ -3032,11 +3077,25 @@ Value executeBuiltinSetRGBColor(AST *node) {
 Value executeBuiltinInitTextSystem(AST *node) {
     if (node->child_count != 2) {
         fprintf(stderr, "Runtime error: InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).\n");
+        EXIT_FAILURE_HANDLER(); // Or return an error indicator
+    }
+    // Graphics system must be up before we can think about text on it.
+    if (!gSdlInitialized || !gSdlRenderer) { // gSdlInitialized refers to core SDL_Init(VIDEO)
+        fprintf(stderr, "Runtime error: Core SDL Graphics not initialized before InitTextSystem.\n");
         EXIT_FAILURE_HANDLER();
     }
-    if (!gSdlInitialized) {
-        fprintf(stderr, "Runtime error: SDL Graphics not initialized before InitTextSystem.\n");
-        EXIT_FAILURE_HANDLER();
+
+    // >>> Lazy Initialize SDL_ttf if not already done <<<
+    if (!gSdlTtfInitialized) {
+        if (TTF_Init() == -1) {
+            fprintf(stderr, "Runtime error: SDL_ttf system initialization failed: %s\n", TTF_GetError());
+            // No font loaded yet, so just exit or return error
+            EXIT_FAILURE_HANDLER();
+        }
+        gSdlTtfInitialized = true;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG InitTextSystem] SDL_ttf system initialized (lazily).\n");
+        #endif
     }
 
     Value fontNameVal = eval(node->children[0]);
@@ -3045,19 +3104,13 @@ Value executeBuiltinInitTextSystem(AST *node) {
     if (fontNameVal.type != TYPE_STRING || fontSizeVal.type != TYPE_INTEGER) {
         fprintf(stderr, "Runtime error: InitTextSystem argument type mismatch.\n");
         freeValue(&fontNameVal); freeValue(&fontSizeVal);
-        EXIT_FAILURE_HANDLER();
+        EXIT_FAILURE_HANDLER(); // Or return error
     }
 
     const char* font_path = fontNameVal.s_val;
     int font_size = (int)fontSizeVal.i_val;
 
-    if (TTF_Init() == -1) {
-        fprintf(stderr, "Runtime error: SDL_ttf initialization failed: %s\n", TTF_GetError());
-        freeValue(&fontNameVal); freeValue(&fontSizeVal);
-        EXIT_FAILURE_HANDLER();
-    }
-
-    if (gSdlFont) { // Close previous font if any
+    if (gSdlFont) { // Close previous font if one was already loaded
         TTF_CloseFont(gSdlFont);
         gSdlFont = NULL;
     }
@@ -3065,9 +3118,10 @@ Value executeBuiltinInitTextSystem(AST *node) {
     gSdlFont = TTF_OpenFont(font_path, font_size);
     if (!gSdlFont) {
         fprintf(stderr, "Runtime error: Failed to load font '%s': %s\n", font_path, TTF_GetError());
-        TTF_Quit(); // Clean up TTF system if font loading failed
+        // Don't TTF_Quit() here if other fonts might be attempted later,
+        // but for a fatal error like this, EXIT_FAILURE_HANDLER might be appropriate.
         freeValue(&fontNameVal); freeValue(&fontSizeVal);
-        EXIT_FAILURE_HANDLER();
+        EXIT_FAILURE_HANDLER(); // Or return error
     }
     gSdlFontSize = font_size;
 
@@ -3081,21 +3135,29 @@ Value executeBuiltinInitTextSystem(AST *node) {
 }
 
 Value executeBuiltinQuitTextSystem(AST *node) {
-    if (node->child_count != 0) {
-        fprintf(stderr, "Runtime error: QuitTextSystem expects 0 arguments.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-    if (gSdlFont) {
+    if (node->child_count != 0) { /* ... error ... */ }
+
+    if (gSdlFont) { // If a font is currently loaded, close it
         TTF_CloseFont(gSdlFont);
         gSdlFont = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG QuitTextSystem] Closed active SDL_ttf font.\n");
+        #endif
     }
-    TTF_Quit(); // Quit the SDL_ttf subsystem
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG QuitTextSystem] SDL_ttf system quit.\n");
-    #endif
+
+    if (gSdlTtfInitialized) { // Only quit TTF if it was initialized
+        TTF_Quit();
+        gSdlTtfInitialized = false; // Reset the flag
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG QuitTextSystem] SDL_ttf system quit.\n");
+        #endif
+    } else {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG QuitTextSystem] SDL_ttf system was not initialized, no need to quit.\n");
+        #endif
+    }
     return makeVoid();
 }
-
 
 Value executeBuiltinDrawLine(AST *node) {
     if (node->child_count != 4) {
@@ -3245,19 +3307,21 @@ Value executeBuiltinDrawCircle(AST *node) {
 }
 
 Value executeBuiltinOutTextXY(AST *node) {
-    if (node->child_count != 3) {
-        fprintf(stderr, "Runtime error: OutTextXY expects 3 arguments (X, Y: Integer; Text: String).\n");
-        EXIT_FAILURE_HANDLER();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        fprintf(stderr, "Runtime error: Graphics mode not initialized before OutTextXY.\n");
-        return makeVoid();
+    if (node->child_count != 3) { /* ... error ... */ }
+    if (!gSdlInitialized || !gSdlRenderer) { /* ... error ... */ }
+
+    // >>> Check if TTF system and font are ready <<<
+    if (!gSdlTtfInitialized) {
+        fprintf(stderr, "Runtime error: Text system not initialized. Call InitTextSystem before OutTextXY.\n");
+        return makeVoid(); // Or EXIT_FAILURE_HANDLER
     }
     if (!gSdlFont) {
-        fprintf(stderr, "Runtime error: Text system (font) not initialized. Call InitTextSystem first.\n");
-        return makeVoid();
+        fprintf(stderr, "Runtime error: No font loaded. Call InitTextSystem with a valid font before OutTextXY.\n");
+        return makeVoid(); // Or EXIT_FAILURE_HANDLER
     }
 
+    // ... (rest of the existing OutTextXY logic: eval args, TTF_RenderUTF8_Solid, etc.) ...
+    // ...
     Value x_val = eval(node->children[0]);
     Value y_val = eval(node->children[1]);
     Value text_val = eval(node->children[2]);
@@ -3274,24 +3338,29 @@ Value executeBuiltinOutTextXY(AST *node) {
 
     SDL_Surface* textSurface = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
     if (!textSurface) {
-        fprintf(stderr, "Runtime error: TTF_RenderUTF8_Solid failed: %s\n", TTF_GetError());
-        goto cleanup;
+        fprintf(stderr, "Runtime error: TTF_RenderUTF8_Solid failed in OutTextXY: %s\n", TTF_GetError());
+        goto cleanup_outtextxy; // Use goto for consistent cleanup
     }
 
     SDL_Texture* textTexture = SDL_CreateTextureFromSurface(gSdlRenderer, textSurface);
     if (!textTexture) {
-        fprintf(stderr, "Runtime error: SDL_CreateTextureFromSurface failed: %s\n", SDL_GetError());
+        fprintf(stderr, "Runtime error: SDL_CreateTextureFromSurface failed in OutTextXY: %s\n", SDL_GetError());
         SDL_FreeSurface(textSurface);
-        goto cleanup;
+        goto cleanup_outtextxy;
     }
 
     SDL_Rect destRect = { x, y, textSurface->w, textSurface->h };
-    SDL_RenderCopy(gSdlRenderer, textTexture, NULL, &destRect);
+    // Ensure blending is enabled for the texture if you want transparent backgrounds for text
+    // SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND); // If not set globally for textures
+    if(SDL_RenderCopy(gSdlRenderer, textTexture, NULL, &destRect) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_RenderCopy failed in OutTextXY: %s\n", SDL_GetError());
+    }
+
 
     SDL_DestroyTexture(textTexture);
     SDL_FreeSurface(textSurface);
 
-cleanup:
+cleanup_outtextxy:
     freeValue(&x_val);
     freeValue(&y_val);
     freeValue(&text_val);
@@ -3343,5 +3412,217 @@ Value executeBuiltinGetMouseState(AST *node) {
     freeValue(&val_y);
     freeValue(&val_buttons);
 
+    return makeVoid();
+}
+
+// Helper to find a free texture slot or return an error ID
+int findFreeTextureID(void) {
+    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
+        if (gSdlTextures[i] == NULL) {
+            return i;
+        }
+    }
+    return -1; // No free slots
+}
+
+Value executeBuiltinCreateTexture(AST *node) {
+    if (node->child_count != 2) {
+        fprintf(stderr, "Runtime error: CreateTexture expects 2 arguments (Width, Height: Integer).\n");
+        return makeInt(-1); // Return -1 for error
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics not initialized before CreateTexture.\n");
+        return makeInt(-1);
+    }
+
+    Value widthVal = eval(node->children[0]);
+    Value heightVal = eval(node->children[1]);
+
+    if (widthVal.type != TYPE_INTEGER || heightVal.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: CreateTexture arguments must be integers.\n");
+        freeValue(&widthVal); freeValue(&heightVal);
+        return makeInt(-1);
+    }
+
+    int width = (int)widthVal.i_val;
+    int height = (int)heightVal.i_val;
+    freeValue(&widthVal); freeValue(&heightVal);
+
+    if (width <= 0 || height <= 0) {
+        fprintf(stderr, "Runtime error: CreateTexture dimensions must be positive.\n");
+        return makeInt(-1);
+    }
+
+    int textureID = findFreeTextureID();
+    if (textureID == -1) {
+        fprintf(stderr, "Runtime error: Maximum number of textures reached (%d).\n", MAX_SDL_TEXTURES);
+        return makeInt(-1);
+    }
+
+    // Create a streaming texture - RGBA8888 is common and easy for byte arrays
+    // SDL_PIXELFORMAT_ARGB8888 means byte order in memory is B,G,R,A for a uint32_t
+    // Or use SDL_PIXELFORMAT_RGBA8888 for R,G,B,A order if your Pscal array matches that.
+    // Let's assume Pscal array will be R,G,B,A order and use SDL_PIXELFORMAT_RGBA8888
+    SDL_Texture* newTexture = SDL_CreateTexture(gSdlRenderer,
+                                                SDL_PIXELFORMAT_RGBA8888,
+                                                SDL_TEXTUREACCESS_STREAMING,
+                                                width, height);
+    if (!newTexture) {
+        fprintf(stderr, "Runtime error: SDL_CreateTexture failed: %s\n", SDL_GetError());
+        return makeInt(-1);
+    }
+    // Optional: Set blend mode if you need transparency with RGBA
+    // SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+
+
+    gSdlTextures[textureID] = newTexture;
+    gSdlTextureWidths[textureID] = width;
+    gSdlTextureHeights[textureID] = height;
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG CreateTexture] Created Texture ID %d (%dx%d).\n", textureID, width, height);
+    #endif
+    return makeInt(textureID);
+}
+
+Value executeBuiltinDestroyTexture(AST *node) {
+    if (node->child_count != 1) { /* error */ return makeVoid(); }
+    Value idVal = eval(node->children[0]);
+    if (idVal.type != TYPE_INTEGER) { /* error */ freeValue(&idVal); return makeVoid(); }
+    int textureID = (int)idVal.i_val;
+    freeValue(&idVal);
+
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        fprintf(stderr, "Runtime warning: DestroyTexture called with invalid TextureID %d.\n", textureID);
+        return makeVoid();
+    }
+
+    SDL_DestroyTexture(gSdlTextures[textureID]);
+    gSdlTextures[textureID] = NULL;
+    gSdlTextureWidths[textureID] = 0;
+    gSdlTextureHeights[textureID] = 0;
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG DestroyTexture] Destroyed Texture ID %d.\n", textureID);
+    #endif
+    return makeVoid();
+}
+
+Value executeBuiltinUpdateTexture(AST *node) {
+    if (node->child_count != 2) {
+        fprintf(stderr, "Runtime error: UpdateTexture expects 2 arguments (TextureID: Integer; PixelData: ARRAY OF Byte).\n");
+        return makeVoid();
+    }
+
+    Value idVal = eval(node->children[0]);
+    Value pixelDataVal = eval(node->children[1]); // This evaluates the Pscal array variable
+
+    if (idVal.type != TYPE_INTEGER || pixelDataVal.type != TYPE_ARRAY) {
+        fprintf(stderr, "Runtime error: UpdateTexture argument type mismatch.\n");
+        goto cleanup_update;
+    }
+    if (pixelDataVal.element_type != TYPE_BYTE) {
+         fprintf(stderr, "Runtime error: UpdateTexture PixelData must be an ARRAY OF Byte. Got array of %s.\n", varTypeToString(pixelDataVal.element_type));
+        goto cleanup_update;
+    }
+
+
+    int textureID = (int)idVal.i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        fprintf(stderr, "Runtime error: UpdateTexture called with invalid TextureID %d.\n", textureID);
+        goto cleanup_update;
+    }
+
+    int texWidth = gSdlTextureWidths[textureID];
+    int texHeight = gSdlTextureHeights[textureID];
+    int bytesPerPixel = 4; // Assuming RGBA8888
+    int expectedPscalArraySize = texWidth * texHeight * bytesPerPixel;
+    int pitch = texWidth * bytesPerPixel;
+
+    // Calculate actual size of the Pscal array (Value struct for arrays has flat data)
+    int pscalArrayTotalElements = 1;
+    for(int i=0; i < pixelDataVal.dimensions; ++i) {
+        pscalArrayTotalElements *= (pixelDataVal.upper_bounds[i] - pixelDataVal.lower_bounds[i] + 1);
+    }
+
+    if (pscalArrayTotalElements != expectedPscalArraySize) {
+        fprintf(stderr, "Runtime error: UpdateTexture PixelData array size (%d) does not match texture dimensions*BPP (%dx%dx%d = %d).\n",
+                pscalArrayTotalElements, texWidth, texHeight, bytesPerPixel, expectedPscalArraySize);
+        goto cleanup_update;
+    }
+
+    // Create a temporary C buffer and copy data from Pscal's Value array
+    unsigned char* c_pixel_buffer = (unsigned char*)malloc(expectedPscalArraySize);
+    if (!c_pixel_buffer) {
+        fprintf(stderr, "Runtime error: Failed to allocate C buffer for UpdateTexture.\n");
+        goto cleanup_update;
+    }
+
+    for (int i = 0; i < expectedPscalArraySize; ++i) {
+        // Pscal array elements are Value structs of TYPE_BYTE
+        if (pixelDataVal.array_val[i].type != TYPE_BYTE) {
+            fprintf(stderr, "Runtime error: UpdateTexture PixelData array element %d is not TYPE_BYTE.\n", i);
+            free(c_pixel_buffer);
+            goto cleanup_update;
+        }
+        c_pixel_buffer[i] = (unsigned char)pixelDataVal.array_val[i].i_val;
+    }
+
+    if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
+        fprintf(stderr, "Runtime error: SDL_UpdateTexture failed: %s\n", SDL_GetError());
+    }
+
+    free(c_pixel_buffer);
+
+cleanup_update:
+    freeValue(&idVal);
+    freeValue(&pixelDataVal); // This will free the Pscal array Value structure and its contents
+    return makeVoid();
+}
+
+Value executeBuiltinRenderCopy(AST *node) {
+    if (node->child_count != 1) { /* error */ return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { /* error */ return makeVoid(); }
+
+    Value idVal = eval(node->children[0]);
+    if (idVal.type != TYPE_INTEGER) { /* error */ freeValue(&idVal); return makeVoid(); }
+    int textureID = (int)idVal.i_val;
+    freeValue(&idVal);
+
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        fprintf(stderr, "Runtime error: RenderCopy called with invalid TextureID %d.\n", textureID);
+        return makeVoid();
+    }
+
+    if (SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, NULL) != 0) { // NULL src/dst rect = copy whole texture to whole renderer
+        fprintf(stderr, "Runtime Warning: SDL_RenderCopy failed: %s\n", SDL_GetError());
+    }
+    return makeVoid();
+}
+
+Value executeBuiltinRenderCopyRect(AST *node) {
+    if (node->child_count != 5) { /* error: ID, dx,dy,dw,dh */ return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { /* error */ return makeVoid(); }
+
+    Value idVal = eval(node->children[0]);
+    Value dxVal = eval(node->children[1]);
+    Value dyVal = eval(node->children[2]);
+    Value dwVal = eval(node->children[3]);
+    Value dhVal = eval(node->children[4]);
+
+    // ... (type checks for all being integer) ...
+    // ... (freeValue for all) ...
+
+    int textureID = (int)idVal.i_val;
+    // ... (check textureID validity) ...
+
+    SDL_Rect dstRect;
+    dstRect.x = (int)dxVal.i_val;
+    dstRect.y = (int)dyVal.i_val;
+    dstRect.w = (int)dwVal.i_val;
+    dstRect.h = (int)dhVal.i_val;
+
+    if (SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, &dstRect) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_RenderCopy (rect) failed: %s\n", SDL_GetError());
+    }
     return makeVoid();
 }

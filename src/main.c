@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <string.h>
+#include "sdl.h"
 
 /* Global variables */
 int gParamCount = 0;
@@ -149,6 +150,11 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("outtextxy", AST_PROCEDURE_DECL);
     registerBuiltinFunction("quittextsystem", AST_PROCEDURE_DECL);
     registerBuiltinFunction("getmousestate", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("createtexture", AST_FUNCTION_DECL); // Returns an Integer ID
+    registerBuiltinFunction("destroytexture", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("updatetexture", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("rendercopy", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("rendercopyrect", AST_PROCEDURE_DECL);
 
     /* Initialize lexer and parser. */
     Lexer lexer;
@@ -202,16 +208,16 @@ if (verifyASTLinks(GlobalAST, NULL)) { // Initial call expects NULL parent for t
 
     freeProcedureTable(); // Original position
 
-     // --- Free the main AST Tree FIRST ---
-     freeAST(GlobalAST); // Original position
+    // --- Free the main AST Tree FIRST ---
+    freeAST(GlobalAST); // Original position
 
-     // --- Free the shared AST nodes stored in the type table ---
-     freeTypeTableASTNodes(); // Original position
+    // --- Free the shared AST nodes stored in the type table ---
+    freeTypeTableASTNodes(); // Original position
 
-     // --- Free the type table linked list itself ---
-     freeTypeTable(); // Original position
+    // --- Free the type table linked list itself ---
+    freeTypeTable(); // Original position
 
-     return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
 
 #ifdef DEBUG
@@ -296,10 +302,15 @@ int main(int argc, char *argv[]) {
             SDL_Quit();
         }
         
+        for (int i = 0; i < MAX_SDL_TEXTURES; ++i) { // Destroy any remaining textures
+            if (gSdlTextures[i] != NULL) {
+                SDL_DestroyTexture(gSdlTextures[i]);
+                gSdlTextures[i] = NULL;
+            }
+        }
+        
         SDL_Quit();
     }
-    
-    
     
     return result;
 }
@@ -355,6 +366,13 @@ int main(int argc, char *argv[]) {
         // This SDL_Quit is for the main SDL system
         if (gSdlInitialized) { // Check this flag for the main SDL_Quit
             SDL_Quit();
+        }
+        
+        for (int i = 0; i < MAX_SDL_TEXTURES; ++i) { // Destroy any remaining textures
+            if (gSdlTextures[i] != NULL) {
+                SDL_DestroyTexture(gSdlTextures[i]);
+                gSdlTextures[i] = NULL;
+            }
         }
         
         SDL_Quit();

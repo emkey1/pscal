@@ -26,7 +26,11 @@ bool gSdlInitialized = false;
 int gSdlWidth = 0;
 int gSdlHeight = 0;
 TTF_Font* gSdlFont = NULL;
-int gSdlFontSize   = 16;   
+int gSdlFontSize   = 16;
+SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
+int gSdlTextureWidths[MAX_SDL_TEXTURES];
+int gSdlTextureHeights[MAX_SDL_TEXTURES];
+bool gSdlTtfInitialized = false;
 // SDL Stuff End
 
 int break_requested = 0;

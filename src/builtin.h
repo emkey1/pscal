@@ -104,6 +104,11 @@ Value executeBuiltinOutTextXY(AST *node);
 Value executeBuiltinGetMouseState(AST *node);
 Value executeBuiltinInitTextSystem(AST *node); // For loading font
 Value executeBuiltinQuitTextSystem(AST *node); // For closing font
+Value executeBuiltinCreateTexture(AST *node);
+Value executeBuiltinDestroyTexture(AST *node);
+Value executeBuiltinUpdateTexture(AST *node);
+Value executeBuiltinRenderCopy(AST *node);
+Value executeBuiltinRenderCopyRect(AST *node);
 
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine
