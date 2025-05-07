@@ -692,7 +692,8 @@ Value makeValueForType(VarType type, AST *type_def_param) {
                      int *ubs = (int*)malloc(sizeof(int) * dims);
                      if (!lbs || !ubs) {
                          fprintf(stderr, "Memory allocation error for bounds in makeValueForType.\n");
-                         if(lbs) free(lbs); if(ubs) free(ubs);
+                         if(lbs) free(lbs);
+                         if(ubs) free(ubs);
                          EXIT_FAILURE_HANDLER();
                      }
 

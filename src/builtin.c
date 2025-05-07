@@ -2560,22 +2560,26 @@ Value executeBuiltinDispose(AST *node) {
             (void*)valueToDispose, lvalueNode->token ? lvalueNode->token->value : "?");
     #endif
 
-    // --- Free the pointed-to Value struct and its contents ---
+    // ---- START FIX ----
+    // Store the address before freeing
+    void* disposedAddress = (void*)valueToDispose;
+
+    // Free the pointed-to Value struct and its contents
     freeValue(valueToDispose); // Free contents (strings, records, etc.)
     free(valueToDispose);      // Free the Value struct itself
 
-    // --- Set the original pointer variable back to nil ---
+    // Set the original pointer variable back to nil
     pointerVarValuePtr->ptr_val = NULL;
 
     // --- ADDED: Nil out aliases (Implementation Specific) ---
     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG DISPOSE] Nullifying aliases pointing to %p.\n", (void*)valueToDispose);
+    // Use the stored address for the debug print
+    fprintf(stderr, "[DEBUG DISPOSE] Nullifying aliases pointing to %p.\n", disposedAddress);
     #endif
-    nullifyPointerAliases(globalSymbols, valueToDispose);
-    nullifyPointerAliases(localSymbols, valueToDispose);
-    // --- END ADDED ---
-
-
+    // Pass the stored address to the helper functions
+    nullifyPointerAliases(globalSymbols, disposedAddress);
+    nullifyPointerAliases(localSymbols, disposedAddress);
+    // ---- END FIX ----
     return makeVoid();
 }
 

@@ -71,19 +71,23 @@ void debugAST(AST *node, int indent) {
     printf(")\n");
 
     if (node->left) {
-        for (int i = 0; i < indent+1; i++) printf("  "); printf("Left:\n");
+        for (int i = 0; i < indent+1; i++) { printf("  "); } // Braces added
+        printf("Left:\n");
         debugAST(node->left, indent + 2);
     }
     if (node->right) {
-        for (int i = 0; i < indent+1; i++) printf("  "); printf("Right:\n");
+        for (int i = 0; i < indent+1; i++) { printf("  "); } // Braces added
+        printf("Right:\n");
         debugAST(node->right, indent + 2);
     }
     if (node->extra) {
-        for (int i = 0; i < indent+1; i++) printf("  "); printf("Extra:\n");
+        for (int i = 0; i < indent+1; i++) { printf("  "); } // Braces added
+        printf("Extra:\n");
         debugAST(node->extra, indent + 2);
     }
     if (node->children && node->child_count > 0) {
-         for (int i = 0; i < indent+1; i++) printf("  "); printf("Children (%d):\n", node->child_count);
+         for (int i = 0; i < indent+1; i++) { printf("  "); } // Braces added
+         printf("Children (%d):\n", node->child_count);
          for (int i = 0; i < node->child_count; i++) {
              debugAST(node->children[i], indent + 2);
          }
