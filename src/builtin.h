@@ -15,6 +15,7 @@ Value executeBuiltinLn(AST *node);
 Value executeBuiltinExp(AST *node);
 Value executeBuiltinAbs(AST *node);
 Value executeBuiltinTrunc(AST *node);
+Value executeBuiltinSqr(AST *node);
 
 // File I/O
 Value executeBuiltinAssign(AST *node);

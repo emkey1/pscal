@@ -83,9 +83,10 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"setcolor",  executeBuiltinSetColor},
     {"setrgbcolor", executeBuiltinSetRGBColor},
     {"sin",       executeBuiltinSin},
+    {"sqr",       executeBuiltinSqr},
     {"sqrt",      executeBuiltinSqrt},
-    {"succ",      executeBuiltinSucc},        // Include Succ
-    {"tan",       executeBuiltinTan},         // Include Tan
+    {"succ",      executeBuiltinSucc},
+    {"tan",       executeBuiltinTan},
     {"textbackground", executeBuiltinTextBackground},
     {"textbackgrounde", executeBuiltinTextBackgroundE},
     {"textcolor", executeBuiltinTextColor},
@@ -830,6 +831,33 @@ Value executeBuiltinPos(AST *node) {
     }
 }
 
+Value executeBuiltinSqr(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: Sqr expects 1 argument.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    Value arg = eval(node->children[0]);
+    Value result = makeVoid(); // Default error
+
+    if (arg.type == TYPE_INTEGER) {
+        long long i_val = arg.i_val;
+        // Check for potential overflow before multiplication, though long long has a large range.
+        // For simplicity here, we'll just do the multiplication.
+        // A more robust solution might check if i_val > sqrt(MAX_LONGLONG)
+        result = makeInt(i_val * i_val);
+    } else if (arg.type == TYPE_REAL) {
+        double r_val = arg.r_val;
+        result = makeReal(r_val * r_val);
+    } else {
+        fprintf(stderr, "Runtime error: Sqr expects an Integer or Real argument. Got %s.\n", varTypeToString(arg.type));
+        freeValue(&arg); // Free evaluated arg before exit
+        EXIT_FAILURE_HANDLER();
+    }
+
+    freeValue(&arg); // Free the evaluated argument
+    return result;
+}
 
 Value executeBuiltinUpcase(AST *node) {
     if (node->child_count != 1) {
@@ -1602,6 +1630,35 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         // Set return type for the function
         Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok); setTypeAST(retNode, TYPE_INTEGER);
         setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+        
+    } else if (strcasecmp(name, "sqr") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+
+        AST* param = newASTNode(AST_VAR_DECL, NULL);
+        // We can make the dummy param type REAL, as Sqr(Integer) also works
+        // and the C implementation will handle both INTEGER and REAL inputs.
+        setTypeAST(param, TYPE_REAL); // Or TYPE_INTEGER, C code handles either
+        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_sqr_arg");
+        AST* varNode = newASTNode(AST_VARIABLE, paramNameToken);
+        freeToken(paramNameToken);
+        addChild(param, varNode);
+        dummy->children[0] = param;
+        dummy->child_count = 1;
+
+        // Return type depends on argument type.
+        // The dummy AST's var_type here is a hint; actual eval handles it.
+        // Let's set it to REAL as that's a common use.
+        // Alternatively, set to TYPE_VOID and let eval determine precise return.
+        // For functions, it's better to be more specific if possible.
+        // Since it can return Int or Real, let's mark it as Real for the dummy.
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "real"); // Or "integer" - depends on convention
+        AST* retNode = newASTNode(AST_VARIABLE, retTok);
+        freeToken(retTok);
+        setTypeAST(retNode, TYPE_REAL); // Or TYPE_INTEGER
+        setRight(dummy, retNode);
+        dummy->var_type = TYPE_REAL; // Or TYPE_INTEGER. The C impl will return correct type.
     } else if (strcasecmp(name, "destroytexture") == 0) {
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* check */
         AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);

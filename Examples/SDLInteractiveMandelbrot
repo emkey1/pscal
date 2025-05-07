@@ -7,7 +7,7 @@ CONST
   WindowWidth   = 640;
   WindowHeight  = 480;
   WindowTitle   = 'Mandelbrot (Zoom Fixed - LMB:Zoom, RMB:Reset, Q:Quit)';
-  MaxIterations = 150;
+  MaxIterations = 50;
   ZoomFactor    = 2.0;
   BytesPerPixel = 4;
   TextureUpdateIntervalRows = 1;

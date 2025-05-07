@@ -121,6 +121,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("low",       AST_FUNCTION_DECL);
     registerBuiltinFunction("high",      AST_FUNCTION_DECL);
     registerBuiltinFunction("succ",      AST_FUNCTION_DECL); // pred would also be FUNCTION
+    registerBuiltinFunction("sqr",       AST_FUNCTION_DECL); 
     registerBuiltinFunction("inttostr",  AST_FUNCTION_DECL);
     registerBuiltinFunction("screencols", AST_FUNCTION_DECL);
     registerBuiltinFunction("screenrows", AST_FUNCTION_DECL);
