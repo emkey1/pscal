@@ -573,13 +573,15 @@ void insertType(const char *name, AST *typeAST) {
 AST *lookupType(const char *name) {
     TypeEntry *entry = type_table;
     while (entry) {
-        if (strcmp(entry->name, name) == 0) {
+        // Ensure entry->name is not NULL before comparing
+        if (entry->name && name && strcasecmp(entry->name, name) == 0) { // <<< USE strcasecmp
             return entry->typeAST;
         }
         entry = entry->next;
     }
     return NULL;
 }
+
 
 AST *buildProgramAST(Parser *main_parser) {
     // --- Copy the PROGRAM token BEFORE calling eat ---

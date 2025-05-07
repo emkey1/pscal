@@ -78,8 +78,8 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"textcolor", executeBuiltinTextColor},
     {"textcolore", executeBuiltinTextColorE},
     {"trunc",     executeBuiltinTrunc},
-    {"updatescreen", executeBuiltinUpdateScreen}, 
     {"upcase",    executeBuiltinUpcase},
+    {"updatescreen", executeBuiltinUpdateScreen},
     {"waitkeyevent", executeBuiltinWaitKeyEvent},
     {"wherex",    executeBuiltinWhereX},
     {"wherey",    executeBuiltinWhereY}

@@ -106,7 +106,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("trunc",     AST_PROCEDURE_DECL);
     registerBuiltinFunction("chr",       AST_PROCEDURE_DECL);
     registerBuiltinFunction("ord",       AST_PROCEDURE_DECL);
-    registerBuiltinFunction("upcase",    AST_PROCEDURE_DECL);
+    registerBuiltinFunction("upcase",    AST_FUNCTION_DECL);
     registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL);
     registerBuiltinFunction("mstreamloadfromfile", AST_PROCEDURE_DECL);
     registerBuiltinFunction("mstreamsavetofile", AST_PROCEDURE_DECL);
