@@ -5,11 +5,7 @@
 // The place where stuff that needs to be shared between files is placed
 #include "types.h"
 #include "sdl.h"
-// SDL stuff
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
 
-#define MAX_SDL_TEXTURES 32 // Define a maximum number of textures
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,20 +13,7 @@ extern "C" {
 
 // ... (other extern variables like gCurrentTextColor etc.) ...
 
-// --- SDL Graphics Globals ---
-extern SDL_Window* gSdlWindow;
-extern SDL_Renderer* gSdlRenderer;
-extern SDL_Color gSdlCurrentColor; // Store RGBA for current drawing color
-extern bool gSdlInitialized;
-extern int gSdlWidth;
-extern int gSdlHeight;
-extern TTF_Font* gSdlFont;
-extern int gSdlFontSize;
-extern SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES]; // Array to hold texture pointers
-extern int gSdlTextureWidths[MAX_SDL_TEXTURES];   // Store widths
-extern int gSdlTextureHeights[MAX_SDL_TEXTURES];
-extern bool gSdlTtfInitialized;
-// --- END SDL ---
+
 
 #ifdef __cplusplus
 }

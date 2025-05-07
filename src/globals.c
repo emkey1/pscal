@@ -18,21 +18,6 @@ bool gCurrentColorIsExt    = false;   // Default standard 16-color mode
 bool gCurrentBgIsExt       = false;   // Default standard 16-color mode (using 0-7 range)
 // --- End CRT State Variables ---
 
-// SDL Stuff Start
-SDL_Window* gSdlWindow = NULL;
-SDL_Renderer* gSdlRenderer = NULL;
-SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
-bool gSdlInitialized = false;
-int gSdlWidth = 0;
-int gSdlHeight = 0;
-TTF_Font* gSdlFont = NULL;
-int gSdlFontSize   = 16;
-SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
-int gSdlTextureWidths[MAX_SDL_TEXTURES];
-int gSdlTextureHeights[MAX_SDL_TEXTURES];
-bool gSdlTtfInitialized = false;
-// SDL Stuff End
-
 int break_requested = 0;
 
 

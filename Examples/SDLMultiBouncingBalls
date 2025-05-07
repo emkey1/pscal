@@ -167,7 +167,7 @@ BEGIN
   END; // FOR k
 END;
 
-PROCEDURE DrawBalls;
+PROCEDURE DrawBalls; // Stays plural
 VAR k:Integer;
 BEGIN
   FOR k := 1 TO NumBalls DO
@@ -175,7 +175,8 @@ BEGIN
     IF Balls[k].active THEN
     BEGIN
       SetRGBColor(Balls[k].r, Balls[k].g, Balls[k].b);
-      DrawCircle(Trunc(Balls[k].x), Trunc(Balls[k].y), Balls[k].radius);
+      // Change DrawCircle to FillCircle
+      FillCircle(Trunc(Balls[k].x), Trunc(Balls[k].y), Balls[k].radius); // <<<< CORRECT CHANGE HERE
     END;
   END;
 END;

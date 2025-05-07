@@ -146,6 +146,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL); // Ensure case consistency if lexer is case sensitive for builtins
     registerBuiltinFunction("setrgbcolor", AST_PROCEDURE_DECL);
     registerBuiltinFunction("drawline", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("fillcircle", AST_PROCEDURE_DECL);
     registerBuiltinFunction("fillrect", AST_PROCEDURE_DECL);
     registerBuiltinFunction("drawcircle", AST_PROCEDURE_DECL);
 
