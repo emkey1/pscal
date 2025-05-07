@@ -10,7 +10,9 @@ As the code was written primarily by AI's I'm releasing this to the public domai
 
 Install:
 
-You will need cmake and curl.  If so,
+You will need cmake, curl, SDL2, and SDL2_ttf.
+
+Here's how to get them installed if needed...
 
 For curl...
 
@@ -70,6 +72,36 @@ sudo pacman -S cmake
 # macOS (with Homebrew)
 brew update
 brew install cmake
+```
+For SDL2 and SDL2_ttf...
+
+```
+Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install libsdl2-dev libsdl2-ttf-dev
+
+RHEL / CentOS (and similar, may require EPEL for older versions)
+For CentOS 8+ / RHEL 8+ / AlmaLinux / Rocky Linux:
+sudo dnf install SDL2-devel SDL2_ttf-devel
+
+For CentOS 7 (these packages are often in EPEL repository):
+sudo yum install epel-release # If EPEL is not already enabled
+sudo yum install SDL2-devel SDL2_ttf-devel
+
+Fedora
+sudo dnf install SDL2-devel SDL2_ttf-devel
+
+SUSE / openSUSE
+sudo zypper install SDL2-devel SDL2_ttf-devel
+
+Alpine
+sudo apk add sdl2-dev sdl2_ttf-dev
+
+Arch Linux
+sudo pacman -S sdl2 sdl2_ttf
+
+macOS (with Homebrew)
+brew install sdl2 sdl2_ttf
 ```
 
 After cloning the repo...

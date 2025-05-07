@@ -1,0 +1,153 @@
+#!/usr/bin/env pscal
+PROGRAM SDLMandelbrotCRTStatus;
+
+USES CRT;
+
+CONST
+  WindowWidth   = 640;
+  WindowHeight  = 480;
+  WindowTitle   = 'Mandelbrot Set Explorer (SDL)';
+  MaxIterations = 150;
+  ScreenUpdateInterval = 1;
+
+  // Console layout for status messages
+  InitialMsgLineCount = 5; // Number of lines used for initial messages
+  // StatusLineY will be a variable initialized from InitialMsgLineCount
+
+  DefaultMinRe  = -2.0;
+  DefaultMaxRe  =  1.0;
+  DefaultMinIm  = -1.2;
+
+VAR
+  Px, Py        : Integer;
+  x0, y0, x, y, xTemp : Real;
+  Iteration     : Integer;
+  R, G, B       : Byte;
+
+  MinRe, MaxRe, MinIm, MaxIm : Real;
+  ReRange, ImRange, ScaleRe, ScaleIm : Real;
+  CurrentMaxX, CurrentMaxY : Integer;
+
+  PercentDone   : Integer;
+  StatusLineY   : Integer; // <<<< MOVED TO VAR SECTION
+
+BEGIN
+  // --- Initialize variables (including StatusLineY) ---
+  StatusLineY := InitialMsgLineCount + 1; // <<<< INITIALIZE HERE
+  MinRe := DefaultMinRe;
+  MaxRe := DefaultMaxRe;
+  MinIm := DefaultMinIm;
+
+  // --- Setup Console Output Area using CRT unit ---
+  HideCursor;
+  ClrScr; // Clears screen and homes cursor to (1,1) of the current window (full screen by default)
+
+  // --- Initial Terminal Messages ---
+  GotoXY(1, 1); Write('Calculating Mandelbrot set for a ', WindowWidth, 'x', WindowHeight, ' SDL window.');
+  MinRe := DefaultMinRe;
+  MaxRe := DefaultMaxRe;
+  MinIm := DefaultMinIm;
+  // MaxIm will be calculated after InitGraph.
+  GotoXY(1, 2); Write('Initial View Region: Re[', MinRe:0:1, '..', MaxRe:0:1, '], Im[', MinIm:0:1, '..approx]');
+  GotoXY(1, 3); Write('SDL window may appear blank or "Not Responding" initially.');
+  GotoXY(1, 4); Write('Progress updates will appear below.');
+  GotoXY(1, 5); Write('----------------------------------------------------------');
+  // StatusLineY is already defined based on InitialMsgLineCount
+
+  // --- Initialize SDL Graphics ---
+  InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  ClearDevice;  // SDL clear
+  UpdateScreen; // Show the cleared SDL screen immediately
+
+  CurrentMaxX := GetMaxX;
+  CurrentMaxY := GetMaxY;
+
+  // --- Calculate Full Viewport & Scaling ---
+  ReRange := MaxRe - MinRe;
+  IF (CurrentMaxX + 1) > 0 THEN
+      MaxIm := MinIm + (ReRange * (CurrentMaxY + 1)) / (CurrentMaxX + 1)
+  ELSE
+      MaxIm := MinIm;
+  ImRange := MaxIm - MinIm;
+
+  // --- Update Console with Precise MaxIm ---
+  GotoXY(1, 2); ClrEol; // Clear the old "approx" line in the console
+  Write('View Region: Re[', MinRe:0:1, '..', MaxRe:0:1, '], Im[', MinIm:0:1, '..', MaxIm:0:1, ']');
+
+  IF CurrentMaxX > 0 THEN ScaleRe := ReRange / CurrentMaxX ELSE ScaleRe := 0;
+  IF CurrentMaxY > 0 THEN ScaleIm := ImRange / CurrentMaxY ELSE ScaleIm := 0;
+
+  GotoXY(1, StatusLineY); // Position for the first progress message
+  Write('Rendering... Please wait.'); // Initial message on the status line
+  ClrEol; // Clear rest of this line
+
+  // --- Main Rendering Loop ---
+  FOR Py := 0 TO CurrentMaxY DO
+  BEGIN
+    FOR Px := 0 TO CurrentMaxX DO
+    BEGIN
+      x0 := MinRe + (Px * ScaleRe);
+      y0 := MaxIm - (Py * ScaleIm);
+
+      x := 0.0; y := 0.0; Iteration := 0;
+      WHILE (x*x + y*y <= 4.0) AND (Iteration < MaxIterations) DO
+      BEGIN
+        xTemp := x*x - y*y + x0;
+        y     := 2*x*y + y0;
+        x     := xTemp;
+        Iteration := Iteration + 1;
+      END;
+
+      IF Iteration = MaxIterations THEN
+      BEGIN R := 0; G := 0; B := 0; END
+      ELSE
+      BEGIN
+        R := (Iteration * 12) MOD 256;
+        G := (Iteration * 8 + 80) MOD 256;
+        B := (Iteration * 5 + 160) MOD 256;
+      END;
+
+      SetRGBColor(R, G, B);
+      PutPixel(Px, Py);
+    END; // END FOR Px
+
+    // --- Periodic SDL Event Processing and Screen Update ---
+    IF (Py + 1) MOD ScreenUpdateInterval = 0 THEN
+    BEGIN
+      UpdateScreen;
+      GraphLoop(0);
+    END;
+
+    // --- Console Status Update Logic using CRT.GotoXY ---
+    // (Py + 1) is the current row number (1-based for display)
+    // CurrentMaxY is 0-indexed, so (CurrentMaxY + 1) is total rows.
+    PercentDone := Trunc( (Py + 1) * 100.0 / (CurrentMaxY + 1) );
+    GotoXY(1, StatusLineY);     // Go to the dedicated status line
+    ClrEol;                     // Clear the previous message on that line
+    Write('Processing: Row ', Py + 1, ' of ', CurrentMaxY + 1, '. Progress: ~', PercentDone, '%');
+  END; // END FOR Py
+
+  // --- Finalize ---
+  UpdateScreen; // Final SDL screen update
+
+  GotoXY(1, StatusLineY); ClrEol; // Clear the last progress message
+  Write('Calculation complete! Displaying Mandelbrot set.');
+
+  GotoXY(1, StatusLineY + 1); ClrEol;
+  Write('----------------------------------------------------------');
+  GotoXY(1, StatusLineY + 2); ClrEol;
+  Write('Press any key in the graphics window to exit.');
+
+  GraphLoop(100);
+  ReadKey;
+
+  CloseGraph;
+
+  // --- Restore Console ---
+  GotoXY(1, StatusLineY + 4); // Move cursor down for a clean exit
+  NormVideo;
+  ShowCursor;
+  WriteLn; // Ensure shell prompt appears on a new, clean line
+  WriteLn('Graphics closed. Program finished.');
+
+END.

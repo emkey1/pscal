@@ -5,7 +5,8 @@
 // The place where stuff that needs to be shared between files is placed
 #include "types.h"
 // SDL stuff
-#include <SDL2/SDL.h> 
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
 #ifdef __cplusplus
 extern "C" {
