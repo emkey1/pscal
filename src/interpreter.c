@@ -2383,10 +2383,17 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             }
             break;
         }
+        case AST_PROCEDURE_CALL: {
+            // Execute the procedure or function call
+            Value call_result = executeProcedureCall(node); // Capture the returned Value
 
-        case AST_PROCEDURE_CALL:
-            (void)executeProcedureCall(node);
+            // Free the Value returned by executeProcedureCall.
+            // If it was a function, this frees the copied result (e.g., its s_val).
+            // If it was a procedure, 'call_result' would be TYPE_VOID,
+            // and freeValue on a TYPE_VOID Value is a safe no-op for its data.
+            freeValue(&call_result);
             break;
+        }
         case AST_NOOP:
         default:
             break;
