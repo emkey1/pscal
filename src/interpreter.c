@@ -1688,6 +1688,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 fprintf(stderr, "[DEBUG ASSIGN] Calling updateSymbol for simple LHS '%s'\n", lhs_name);
                 #endif
                 updateSymbol(lhs_name, rhs_val);
+                freeValue(&rhs_val);
                 // updateSymbol handles freeing old value, type checking, deep copies, and freeing rhs_val if consumed
 
             } else if (is_string_index_assign) {
