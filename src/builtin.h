@@ -84,6 +84,8 @@ Value executeBuiltinTextBackgroundE(AST *node); // <--- ADD for 256 background
 // Pointers/Memory Management
 Value executeBuiltinNew(AST *node);
 Value executeBuiltinDispose(AST *node);
+void nullifyPointerAliasesByAddrValue(Symbol* table, uintptr_t disposedAddrValue);
+
 
 
 

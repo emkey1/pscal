@@ -7,11 +7,11 @@
 #include "globals.h"
 #include <math.h>
 #include <termios.h>
-#include <unistd.h>
 #include <unistd.h>     // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>      // For isdigit
 #include <errno.h>
 #include <sys/ioctl.h> // For ioctl, FIONREAD
+#include <stdint.h>
 
 // Comparison function for bsearch (case-insensitive)
 static int compareBuiltinMappings(const void *key, const void *element) {
@@ -2535,9 +2535,6 @@ Value executeBuiltinNew(AST *node) {
     return makeVoid(); // new() is a procedure
 }
 
-// Forward declaration needed if not already visible
-void nullifyPointerAliases(Symbol* table, Value* disposedValuePtr);
-
 // --- Implementation for dispose(pointer_variable) ---
 Value executeBuiltinDispose(AST *node) {
     // ... (argument checking as before) ...
@@ -2560,43 +2557,41 @@ Value executeBuiltinDispose(AST *node) {
             (void*)valueToDispose, lvalueNode->token ? lvalueNode->token->value : "?");
     #endif
 
-    // ---- START FIX ----
-    // Store the address before freeing
-    void* disposedAddress = (void*)valueToDispose;
+    // Store the address VALUE as an integer type BEFORE freeing
+     uintptr_t disposedAddrValue = (uintptr_t)valueToDispose;
 
-    // Free the pointed-to Value struct and its contents
-    freeValue(valueToDispose); // Free contents (strings, records, etc.)
-    free(valueToDispose);      // Free the Value struct itself
+     // Free the pointed-to Value struct and its contents
+     freeValue(valueToDispose); // Free contents (strings, records, etc.)
+     free(valueToDispose);      // Free the Value struct itself
 
-    // Set the original pointer variable back to nil
-    pointerVarValuePtr->ptr_val = NULL;
+     // Set the original pointer variable back to nil
+     pointerVarValuePtr->ptr_val = NULL;
 
-    // --- ADDED: Nil out aliases (Implementation Specific) ---
-    #ifdef DEBUG
-    // Use the stored address for the debug print
-    fprintf(stderr, "[DEBUG DISPOSE] Nullifying aliases pointing to %p.\n", disposedAddress);
-    #endif
-    // Pass the stored address to the helper functions
-    nullifyPointerAliases(globalSymbols, disposedAddress);
-    nullifyPointerAliases(localSymbols, disposedAddress);
-    // ---- END FIX ----
+     // --- Nullify Aliases using the stored integer address value ---
+     #ifdef DEBUG
+     // Use the stored integer address value for printing (using %lx for hex representation)
+     fprintf(stderr, "[DEBUG DISPOSE] Nullifying aliases pointing to address 0x%lx.\n", disposedAddrValue);
+     #endif
+
+     // Pass the integer address value to the (renamed) helper functions
+     nullifyPointerAliasesByAddrValue(globalSymbols, disposedAddrValue);
+     nullifyPointerAliasesByAddrValue(localSymbols, disposedAddrValue);
+    
     return makeVoid();
 }
 
-// --- ADDED HELPER FUNCTION ---
-// Searches a symbol table and sets ptr_val to NULL for any
-// pointer symbol that points to the disposedValuePtr address.
-void nullifyPointerAliases(Symbol* table, Value* disposedValuePtr) {
+void nullifyPointerAliasesByAddrValue(Symbol* table, uintptr_t disposedAddrValue) {
     Symbol* current = table;
     while (current) {
-        if (current->value && current->type == TYPE_POINTER && current->value->ptr_val == disposedValuePtr) {
+        // Compare the stored pointer address (cast to integer) with the disposed address value
+        if (current->value && current->type == TYPE_POINTER &&
+            ((uintptr_t)current->value->ptr_val) == disposedAddrValue) {
             #ifdef DEBUG
-            fprintf(stderr, "[DEBUG DISPOSE] Nullifying alias '%s' which pointed to disposed memory %p.\n",
-                    current->name ? current->name : "?", (void*)disposedValuePtr);
+            fprintf(stderr, "[DEBUG DISPOSE] Nullifying alias '%s' which pointed to disposed memory address 0x%lx.\n",
+                    current->name ? current->name : "?", disposedAddrValue);
             #endif
-            current->value->ptr_val = NULL;
+            current->value->ptr_val = NULL; // Set the alias pointer to nil
         }
         current = current->next;
     }
 }
-
