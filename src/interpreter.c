@@ -1870,6 +1870,9 @@ void executeWithScope(AST *node, bool is_global_scope)  {
         case AST_IF: {
             Value cond = eval(node->left);
             int is_true = (cond.type == TYPE_INTEGER || cond.type == TYPE_BOOLEAN) ? (cond.i_val != 0) : (cond.r_val != 0.0);
+            
+            freeValue(&cond);
+            
             if (is_true)
                 executeWithScope(node->right, false);
             else if (node->extra)
@@ -1951,6 +1954,8 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                     // Assume INTEGER or BOOLEAN (or other compatible ordinal)
                     is_true = (cond.i_val != 0);
                 }
+                
+                freeValue(&cond);
                 
                 if (is_true) // <<< Check the evaluated condition
                     break; // Exit REPEAT loop normally based on UNTIL condition
