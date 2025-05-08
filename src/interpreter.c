@@ -1880,7 +1880,6 @@ void executeWithScope(AST *node, bool is_global_scope)  {
              while (1) {
                  Value cond = eval(node->left); // Evaluate condition (x < 3)
 
-                 // <<< ADD DEBUG PRINTS START >>>
                  #ifdef DEBUG
                  fprintf(stderr, "[DEBUG WHILE] Condition eval result: Type=%s", varTypeToString(cond.type));
                  if (cond.type == TYPE_BOOLEAN || cond.type == TYPE_INTEGER) {
@@ -1891,7 +1890,6 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                      fprintf(stderr, "\n");
                  }
                  #endif
-                 // <<< ADD DEBUG PRINTS END >>>
 
                  int is_true;
                  if (cond.type == TYPE_REAL) {
@@ -1906,6 +1904,8 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                       fprintf(stderr, "[DEBUG WHILE] Condition type is %s. is_true set to %d (based on i_val!=0)\n", varTypeToString(cond.type), is_true);
                       #endif
                  }
+                 
+                 freeValue(&cond);
 
                  if (!is_true) {
                       #ifdef DEBUG
