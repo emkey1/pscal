@@ -1420,16 +1420,35 @@ unsupported_operands_label: // Target label for goto from other blocks if needed
         case AST_SET: // Add case to handle set evaluation
             return evalSet(node);
         case AST_UNARY_OP: {
-            Value val = eval(node->left);
-            if (node->token->type == TOKEN_PLUS)
+            Value val = eval(node->left); // 'val' might contain allocated data
+            Value result; // Temporary to hold the new value before returning
+
+            if (node->token->type == TOKEN_PLUS) {
+                // 'val' is being returned directly. Ownership is transferred.
+                // No freeValue(&val) needed here.
                 return val;
-            else if (node->token->type == TOKEN_MINUS) {
-                if (val.type == TYPE_INTEGER)
-                    return makeInt(-val.i_val);
-                else
-                    return makeReal(-val.r_val);
-            } else if (node->token->type == TOKEN_NOT)
-                return makeBoolean(val.i_val == 0);
+            } else if (node->token->type == TOKEN_MINUS) {
+                if (val.type == TYPE_INTEGER) {
+                    result = makeInt(-val.i_val);
+                } else { // Assuming other numeric types (like REAL)
+                    result = makeReal(-val.r_val);
+                }
+                // Now that we've used val.i_val or val.r_val to create 'result',
+                // we must free the original 'val'.
+                freeValue(&val);
+                return result;
+            } else if (node->token->type == TOKEN_NOT) {
+                // Assuming val.i_val is used for boolean logic (0 for false, non-zero for true)
+                result = makeBoolean(val.i_val == 0);
+                // Free the original 'val' after creating 'result'.
+                freeValue(&val);
+                return result;
+            }
+            
+            // If the token type was not PLUS, MINUS, or NOT (should ideally be caught by parser as an error)
+            // and we reach this 'break', 'val' would be leaked.
+            // To be safe, ensure 'val' is freed if none of the above conditions returned.
+            freeValue(&val);
             break;
         }
         case AST_PROCEDURE_CALL:
