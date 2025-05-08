@@ -817,6 +817,7 @@ Value eval(AST *node) {
             // 3. Check if pointer is nil (ptrVal.ptr_val == NULL)
             if (ptrVal.ptr_val == NULL) {
                 fprintf(stderr, "Runtime error: Attempted to dereference a nil pointer.\n");
+                freeValue(&ptrVal);
                 // Do not free ptrVal here, as it's the nil pointer itself (no heap data)
                 EXIT_FAILURE_HANDLER();
             }
@@ -827,6 +828,7 @@ Value eval(AST *node) {
             //     but if eval(node->left) returned a allocated copy, it needs freeing.
             //     This depends on how variable lookup returns values. Assuming lookup doesn't return heap copy here).
             // Let's skip freeing ptrVal for now, assuming it's directly from symbol or nil.
+            freeValue(&ptrVal);
             return dereferencedValue;
             // --- End Implementation ---
             // return makeVoid(); // Placeholder return
