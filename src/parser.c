@@ -532,14 +532,14 @@ void addProcedure(AST *proc_decl) {
     // Allocate a new Procedure structure.
     Procedure *proc = malloc(sizeof(Procedure));
     if (!proc) {
-        fprintf(stderr, "Memory allocation error in add_procedure\n");
+        fprintf(stderr, "Memory allocation error in addProcedure\n"); // Corrected function name
         EXIT_FAILURE_HANDLER();
     }
     // Use the procedure name from the token of the declaration.
     const char *originalName = proc_decl->token->value;
     char *lowerName = strdup(originalName); // Duplicate the original name
     if (!lowerName) {
-        fprintf(stderr, "Memory allocation error in add_procedure (strdup)\n");
+        fprintf(stderr, "Memory allocation error in addProcedure (strdup)\n");
         free(proc); // Free allocated proc struct
         EXIT_FAILURE_HANDLER();
     }
@@ -549,17 +549,34 @@ void addProcedure(AST *proc_decl) {
     }
     proc->name = lowerName; // Store the lowercase name
 
-    // Original code continues...
-    proc->proc_decl = proc_decl;
+    // ADDED: Make a deep copy of the procedure declaration AST node.
+    // This copy is now owned by the Procedure struct in the global table.
+    // This is crucial to avoid use-after-free when the original AST is freed.
+    AST *proc_decl_copy = copyAST(proc_decl); // <<< THIS IS THE CRUCIAL ADDITION
+    if (!proc_decl_copy) {
+        fprintf(stderr, "Memory allocation error in addProcedure (copyAST)\n");
+        // Need to free allocated proc and lowerName before exiting
+        free(lowerName);
+        free(proc);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Use the COPY in the procedure table entry.
+    proc->proc_decl = proc_decl_copy; // <<< Now stores the pointer to the COPY
+
+    // Link the new procedure into the head of the procedure table list.
     proc->next = procedure_table;
     procedure_table = proc;
 
     // Optional Debug Print
     #ifdef DEBUG
     if (dumpExec) {
-        fprintf(stderr, "[DEBUG] addProcedure: Added procedure '%s' (original: '%s') to table.\n", proc->name, originalName);
+        fprintf(stderr, "[DEBUG] addProcedure: Added procedure '%s' (original: '%s') to table. Copied AST node at %p\n", proc->name, originalName, (void*)proc->proc_decl);
     }
     #endif
+
+    // The original proc_decl node remains part of the main AST or unit AST structure.
+    // It will be freed when that AST is freed by the general cleanup (freeAST on the root).
 }
 
 void insertType(const char *name, AST *typeAST) {

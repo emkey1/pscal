@@ -142,97 +142,70 @@ void setExtra(AST *parent, AST *child) {
 void freeAST(AST *node) {
     if (!node) return;
 
-    // --- ADDED: Check if node is directly in type_table ---
-    // If so, let freeTypeTableASTNodes handle it exclusively.
-    // This requires the original main.c cleanup order: freeAST(Global) then freeTypeTable.
-    if (isNodeInTypeTable(node)) {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE] Postponing free for Node %p (Type: %s) as it's in type_table.\n",
-                (void*)node, astTypeToString(node->type));
-        #endif
-        return; // Don't free contents or node itself here
+    // Check if this node is owned by the global type table. If so, its freeing is managed elsewhere.
+    // This check is needed because type definition AST nodes are linked into the type_table
+    // but can also be children within a larger AST structure (like a UNIT AST).
+    if (isNodeInTypeTable(node)) { // Keep this check
+        // #ifdef DEBUG // Keep debug prints conditional
+        // fprintf(stderr, "[DEBUG_FREE] Postponing free for Node %p (Type: %s) as it's in type_table.\n", (void*)node, astTypeToString(node->type)); #endif
+        return; // Do NOT free this node or its contents recursively from here
     }
-    // --- END ADDED CHECK ---
 
+    // #ifdef DEBUG // Keep debug prints conditional
+    // fprintf(stderr, "[DEBUG_FREE] Enter freeAST for Node %p (Type: %s, Token: '%s')\n", (void*)node, astTypeToString(node->type), (node->token && node->token->value) ? node->token->value : "NULL"); #endif
+
+
+    // Recursively free children and branches.
+    // This will now correctly recurse into routine declarations' contents
+    // if they are part of the AST being freed.
+    bool skip_left_free = (node->type == AST_TYPE_DECL);
     bool skip_right_free = (node->type == AST_TYPE_REFERENCE);
-    bool skip_left_free = (node->type == AST_TYPE_DECL); // Keep this from previous fix
 
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] Enter freeAST for Node %p (Type: %s, Token: '%s')\n",
-            (void*)node,
-            astTypeToString(node->type),
-            (node->token && node->token->value) ? node->token->value : "NULL");
-    #endif
-
-    // Free Left, Extra, and Children first (using skip flags)
     if (node->left) {
-        if (!skip_left_free) {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]  - Recursing Left from Node %p into Node %p (Type: %s)\n", (void*)node, (void*)node->left, astTypeToString(node->left->type));
-            #endif
-            freeAST(node->left);
-        } else {
-             #ifdef DEBUG
-             fprintf(stderr, "[DEBUG_FREE]  - Skipping freeAST(node->left) for TYPE_DECL node %p\n", (void*)node);
-             #endif
-        }
+        if (!skip_left_free) freeAST(node->left);
         node->left = NULL;
     }
-
+    if (node->right) {
+        if (!skip_right_free) freeAST(node->right);
+        node->right = NULL;
+    }
     if (node->extra) {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]  - Recursing Extra from Node %p into Node %p (Type: %s)\n", (void*)node, (void*)node->extra, astTypeToString(node->extra->type));
-        #endif
         freeAST(node->extra);
         node->extra = NULL;
     }
     if (node->children) {
         for (int i = 0; i < node->child_count; i++) {
-            if (node->children[i]) {
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG_FREE]  - Recursing Child %d from Node %p into Node %p (Type: %s)\n", i, (void*)node, (void*)node->children[i], astTypeToString(node->children[i]->type));
-                #endif
-                freeAST(node->children[i]);
-                node->children[i] = NULL;
-            }
+            if (node->children[i]) freeAST(node->children[i]);
+            node->children[i] = NULL;
         }
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]  - Freeing children array for Node %p\n", (void*)node);
-        #endif
+        // #ifdef DEBUG fprintf(stderr, "[DEBUG_FREE]  - Freeing children array for Node %p\n", (void*)node); #endif
         free(node->children);
         node->children = NULL;
         node->child_count = 0;
         node->child_capacity = 0;
     }
 
-    // Conditionally free the 'right' subtree
-    if (node->right) {
-        if (!skip_right_free) {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]  - Recursing Right from Node %p (%s) into Node %p (%s)\n", (void*)node, astTypeToString(node->type), (void*)node->right, astTypeToString(node->right->type));
-            #endif
-            freeAST(node->right);
-        } else {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG_FREE]  - Skipping freeAST(node->right) for TYPE_REFERENCE node %p\n", (void*)node);
-            #endif
-        }
-        node->right = NULL;
+    // Free any dynamically allocated list attached to this specific node (e.g., unit_list for USES_CLAUSE)
+    if (node->type == AST_USES_CLAUSE && node->unit_list) {
+        freeList(node->unit_list); // Assuming freeList is correctly implemented
+        node->unit_list = NULL;
+    }
+    // The symbol_table attached to a UNIT node should have been freed by freeUnitSymbolTable in linkUnit.
+    // We just nullify the pointer here defensively.
+    if (node->type == AST_UNIT && node->symbol_table) {
+         node->symbol_table = NULL;
     }
 
-    // Free token
+
+    // Free token (copy created by newASTNode)
     if (node->token) {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG_FREE]  - Freeing Token for Node %p\n", (void*)node);
-        #endif
+        // #ifdef DEBUG fprintf(stderr, "[DEBUG_FREE]  - Freeing Token for Node %p\n", (void*)node); #endif
         freeToken(node->token);
         node->token = NULL;
     }
 
     // Free the node struct itself
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG_FREE] Freeing Node struct %p itself (Type: %s)\n", (void*)node, astTypeToString(node->type));
-    #endif
+    // #ifdef DEBUG fprintf(stderr, "[DEBUG_FREE] Freeing Node struct %p itself (Type: %s)\n", (void*)node, astTypeToString(node->type)); #endif
     free(node);
 }
 

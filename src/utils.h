@@ -61,6 +61,7 @@ void freeValue(Value *v);
 char *findUnitFile(const char *unit_name);
 void linkUnit(AST *unit_ast, int recursion_depth);
 Symbol *buildUnitSymbolTable(AST *interface_ast);
+void freeUnitSymbolTable(Symbol *symbol_table);
 
 // Arrays
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def);

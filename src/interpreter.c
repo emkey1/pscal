@@ -671,7 +671,7 @@ Value eval(AST *node) {
             snprintf(buf, sizeof(buf), "%*lld", width, val_to_format.i_val);
         } else if (val_to_format.type == TYPE_STRING) {
             const char* source_str = val_to_format.s_val ? val_to_format.s_val : "";
-            int len = strlen(source_str);
+            int len = (int)strlen(source_str);
             int precision = len;
             if (width > 0 && width < len) {
                 precision = width; // Truncate
@@ -679,7 +679,7 @@ Value eval(AST *node) {
             snprintf(buf, sizeof(buf), "%*.*s", width, precision, source_str);
         } else if (val_to_format.type == TYPE_BOOLEAN) {
              const char* bool_str = val_to_format.i_val ? "TRUE" : "FALSE";
-             int len = strlen(bool_str);
+             int len = (int)strlen(bool_str);
              int precision = len;
              if (width > 0 && width < len) {
                  precision = width; // Truncate
@@ -883,7 +883,7 @@ Value eval(AST *node) {
             } else if (val.type == TYPE_STRING) {
                 // <<< START Correction for String Formatting >>>
                 const char* source_str = val.s_val ? val.s_val : "";
-                int len = strlen(source_str);
+                int len = (int)strlen(source_str);
                 // Determine the number of characters to actually print (precision)
                 int precision = len; // Default: print whole string
                 // If width is specified and positive, it dictates the max characters
@@ -899,7 +899,7 @@ Value eval(AST *node) {
             } else if (val.type == TYPE_BOOLEAN) {
                  // <<< ADDED: Boolean Formatting >>>
                  const char* bool_str = val.i_val ? "TRUE" : "FALSE";
-                 int len = strlen(bool_str);
+                 int len = (int)strlen(bool_str);
                  int precision = len;
                  if (width > 0 && width < len) { // Handle potential truncation
                      precision = width;
@@ -1506,24 +1506,36 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
 
     if (label->type == AST_SUBRANGE) {
         // Ensure case value and range bounds are compatible ordinals (e.g., integer or char)
-        Value low = eval(label->left);
-        Value high = eval(label->right);
+        Value low = eval(label->left); // <<< Memory might be allocated here
+        Value high = eval(label->right); // <<< Memory might be allocated here
+
+        // ADDED: Variables to hold comparison result
+        bool match = false;
 
         // Allow Integer range
         if (caseVal.type == TYPE_INTEGER && low.type == TYPE_INTEGER && high.type == TYPE_INTEGER) {
-            return caseVal.i_val >= low.i_val && caseVal.i_val <= high.i_val;
+            match = caseVal.i_val >= low.i_val && caseVal.i_val <= high.i_val;
         }
         // Allow Char range (compare char values directly)
         else if (caseVal.type == TYPE_CHAR && low.type == TYPE_CHAR && high.type == TYPE_CHAR) {
-             return caseVal.c_val >= low.c_val && caseVal.c_val <= high.c_val;
+            match = caseVal.c_val >= low.c_val && caseVal.c_val <= high.c_val;
         }
         // Add other ordinal range checks if needed (e.g., Byte, Word)
 
         // Incompatible types for range check
-        return false;
+        // return false; // Replaced by setting match = false
+
+        // ADDED: Free the evaluated values for the bounds
+        freeValue(&low);
+        freeValue(&high);
+
+        return match; // ADDED: Return the determined match result
 
     } else { // Single label comparison
         Value labelVal = eval(label); // Evaluate the label (e.g., dirRight, 'A', 5)
+
+        // ADDED: Variable to hold comparison result
+        bool match = false;
 
         // Compare based on the type of the case expression value
         switch (caseVal.type) {
@@ -1532,59 +1544,54 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
                 if (labelVal.type == TYPE_ENUM) {
                     // Optional: Add stricter check using enum_name if desired:
                     // if (caseVal.enum_val.enum_name && labelVal.enum_val.enum_name &&
-                    //     strcmp(caseVal.enum_val.enum_name, labelVal.enum_val.enum_name) == 0)
-                    return caseVal.enum_val.ordinal == labelVal.enum_val.ordinal;
-                    // else return false; // Mismatched enum types
+                    //     strcmp(caseVal.enum_val.enum_name, labelVal.enum_val.enum_name) == 0)
+                    match = caseVal.enum_val.ordinal == labelVal.enum_val.ordinal; // ADDED: Store result
+                    // else return false; // Replaced by setting match = false
                 }
                 break; // Enum vs non-enum fails
 
             case TYPE_INTEGER:
-            case TYPE_BYTE:  // Treat Byte/Word as integers for case
-            case TYPE_WORD:
-                // Case expression is Integer-like, label must be Integer-like
-                if (labelVal.type == TYPE_INTEGER || labelVal.type == TYPE_BYTE || labelVal.type == TYPE_WORD) {
-                    return caseVal.i_val == labelVal.i_val;
-                }
-                 // Allow matching Integer Case value against a Char label (using Ord(char))
-                 else if (labelVal.type == TYPE_CHAR) {
-                     return caseVal.i_val == (long long)labelVal.c_val;
+            case TYPE_WORD: // Treat Byte/Word as integers for case
+                    // Case expression is Integer-like, label must be Integer-like
+                 if (labelVal.type == TYPE_INTEGER || labelVal.type == TYPE_BYTE || labelVal.type == TYPE_WORD) {
+                    match = caseVal.i_val == labelVal.i_val; // ADDED: Store result
+                 } else if (labelVal.type == TYPE_CHAR) {
+                     // Allow matching Integer Case value against a Char label (using Ord(char))
+                      match = caseVal.i_val == (long long)labelVal.c_val; // ADDED: Store result
                  }
-                break; // Integer vs other types fails
+                 break; // Integer vs other types fails
             case TYPE_CHAR:
-                // Case expression is CHAR
+                 // Case expression is CHAR
                  if (labelVal.type == TYPE_CHAR) {
                      // Label is CHAR - Direct comparison
-                     return caseVal.c_val == labelVal.c_val;
-                 }
-                 else if (labelVal.type == TYPE_STRING && labelVal.s_val && strlen(labelVal.s_val) == 1) {
+                     match = caseVal.c_val == labelVal.c_val; // ADDED: Store result
+                 } else if (labelVal.type == TYPE_STRING && labelVal.s_val && strlen(labelVal.s_val) == 1) {
                      // <<< FIX: Label is single-char STRING - Compare case char to string's first char
-                     return caseVal.c_val == labelVal.s_val[0];
-                 }
-                 else if (labelVal.type == TYPE_INTEGER) {
-                      // Allow matching Char Case value against an Integer label (Ordinal match)
-                      return (long long)caseVal.c_val == labelVal.i_val;
+                     match = caseVal.c_val == labelVal.s_val[0]; // ADDED: Store result
+                 } else if (labelVal.type == TYPE_INTEGER) {
+                     // Allow matching Char Case value against an Integer label (Ordinal match)
+                     match = (long long)caseVal.c_val == labelVal.i_val; // ADDED: Store result
                  }
                  break; // Char vs other types fails
-             case TYPE_BOOLEAN:
+                 case TYPE_BOOLEAN:
                  // Case expression is BOOLEAN, label must be BOOLEAN
                  if (labelVal.type == TYPE_BOOLEAN) {
-                     return caseVal.i_val == labelVal.i_val; // Booleans use i_val (0/1)
+                     match = caseVal.i_val == labelVal.i_val; // Booleans use i_val (0/1) // ADDED: Store result
                  }
-                 break; // Boolean vs non-boolean fails
+             break; // Boolean vs non-boolean fails
 
             // Add other ordinal types if needed
-
             default:
                 // Non-ordinal type used in case expression - error or return false
                 // fprintf(stderr, "Warning: Non-ordinal type %s used in CASE expression.\n", varTypeToString(caseVal.type));
-                return false;
+                match = false; // ADDED: Store result
         }
-        
+
         freeValue(&labelVal);
 
         // If we fall through, types were incompatible
-        return false;
-    }
+        return match; // ADDED: Return the determined match result
+     }
 }
 
 static void processDeclarations(AST *decl, bool is_global_block) {
