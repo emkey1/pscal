@@ -235,7 +235,8 @@ AST *lvalue(Parser *parser) {
             Token *field = copyToken(parser->current_token);
             if(!field || field->type != TOKEN_IDENTIFIER){ errorParser(parser,"Expected field name"); if(field) freeToken(field); /* Return partial node? */ return node; }
             eat(parser, TOKEN_IDENTIFIER);
-            AST *fa = newASTNode(AST_FIELD_ACCESS, field); freeToken(field);
+            AST *fa = newASTNode(AST_FIELD_ACCESS, field);
+            freeToken(field);
             setLeft(fa, node); // Previous node becomes left child
             node = fa;         // Update node to the field access node
         } else if (parser->current_token->type == TOKEN_LBRACKET) {
