@@ -2106,7 +2106,11 @@ void executeWithScope(AST *node, bool is_global_scope)  {
 
             // Ensure flag is reset after the loop finishes
             break_requested = 0;
-
+            
+            // Make sure to free things that need to be free
+            freeValue(&start_val);
+            freeValue(&end_val);
+            
             break; // Break from the switch case for AST_FOR_TO/DOWNTO
         }
 
