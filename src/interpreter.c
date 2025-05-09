@@ -741,7 +741,10 @@ Value eval(AST *node) {
                  // Ensure copied strings are not NULL
                  if (result.type == TYPE_STRING && result.s_val == NULL) {
                      result.s_val = strdup("");
-                     if (!result.s_val) { /* Malloc error */ freeValue(&baseVal); EXIT_FAILURE_HANDLER(); }
+                     if (!result.s_val) { /* Malloc error */
+                         freeValue(&baseVal);
+                         EXIT_FAILURE_HANDLER();
+                     }
                  }
                  // --- End Array Element Logic ---
 
@@ -787,8 +790,8 @@ Value eval(AST *node) {
             } else {
                 // --- Error: Indexing applied to non-array/non-string type ---
                 fprintf(stderr, "Runtime error: Cannot apply indexing to type %s.\n", varTypeToString(baseVal.type));
-                 freeValue(&baseVal);
-                 EXIT_FAILURE_HANDLER(); // Exit on type error
+                freeValue(&baseVal);
+                EXIT_FAILURE_HANDLER(); // Exit on type error
             }
 
             // Free the evaluated base value (string, array struct copy, etc.)
@@ -954,8 +957,8 @@ Value eval(AST *node) {
             if (actualArrayTypeNode->type == AST_TYPE_REFERENCE) {
                  actualArrayTypeNode = lookupType(actualArrayTypeNode->token->value);
                  if (!actualArrayTypeNode) {
-                      fprintf(stderr, "Runtime error: Could not resolve array type reference '%s' for literal.\n", typeNode->token->value);
-                       EXIT_FAILURE_HANDLER();
+                     fprintf(stderr, "Runtime error: Could not resolve array type reference '%s' for literal.\n", typeNode->token->value);
+                     EXIT_FAILURE_HANDLER();
                  }
             }
 
@@ -976,40 +979,44 @@ Value eval(AST *node) {
 
             int expected_size = 1;
             for (int dim = 0; dim < dimensions; dim++) {
-                 AST *subrange = actualArrayTypeNode->children[dim];
-                 if (!subrange || subrange->type != AST_SUBRANGE) { /* error handling */ }
+                AST *subrange = actualArrayTypeNode->children[dim];
+                if (!subrange || subrange->type != AST_SUBRANGE) { /* error handling */ }
 
-                 // --- Evaluate bounds and get ordinal values ---
-                 Value low_val = eval(subrange->left);
-                 Value high_val = eval(subrange->right);
-                 long long low_ord = 0, high_ord = 0; // <<< Initialize to 0
+                // --- Evaluate bounds and get ordinal values ---
+                Value low_val = eval(subrange->left);
+                Value high_val = eval(subrange->right);
+                long long low_ord = 0, high_ord = 0; // <<< Initialize to 0
 
-                 // Check type of lower bound
-                 if (low_val.type == TYPE_INTEGER) low_ord = low_val.i_val;
-                 else if (low_val.type == TYPE_ENUM) low_ord = low_val.enum_val.ordinal;
-                 else if (low_val.type == TYPE_CHAR) low_ord = low_val.c_val;
-                 // Add other ordinal types if needed (Boolean, Byte, Word)
-                 else {
-                     fprintf(stderr, "Runtime error: Invalid type (%s) for lower bound of array constant.\n", varTypeToString(low_val.type));
-                     free(lower_bounds); free(upper_bounds); EXIT_FAILURE_HANDLER();
-                 }
+                // Check type of lower bound
+                if (low_val.type == TYPE_INTEGER) low_ord = low_val.i_val;
+                else if (low_val.type == TYPE_ENUM) low_ord = low_val.enum_val.ordinal;
+                else if (low_val.type == TYPE_CHAR) low_ord = low_val.c_val;
+                // Add other ordinal types if needed (Boolean, Byte, Word)
+                else {
+                    fprintf(stderr, "Runtime error: Invalid type (%s) for lower bound of array constant.\n", varTypeToString(low_val.type));
+                    free(lower_bounds); free(upper_bounds); EXIT_FAILURE_HANDLER();
+                }
 
-                 // Check type of upper bound
-                 if (high_val.type == TYPE_INTEGER) high_ord = high_val.i_val;
-                 else if (high_val.type == TYPE_ENUM) high_ord = high_val.enum_val.ordinal;
-                 else if (high_val.type == TYPE_CHAR) high_ord = high_val.c_val;
-                 // Add other ordinal types if needed
-                 else {
-                      fprintf(stderr, "Runtime error: Invalid type (%s) for upper bound of array constant.\n", varTypeToString(high_val.type));
-                      free(lower_bounds); free(upper_bounds); EXIT_FAILURE_HANDLER();
-                 }
-                 // --- End bound evaluation ---
+                // Check type of upper bound
+                if (high_val.type == TYPE_INTEGER) high_ord = high_val.i_val;
+                else if (high_val.type == TYPE_ENUM) high_ord = high_val.enum_val.ordinal;
+                else if (high_val.type == TYPE_CHAR) high_ord = high_val.c_val;
+                // Add other ordinal types if needed
+                else {
+                    fprintf(stderr, "Runtime error: Invalid type (%s) for upper bound of array constant.\n", varTypeToString(high_val.type));
+                    free(lower_bounds); free(upper_bounds); EXIT_FAILURE_HANDLER();
+                }
+                // --- End bound evaluation ---
 
-                 lower_bounds[dim] = (int)low_ord; // <<< Use calculated ordinal
-                 upper_bounds[dim] = (int)high_ord; // <<< Use calculated ordinal
+                lower_bounds[dim] = (int)low_ord; // <<< Use calculated ordinal
+                upper_bounds[dim] = (int)high_ord; // <<< Use calculated ordinal
 
-                 if (lower_bounds[dim] > upper_bounds[dim]) { /* error handling */ }
-                 expected_size *= (upper_bounds[dim] - lower_bounds[dim] + 1);
+                if (lower_bounds[dim] > upper_bounds[dim]) { /* error handling */ }
+                expected_size *= (upper_bounds[dim] - lower_bounds[dim] + 1);
+                
+                freeValue(&low_val);
+                freeValue(&high_val);
+                
             }
 
             // Determine element type (existing logic should be okay)
@@ -1104,7 +1111,9 @@ Value eval(AST *node) {
 
             while (fv) {
                 if (strcmp(fv->name, targetField) == 0) {
-                    return fv->value;
+                    Value result = makeCopyOfValue(&fv->value);
+                    freeValue(&recVal);
+                    return result;                             
                 }
                 fv = fv->next;
             }
@@ -2527,7 +2536,7 @@ Value makeCopyOfValue(Value *src) {
             v.element_type_def = src->element_type_def; // Assuming shallow copy is ok for AST node link
             v.element_type = src->element_type; // Copy element type enum
 
-            break; // <<< Make sure break is here >>>
+            break;
         } // End case TYPE_ARRAY
         case TYPE_CHAR:
             // Already handled by shallow copy

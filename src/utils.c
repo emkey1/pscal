@@ -870,13 +870,10 @@ void freeTypeTable(void) {
 void freeValue(Value *v) {
     if (!v) return;
 
-    // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
     fprintf(stderr, "[DEBUG] freeValue called for Value* at %p, type=%s\n",
             (void*)v, varTypeToString(v->type));
 #endif
-    // *** END DEBUG PRINT ***
-
     switch (v->type) {
         case TYPE_VOID:
         case TYPE_INTEGER:
