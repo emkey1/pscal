@@ -2,42 +2,61 @@
 //  sdl.h
 //  Pscal
 //
-//  Created by Michael Miller on 5/7/25. // Date seems to be in the future, just a note :)
+//  Created by Michael Miller on 5/7/25.
 //
 
 // Include guards are essential for header files
-#ifndef PSCAL_SDL_H  // <<<< ONLY the macro name here
+#ifndef PSCAL_SDL_H
 #define PSCAL_SDL_H
 
-// SDL stuff
+// --- INCLUDE SDL HEADERS HERE ---
+// These headers define the types used in the global variable declarations below
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+// --- END INCLUDE ---
 
-// Need Value and AST types for function prototypes
-#include "types.h" // Assuming Value and AST are defined here or in headers it includes
+// Include types.h which should NOT include SDL headers (confirmed by your content)
+#include "types.h"
 
 #define MAX_SDL_TEXTURES 32 // Define a maximum number of textures
 
-// Wrap extern "C" for C++ compatibility, though likely not an issue if pure C
+// Wrap extern "C" for C++ compatibility (standard practice)
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// --- SDL Graphics Globals ---
+// --- REMOVE REDUNDANT FORWARD DECLARATIONS ---
+// The full definitions are provided by the includes above.
+// Remove these lines:
+/*
+struct SDL_Window;
+struct SDL_Renderer;
+struct SDL_Color; // Used directly in globals.h/globals.c, but forward decl for pointers
+struct _TTF_Font; // Forward declaration for TTF_Font*
+struct SDL_Texture; // Forward declaration for SDL_Texture*
+*/
+// --- END REMOVE ---
+
+
+// --- SDL Graphics Globals (Declarations) ---
+// These global variables are defined in symbol.c
+// Use the standard type names (SDL_Window*, SDL_Renderer*, etc.)
+// since the full type definitions are available from the included headers.
 extern SDL_Window* gSdlWindow;
 extern SDL_Renderer* gSdlRenderer;
-extern SDL_Color gSdlCurrentColor; // Store RGBA for current drawing color
+extern SDL_Color gSdlCurrentColor; // Use the standard type name
 extern bool gSdlInitialized;       // Tracks if core SDL_Init(VIDEO) was called
 extern int gSdlWidth;
 extern int gSdlHeight;
-extern TTF_Font* gSdlFont;
+extern TTF_Font* gSdlFont; // Use TTF_Font* (standard type name)
 extern int gSdlFontSize;
 extern bool gSdlTtfInitialized;    // Tracks if TTF_Init() was called
 
-extern SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES]; // Array to hold texture pointers
+extern SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES]; // Use SDL_Texture* (standard type name)
 extern int gSdlTextureWidths[MAX_SDL_TEXTURES];   // Store widths
 extern int gSdlTextureHeights[MAX_SDL_TEXTURES];  // Store heights
-// --- END SDL Globals ---
+Value executeBuiltinClearDevice(AST *node);
+// --- END SDL ---
 
 // --- SDL Misc ---
 Value executeBuiltinQuitRequested(AST *node);
@@ -86,8 +105,12 @@ Value executeBuiltinUpdateTexture(AST *node);
 Value executeBuiltinRenderCopy(AST *node);
 Value executeBuiltinRenderCopyRect(AST *node);
 
+// Misc Built-ins
+Value executeBuiltinQuitRequested(AST *node);
+
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // PSCAL_SDL_H
+#endif // PSCAL_SDL_H

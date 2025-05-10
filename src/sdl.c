@@ -4,6 +4,8 @@
 //
 //  Created by Michael Miller on 5/7/25.
 //
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h> 
 #include "sdl.h"
 #include "globals.h"
 #include "types.h"

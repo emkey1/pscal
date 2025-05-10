@@ -1,35 +1,11 @@
+// audio.c
 //
-//  audio.c
-//  Pscal
+// audio.c
+// Pscal
 //
-//  Created by Michael Miller on 5/10/25.
+// Created by Michael Miller on 5/10/25.
 //
-// Check for SDL main header guard early
-#ifdef SDL_h_ // Standard include guard for SDL.h
-#error "SDL.h included before our check!"
-#endif
 
-// Include core SDL header first, as recommended
-#include <SDL2/SDL.h>
-
-// Check for SDL main header guard AFTER its include
-#ifndef SDL_h_
-#error "SDL.h include guard not defined after its include!"
-#endif
-
-
-// Check for SDL_mixer header guard BEFORE its include
-#ifdef SDL_MIXER_H_ // Standard include guard for SDL_mixer.h
-#error "SDL_mixer.h included before our check!"
-#endif
-
-// Include SDL_mixer.h after SDL.h
-#include <SDL2/SDL_mixer.h>
-
-// Check for SDL_mixer header guard AFTER its include
-#ifndef SDL_MIXER_H_
-#error "SDL_mixer.h include guard not defined after its include!"
-#endif
 #include "audio.h"
 #include "globals.h" // For EXIT_FAILURE_HANDLER
 #include "interpreter.h" // For EXIT_FAILURE_HANDLER
@@ -37,10 +13,6 @@
 #include <stdio.h>
 #include <string.h> // For strdup
 #include <SDL2/SDL.h> // Need basic SDL for SDL_InitSubSystem, SDL_WasInit
-
-#ifndef __SDL_MIXER_H__
-#error "SDL_mixer.h does not appear to be included or processed correctly before this point in the test code!"
-#endif
 
 // Define and initialize global variables from audio.h
 Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
@@ -76,11 +48,10 @@ void Audio_InitSystem(void) {
          DEBUG_PRINT("[DEBUG AUDIO] SDL_INIT_AUDIO already initialized.\n");
     }
 
-
     // Initialize SDL_mixer. Specify desired audio formats (flags).
     // MIX_INIT_OGG and MIX_INIT_MP3 require external libraries (libvorbis, libmad/libmpg123).
     // MIX_INIT_WAV is typically built-in.
-    int mix_flags = MIX_INIT_WAV; // Start with WAV support
+    int mix_flags = 0;
     #ifdef INCLUDE_OGG_MP3_SUPPORT // Define this macro in your Makefile if you have the libs
     mix_flags |= MIX_INIT_OGG | MIX_INIT_MP3;
     #endif
@@ -99,7 +70,7 @@ void Audio_InitSystem(void) {
     // Parameters: frequency (e.g. 44100), format (MIX_DEFAULT_FORMAT),
     // channels (1 for mono, 2 for stereo), chunksize (size of the audio buffer)
     if (Mix_OpenAudio(MIX_DEFAULT_FREQUENCY, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
-        fprintf(stderr, "Runtime error: Mix_OpenAudio failed: %s\n", Mix_GetError());
+        fprintf(stderr, "Runtime error: Mix_OpenAudio failed: %s\n", SDL_GetError());
         Mix_Quit(); // Clean up any Mix_Init attempts before failing
         // Decide whether to exit or continue without audio. Let's exit for now.
         EXIT_FAILURE_HANDLER(); // Treat as fatal
@@ -163,7 +134,7 @@ int Audio_LoadSound(const char* filename) {
 // Play a loaded sound effect once. Takes the 1-based sound ID.
 void Audio_PlaySound(int soundID) {
     if (!gSoundSystemInitialized) {
-        fprintf(stderr, "Runtime warning: Sound system not initialized. Skipping PlaySound(ID: %d).\n", soundID);
+        DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping PlaySound(ID: %d).\n", soundID);
         return; // Don't crash, just don't play sound
     }
 
@@ -176,15 +147,17 @@ void Audio_PlaySound(int soundID) {
         return;
     }
 
+    DEBUG_PRINT("[DEBUG AUDIO] Playing SoundID %d (internal index %d)...\n", soundID, c_index);
+
     // Play the loaded sound chunk.
     // Parameters: channel (-1 means find the first available), chunk (the Mix_Chunk* to play), loops (0 means play once).
     // Returns the channel the sound is playing on, or -1 on error.
     int played_channel = Mix_PlayChannel(-1, gLoadedSounds[c_index], 0);
     if (played_channel < 0) {
         fprintf(stderr, "Runtime warning: Mix_PlayChannel failed for SoundID %d: %s\n", soundID, Mix_GetError());
-        // Continue, but warn the user
+        // Continue, but warn
     } else {
-        DEBUG_PRINT("[DEBUG AUDIO] Playing SoundID %d on channel %d.\n", soundID, played_channel);
+        DEBUG_PRINT("[DEBUG AUDIO] Played SoundID %d on channel %d.\n", soundID, played_channel);
     }
 }
 
@@ -254,7 +227,7 @@ void Audio_QuitSystem(void) {
     DEBUG_PRINT("[DEBUG AUDIO] Sound system shutdown complete.\n");
 }
 
-// The builtins
+// The builtins (assuming these are correctly placed after Audio_... function definitions)
 
 Value executeBuiltinInitSoundSystem(AST *node) {
     // Check that no arguments were provided

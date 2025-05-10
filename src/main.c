@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <string.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 // No need for a separate "#include "sdl.h"" if globals.h or types.h handles SDL includes
 
 /* Global variables */

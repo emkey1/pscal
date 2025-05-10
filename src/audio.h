@@ -7,6 +7,7 @@
 #ifndef PSCAL_AUDIO_H
 #define PSCAL_AUDIO_H
 
+#include <SDL2/SDL.h> // Include the SDL_mixer header
 #include <SDL2/SDL_mixer.h> // Include the SDL_mixer header
 #include "types.h"          // For the Value struct if needed (though helpers won't return Value)
 #include "ast.h"            // For AST node if needed

@@ -424,6 +424,18 @@ Token *getNextToken(Lexer *lexer) {
             if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_GREATER_EQUAL, ">="); }
             return newToken(TOKEN_GREATER, ">");
         }
+        // Handle Not Equal (!=)
+        if (lexer->current_char == '!') {
+            // Check if the next character is '='
+            if (lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '=') {
+                advance(lexer); // Consume '!'
+                advance(lexer); // Consume '='
+                return newToken(TOKEN_NOT_EQUAL, "!="); // Recognize !=
+            } else {
+                // If '!' is not followed by '=', it's an unrecognized character in Pascal.
+                // Fall through to the generic unknown character handling below.
+            }
+        }
 
         // If character is not recognized by any rule above
         char unknown_char_str[2] = {lexer->current_char, '\0'};

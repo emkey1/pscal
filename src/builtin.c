@@ -5,6 +5,8 @@
 #include "symbol.h"
 #include "sdl.h"
 #include "audio.h"
+#include "sdl.h"
+#include "audio.h"
 #include "globals.h"
 #include <math.h>
 #include <termios.h>
