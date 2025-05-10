@@ -167,6 +167,12 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("updatetexture", AST_PROCEDURE_DECL);
     registerBuiltinFunction("rendercopy", AST_PROCEDURE_DECL);
     registerBuiltinFunction("rendercopyrect", AST_PROCEDURE_DECL);
+    
+    // SDL Sound subsystem
+    registerBuiltinFunction("initsoundsystem", AST_PROCEDURE_DECL); // Procedure
+    registerBuiltinFunction("loadsound",       AST_FUNCTION_DECL); // Function (returns Integer ID)
+    registerBuiltinFunction("playsound",       AST_PROCEDURE_DECL); // Procedure
+    registerBuiltinFunction("quitsoundsystem", AST_PROCEDURE_DECL); // Procedure
 
     /* Initialize lexer and parser. */
     Lexer lexer;

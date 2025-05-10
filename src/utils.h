@@ -7,11 +7,18 @@
    DEBUG MACROS & GLOBALS
    ======================= */
 #ifdef DEBUG
+    // In DEBUG builds, use the fprintf logic if dumpExec is enabled
     extern int dumpExec;   /* Global flag for execution debug dump */
     #define DEBUG_PRINT(...) do { if(dumpExec) fprintf(stderr, __VA_ARGS__); } while(0)
+
+    // DEBUG_DUMP_AST will call the debugAST function
     #define DEBUG_DUMP_AST(node, indent) debugAST((node), (indent))
 #else
-    #define DEBUG_PRINT(...) ((void)0)
+    // In non-DEBUG builds, define DEBUG_PRINT to expand to nothing.
+    // The compiler will simply remove any line like DEBUG_PRINT(...)
+    #define DEBUG_PRINT(...)
+
+    // DEBUG_DUMP_AST should still be defined as a no-op that takes the arguments
     #define DEBUG_DUMP_AST(node, indent) ((void)0)
 #endif
 

@@ -935,19 +935,15 @@ void freeValue(Value *v) {
 
         case TYPE_RECORD: {
             FieldValue *f = v->record_val;
-            // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG]   Processing record fields for Value* at %p (record_val=%p)\n", (void*)v, (void*)f);
 #endif
-            // *** END DEBUG PRINT ***
             while (f) {
                 FieldValue *next = f->next;
-                // *** ADD DEBUG PRINT ***
 #ifdef DEBUG
                 fprintf(stderr, "[DEBUG]     Freeing FieldValue* at %p (name='%s' @ %p)\n",
                         (void*)f, f->name ? f->name : "NULL", (void*)f->name);
 #endif
-                // *** END DEBUG PRINT ***
                 if (f->name) free(f->name);
                 freeValue(&f->value); // Recursive call
                 free(f);              // Free the FieldValue struct itself

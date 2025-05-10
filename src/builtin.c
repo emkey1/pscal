@@ -4,6 +4,7 @@
 #include "interpreter.h"
 #include "symbol.h"
 #include "sdl.h"
+#include "audio.h"
 #include "globals.h"
 #include <math.h>
 #include <termios.h>
@@ -52,12 +53,14 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"high",      executeBuiltinHigh},
     {"inc",       executeBuiltinInc},
     {"initgraph", executeBuiltinInitGraph},
+    {"initsoundsystem", executeBuiltinInitSoundSystem},
     {"inittextsystem", executeBuiltinInitTextSystem},
     {"inttostr",  executeBuiltinIntToStr},
     {"ioresult",  executeBuiltinIOResult},
     {"keypressed", executeBuiltinKeyPressed},
     {"length",    executeBuiltinLength},
     {"ln",        executeBuiltinLn},
+    {"loadsound", executeBuiltinLoadSound},
     {"low",       executeBuiltinLow},
     {"mstreamcreate", executeBuiltinMstreamCreate},
     {"mstreamfree", executeBuiltinMstreamFree},
@@ -68,9 +71,11 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"outtextxy", executeBuiltinOutTextXY},
     {"paramcount", executeBuiltinParamcount},
     {"paramstr",  executeBuiltinParamstr},
+    {"playsound", executeBuiltinPlaySound},
     {"pos",       executeBuiltinPos},
     {"putpixel",  executeBuiltinPutPixel},
     {"quitrequested", executeBuiltinQuitRequested},
+    {"quitsoundsystem", executeBuiltinQuitSoundSystem},
     {"quittextsystem", executeBuiltinQuitTextSystem},
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
@@ -2356,7 +2361,8 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
         "upcase", "low", "high", "succ", "pred", // Added Pred assuming it might exist
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
-        "keypressed", "mstreamcreate", "quitrequested"
+        "keypressed", "mstreamcreate", "quitrequested", "loadsound",
+        
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
     int num_functions = sizeof(functions) / sizeof(functions[0]);
@@ -2370,7 +2376,8 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     const char *procedures[] = {
          "writeln", "write", "readln", "read", "reset", "rewrite",
          "close", "assign", "halt", "inc", "dec", "delay",
-         "randomize", "mstreamfree", "textcolore", "textbackgrounde"
+         "randomize", "mstreamfree", "textcolore", "textbackgrounde",
+        "initsoundsystem", "playsound", "quitsoundsystem",
          // Add others like clrscr, gotoxy, assert if implemented
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
