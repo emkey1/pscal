@@ -14,6 +14,7 @@ file(GLOB SRC_FILES CONFIGURE_DEPENDS src/*.c src/*.h)
 
 # ---- Release‑style build : pscal ------------------------------------------
 add_executable(pscal  ${SRC_FILES})
+target_compile_options(pscal PRIVATE -O3)      
 
 # ---- Address‑Sanitized debug build : dscal -------------------------------
 add_executable(dscal  ${SRC_FILES})

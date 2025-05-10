@@ -2550,6 +2550,12 @@ Value makeCopyOfValue(Value *src) {
             if (src->set_val.set_size > 0 && src->set_val.set_values != NULL) {
                 size_t array_size_bytes = sizeof(long long) * src->set_val.set_size;
                 v.set_val.set_values = malloc(array_size_bytes);
+                if (!v.set_val.set_values) { 
+                    freeValue(&v);
+                    fprintf(stderr,
+                            "Memory allocation failed in makeCopyOfValue (set)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
                 if (!v.set_val.set_values) {
                     fprintf(stderr, "Memory allocation failed in makeCopyOfValue (set values)\n");
                     // Potentially free other copied parts before exiting if necessary
