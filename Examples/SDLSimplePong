@@ -1,0 +1,247 @@
+program SimplePong;
+
+{ This program demonstrates basic SDL graphics,
+  input handling, paddle collision, score keeping, and a score limit.
+  The computer AI is now limited by a maximum paddle speed.
+  Exiting by closing the window or pressing 'q' is added. }
+
+// Assuming built-in SDL procedures and utility functions are globally available or imported via a unit
+// Assuming a global boolean flag (e.g., break_requested) is set by GraphLoop
+// when the window is closed or 'q' is pressed.
+
+var
+  WindowWidth, WindowHeight : Integer;
+  PlayerPaddleY, ComputerPaddleY : Integer;
+  PaddleWidth, PaddleHeight : Integer;
+  BallX, BallY : Integer;
+  BallSize : Integer;
+  BallSpeedX, BallSpeedY : Integer;
+  KeepRunning : Boolean;
+
+  // Variables for mouse input
+  MouseX, MouseY, MouseButtons : Integer;
+
+  // Variables for score keeping
+  ScorePlayer, ScoreComputer : Integer;
+
+  // Constants for game settings
+  MaxScore : Integer;
+
+  // Font settings (adjust filename and size as needed for your system)
+  FontFileName : String;
+  FontSize : Integer;
+
+  // Variables to hold score strings
+  PlayerScoreStr, ComputerScoreStr : String;
+
+  // Variable for computer paddle speed
+  ComputerPaddleSpeed : Integer;
+
+  // Variables for calculating computer paddle movement
+  DesiredComputerPaddleY : Integer;
+  MoveDistance : Integer;
+
+  // The global break_requested flag is assumed to be set by GraphLoop
+  // if the window is closed or 'q' is pressed.
+  // No explicit Pascal variable is needed here if we check the global flag directly
+  // or if GraphLoop modifies KeepRunning (less ideal).
+  // Let's assume GraphLoop sets break_requested.
+
+begin
+  // --- Initialization ---
+  WindowWidth := 640;
+  WindowHeight := 480;
+  InitGraph(WindowWidth, WindowHeight, 'Pscal Simple Pong');
+
+  // --- Text System Initialization ---
+  // NOTE: Adjust the font file path if needed for your system
+  FontFileName := '/System/Library/Fonts/Supplemental/Arial.ttf';
+  FontSize := 24;
+  InitTextSystem(FontFileName, FontSize);
+
+  // --- Game Setup (Initial State) ---
+  PaddleWidth := 10;
+  PaddleHeight := 80;
+
+  PlayerPaddleY := WindowHeight div 2 - PaddleHeight div 2;
+  ComputerPaddleY := WindowHeight div 2 - PaddleHeight div 2;
+
+  BallSize := 8;
+  BallX := WindowWidth div 2;
+  BallY := WindowHeight div 2;
+
+  BallSpeedX := 4;
+  BallSpeedY := 4;
+
+  ScorePlayer := 0;
+  ScoreComputer := 0;
+  MaxScore := 5;
+
+  ComputerPaddleSpeed := 5;
+
+  KeepRunning := True;
+
+  // --- Main Game Loop ---
+  // ADDED: Check the global break_requested flag in the loop condition.
+  // This assumes GraphLoop sets break_requested on quit/key press.
+  while KeepRunning and (break_requested = 0) do
+  begin
+    // --- Input ---
+    GetMouseState(MouseX, MouseY, MouseButtons);
+
+    PlayerPaddleY := MouseY - PaddleHeight div 2;
+
+    // Clamp player paddle Y position
+    if PlayerPaddleY < 0 then
+      PlayerPaddleY := 0;
+    if PlayerPaddleY > WindowHeight - PaddleHeight then
+      PlayerPaddleY := WindowHeight - PaddleHeight;
+
+    // --- Game Logic ---
+    BallX := BallX + BallSpeedX;
+    BallY := BallY + BallSpeedY;
+
+    // Limited Speed AI for computer paddle
+    DesiredComputerPaddleY := BallY - PaddleHeight div 2;
+    MoveDistance := DesiredComputerPaddleY - ComputerPaddleY;
+
+    if MoveDistance > ComputerPaddleSpeed then
+    begin
+      ComputerPaddleY := ComputerPaddleY + ComputerPaddleSpeed;
+    end
+    else if MoveDistance < -ComputerPaddleSpeed then
+    begin
+      ComputerPaddleY := ComputerPaddleY - ComputerPaddleSpeed;
+    end
+    else
+    begin
+      ComputerPaddleY := DesiredComputerPaddleY;
+    end;
+
+    // Clamp computer paddle Y position
+    if ComputerPaddleY < 0 then
+      ComputerPaddleY := 0;
+    if ComputerPaddleY > WindowHeight - PaddleHeight then
+      ComputerPaddleY := WindowPaddleHeight - PaddleHeight; // FIX: Should be WindowHeight - PaddleHeight
+
+    // Collision Detection (Ball with Top/Bottom Walls)
+    if (BallY <= 0) or (BallY + BallSize >= WindowHeight) then
+    begin
+      BallSpeedY := -BallSpeedY;
+    end;
+
+    // Collision Detection (Ball with Paddles)
+    // Player Paddle Collision (left side)
+    if (BallX <= PaddleWidth) and
+       (BallSpeedX < 0) and
+       (BallY + BallSize >= PlayerPaddleY) and
+       (BallY <= PlayerPaddleY + PaddleHeight)
+    then
+    begin
+      BallSpeedX := -BallSpeedX;
+    end;
+
+    // Computer Paddle Collision (right side)
+    if (BallX + BallSize >= WindowWidth - PaddleWidth) and
+       (BallSpeedX > 0) and
+       (BallY + BallSize >= ComputerPaddleY) and
+       (BallY <= ComputerPaddleY + PaddleHeight)
+    then
+    begin
+      BallSpeedX := -BallSpeedX;
+    end;
+
+
+    // --- Scoring and Ball Reset ---
+    if (BallX < 0) then
+    begin
+      ScoreComputer := ScoreComputer + 1;
+
+      BallX := WindowWidth div 2;
+      BallY := WindowHeight div 2;
+
+      BallSpeedX := 4;
+      BallSpeedY := 4;
+
+      if ScoreComputer >= MaxScore then
+      begin
+        KeepRunning := False;
+      end;
+    end;
+
+    if (BallX + BallSize > WindowWidth) then
+    begin
+      ScorePlayer := ScorePlayer + 1;
+
+      BallX := WindowWidth div 2;
+      BallY := WindowHeight div 2;
+
+      BallSpeedX := -4;
+      BallSpeedY := 4;
+
+      if ScorePlayer >= MaxScore then
+      begin
+        KeepRunning := False;
+      end;
+    end;
+
+    // --- Rendering ---
+    ClearDevice;
+
+    SetRGBColor(255, 255, 255); // White
+
+    //Draw the Player Paddle
+    FillRect(0, PlayerPaddleY, PaddleWidth - 1, PlayerPaddleY + PaddleHeight - 1);
+
+    //Draw the Computer Paddle
+    FillRect(WindowWidth - PaddleWidth, ComputerPaddleY, WindowWidth - 1, ComputerPaddleY + PaddleHeight - 1);
+
+    //Draw the Ball
+    FillRect(BallX, BallY, BallX + BallSize - 1, BallY + BallSize - 1);
+
+    //--- Draw Scores ---
+    PlayerScoreStr := 'Player: ' + IntToStr(ScorePlayer);
+    ComputerScoreStr := 'Computer: ' + IntToStr(ScoreComputer);
+
+    SetRGBColor(255, 255, 0); // Yellow
+
+    OutTextXY(20, 20, PlayerScoreStr);
+    OutTextXY(WindowWidth - 150, 20, ComputerScoreStr);
+
+    //--- End Draw Scores ---
+
+
+    //Present the rendered frame to the window
+    UpdateScreen;
+
+    // Process SDL events and delay.
+    // GraphLoop needs to set break_requested on SDL_QUIT or 'q' key press.
+    GraphLoop(16);
+
+  end; // while KeepRunning and (break_requested = 0)
+
+  //--- Game Over / Final Screen ---
+  // This code executes after the loop finishes.
+
+  ClearDevice;
+  SetRGBColor(255, 255, 255); // White text
+
+  // Display message based on exit reason
+  if break_requested = 0 then // Outer IF
+  begin // Compound statement for the Outer THEN
+    if ScorePlayer >= MaxScore then // Inner IF 1
+      OutTextXY(WindowWidth div 2 - 100, WindowHeight div 2, 'Player Wins!') // REMOVE THE SEMICOLON HERE
+    else if ScoreComputer >= MaxScore then // This ELSE belongs to Inner IF 1
+      OutTextXY(WindowWidth div 2 - 100, WindowHeight div 2, 'Computer Wins!'); // Semicolon here is optional as it's the last statement before the END of this BEGIN block.
+  end // END of the compound statement for the Outer THEN. NO SEMICOLON HERE before the Outer ELSE.
+  else // Outer ELSE
+  begin // Compound statement for the Outer ELSE
+    OutTextXY(WindowWidth div 2 - 50, WindowHeight div 2, 'Quit'); // Semicolon here is optional as it's the last statement before the END of this BEGIN block.
+  end; // This SEMICOLON is required and terminates the entire Outer IF/ELSE statement.
+
+  UpdateScreen; // Statement after the Outer IF/ELSE statement. Needs a semicolon.
+  WaitKeyEvent; // Statement after UpdateScreen. Needs a semicolon.
+  QuitTextSystem; // Statement after WaitKeyEvent. Needs a semicolon.
+  CloseGraph; // Last statement before END.
+
+end. // Final program END.

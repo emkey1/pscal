@@ -70,6 +70,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"paramstr",  executeBuiltinParamstr},
     {"pos",       executeBuiltinPos},
     {"putpixel",  executeBuiltinPutPixel},
+    {"quitrequested", executeBuiltinQuitRequested},
     {"quittextsystem", executeBuiltinQuitTextSystem},
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
@@ -2355,7 +2356,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
         "upcase", "low", "high", "succ", "pred", // Added Pred assuming it might exist
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
-        "keypressed", "mstreamcreate"
+        "keypressed", "mstreamcreate", "quitrequested"
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
     int num_functions = sizeof(functions) / sizeof(functions[0]);

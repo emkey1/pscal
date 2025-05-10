@@ -207,21 +207,52 @@ Value executeBuiltinGraphLoop(AST *node) {
                  }
                  #endif
                  // Check specifically for the quit event
-                 if (event.type == SDL_QUIT) {
-                     #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG GraphLoop] SDL_QUIT event detected during graphloop.\n");
-                     #endif
-                     // NOTE: We detect QUIT here, but cannot easily stop the Pascal
-                     // program from *this* function in the current design.
-                     // A more robust solution would involve setting a global flag
-                     // or redesigning the main execution loop.
-                 }
+                // Handle different event types
+                if (event.type == SDL_QUIT) {
+                    // User closed the window
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG GraphLoop] SDL_QUIT event detected.\n");
+                    #endif
+                    break_requested = 1; // Signal Pscal to quit by setting the global flag
+                    // Exit the inner event loop immediately
+                    break; // Exit the while(SDL_PollEvent) loop
+                } else if (event.type == SDL_KEYDOWN) {
+                    // A key was pressed
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG GraphLoop] SDL_KEYDOWN event detected. Key sym: %d ('%s')\n",
+                            event.key.keysym.sym, SDL_GetKeyName(event.key.keysym.sym));
+                    #endif
+                    // Check if the pressed key is 'q' (SDLK_q)
+                    if (event.key.keysym.sym == SDLK_q) {
+                        #ifdef DEBUG
+                        fprintf(stderr, "[DEBUG GraphLoop] 'q' key pressed.\n");
+                        #endif
+                        break_requested = 1; // Signal Pscal to quit
+                         // Exit the inner event loop immediately
+                        break; // Exit the while(SDL_PollEvent) loop
+                    }
+                    // Add more key checks here if needed (e.g., SDLK_ESCAPE)
+                }
                  // Add handling for other events if needed (keyboard, mouse)
+            } // End SDL_PollEvent while loop
+            
+            // If break_requested was set by an event, exit the outer loop too
+            if (break_requested != 0) {
+                #ifdef DEBUG
+                fprintf(stderr, "[DEBUG GraphLoop] break_requested set during event polling. Exiting time loop.\n");
+                #endif
+                break; // Exit the while (SDL_GetTicks() < targetTime) loop
+            }
+
+            // Add a small delay to prevent 100% CPU usage if the event queue is empty
+            // Only delay if no quit was requested and we still have time
+            if (SDL_GetTicks() < targetTime && break_requested == 0) {
+                SDL_Delay(1); // Wait for 1 millisecond
             }
 
             // Prevent busy-waiting: Give a tiny bit of time back to the OS.
             SDL_Delay(1); // Wait 1 millisecond
-        }
+        } // End while (SDL_GetTicks() < targetTime) loop
         #ifdef DEBUG
         fprintf(stderr, "[DEBUG GraphLoop] Finished SDL Delay/Event Loop. End: %u\n", SDL_GetTicks());
         #endif
@@ -1200,4 +1231,17 @@ Value executeBuiltinFillCircle(AST *node) {
 
     return makeVoid();
 }
+
+Value executeBuiltinQuitRequested(AST *node) {
+    // This function expects no arguments. Check the argument count.
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: QuitRequested expects 0 arguments.\n");
+        // Consider adding error handling or exit here if arguments are found unexpectedly
+        EXIT_FAILURE_HANDLER(); // Exit on invalid built-in usage
+    }
+    // Return a Pascal BOOLEAN value based on the C global break_requested flag
+    // In C, 0 is false, non-zero is true.
+    return makeBoolean(break_requested != 0);
+}
+
 

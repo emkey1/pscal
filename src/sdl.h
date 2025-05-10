@@ -37,7 +37,10 @@ extern bool gSdlTtfInitialized;    // Tracks if TTF_Init() was called
 extern SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES]; // Array to hold texture pointers
 extern int gSdlTextureWidths[MAX_SDL_TEXTURES];   // Store widths
 extern int gSdlTextureHeights[MAX_SDL_TEXTURES];  // Store heights
-// --- END SDL ---
+// --- END SDL Globals ---
+
+// --- SDL Misc ---
+Value executeBuiltinQuitRequested(AST *node);
 
 // --- C-level SDL System Functions ---
 void InitializeSdlSystems(void); // Optional: if you want a C-level init for SDL/TTF called by main

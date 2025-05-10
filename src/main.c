@@ -154,6 +154,9 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("inittextsystem", AST_PROCEDURE_DECL);
     registerBuiltinFunction("outtextxy", AST_PROCEDURE_DECL);
     registerBuiltinFunction("quittextsystem", AST_PROCEDURE_DECL);
+    
+    // SDL Misc Built-ins
+    registerBuiltinFunction("quitrequested", AST_FUNCTION_DECL); 
 
     // Mouse
     registerBuiltinFunction("getmousestate", AST_PROCEDURE_DECL);
