@@ -85,6 +85,7 @@ void freeHashTable(HashTable *table) {
                     #endif
                     // freeValue expects a Value**
                     freeValue(current->value); // Free the allocated Value struct and its contents
+                    current->value = NULL; // Important: Nullify the pointer!
                 } else {
                     // If it's an alias, just nullify the pointer in the symbol struct
                     // to prevent double-free when the original symbol's table is freed.

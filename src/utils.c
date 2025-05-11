@@ -1008,28 +1008,28 @@ void freeValue(Value *v) {
              break;
         }
         case TYPE_MEMORYSTREAM:
-            if (v->mstream) {
-        #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Attempting to free MStream content for Value* at %p (mstream=%p)\n", (void*)v, (void*)v->mstream);
-        #endif
-                if (v->mstream->buffer) {
-        #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG]     Freeing MStream buffer at %p (size=%d)\n", (void*)v->mstream->buffer, v->mstream->size);
-        #endif
-                    free(v->mstream->buffer);
-                    v->mstream->buffer = NULL;
-                }
-        #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]     Freeing MStream struct itself at %p\n", (void*)v->mstream);
-        #endif
-                free(v->mstream);
-                v->mstream = NULL;
-            } else {
-        #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   MStream pointer is NULL, nothing to free for MStream.\n");
-        #endif
-            }
-            break;
+             if (v->mstream) {
+         #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG]   Attempting to free MStream content for Value* at %p (mstream=%p)\n", (void*)v, (void*)v->mstream);
+         #endif
+                 if (v->mstream->buffer) {
+         #ifdef DEBUG
+                     fprintf(stderr, "[DEBUG]     Freeing MStream buffer at %p (size=%d)\n", (void*)v->mstream->buffer, v->mstream->size);
+         #endif
+                     free(v->mstream->buffer);
+                     v->mstream->buffer = NULL;
+                 }
+         #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG]     Freeing MStream struct itself at %p\n", (void*)v->mstream);
+         #endif
+                 free(v->mstream);
+                 v->mstream = NULL;
+             } else {
+         #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG]   MStream pointer is NULL, nothing to free for MStream.\n");
+         #endif
+             }
+             break;
         // Add other types if they allocate memory pointed to by Value struct members
         default:
 #ifdef DEBUG
