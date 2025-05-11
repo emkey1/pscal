@@ -25,13 +25,13 @@ const char *varTypeToString(VarType type) {
         case TYPE_FILE:         return "FILE";
         case TYPE_BYTE:         return "BYTE";
         case TYPE_WORD:         return "WORD";
+        case TYPE_ENUM:         return "ENUM";
         case TYPE_ARRAY:        return "ARRAY";
         case TYPE_BOOLEAN:      return "BOOLEAN";
         case TYPE_MEMORYSTREAM: return "MEMORY_STREAM";
-        case TYPE_ENUM:         return "ENUM";
         case TYPE_SET:          return "SET";
-        case TYPE_NIL:          return "NIL";
         case TYPE_POINTER:      return "POINTER";
+        case TYPE_NIL:          return "NIL";
         default:                return "UNKNOWN_VAR_TYPE";
     }
 }

@@ -77,10 +77,23 @@ void freeHashTable(HashTable *table) {
             DEBUG_PRINT("[DEBUG SYMBOL] Freeing Symbol '%s' at %p in bucket %d.\n", current->name ? current->name : "?", (void*)current, i);
             // Free memory owned by the Symbol struct (name, value and its contents)
             if (current->name) free(current->name);
-            if (current->value) {
-                freeValue(current->value); // Free contents of the Value struct
-                free(current->value);      // Free the Value struct itself
-                current->value = NULL;
+            if (current->value) { // Check if there is a value pointer before accessing is_alias
+                if (!current->is_alias) {
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG SYMBOL] Freeing Value for Symbol '%s' at %p.\n",
+                            current->name ? current->name : "NULL", (void*)current);
+                    #endif
+                    // freeValue expects a Value**
+                    freeValue(current->value); // Free the allocated Value struct and its contents
+                } else {
+                    // If it's an alias, just nullify the pointer in the symbol struct
+                    // to prevent double-free when the original symbol's table is freed.
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG SYMBOL] Not freeing aliased Value for Symbol '%s' at %p. Value owned by original symbol.\n",
+                            current->name ? current->name : "NULL", (void*)current);
+                    #endif
+                    current->value = NULL; // Important: Nullify the pointer!
+                }
             }
             free(current); // Free the Symbol struct
             current = next;
@@ -637,6 +650,7 @@ void updateSymbol(const char *name, Value val) {
     if (!types_compatible) {
         fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for symbol '%s'.\n",
                 varTypeToString(val.type), varTypeToString(sym->type), name);
+        fprintf(stderr, "%d", val.type);
         freeValue(&val); // Free incoming value
         EXIT_FAILURE_HANDLER(); // Terminate the program on type mismatch.
     }
@@ -747,10 +761,6 @@ void updateSymbol(const char *name, Value val) {
                 // Ensure null termination at the end of the copied content.
                 sym->value->s_val[copy_len] = '\0';
                 
-                // Pad with spaces if the source string is shorter than the max length.
-                for (size_t i = copy_len; i < (size_t)sym->value->max_length; ++i) {
-                    sym->value->s_val[i] = ' ';
-                }
                 // The buffer is already null-terminated at max_length + 1.
                 
             } else { // Target is a dynamic string (max_length is -1).
