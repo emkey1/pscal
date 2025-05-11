@@ -94,6 +94,12 @@ void freeHashTable(HashTable *table) {
                     #endif
                     current->value = NULL; // Important: Nullify the pointer!
                 }
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG SYMBOL] Freeing Value struct itself for Symbol '%s' at %p (Value* was %p).\n",
+                        current->name ? current->name : "NULL", (void*)current, (void*)current->value);
+#endif
+                free(current->value);      // Frees the Value struct itself
+                current->value = NULL;     // Nullify to prevent dangling pointer issues if current is accessed again (though it's about to be freed)
             }
             free(current); // Free the Symbol struct
             current = next;
