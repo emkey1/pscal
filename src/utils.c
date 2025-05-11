@@ -30,6 +30,7 @@ const char *varTypeToString(VarType type) {
         case TYPE_MEMORYSTREAM: return "MEMORY_STREAM";
         case TYPE_ENUM:         return "ENUM";
         case TYPE_SET:          return "SET";
+        case TYPE_NIL:          return "NIL";
         case TYPE_POINTER:      return "POINTER";
         default:                return "UNKNOWN_VAR_TYPE";
     }
@@ -461,12 +462,14 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     return v;
 }
 
+// Value constructor for the 'nil' literal.
+// Creates a Value of type TYPE_NIL with a NULL pointer value.
 Value makeNil(void) {
     Value v;
-    memset(&v, 0, sizeof(Value)); // Initialize all fields
-    v.type = TYPE_POINTER;
-    v.ptr_val = NULL;
-    v.base_type_node = NULL; // nil doesn't have a specific base type
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_NIL; // <<< Set type to TYPE_NIL
+    v.ptr_val = NULL; // A nil pointer's value is NULL
+    v.base_type_node = NULL; // A nil pointer doesn't point to a specific base type definition node
     return v;
 }
 
@@ -784,6 +787,21 @@ Value makeMStream(MStream *ms) {
     return v;
 }
 
+// Value constructor for creating a Value representing a general pointer.
+// Used by the 'new' builtin after memory allocation.
+// Creates a Value of type TYPE_POINTER with a given memory address and base type link.
+// @param address        The memory address the pointer points to (e.g., allocated by malloc).
+// @param base_type_node The AST node defining the type being pointed to (e.g., the Integer node in ^Integer).
+Value makePointer(void* address, AST* base_type_node) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_POINTER; // The type of the value is POINTER
+    v.ptr_val = address;     // The actual memory address it points to
+    v.base_type_node = base_type_node; // Link to the definition of the type being pointed to
+    return v;
+}
+
+
 // Token
 /* Create a new token */
 Token *newToken(TokenType type, const char *value) {
@@ -1000,7 +1018,7 @@ void freeValue(Value *v) {
     // v->type = TYPE_VOID;
 }
 
-static void dumpSymbol(Symbol *sym) {
+void dumpSymbol(Symbol *sym) {
     if (!sym) return;
 
     printf("Name: %s, Type: %s", sym->name, varTypeToString(sym->type));
@@ -1067,6 +1085,15 @@ static void dumpSymbol(Symbol *sym) {
             case TYPE_MEMORYSTREAM:
                 printf("MStream (size: %d)", sym->value->mstream->size);
                 break;
+            case TYPE_NIL:
+                 // A TYPE_NIL Value struct represents the absence of a pointer.
+                 // It does not own any heap data itself (the ptr_val field is NULL).
+                 // Therefore, there is nothing specific to free for a TYPE_NIL value.
+                 // Just break and let the Value struct container potentially be freed by the caller.
+                 #ifdef DEBUG
+                 fprintf(stderr, "[DEBUG]   Handling TYPE_NIL in freeValue - no heap data to free.\n");
+                 #endif
+                 break; // No dynamic memory specific to the NIL type to free
             default:
                 printf("(not printed)");
                 break;
@@ -1079,31 +1106,7 @@ static void dumpSymbol(Symbol *sym) {
 }
 
 /* Dump the global and local symbol tables. */
-void dumpSymbolTable(void) {
-    printf("--- Symbol Table Dump ---\n");
-
-    printf("Global Symbols:\n");
-    Symbol *sym = globalSymbols;
-    if (!sym) {
-        printf("  (none)\n");
-    }
-    while (sym) {
-        dumpSymbol(sym);
-        sym = sym->next;
-    }
-
-    printf("Local Symbols:\n");
-    sym = localSymbols;
-    if (!sym) {
-        printf("  (none)\n");
-    }
-    while (sym) {
-        dumpSymbol(sym);
-        sym = sym->next;
-    }
-
-    printf("--- End of Symbol Table Dump ---\n");
-}
+void dumpSymbolTable(void);
 
 /*
  * debug_ast - A simple wrapper that begins dumping at the root with zero indent.

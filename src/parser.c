@@ -2314,9 +2314,9 @@ AST *factor(Parser *parser) {
         eat(parser, TOKEN_NIL);             // Consume NIL, frees original initialToken
         node = newASTNode(AST_NIL, c);      // Create node with the copy
         freeToken(c);                       // Free the copy
-        setTypeAST(node, TYPE_POINTER);
+        // Set the AST node's type to TYPE_NIL, aligning with the Value representation.
+        setTypeAST(node, TYPE_NIL);
         return node; // <<< RETURN IMMEDIATELY
-
     } else if (initialTokenType == TOKEN_TRUE || initialTokenType == TOKEN_FALSE) {
         Token* c = copyToken(initialToken);
         eat(parser, initialTokenType); // Eat TRUE or FALSE

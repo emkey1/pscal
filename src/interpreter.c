@@ -99,75 +99,6 @@ static int map16BgColorToAnsi(int colorCode) {
     return 40 + (colorCode % 8);
 }
 
-void popLocalEnv(void) {
-    Symbol *sym = localSymbols;
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG] Popping local env (localSymbols=%p)\n", (void*)sym);
-    #endif
-    while (sym) {
-        Symbol *next = sym->next;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG]   Processing local symbol '%s' at %p (is_alias=%d, is_local_var=%d)\n",
-                sym->name ? sym->name : "NULL", (void*)sym, sym->is_alias, sym->is_local_var);
-        #endif
-
-        if (sym->value) {
-            if (sym->is_alias) {
-                // Aliased value - DO NOT free content or Value struct
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Skipping free for ALIAS symbol '%s'\n", sym->name ? sym->name : "NULL");
-                #endif
-            } else {
-                // Not an alias - value belongs to this symbol scope (includes local vars AND value params)
-                // Free the HEAP DATA managed *by* the Value struct
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Calling freeValue for non-alias symbol '%s' (value=%p, is_local_var=%d)\n", sym->name ? sym->name : "NULL", (void*)sym->value, sym->is_local_var);
-                #endif
-                freeValue(sym->value); // Frees string, record fields, array elements etc.
-
-                // Free the Value struct ITSELF allocated by insertLocalSymbol
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Freeing Value struct itself at %p for non-alias symbol '%s'\n", (void*)sym->value, sym->name ? sym->name : "NULL");
-                #endif
-                free(sym->value);      // <<< FIX: Free the Value struct for non-aliases >>>
-                sym->value = NULL;     // Prevent dangling pointer in Symbol struct
-            }
-        }
-
-        // Free symbol name and struct itself (always do this for locals)
-        if (sym->name) {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG]     Freeing name '%s' at %p\n", sym->name, (void*)sym->name);
-            #endif
-            free(sym->name);
-        }
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG]     Freeing Symbol* struct at %p\n", (void*)sym);
-#endif
-        free(sym); // Free the Symbol struct itself
-        sym = next;
-    }
-    localSymbols = NULL;
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG] Finished popping local env\n");
-    #endif
-}
-
-// Add this structure to snapshot and restore local environment safely
-typedef struct SymbolEnvSnapshot {
-    Symbol *head;
-} SymbolEnvSnapshot;
-
-void saveLocalEnv(SymbolEnvSnapshot *snap) {
-    snap->head = localSymbols;
-    localSymbols = NULL;
-}
-
-void restoreLocalEnv(SymbolEnvSnapshot *snap) {
-    popLocalEnv();
-    localSymbols = snap->head;
-}
-
 Value evalSet(AST *node) {
     // ... (initial checks and variable declarations remain the same) ...
     Value v;
@@ -1144,7 +1075,37 @@ Value eval(AST *node) {
             // --- Stage 2: Handle Operators based on types ---
 
             // Handle specific operators first that have unique type rules or don't fit the general pattern easily
-            if (op == TOKEN_SHL || op == TOKEN_SHR) {
+            // --- Handle comparisons involving POINTER or NIL ---
+            // This check must come before other general type combination checks.
+            if ((left.type == TYPE_POINTER || left.type == TYPE_NIL) &&
+                (right.type == TYPE_POINTER || right.type == TYPE_NIL)) {
+                // Both operands are pointer-like types (POINTER or NIL)
+                bool comparison_result = false;
+
+                if (op == TOKEN_EQUAL) {
+                     // Check if both are NIL, OR one is POINTER (and its ptr_val is NULL) and the other is NIL,
+                     // OR both are POINTER and their ptr_val are equal.
+                     comparison_result = (left.type == TYPE_NIL && right.type == TYPE_NIL) ||
+                                         (left.type == TYPE_POINTER && left.ptr_val == NULL && right.type == TYPE_NIL) ||
+                                         (left.type == TYPE_NIL && right.type == TYPE_POINTER && right.ptr_val == NULL) ||
+                                         (left.type == TYPE_POINTER && right.type == TYPE_POINTER && left.ptr_val == right.ptr_val);
+                } else if (op == TOKEN_NOT_EQUAL) {
+                    // Not equal is the negation of the equality check.
+                    comparison_result = !((left.type == TYPE_NIL && right.type == TYPE_NIL) ||
+                                          (left.type == TYPE_POINTER && left.ptr_val == NULL && right.type == TYPE_NIL) ||
+                                          (left.type == TYPE_NIL && right.type == TYPE_POINTER && right.ptr_val == NULL) ||
+                                          (left.type == TYPE_POINTER && right.type == TYPE_POINTER && left.ptr_val == right.ptr_val));
+                } else {
+                    // Other operators (<, <=, >, >=, +, -, etc.) are invalid for pointer/nil comparison
+                    freeValue(&left); freeValue(&right);
+                    fprintf(stderr, "Runtime error: Invalid operator '%s' for pointer or nil comparison.\n", tokenTypeToString(op));
+                    EXIT_FAILURE_HANDLER();
+                }
+
+                freeValue(&left); freeValue(&right); // Free the temporary operand values
+                return makeBoolean(comparison_result); // Return the boolean result as a Value
+            } else if (op == TOKEN_SHL || op == TOKEN_SHR) {
+                // --- End POINTER/NIL handling ---
                 // Requires integer-like types. Use original types for value access.
                 // Check if original types are integer-compatible (Integer, Byte, Word)
                 if (!((left.type == TYPE_INTEGER || left.type == TYPE_BYTE || left.type == TYPE_WORD) &&

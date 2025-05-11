@@ -107,6 +107,7 @@ Value executeBuiltinRenderCopyRect(AST *node);
 
 // Misc Built-ins
 Value executeBuiltinQuitRequested(AST *node);
+void SdlCleanupAtExit(void);
 
 
 #ifdef __cplusplus

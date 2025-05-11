@@ -21,7 +21,7 @@ target_compile_options(pscal PRIVATE -O3)
 # ---- Address‑Sanitized debug build : dscal -------------------------------
 add_executable(dscal ${SRC_FILES})
 # You might want to add DEBUG here: target_compile_definitions(dscal PRIVATE DEBUG)
-target_compile_definitions(dscal PRIVATE )
+target_compile_definitions(dscal PRIVATE DEBUG)
 target_compile_options( dscal PRIVATE -fsanitize=address -g)
 target_link_options( dscal PRIVATE -fsanitize=address)
 

@@ -6,6 +6,10 @@
 #include "types.h"
 #include "sdl.h"
 
+// Forward declare structures that are defined in symbol.h.
+// We declare pointers to these types below, but don't need their full definitions here.
+typedef struct SymbolTable HashTable; // Forward declare HashTable (which is a typedef for struct SymbolTable)
+typedef struct Symbol Symbol;         // Forward declare Symbol struct
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,8 +58,6 @@ extern int dumpExec;
 
 /* Symbol table globals */
 typedef struct Symbol Symbol;
-extern Symbol *globalSymbols;
-extern Symbol *localSymbols;
 extern Symbol *current_function_symbol;
 
 /* User-defined type table */
@@ -70,6 +72,11 @@ extern Procedure *procedure_table;
 }
 #endif
 
+// Add this structure to snapshot and restore local environment safely
+typedef struct SymbolEnvSnapshot {
+    HashTable *head;
+} SymbolEnvSnapshot;
+
 // Define a new structure to hold user-defined type mappings.
 typedef struct TypeEntry {
     char *name;    // The type name, already lowercased by the lexer.
@@ -78,6 +85,14 @@ typedef struct TypeEntry {
 } TypeEntry;
 
 extern int break_requested;
+
+/* Symbol table globals - NOW POINTERS TO HASHTABLES */
+// These extern declarations come AFTER symbol.h is included
+extern HashTable *globalSymbols;
+extern HashTable *localSymbols;
+extern Symbol *current_function_symbol; // This remains a pointer to a Symbol struct
+
+
 
 #define DEFAULT_STRING_CAPACITY 255
 

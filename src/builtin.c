@@ -2514,47 +2514,53 @@ Value executeBuiltinTextBackground(AST *node) {
 }
 
 // --- Implementation for new(pointer_variable) ---
+// Pascal: procedure new(var P: Pointer);
+// Allocates memory for the variable pointed to by P and makes P point to it.
+// The type of the allocated memory is determined by the base type of P.
 Value executeBuiltinNew(AST *node) {
+    // Check that exactly one argument was provided.
     if (node->child_count != 1) {
         fprintf(stderr, "Runtime error: new() expects exactly one argument (a pointer variable).\n");
         EXIT_FAILURE_HANDLER();
     }
 
+    // The argument must be an L-value (a variable, field, or array element).
+    // It should resolve to a pointer to the Value struct of the pointer variable itself.
     AST *lvalueNode = node->children[0];
+    // resolveLValueToPtr finds the memory location of the pointer variable's Value struct.
     Value *pointerVarValuePtr = resolveLValueToPtr(lvalueNode);
+
+    // Check if the lvalue resolved successfully.
     if (!pointerVarValuePtr) {
         fprintf(stderr, "Runtime error: Argument to new() could not be resolved to a memory location.\n");
         EXIT_FAILURE_HANDLER();
     }
 
+    // Check if the variable resolved by lvalue is indeed of pointer type.
     if (pointerVarValuePtr->type != TYPE_POINTER) {
         fprintf(stderr, "Runtime error: Argument to new() must be of pointer type. Got %s.\n", varTypeToString(pointerVarValuePtr->type));
         EXIT_FAILURE_HANDLER();
     }
 
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG new] executeBuiltinNew for '%s': pointerVarValuePtr=%p, pointerVarValuePtr->base_type_node=%p\n",
-             lvalueNode->token ? lvalueNode->token->value : "?",
-             (void*)pointerVarValuePtr,
-             pointerVarValuePtr ? (void*)pointerVarValuePtr->base_type_node : NULL);
-    fflush(stderr);
-    #endif
-
+    // Get the base type information from the pointer variable's Value struct.
+    // This link (base_type_node) was set when the pointer variable was declared and initialized (makeValueForType).
     AST *baseTypeNode = pointerVarValuePtr->base_type_node;
-    // <<< ORIGINAL CRASH POINT / CHECK >>>
+
+    // Check if the base type information is available. Without it, we don't know what to allocate/initialize.
     if (!baseTypeNode) {
         fprintf(stderr, "Runtime error: Cannot determine base type for pointer variable in new(). Missing type definition link.\n");
         EXIT_FAILURE_HANDLER();
     }
-    // <<< END ORIGINAL CHECK >>>
 
-
-    // --- Determine the actual VarType enum and definition node of the base type ---
+    // Determine the actual VarType enum and the AST node definition of the base type being pointed to.
+    // This involves potentially resolving type references.
     VarType baseVarType = TYPE_VOID;
-    AST* actualBaseTypeDef = baseTypeNode;
+    AST* actualBaseTypeDef = baseTypeNode; // Start with the node linked by the pointer variable.
 
+    // Logic to get baseVarType and actualBaseTypeDef (copied from previous implementation)
     if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
         const char* typeName = actualBaseTypeDef->token->value;
+        // Check against built-in types first.
         if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "real")==0) { baseVarType=TYPE_REAL; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "char")==0) { baseVarType=TYPE_CHAR; actualBaseTypeDef = NULL; }
@@ -2563,44 +2569,74 @@ Value executeBuiltinNew(AST *node) {
         else if (strcasecmp(typeName, "byte")==0) { baseVarType=TYPE_BYTE; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "word")==0) { baseVarType=TYPE_WORD; actualBaseTypeDef = NULL; }
         else {
-            AST* lookedUpType = lookupType(typeName);
+            // If not a built-in type name, look it up in the type table.
+            AST* lookedUpType = lookupType(typeName); // Assumes lookupType is defined (parser.h/parser.c)
             if (!lookedUpType) {
-                 fprintf(stderr, "Runtime error: Cannot resolve base type identifier '%s' during new().\n", typeName);
+                 fprintf(stderr, "Runtime error: Cannot resolve base type identifier '%s' during new(). Type not found.\n", typeName);
                  EXIT_FAILURE_HANDLER();
             }
-            actualBaseTypeDef = lookedUpType;
-            baseVarType = actualBaseTypeDef->var_type;
+            actualBaseTypeDef = lookedUpType; // Use the looked-up type definition node.
+            baseVarType = actualBaseTypeDef->var_type; // Get the VarType from the definition.
         }
     } else {
+         // If the base type node is not a TYPE_REFERENCE or simple VARIABLE node,
+         // assume its var_type is already set (e.g., for anonymous records/arrays).
          baseVarType = actualBaseTypeDef->var_type;
     }
 
+    // Final check to ensure a valid base type was determined.
     if (baseVarType == TYPE_VOID) {
         fprintf(stderr, "Runtime error: Cannot determine valid base type VarType during new(). AST Node type was %s\n",
-                actualBaseTypeDef ? astTypeToString(actualBaseTypeDef->type) : (baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL"));
+                actualBaseTypeDef ? astTypeToString(actualBaseTypeDef->type) : (baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL")); // Assumes astTypeToString is defined.
         EXIT_FAILURE_HANDLER();
     }
 
     // --- Allocate memory for the new Value structure on the heap ---
-    Value *newValue = malloc(sizeof(Value));
-    if (!newValue) {
+    // This is the memory block that the pointer variable will point TO.
+    // We allocate a Value struct because this is our standard container for runtime data.
+    Value *allocated_memory = malloc(sizeof(Value)); // Use malloc to allocate on the heap.
+    if (!allocated_memory) {
         fprintf(stderr, "Memory allocation failed for new value structure in new().\n");
         EXIT_FAILURE_HANDLER();
     }
 
-    // --- Initialize the allocated Value structure based on the base type ---
-    *newValue = makeValueForType(baseVarType, actualBaseTypeDef);
+    // --- Initialize the allocated memory based on the base type ---
+    // Initialize the Value structure located at the allocated_memory address with default values for its type.
+    // makeValueForType creates a Value and initializes its contents (e.g., NULL string, empty record).
+    *(allocated_memory) = makeValueForType(baseVarType, actualBaseTypeDef); // Use assignment to copy the returned Value.
 
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG NEW] Allocated new Value* at %p for base type %s. Initialized content.\n",
-            (void*)newValue, varTypeToString(baseVarType));
+    #ifdef DEBUG // Debug print to confirm allocation and initialization.
+    fprintf(stderr, "[DEBUG new] Allocated memory for pointed-to Value* at %p for base type %s. Initialized content.\n",
+            (void*)allocated_memory, varTypeToString(baseVarType)); // Assumes varTypeToString is defined.
     fflush(stderr);
     #endif
 
-    // --- Update the pointer variable to point to the newly allocated Value ---
-    pointerVarValuePtr->ptr_val = newValue;
+    // --- Create a Value struct representing the pointer TO this newly allocated memory ---
+    // This is the source Value that we will assign TO the pointer variable (lvalueNode).
+    // Use the makePointer function to create this Value.
+    // Pass the address of the allocated memory and the base type definition node link.
+    Value pointerValueToAssign = makePointer(allocated_memory, baseTypeNode); // <<< Use makePointer (defined in utils.c)
 
-    return makeVoid(); // new() is a procedure
+    #ifdef DEBUG // Debug print to show the pointer Value being assigned.
+    fprintf(stderr, "[DEBUG NEW] Created Value struct to assign to pointer variable: type=%s, ptr_val=%p, base_type_node=%p\n",
+            varTypeToString(pointerValueToAssign.type), (void*)pointerValueToAssign.ptr_val, (void*)pointerValueToAssign.base_type_node);
+    fflush(stderr);
+    #endif
+
+
+    // --- Update the pointer variable (lvalueNode) to hold this new pointer value ---
+    // Use the standard assignment helper function assignValueToLValue.
+    // assignValueToLValue will handle freeing the pointer variable's old Value contents (if necessary, though for TYPE_POINTER it likely doesn't free the pointed-to memory)
+    // and copying the new pointer value (ptr_val and base_type_node) into the pointer variable's Value struct.
+    assignValueToLValue(lvalueNode, pointerValueToAssign); // <<< Use assignValueToLValue (defined in builtin.c or interpreter.h)
+
+    // --- The temporary Value struct 'pointerValueToAssign' is on the stack ---
+    // Its contents (ptr_val, base_type_node) are copied into the symbol's Value by assignValueToLValue.
+    // No dynamic memory owned *by* pointerValueToAssign needs freeing here; it's just a stack variable holding pointers/data by value.
+    // freeValue(&pointerValueToAssign); // This call is NOT needed for a simple pointer Value struct on the stack.
+
+
+    return makeVoid(); // new() is a procedure, it does not return a value on the Pascal stack.
 }
 
 // --- Implementation for dispose(pointer_variable) ---
@@ -2646,20 +2682,4 @@ Value executeBuiltinDispose(AST *node) {
      nullifyPointerAliasesByAddrValue(localSymbols, disposedAddrValue);
     
     return makeVoid();
-}
-
-void nullifyPointerAliasesByAddrValue(Symbol* table, uintptr_t disposedAddrValue) {
-    Symbol* current = table;
-    while (current) {
-        // Compare the stored pointer address (cast to integer) with the disposed address value
-        if (current->value && current->type == TYPE_POINTER &&
-            ((uintptr_t)current->value->ptr_val) == disposedAddrValue) {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG DISPOSE] Nullifying alias '%s' which pointed to disposed memory address 0x%lx.\n",
-                    current->name ? current->name : "?", disposedAddrValue);
-            #endif
-            current->value->ptr_val = NULL; // Set the alias pointer to nil
-        }
-        current = current->next;
-    }
 }

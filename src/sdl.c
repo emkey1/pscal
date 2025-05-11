@@ -5,9 +5,16 @@
 //  Created by Michael Miller on 5/7/25.
 //
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h> 
-#include "sdl.h"
-#include "globals.h"
+#include <SDL2/SDL_ttf.h>
+// <<< MODIFICATION START >>>
+// Include SDL_mixer header directly
+#include <SDL2/SDL_mixer.h>
+// Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
+#include "audio.h"
+// <<< MODIFICATION END >>>
+
+#include "sdl.h" // This header includes SDL/SDL_ttf headers
+#include "globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 #include "types.h"
 #include "ast.h"
 #include "interpreter.h"
@@ -1246,4 +1253,83 @@ Value executeBuiltinQuitRequested(AST *node) {
     return makeBoolean(break_requested != 0);
 }
 
+// --- Implementation for SdlCleanupAtExit ---
+// This function is called at the end of the program to clean up SDL,
+// SDL_mixer, and SDL_ttf resources.
+// It cleans up global SDL/Audio/TTF state variables (gSdlWindow, gSdlRenderer, etc.)
+// and the underlying library resources.
+void SdlCleanupAtExit(void) {
+    #ifdef DEBUG // Use DEBUG_PRINT or fprintf(stderr, ...) wrapped in #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SDL] Running SdlCleanupAtExit...\n");
+    #endif
+
+    // Clean up SDL_ttf resources
+    if (gSdlFont) { // Check if font was loaded
+        TTF_CloseFont(gSdlFont); // Close the loaded font
+        gSdlFont = NULL; // Set pointer to NULL after freeing
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] TTF_CloseFont successful.\n");
+        #endif
+    }
+    if (gSdlTtfInitialized) { // Check if TTF system was initialized
+        TTF_Quit(); // Shutdown the SDL_ttf library
+        gSdlTtfInitialized = false; // Reset the flag
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] TTF_Quit successful.\n");
+        #endif
+    }
+
+    // Clean up SDL_mixer audio resources
+    // Halt any currently playing sound effects and music (good practice before cleanup)
+    Mix_HaltGroup(-1); // Stop all sound effects on all channels (-1)
+    Mix_HaltMusic();   // Stop music playback
+
+    // Free all loaded sound chunks (sound effects) that haven't been freed yet.
+    // Iterate through the global gLoadedSounds array.
+    for (int i = 0; i < MAX_SOUNDS; ++i) {
+        if (gLoadedSounds[i] != NULL) { // Check if a sound is loaded in this slot
+            Mix_FreeChunk(gLoadedSounds[i]); // Free the Mix_Chunk data
+            gLoadedSounds[i] = NULL; // Set array entry to NULL after freeing
+            DEBUG_PRINT("[DEBUG AUDIO] Auto-freed sound chunk at index %d during SdlCleanupAtExit.\n", i); // Assumes DEBUG_PRINT is defined in utils.h
+        }
+    }
+     DEBUG_PRINT("[DEBUG AUDIO] All loaded sound chunks auto-freed during SdlCleanupAtExit.\n");
+
+    // Close the audio device opened by Mix_OpenAudio.
+    Mix_CloseAudio();
+    DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio successful during SdlCleanupAtExit.\n");
+
+    // Quit SDL_mixer subsystems initialized by Mix_Init.
+    Mix_Quit(); // This cleans up all initialized formats (OGG, MP3, etc.)
+    DEBUG_PRINT("[DEBUG AUDIO] Mix_Quit successful during SdlCleanupAtExit.\n");
+
+
+    // Clean up core SDL video and timer resources.
+    // Renderer should be destroyed before the Window.
+    if (gSdlRenderer) { // Check if renderer was created
+        SDL_DestroyRenderer(gSdlRenderer); // Destroy the renderer
+        gSdlRenderer = NULL; // Set pointer to NULL
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SDL_DestroyRenderer successful.\n");
+        #endif
+    }
+    if (gSdlWindow) { // Check if window was created
+        SDL_DestroyWindow(gSdlWindow); // Destroy the window
+        gSdlWindow = NULL; // Set pointer to NULL
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SDL_DestroyWindow successful.\n");
+        #endif
+    }
+    if (gSdlInitialized) { // Check if core SDL_Init (with VIDEO/TIMER) was called
+        SDL_Quit(); // This quits all initialized SDL subsystems
+        gSdlInitialized = false; // Reset the flag
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SDL_Quit successful.\n");
+        #endif
+    }
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit finished.\n");
+    #endif
+}
 
