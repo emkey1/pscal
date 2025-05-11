@@ -255,12 +255,52 @@ Value executeBuiltinLoadSound(AST *node) {
         EXIT_FAILURE_HANDLER();
     }
 
-    // Call the C-side sound loading helper
-    int soundID = Audio_LoadSound(fileNameVal.s_val);
+    // --- MODIFICATION START: Add Debug Prints and Path Handling ---
+//    printf("[DEBUG BUILTIN LoadSound] Original filename string received: '%s'\n", fileNameVal.s_val ? fileNameVal.s_val : "NULL");
 
-    freeValue(&fileNameVal); // Free the evaluated string value after use
+    char full_path[512]; // Buffer to construct the full path. Adjust size if needed.
+    const char* filename_to_pass = fileNameVal.s_val; // Start by using the original string
+
+    // Check if the original filename string starts with '.' or '/'
+    if (filename_to_pass && filename_to_pass[0] != '.' && filename_to_pass[0] != '/') {
+        // If it doesn't start with '.' or '/', prepend the default sound directory path.
+        const char* default_sound_dir = "/usr/local/pscal/lib/sounds/";
+
+        // Construct the full path: default_sound_dir + filename
+        // Use snprintf to prevent buffer overflow.
+        int chars_written = snprintf(full_path, sizeof(full_path), "%s%s", default_sound_dir, filename_to_pass);
+
+        // Check if snprintf failed or if the resulting path is too long
+        if (chars_written < 0 || chars_written >= sizeof(full_path)) {
+            fprintf(stderr, "Runtime error: Constructed sound path too long for '%s' (attempted to prepend '%s').\n",
+                    filename_to_pass, default_sound_dir);
+            freeValue(&fileNameVal); // Free evaluated string before returning
+            return makeInt(-1); // Indicate error due to path construction failure
+        }
+
+        // If construction was successful, use the full_path
+        filename_to_pass = full_path;
+
+        //printf("[DEBUG BUILTIN LoadSound] Determined path (default prepended): '%s'\n", filename_to_pass);
+    } else {
+        // If it starts with '.' or '/', use the original filename directly (relative or absolute).
+        //printf("[DEBUG BUILTIN LoadSound] Determined path (original filename): '%s'\n", filename_to_pass);
+    }
+    // --- MODIFICATION END: Add Debug Prints and Path Handling ---
+
+
+    // Call the C-side sound loading helper with the determined path.
+    // Audio_LoadSound still contains the Mix_LoadWAV call and its error handling (which prints the error message).
+    //printf("[DEBUG BUILTIN LoadSound] Calling Audio_LoadSound with resolved path: '%s'\n", filename_to_pass);
+    int soundID = Audio_LoadSound(filename_to_pass);
+
+    //printf("[DEBUG BUILTIN LoadSound] Audio_LoadSound returned ID: %d\n", soundID);
+
+    // Free the evaluated filename Value struct's content (the original string from eval)
+    freeValue(&fileNameVal);
 
     // Return the sound ID as a Pascal Integer Value
+    // The Mix_LoadWAV error message (if any) will be printed by Audio_LoadSound.
     return makeInt(soundID); // Returns 1-based ID or -1 on error
 }
 

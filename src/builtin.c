@@ -1931,6 +1931,50 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
      setTypeAST(retTypeNode, TYPE_MEMORYSTREAM); // Set the VarType enum
      setRight(dummy, retTypeNode); // Link the type node as the return type
      dummy->var_type = TYPE_MEMORYSTREAM; // Set the function node's return type hint
+ } else if (strcasecmp(name, "initsoundsystem") == 0) { // Procedure, 0 args
+     dummy->child_count = 0;
+     dummy->var_type = TYPE_VOID;
+ } else if (strcasecmp(name, "loadsound") == 0) { // Function, 1 string arg
+     dummy->child_capacity = 1;
+     dummy->children = malloc(sizeof(AST*));
+     if (!dummy->children) { /* check malloc */ EXIT_FAILURE_HANDLER(); }
+     AST* p1 = newASTNode(AST_VAR_DECL, NULL); // Dummy VAR_DECL for the parameter
+     setTypeAST(p1, TYPE_STRING); // Parameter type is String
+     Token* p1n = newToken(TOKEN_IDENTIFIER, "_ls_filename"); // Dummy parameter name
+     AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); // Dummy variable node
+     addChild(p1, v1); // Add dummy var to dummy VAR_DECL
+     dummy->children[0] = p1; // Add dummy VAR_DECL to dummy procedure node's children
+     dummy->child_count = 1; // <<< Set child_count to 1
+     // Set return type for the function (already exists for loadsound)
+
+ } else if (strcasecmp(name, "playsound") == 0) { // Procedure, 1 integer arg
+     dummy->child_capacity = 1;
+     dummy->children = malloc(sizeof(AST*));
+      if (!dummy->children) { /* check malloc */ EXIT_FAILURE_HANDLER(); }
+     AST* p1 = newASTNode(AST_VAR_DECL, NULL); // Dummy VAR_DECL
+     setTypeAST(p1, TYPE_INTEGER); // Parameter type is Integer (SoundID)
+     Token* p1n = newToken(TOKEN_IDENTIFIER, "_ps_soundid"); // Dummy parameter name
+     AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
+     addChild(p1, v1);
+     dummy->children[0] = p1;
+     dummy->child_count = 1; // <<< Set child_count to 1
+     dummy->var_type = TYPE_VOID; // It's a procedure
+
+ } else if (strcasecmp(name, "quitsoundsystem") == 0) { // Procedure, 0 args
+     dummy->child_count = 0;
+     dummy->var_type = TYPE_VOID;
+ } else if (strcasecmp(name, "freesound") == 0) { // Procedure, 1 integer arg
+     dummy->child_capacity = 1;
+     dummy->children = malloc(sizeof(AST*));
+      if (!dummy->children) { /* check malloc */ EXIT_FAILURE_HANDLER(); }
+     AST* p1 = newASTNode(AST_VAR_DECL, NULL); // Dummy VAR_DECL
+     setTypeAST(p1, TYPE_INTEGER); // Parameter type is Integer (SoundID)
+     Token* p1n = newToken(TOKEN_IDENTIFIER, "_fs_soundid"); // Dummy parameter name
+     AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
+     addChild(p1, v1);
+     dummy->children[0] = p1;
+     dummy->child_count = 1; // <<< Set child_count to 1
+     dummy->var_type = TYPE_VOID; // It's a procedure
  }
     // --- Add similar blocks for ALL other built-in functions ---
     // --- that require specific return type or parameter setup. ---
