@@ -50,7 +50,6 @@ void Audio_InitSystem(void) {
 
     // Initialize SDL_mixer. Specify desired audio formats (flags).
     // MIX_INIT_OGG and MIX_INIT_MP3 require external libraries (libvorbis, libmad/libmpg123).
-    // MIX_INIT_WAV is typically built-in.
     int mix_flags = 0;
     #ifdef INCLUDE_OGG_MP3_SUPPORT // Define this macro in your Makefile if you have the libs
     mix_flags |= MIX_INIT_OGG | MIX_INIT_MP3;

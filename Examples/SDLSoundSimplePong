@@ -83,7 +83,7 @@ begin
 
   // --- Text System Initialization ---
   // NOTE: Adjust the font file path if needed for your system
-  FontFileName := '/System/Library/Fonts/Supplemental/Arial.ttf'; // Example path
+  FontFileName := '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf'; // The default font
   FontSize := 24;
   InitTextSystem(FontFileName, FontSize);
 
