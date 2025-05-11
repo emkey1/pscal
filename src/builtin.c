@@ -59,6 +59,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"inittextsystem", executeBuiltinInitTextSystem},
     {"inttostr",  executeBuiltinIntToStr},
     {"ioresult",  executeBuiltinIOResult},
+    {"issoundplaying", executeBuiltinIsSoundPlaying},
     {"keypressed", executeBuiltinKeyPressed},
     {"length",    executeBuiltinLength},
     {"ln",        executeBuiltinLn},
@@ -1975,6 +1976,19 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
      dummy->children[0] = p1;
      dummy->child_count = 1; // <<< Set child_count to 1
      dummy->var_type = TYPE_VOID; // It's a procedure
+ } else if (strcasecmp(name, "issoundplaying") == 0) { // Function, 0 args, returns Boolean
+     dummy->child_count = 0; // Explicitly confirm 0 args (default is already 0)
+
+     // Set return type for the function (Boolean)
+     Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "boolean"); // Create a temporary token for the type name "boolean"
+     AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken); // Create a dummy AST node representing the Boolean type
+     freeToken(retTypeNameToken); // Free the temporary token after newASTNode copies it
+
+     setTypeAST(retTypeNode, TYPE_BOOLEAN); // Set the VarType enum for the return type node
+
+     setRight(dummy, retTypeNode); // Link the return type node to the dummy function declaration node's 'right' child
+     dummy->var_type = TYPE_BOOLEAN; // Set the function declaration node's VarType hint to Boolean
+
  }
     // --- Add similar blocks for ALL other built-in functions ---
     // --- that require specific return type or parameter setup. ---
@@ -2423,7 +2437,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
          "writeln", "write", "readln", "read", "reset", "rewrite",
          "close", "assign", "halt", "inc", "dec", "delay",
          "randomize", "mstreamfree", "textcolore", "textbackgrounde",
-        "initsoundsystem", "playsound", "quitsoundsystem",
+        "initsoundsystem", "playsound", "quitsoundsystem","issoundplaying"
          // Add others like clrscr, gotoxy, assert if implemented
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);

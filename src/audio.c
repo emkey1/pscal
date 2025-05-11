@@ -337,3 +337,24 @@ Value executeBuiltinQuitSoundSystem(AST *node) {
     Audio_QuitSystem(); // Call the C-side cleanup helper
     return makeVoid(); // Procedures return a void value
 }
+
+Value executeBuiltinIsSoundPlaying(AST *node) {
+    // Check that no arguments were provided
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: IsSoundPlaying expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Check if sound system is initialized
+    if (!gSoundSystemInitialized) {
+        DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. IsSoundPlaying returning false.\n");
+        return makeBoolean(false); // No sound can be playing if system isn't initialized
+    }
+
+    // Check if any channel is playing (channel -1 checks all channels)
+    int playing = Mix_Playing(-1); // Mix_Playing returns 1 if playing, 0 if not.
+    DEBUG_PRINT("[DEBUG AUDIO] Mix_Playing(-1) returned %d. IsSoundPlaying returning %s.\n", playing, playing ? "true" : "false");
+
+    // Return a Pascal Boolean Value (True if playing, False otherwise)
+    return makeBoolean(playing != 0);
+}

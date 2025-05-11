@@ -1,0 +1,87 @@
+#!/usr/bin/env pscal
+program PlayWaveFile;
+
+{
+  This program plays a specified WAV audio file.
+  The filename must be provided as the first command-line argument
+  when running the program with the pscal interpreter.
+
+  Example usage (assuming the program is compiled to 'playwav'):
+  pscal playwav my_sound.wav
+
+  It assumes sound built-ins and command-line built-ins (ParamCount, ParamStr)
+  and Delay are globally available.
+}
+
+var
+  WaveFileName : String;    // Variable to store the filename from the command line
+  SoundID : Integer;        // Variable to hold the ID of the loaded sound
+  // DelayDurationMs : Integer; // No longer needed for fixed delay
+
+
+begin
+  writeln('Pscal WAV Player');
+  writeln('-----------------');
+
+  // Check if at least one command-line argument (the filename) was provided
+  if ParamCount() < 1 then
+  begin
+    writeln('Error: No WAV filename provided on the command line.');
+    writeln('Usage: pscal <program_name> <wave_file.wav>');
+    writeln('Example: pscal playwav ding.wav');
+    Halt(1); // Halt the program with an error code
+  end;
+
+  // Get the filename from the first command-line argument
+  WaveFileName := ParamStr(1);
+  writeln('Attempting to play: ', WaveFileName);
+
+  // Initialize the Sound System
+  InitSoundSystem;
+  writeln('Sound system initialized.');
+
+  // Load the sound file
+  SoundID := LoadSound(WaveFileName);
+
+  // Check if the sound loaded successfully
+  if SoundID = -1 then
+  begin
+    writeln('Error loading sound file: ', WaveFileName);
+    QuitSoundSystem; // Clean up sound system
+    Halt(1); // Halt indicating failure
+  end
+  else // Sound loaded successfully (SoundID will be >= 1)
+  begin
+    writeln('Sound loaded successfully. Assigned SoundID: ', SoundID);
+
+    // Play the sound once
+    writeln('Playing sound...');
+    PlaySound(SoundID);
+    writeln('PlaySound called.');
+
+    // <<< MODIFICATION START >>>
+    // Wait until the sound finishes playing by checking if any channel is still active.
+    writeln('Waiting for sound to finish playing...');
+    // The loop continues as long as IsSoundPlaying() returns True.
+    while IsSoundPlaying() do
+    begin
+      // Add a small delay to prevent the loop from consuming 100% CPU (busy-waiting).
+      Delay(10); // Wait for 10 milliseconds before checking again
+    end;
+    writeln('Sound finished playing.');
+    // <<< MODIFICATION END >>>
+
+    // Free the loaded sound from memory when done.
+    writeln('Freeing sound...');
+    FreeSound(SoundID);
+    writeln('Sound freed.');
+  end; // end if/else checking SoundID
+
+  // Shut down the Sound System.
+  writeln('Quitting sound system.');
+  QuitSoundSystem;
+  writeln('Sound system quit.');
+
+  writeln('Pscal WAV Player finished.');
+
+end. // End of the program.

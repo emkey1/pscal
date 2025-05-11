@@ -42,6 +42,7 @@ Value executeBuiltinInitSoundSystem(AST *node);
 Value executeBuiltinLoadSound(AST *node);
 Value executeBuiltinPlaySound(AST *node);
 Value executeBuiltinQuitSoundSystem(AST *node);
+Value executeBuiltinIsSoundPlaying(AST *node);
 
 
 
