@@ -578,7 +578,7 @@ int main(int argc, char *argv[]) {
     // freeTypeTableASTNodes(); // Frees AST nodes pointed to by TypeEntry->typeAST.
     // freeTypeTable(); // Frees TypeEntry structs.
     // Note: If GlobalAST was not freed in runProgram (e.g., if parsing failed), freeAST(NULL) is safe.
-    // SdlCleanupAtExit(); // Cleans up SDL, SDL_mixer, SDL_ttf, global SDL/Audio state.
+    SdlCleanupAtExit(); // Cleans up SDL, SDL_mixer, SDL_ttf, global SDL/Audio state.
 
 
     // Free global symbol table (frees Symbols and their owned Values).

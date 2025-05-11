@@ -2013,6 +2013,8 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
     addProcedure(dummy);
 
     // Lowercased name string `lowerName` was freed earlier after funcNameToken was created.
+    
+    freeAST(dummy); // This will free the dummy node and its tree
 }
 
 Value executeBuiltinParamcount(AST *node) {
