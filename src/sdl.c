@@ -1030,7 +1030,8 @@ Value executeBuiltinCreateTexture(AST *node) {
     }
     // Optional: Set blend mode if you need transparency with RGBA
     // SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
-
+    
+    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
 
     gSdlTextures[textureID] = newTexture;
     gSdlTextureWidths[textureID] = width;
@@ -1259,77 +1260,218 @@ Value executeBuiltinQuitRequested(AST *node) {
 // It cleans up global SDL/Audio/TTF state variables (gSdlWindow, gSdlRenderer, etc.)
 // and the underlying library resources.
 void SdlCleanupAtExit(void) {
-    #ifdef DEBUG // Use DEBUG_PRINT or fprintf(stderr, ...) wrapped in #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] Running SdlCleanupAtExit...\n");
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SDL] Running SdlCleanupAtExit (Final Program Exit Cleanup)...\n");
     #endif
 
-    // Clean up SDL_ttf resources
-    if (gSdlFont) { // Check if font was loaded
-        TTF_CloseFont(gSdlFont); // Close the loaded font
-        gSdlFont = NULL; // Set pointer to NULL after freeing
+    // --- Clean up SDL_ttf resources ---
+    if (gSdlFont) {
+        TTF_CloseFont(gSdlFont);
+        gSdlFont = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] TTF_CloseFont successful.\n");
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_CloseFont successful.\n");
         #endif
     }
-    if (gSdlTtfInitialized) { // Check if TTF system was initialized
-        TTF_Quit(); // Shutdown the SDL_ttf library
-        gSdlTtfInitialized = false; // Reset the flag
+    if (gSdlTtfInitialized) {
+        TTF_Quit();
+        gSdlTtfInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] TTF_Quit successful.\n");
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_Quit successful.\n");
         #endif
     }
 
-    // Clean up SDL_mixer audio resources
+    // --- Clean up SDL_mixer audio resources ---
     // Halt any currently playing sound effects and music (good practice before cleanup)
-    Mix_HaltGroup(-1); // Stop all sound effects on all channels (-1)
-    Mix_HaltMusic();   // Stop music playback
+    // Only do this if the sound system was initialized by pscal at some point.
+    // However, SDL_Init(SDL_INIT_AUDIO) might have been called by SDL_Init(SDL_INIT_EVERYTHING)
+    // even if Audio_InitSystem wasn't. For safety, check if SDL_mixer was actually used.
+    // A simple check: if gSoundSystemInitialized was ever true, or if SDL_WasInit(SDL_INIT_AUDIO) is true.
 
-    // Free all loaded sound chunks (sound effects) that haven't been freed yet.
-    // Iterate through the global gLoadedSounds array.
+    // If Audio_QuitSystem might have already freed sounds, this loop is safe as it checks for NULL.
     for (int i = 0; i < MAX_SOUNDS; ++i) {
-        if (gLoadedSounds[i] != NULL) { // Check if a sound is loaded in this slot
-            Mix_FreeChunk(gLoadedSounds[i]); // Free the Mix_Chunk data
-            gLoadedSounds[i] = NULL; // Set array entry to NULL after freeing
-            DEBUG_PRINT("[DEBUG AUDIO] Auto-freed sound chunk at index %d during SdlCleanupAtExit.\n", i); // Assumes DEBUG_PRINT is defined in utils.h
+        if (gLoadedSounds[i] != NULL) {
+            Mix_FreeChunk(gLoadedSounds[i]);
+            gLoadedSounds[i] = NULL;
+            DEBUG_PRINT("[DEBUG AUDIO] SdlCleanupAtExit: Auto-freed sound chunk at index %d.\n", i);
         }
     }
-     DEBUG_PRINT("[DEBUG AUDIO] All loaded sound chunks auto-freed during SdlCleanupAtExit.\n");
 
-    // Close the audio device opened by Mix_OpenAudio.
-    Mix_CloseAudio();
-    DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio successful during SdlCleanupAtExit.\n");
+    // Close the audio device if it's still considered open by SDL_mixer
+    // Mix_QuerySpec returns 0 if not open, non-zero if open.
+    int open_freq, open_channels;
+    Uint16 open_format;
+    if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) {
+        Mix_CloseAudio();
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio successful.\n");
+        #endif
+    } else {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by Audio_QuitSystem).\n");
+        #endif
+    }
 
-    // Quit SDL_mixer subsystems initialized by Mix_Init.
+    // Quit SDL_mixer subsystems. This should be safe to call even if already called,
+    // but ideally, it's called only once.
+    // If Audio_QuitSystem is changed to NOT call Mix_Quit(), this is the sole place.
     Mix_Quit(); // This cleans up all initialized formats (OGG, MP3, etc.)
-    DEBUG_PRINT("[DEBUG AUDIO] Mix_Quit successful during SdlCleanupAtExit.\n");
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_Quit successful.\n");
+    #endif
+    // Reset our flag if Audio_QuitSystem didn't
+    gSoundSystemInitialized = false;
 
 
-    // Clean up core SDL video and timer resources.
-    // Renderer should be destroyed before the Window.
-    if (gSdlRenderer) { // Check if renderer was created
-        SDL_DestroyRenderer(gSdlRenderer); // Destroy the renderer
-        gSdlRenderer = NULL; // Set pointer to NULL
+    // --- Clean up core SDL video and timer resources ---
+    if (gSdlRenderer) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SDL_DestroyRenderer successful.\n");
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
         #endif
     }
-    if (gSdlWindow) { // Check if window was created
-        SDL_DestroyWindow(gSdlWindow); // Destroy the window
-        gSdlWindow = NULL; // Set pointer to NULL
+    if (gSdlWindow) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SDL_DestroyWindow successful.\n");
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyWindow successful.\n");
         #endif
     }
-    if (gSdlInitialized) { // Check if core SDL_Init (with VIDEO/TIMER) was called
-        SDL_Quit(); // This quits all initialized SDL subsystems
-        gSdlInitialized = false; // Reset the flag
+    if (gSdlInitialized) { // This flag tracks if SDL_Init() for video/timer was called
+        SDL_Quit(); // This quits all initialized SDL subsystems (including SDL_INIT_AUDIO if it was ever inited)
+        gSdlInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SDL_Quit successful.\n");
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_Quit successful.\n");
         #endif
     }
 
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit finished.\n");
     #endif
+}
+
+Value executeBuiltinRenderCopyEx(AST *node) {
+    // Expected arguments:
+    // 0: TextureID (Integer)
+    // 1: SrcX (Integer)
+    // 2: SrcY (Integer)
+    // 3: SrcW (Integer)
+    // 4: SrcH (Integer)
+    // 5: DstX (Integer)
+    // 6: DstY (Integer)
+    // 7: DstW (Integer)
+    // 8: DstH (Integer)
+    // 9: Angle (Real)
+    // 10: RotationPointX (Integer, relative to DstW/H, or special value for center)
+    // 11: RotationPointY (Integer, relative to DstW/H, or special value for center)
+    // 12: FlipMode (Integer)
+
+    if (node->child_count != 13) {
+        fprintf(stderr, "Runtime error: RenderCopyEx expects 13 arguments.\n");
+        EXIT_FAILURE_HANDLER(); // Or return makeVoid() after freeing any evaluated args
+    }
+
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before RenderCopyEx.\n");
+        return makeVoid();
+    }
+
+    // Evaluate all arguments
+    Value texID_val = eval(node->children[0]);
+    Value srcX_val  = eval(node->children[1]);
+    Value srcY_val  = eval(node->children[2]);
+    Value srcW_val  = eval(node->children[3]);
+    Value srcH_val  = eval(node->children[4]);
+    Value dstX_val  = eval(node->children[5]);
+    Value dstY_val  = eval(node->children[6]);
+    Value dstW_val  = eval(node->children[7]);
+    Value dstH_val  = eval(node->children[8]);
+    Value angle_val = eval(node->children[9]);
+    Value rotX_val  = eval(node->children[10]);
+    Value rotY_val  = eval(node->children[11]);
+    Value flip_val  = eval(node->children[12]);
+
+    // Type checking
+    if (texID_val.type != TYPE_INTEGER ||
+        srcX_val.type  != TYPE_INTEGER || srcY_val.type  != TYPE_INTEGER ||
+        srcW_val.type  != TYPE_INTEGER || srcH_val.type  != TYPE_INTEGER ||
+        dstX_val.type  != TYPE_INTEGER || dstY_val.type  != TYPE_INTEGER ||
+        dstW_val.type  != TYPE_INTEGER || dstH_val.type  != TYPE_INTEGER ||
+        angle_val.type != TYPE_REAL    || // Angle is Real
+        rotX_val.type  != TYPE_INTEGER || rotY_val.type  != TYPE_INTEGER ||
+        flip_val.type  != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: RenderCopyEx argument type mismatch.\n");
+        // Free all evaluated values before exiting
+        freeValue(&texID_val); freeValue(&srcX_val); freeValue(&srcY_val);
+        freeValue(&srcW_val); freeValue(&srcH_val); freeValue(&dstX_val);
+        freeValue(&dstY_val); freeValue(&dstW_val); freeValue(&dstH_val);
+        freeValue(&angle_val); freeValue(&rotX_val); freeValue(&rotY_val);
+        freeValue(&flip_val);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    int textureID = (int)texID_val.i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        fprintf(stderr, "Runtime error: RenderCopyEx called with invalid or unloaded TextureID %d.\n", textureID);
+        // Free remaining values
+        // (Simplified cleanup for brevity, a goto or more structured cleanup is better for many args)
+        goto cleanup_rendercopyex;
+    }
+    SDL_Texture* texture = gSdlTextures[textureID];
+
+    SDL_Rect srcRect;
+    SDL_Rect* srcRectPtr = NULL;
+    srcRect.x = (int)srcX_val.i_val;
+    srcRect.y = (int)srcY_val.i_val;
+    srcRect.w = (int)srcW_val.i_val;
+    srcRect.h = (int)srcH_val.i_val;
+    if (srcRect.w > 0 && srcRect.h > 0) {
+        srcRectPtr = &srcRect;
+    }
+
+    SDL_Rect dstRect;
+    dstRect.x = (int)dstX_val.i_val;
+    dstRect.y = (int)dstY_val.i_val;
+    dstRect.w = (int)dstW_val.i_val;
+    dstRect.h = (int)dstH_val.i_val;
+
+    double angle_degrees = angle_val.r_val;
+
+    SDL_Point rotationCenter;
+    SDL_Point* centerPtr = NULL;
+    int pscalRotX = (int)rotX_val.i_val;
+    int pscalRotY = (int)rotY_val.i_val;
+
+    // If Pscal user passes a conventional negative value (e.g., -1) for center,
+    // SDL_RenderCopyEx uses the dstRect's center when centerPtr is NULL.
+    // Otherwise, use the provided relative coordinates.
+    if (pscalRotX >= 0 && pscalRotY >= 0) {
+        rotationCenter.x = pscalRotX;
+        rotationCenter.y = pscalRotY;
+        centerPtr = &rotationCenter;
+    } else {
+        centerPtr = NULL; // Use center of dstRect for rotation
+    }
+
+
+    SDL_RendererFlip sdl_flip = SDL_FLIP_NONE;
+    int flipMode = (int)flip_val.i_val;
+    if (flipMode == 1) sdl_flip = SDL_FLIP_HORIZONTAL;
+    else if (flipMode == 2) sdl_flip = SDL_FLIP_VERTICAL;
+    else if (flipMode == 3) sdl_flip = (SDL_RendererFlip)(SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL);
+
+
+    if (SDL_RenderCopyEx(gSdlRenderer, texture, srcRectPtr, &dstRect, angle_degrees, centerPtr, sdl_flip) != 0) {
+        fprintf(stderr, "Runtime Warning: SDL_RenderCopyEx failed: %s\n", SDL_GetError());
+    }
+
+cleanup_rendercopyex:
+    freeValue(&texID_val); freeValue(&srcX_val); freeValue(&srcY_val);
+    freeValue(&srcW_val); freeValue(&srcH_val); freeValue(&dstX_val);
+    freeValue(&dstY_val); freeValue(&dstW_val); freeValue(&dstH_val);
+    freeValue(&angle_val); freeValue(&rotX_val); freeValue(&rotY_val);
+    freeValue(&flip_val);
+
+    return makeVoid();
 }
 

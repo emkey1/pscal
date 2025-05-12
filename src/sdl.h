@@ -89,6 +89,7 @@ Value executeBuiltinDrawRect(AST *node); // Outline
 Value executeBuiltinFillRect(AST *node); // Filled
 Value executeBuiltinDrawCircle(AST *node); // Outline
 Value executeBuiltinFillCircle(AST *node); // Filled
+Value executeBuiltinRenderCopyEx(AST *node); // <<< ADD THIS LINE
 
 // SDL_ttf Text System
 Value executeBuiltinInitTextSystem(AST *node);

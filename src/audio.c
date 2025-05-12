@@ -189,41 +189,42 @@ void Audio_FreeSound(int soundID) {
 void Audio_QuitSystem(void) {
     if (!gSoundSystemInitialized) {
         DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping Audio_QuitSystem.\n");
-        return; // Avoid errors if not initialized
+        return;
     }
+    DEBUG_PRINT("[DEBUG AUDIO] Shutting down sound system (called by Pscal's QuitSoundSystem)...\n");
 
-    DEBUG_PRINT("[DEBUG AUDIO] Shutting down sound system...\n");
+    Mix_HaltGroup(-1);
+    Mix_HaltMusic();
 
-    // Halt any currently playing sound effects and music (optional but good practice)
-    Mix_HaltGroup(-1); // Stop all sound effects
-    Mix_HaltMusic();   // Stop music
-
-    // Free all loaded sound chunks that haven't been freed yet
     for (int i = 0; i < MAX_SOUNDS; ++i) {
         if (gLoadedSounds[i] != NULL) {
             Mix_FreeChunk(gLoadedSounds[i]);
             gLoadedSounds[i] = NULL;
-            DEBUG_PRINT("[DEBUG AUDIO] Auto-freed sound chunk at index %d during quit.\n", i);
+            DEBUG_PRINT("[DEBUG AUDIO] Freed sound chunk at index %d during Audio_QuitSystem.\n", i);
         }
     }
-     DEBUG_PRINT("[DEBUG AUDIO] All loaded sound chunks auto-freed.\n");
+    DEBUG_PRINT("[DEBUG AUDIO] All user-loaded sound chunks freed by Audio_QuitSystem.\n");
 
-    // Close the audio device
-    Mix_CloseAudio();
-    DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio successful.\n");
+    // Close the audio device. This makes sense here as the sound system is being "quit" from Pscal's perspective.
+    // SdlCleanupAtExit will also call it, but Mix_CloseAudio can be called multiple times, though only first has effect.
+    // For safety, let's only close if it's known to be open.
+    // SDL_WasInit(SDL_INIT_AUDIO) can check if the subsystem was ever inited.
+    // Mix_QuerySpec can check if audio is open.
+    int open_freq, open_channels;
+    Uint16 open_format;
+    if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) { // Returns 1 if audio is open
+        Mix_CloseAudio();
+        DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio called from Audio_QuitSystem.\n");
+    } else {
+        DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio skipped in Audio_QuitSystem (audio not open or already closed).\n");
+    }
 
-    // Quit SDL_mixer subsystems
-    Mix_Quit(); // This cleans up all initialized formats (OGG, MP3, etc.)
-    DEBUG_PRINT("[DEBUG AUDIO] Mix_Quit successful.\n");
 
+    // DO NOT CALL Mix_Quit() here. Let SdlCleanupAtExit handle the final Mix_Quit().
+    // Mix_Quit(); // <<< REMOVE OR COMMENT OUT
 
-    // Quit the SDL audio subsystem. This is often handled by the main SDL_Quit()
-    // at the end of the program, but if you initialized it separately, quitting
-    // it explicitly here is correct.
-    // SDL_QuitSubSystem(SDL_INIT_AUDIO); // Call this if you used SDL_InitSubSystem
-
-    gSoundSystemInitialized = false;
-    DEBUG_PRINT("[DEBUG AUDIO] Sound system shutdown complete.\n");
+    gSoundSystemInitialized = false; // Mark as no longer initialized by Pscal logic
+    DEBUG_PRINT("[DEBUG AUDIO] Pscal sound system shutdown procedures complete (Mix_Quit deferred to global exit).\n");
 }
 
 // The builtins (assuming these are correctly placed after Audio_... function definitions)

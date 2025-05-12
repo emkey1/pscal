@@ -17,6 +17,7 @@ Value executeBuiltinExp(AST *node);
 Value executeBuiltinAbs(AST *node);
 Value executeBuiltinTrunc(AST *node);
 Value executeBuiltinSqr(AST *node);
+Value executeBuiltinRound(AST *node);
 
 // File I/O
 Value executeBuiltinAssign(AST *node);
@@ -34,6 +35,7 @@ Value executeBuiltinUpcase(AST *node);
 Value executeBuiltinOrd(AST *node);
 Value executeBuiltinChr(AST *node);
 Value executeBuiltinIntToStr(AST *node);
+Value executeBuiltinReal(AST *node);
 
 // System
 Value executeBuiltinHalt(AST *node);

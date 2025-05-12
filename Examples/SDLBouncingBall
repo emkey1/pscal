@@ -1,0 +1,276 @@
+#!/usr/bin/env pscal
+program AmigaBoingBallTextureDemo_v4;
+
+const
+  BallTextureSize = 128;
+  BytesPerPixel   = 4;
+  CheckSize       = BallTextureSize div 4;
+
+  GridCellSizeBase = 40;
+  GridLinesColorR  = 100;
+  GridLinesColorG  = 0;
+  GridLinesColorB  = 100;
+  BackgroundColorR = 180;
+  BackgroundColorG = 180;
+  BackgroundColorB = 180;
+
+type
+  PixelArray = array[0..BallTextureSize * BallTextureSize * BytesPerPixel - 1] of Byte;
+
+var
+  { Screen and Graphics }
+  MaxX, MaxY, MidX, MidY : integer;
+  LoopDelay              : integer;
+  FontPath               : string;
+  TitleMsg               : string;
+
+  { Ball Properties }
+  BallX, BallY           : integer;
+  BallRadius             : integer;
+  BallDX, BallDY         : integer;
+  BallAngle              : Real;
+  RotationSpeed          : Real;
+  BallTextureID          : Integer;
+  BallPixels             : PixelArray;
+
+  { Shadow Properties }
+  ShadowX, ShadowY         : integer;
+  currentShadowRadius    : integer; // Renamed for clarity, was ShadowRadius
+
+  { Sound }
+  BounceSoundID          : integer;
+  SoundSystemInitialized : boolean;
+
+  { Perspective Grid Globals }
+  HorizonY               : integer;
+  VanishingPointX        : integer;
+
+  { Local variables for main loop's drawing phase (for shadow) }
+  effectiveFloorY         : integer;
+  maxBallHeightFromFloor  : integer;
+  ballDistFromFloor       : integer;
+  shadowScaleFactor       : Real;
+
+{ --- Procedure to generate the checkered ball texture data (same) --- }
+procedure CreateCheckeredBallTextureData(var pixels: PixelArray; textureActualSize: Integer; checkDivisor: Integer);
+var
+  x, y, i                  : integer;
+  idx                      : integer;
+  distSq, radiusSq, center : real;
+  isTransparent            : boolean;
+  checkPatternX, checkPatternY: integer;
+begin
+  center := (textureActualSize - 1) / 2.0;
+  radiusSq := sqr(center);
+  for y := 0 to textureActualSize - 1 do
+  begin
+    for x := 0 to textureActualSize - 1 do
+    begin
+      idx := (y * textureActualSize + x) * BytesPerPixel;
+      distSq := sqr(x - center) + sqr(y - center);
+      isTransparent := distSq > radiusSq;
+      if isTransparent then
+      begin
+        pixels[idx + 0] := 0; pixels[idx + 1] := 0; pixels[idx + 2] := 0; pixels[idx + 3] := 0;
+      end
+      else
+      begin
+        checkPatternX := (x div checkDivisor) mod 2;
+        checkPatternY := (y div checkDivisor) mod 2;
+        if checkPatternX = checkPatternY then
+        begin
+          pixels[idx + 0] := 230; pixels[idx + 1] := 30; pixels[idx + 2] := 30; pixels[idx + 3] := 255;
+        end
+        else
+        begin
+          pixels[idx + 0] := 240; pixels[idx + 1] := 240; pixels[idx + 2] := 240; pixels[idx + 3] := 255;
+        end;
+      end;
+    end;
+  end;
+end;
+
+{ --- Procedure to draw the background grid with perspective (same) --- }
+procedure DrawBackgroundGridPerspective(screenWidth, screenHeight, currentHorizonY, currentVanishingPointX, baseCellSize: Integer);
+var
+  x, y, i               : integer;
+  perspectiveFactor     : Real;
+  lineY                 : integer;
+  numFloorLines         : integer;
+  floorLineStartX       : integer;
+  localVanishingPointY  : integer;
+begin
+  SetRGBColor(BackgroundColorR, BackgroundColorG, BackgroundColorB);
+  FillRect(0, 0, screenWidth, screenHeight);
+  SetRGBColor(GridLinesColorR, GridLinesColorG, GridLinesColorB);
+  x := 0;
+  while x <= screenWidth do
+  begin
+    DrawLine(x, 0, x, currentHorizonY);
+    x := x + baseCellSize;
+  end;
+  y := 0;
+  while y <= currentHorizonY do
+  begin
+    DrawLine(0, y, screenWidth, y);
+    y := y + baseCellSize;
+  end;
+  SetRGBColor(GridLinesColorR - 30, GridLinesColorG, GridLinesColorB - 30);
+  numFloorLines := 6;
+  for i := 0 to numFloorLines - 1 do
+  begin
+    if numFloorLines > 1 then
+        perspectiveFactor := 1.0 - (i / numFloorLines) // Use Real division by default
+    else
+        perspectiveFactor := 0.5;
+    perspectiveFactor := perspectiveFactor * perspectiveFactor;
+    lineY := currentHorizonY + round((screenHeight - currentHorizonY - 1) * (1.0 - perspectiveFactor));
+    if lineY < screenHeight then
+      DrawLine(0, lineY, screenWidth, lineY);
+  end;
+  DrawLine(0, screenHeight -1, screenWidth, screenHeight -1);
+  localVanishingPointY := currentHorizonY;
+  for i := 0 to (screenWidth div (baseCellSize * 2)) do
+  begin
+    DrawLine(currentVanishingPointX + (i * baseCellSize), screenHeight -1, currentVanishingPointX, localVanishingPointY);
+    if i > 0 then
+        DrawLine(currentVanishingPointX - (i * baseCellSize), screenHeight -1, currentVanishingPointX, localVanishingPointY);
+  end;
+  SetRGBColor(GridLinesColorR - 50, GridLinesColorG, GridLinesColorB - 50);
+  DrawLine(0, currentHorizonY, screenWidth, currentHorizonY);
+end;
+
+begin { Main Program }
+  InitGraph(800, 600, 'Pscal Boing Ball Demo v4 - Better Physics & Shadow');
+  MaxX := GetMaxX;
+  MaxY := GetMaxY;
+  MidX := MaxX div 2;
+  MidY := MaxY div 2;
+
+  FontPath := '/System/Library/Fonts/Supplemental/Arial.ttf';
+  InitTextSystem(FontPath, 18);
+  TitleMsg := 'Pscal Boing Ball v4! Q or Close to Quit.';
+
+  HorizonY := MaxY * 3 div 4; // Horizon a bit lower for more "floor" space feel
+  VanishingPointX := MidX;
+
+  CreateCheckeredBallTextureData(BallPixels, BallTextureSize, CheckSize);
+  BallTextureID := CreateTexture(BallTextureSize, BallTextureSize);
+  if BallTextureID = -1 then
+  begin
+    SetRGBColor(255,0,0); OutTextXY(10, 30, 'Error: CreateTexture failed. Halting.');
+    UpdateScreen; GraphLoop(5000); CloseGraph; Halt;
+  end;
+  UpdateTexture(BallTextureID, BallPixels);
+
+  InitSoundSystem;
+  SoundSystemInitialized := true;
+  BounceSoundID := LoadSound('bounce_lf.wav');
+  if BounceSoundID = -1 then SoundSystemInitialized := false;
+
+  BallRadius := 60; // Slightly smaller than before, but still large
+  BallX := MidX;
+  BallY := HorizonY - BallRadius - 10; // Start on the "floor"
+  BallDX := 5;  // Initial horizontal speed
+  BallDY := -12; // Initial strong upward bounce
+  BallAngle := 0.0;
+  RotationSpeed := 2.5;
+
+  LoopDelay := 16;
+
+  while not QuitRequested do
+  begin
+    { 1. Update Ball Position and Angle }
+    BallX := BallX + BallDX;
+    BallY := BallY + BallDY;
+    BallAngle := BallAngle + RotationSpeed;
+    if BallAngle >= 360.0 then BallAngle := BallAngle - 360.0;
+
+    { 2. Collision Detection & Bounce Logic }
+    if (BallX + BallRadius >= MaxX) or (BallX - BallRadius <= 0) then
+    begin
+      BallDX := -BallDX;
+      if BallX + BallRadius > MaxX then BallX := MaxX - BallRadius
+      else if BallX - BallRadius < 0 then BallX := BallRadius;
+      if SoundSystemInitialized and (BounceSoundID <> -1) then PlaySound(BounceSoundID);
+    end;
+
+    if (BallY + BallRadius >= MaxY -1) then // Hit floor
+    begin
+      BallY := MaxY - BallRadius -1; // Ensure it's just above the line
+      if BallDY > 0 then // Only reverse and dampen if it was moving downwards
+      begin
+        BallDY := -round(BallDY * 1.00); // Damping factor (e.g., 0.80 retains 80% speed)
+        if SoundSystemInitialized and (BounceSoundID <> -1) then PlaySound(BounceSoundID);
+        { If ball has very little energy after bounce, make it stop or give small 'resting' bounce }
+        if Abs(BallDY) < 2 then BallDY := -2; // ensure a minimum bounce if it was settling
+      end;
+    end
+    else if (BallY - BallRadius <= 0) then // Hit ceiling
+    begin
+      BallY := BallRadius;
+      if BallDY < 0 then // Only reverse if it was moving upwards
+      begin
+        BallDY := -round(BallDY * 0.80);
+        if SoundSystemInitialized and (BounceSoundID <> -1) then PlaySound(BounceSoundID);
+      end;
+    end
+    else
+    begin
+      { Apply gravity if not on floor and not at apex of a very small bounce }
+      BallDY := BallDY + 1;
+    end;
+
+    { Drawing Phase }
+    DrawBackgroundGridPerspective(MaxX, MaxY, HorizonY, VanishingPointX, GridCellSizeBase);
+
+    { Shadow Calculation and Drawing }
+    ShadowX := BallX + (BallRadius div 4); // Slight offset
+    ShadowY := HorizonY + ((MaxY - HorizonY) div 3); // Position on the perceived "floor"
+
+    effectiveFloorY := HorizonY;
+    { Calculate distance from ball's *bottom* to the effective floor }
+    ballDistFromFloor := effectiveFloorY - (BallY + BallRadius);
+    if ballDistFromFloor < 0 then ballDistFromFloor := 0;
+
+    { Scale shadow: 1.0 when ball is on floor, smaller when higher. Max height for scaling can be HorizonY. }
+    if HorizonY > 0 then // Avoid division by zero if horizon is at top
+        shadowScaleFactor := 1.0 - (ballDistFromFloor / (HorizonY + BallRadius * 2) )
+    else
+        shadowScaleFactor := 1.0;
+
+    if shadowScaleFactor < 0.1 then shadowScaleFactor := 0.1;
+    if shadowScaleFactor > 1.0 then shadowScaleFactor := 1.0;
+
+    currentShadowRadius := round(BallRadius * 0.9 * shadowScaleFactor);
+    if currentShadowRadius < 3 then currentShadowRadius := 3;
+
+    SetRGBColor(70, 70, 70); // Shadow color
+    if currentShadowRadius > 0 then
+        FillCircle(ShadowX, ShadowY, currentShadowRadius);
+
+
+    { Draw Ball }
+    RenderCopyEx(BallTextureID,
+                 0, 0, BallTextureSize, BallTextureSize,
+                 BallX - BallRadius, BallY - BallRadius,
+                 BallRadius * 2, BallRadius * 2,
+                 BallAngle,
+                 BallRadius, BallRadius,
+                 0);
+
+    SetRGBColor(230, 230, 230);
+    OutTextXY(15, 15, TitleMsg);
+    if (SoundSystemInitialized) and (BounceSoundID = -1) then
+        OutTextXY(15, MaxY - 25, 'Warning: bounce.wav not loaded.');
+
+    UpdateScreen;
+    GraphLoop(LoopDelay);
+  end;
+
+  writeln('Exiting Textured Boing Ball Demo v4...');
+  DestroyTexture(BallTextureID);
+  if SoundSystemInitialized then QuitSoundSystem;
+  QuitTextSystem;
+  CloseGraph;
+end.
