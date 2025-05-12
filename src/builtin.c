@@ -83,11 +83,14 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
     {"readkey",   executeBuiltinReadKey},
+    {"real",      executeBuiltinReal},
     {"rendercopy", executeBuiltinRenderCopy},
+    {"rendercopyex", executeBuiltinRenderCopyEx},
     {"rendercopyrect", executeBuiltinRenderCopyRect},
     {"reset",     executeBuiltinReset},
     // {"result",    executeBuiltinResult}, // 'result' is special, handled differently? Let's assume not dispatched here.
     {"rewrite",   executeBuiltinRewrite},
+    {"round",     executeBuiltinRound},
     {"screencols", executeBuiltinScreenCols},
     {"screenrows", executeBuiltinScreenRows},
     {"setcolor",  executeBuiltinSetColor},
@@ -474,6 +477,32 @@ Value executeBuiltinTrunc(AST *node) {
     }
     return makeValueForType(TYPE_INTEGER, NULL);
 
+}
+
+Value executeBuiltinRound(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: Round expects 1 argument (Real).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    Value arg = eval(node->children[0]);
+    Value result;
+
+    if (arg.type == TYPE_REAL) {
+        // C round() returns a double, convert to long long for Pscal Integer
+        result = makeInt((long long)round(arg.r_val));
+    } else if (arg.type == TYPE_INTEGER || arg.type == TYPE_BYTE || arg.type == TYPE_WORD) {
+        // Rounding an integer just returns the integer itself
+        result = makeInt(arg.i_val);
+    }
+    else {
+        fprintf(stderr, "Runtime error: Round argument must be a Real or Integer type. Got %s.\n", varTypeToString(arg.type));
+        freeValue(&arg); // Free evaluated arg before exit
+        EXIT_FAILURE_HANDLER();
+    }
+
+    freeValue(&arg); // Free the evaluated argument
+    return result;
 }
 
 // File I/O
@@ -1122,6 +1151,38 @@ Value executeBuiltinIntToStr(AST *node) {
     return result; // Return the string Value (contains its own heap copy)
 }
 
+Value executeBuiltinReal(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: Real() expects 1 argument.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    Value arg = eval(node->children[0]);
+    Value result;
+
+    switch (arg.type) {
+        case TYPE_INTEGER:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_BOOLEAN: // Booleans (0 or 1) can be promoted to Real (0.0 or 1.0)
+            result = makeReal((double)arg.i_val);
+            break;
+        case TYPE_CHAR:
+            result = makeReal((double)arg.c_val); // Use ASCII value
+            break;
+        case TYPE_REAL:
+            result = makeCopyOfValue(&arg); // Already Real, just return a copy
+            break;
+        default:
+            fprintf(stderr, "Runtime error: Real() argument must be an Integer, Ordinal, or Real type. Got %s.\n", varTypeToString(arg.type));
+            freeValue(&arg); // Free evaluated arg before exit
+            EXIT_FAILURE_HANDLER();
+    }
+
+    freeValue(&arg); // Free the original evaluated argument
+    return result;
+}
+
 Value executeBuiltinInc(AST *node) {
     if (node->child_count < 1 || node->child_count > 2) {
         fprintf(stderr, "Runtime error: Inc expects 1 or 2 arguments.\n");
@@ -1630,6 +1691,29 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         setRight(dummy, retTypeNode);
         dummy->var_type = TYPE_MEMORYSTREAM; // Set function's return type
         
+    } else if (strcasecmp(name, "round") == 0) { // <<< ADD THIS ELSE IF BLOCK
+        // Round(X: Real): Integer;
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { /* Malloc error */ freeAST(dummy); EXIT_FAILURE_HANDLER(); }
+
+        // Parameter 1: X (Real)
+        AST* param = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(param, TYPE_REAL); // Parameter type
+        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_round_arg_x"); // Dummy param name
+        AST* varNode = newASTNode(AST_VARIABLE, paramNameToken);
+        freeToken(paramNameToken); // Free temp token
+        addChild(param, varNode);
+        dummy->children[0] = param;
+        dummy->child_count = 1;
+
+        // Return type: Integer
+        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer"); // Type name for return
+        AST* retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+        freeToken(retTypeNameToken); // Free temp token
+        setTypeAST(retTypeNode, TYPE_INTEGER); // Actual VarType for return
+        setRight(dummy, retTypeNode);          // Link return type node
+        dummy->var_type = TYPE_INTEGER;        // Set function's overall return type
     } else if (strcasecmp(name, "createtexture") == 0) {
         dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
         AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
@@ -1641,6 +1725,29 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
         Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok); setTypeAST(retNode, TYPE_INTEGER);
         setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
         
+    } else if (strcasecmp(name, "real") == 0) { // <<< ADD THIS ELSE IF BLOCK
+        // Pscal: function Real(IntValue: Integer): Real; (or other ordinals)
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { freeAST(dummy); EXIT_FAILURE_HANDLER(); }
+
+        // Parameter 1: Value (Integer or Ordinal, represented as Integer for dummy)
+        AST* param = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(param, TYPE_INTEGER); // Dummy parameter type, C code handles more
+        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_real_arg_val");
+        AST* varNode = newASTNode(AST_VARIABLE, paramNameToken);
+        freeToken(paramNameToken);
+        addChild(param, varNode);
+        dummy->children[0] = param;
+        dummy->child_count = 1;
+
+        // Return type: Real
+        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "real");
+        AST* retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
+        freeToken(retTypeNameToken);
+        setTypeAST(retTypeNode, TYPE_REAL);
+        setRight(dummy, retTypeNode);
+        dummy->var_type = TYPE_REAL;
     } else if (strcasecmp(name, "sqr") == 0) {
         dummy->child_capacity = 1;
         dummy->children = malloc(sizeof(AST*));
@@ -2421,9 +2528,10 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "paramcount", "paramstr", "length", "pos", "ord", "chr",
         "abs", "sqrt", "cos", "sin", "tan", "ln", "exp", "trunc",
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
-        "upcase", "low", "high", "succ", "pred", // Added Pred assuming it might exist
+        "upcase", "low", "high", "succ", "pred", "round", // Added Pred assuming it might exist
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
         "keypressed", "mstreamcreate", "quitrequested", "loadsound",
+        "real"
         
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
@@ -2436,11 +2544,11 @@ BuiltinRoutineType getBuiltinType(const char *name) {
 
     // List known PROCEDURES (no return value) - case-insensitive compare
     const char *procedures[] = {
-         "writeln", "write", "readln", "read", "reset", "rewrite",
-         "close", "assign", "halt", "inc", "dec", "delay",
-         "randomize", "mstreamfree", "textcolore", "textbackgrounde",
-        "initsoundsystem", "playsound", "quitsoundsystem","issoundplaying"
-         // Add others like clrscr, gotoxy, assert if implemented
+        "writeln", "write", "readln", "read", "reset", "rewrite",
+        "close", "assign", "halt", "inc", "dec", "delay",
+        "randomize", "mstreamfree", "textcolore", "textbackgrounde",
+        "initsoundsystem", "playsound", "quitsoundsystem",
+        "issoundplaying", "rendercopyex"
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
     for (int i = 0; i < num_procedures; i++) {

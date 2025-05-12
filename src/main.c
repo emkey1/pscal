@@ -220,6 +220,8 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("textbackgrounde", AST_PROCEDURE_DECL); // Terminal IO: Set background color (256).
     registerBuiltinFunction("new",       AST_PROCEDURE_DECL); // Memory: Allocates memory for pointer.
     registerBuiltinFunction("dispose",   AST_PROCEDURE_DECL); // Memory: Frees memory for pointer.
+    registerBuiltinFunction("round",     AST_FUNCTION_DECL);
+    registerBuiltinFunction("real",      AST_FUNCTION_DECL);  // Convert value to type real
 
     // SDL Graphics built-ins
     registerBuiltinFunction("initgraph", AST_PROCEDURE_DECL);
@@ -238,6 +240,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("fillcircle", AST_PROCEDURE_DECL);
     registerBuiltinFunction("fillrect", AST_PROCEDURE_DECL);
     registerBuiltinFunction("drawcircle", AST_PROCEDURE_DECL);
+    registerBuiltinFunction("rendercopyex", AST_PROCEDURE_DECL); 
 
     // SDL_ttf built-ins
     registerBuiltinFunction("inittextsystem", AST_PROCEDURE_DECL);
