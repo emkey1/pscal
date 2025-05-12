@@ -4,15 +4,15 @@ PROGRAM SDLMultiBouncingBalls;
 USES CRT;
 
 CONST
-  WindowWidth   = 800;
-  WindowHeight  = 600;
+  WindowWidth   = 1024;
+  WindowHeight  = 768;
   WindowTitle   = 'Multi Bouncing Balls Demo';
   TargetFPS     = 60;
   FrameDelay    = 1000 DIV TargetFPS;
 
-  NumBalls        = 15; // <<<< Number of balls
-  MaxInitialSpeed = 150.0;
-  MinInitialSpeed = 50.0;
+  NumBalls        = 20; // <<<< Number of balls
+  MaxInitialSpeed = 250.0;
+  MinInitialSpeed = 80.0;
 
 TYPE
   BallType = RECORD

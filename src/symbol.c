@@ -75,32 +75,37 @@ void freeHashTable(HashTable *table) {
         while (current) {
             Symbol *next = current->next;
             DEBUG_PRINT("[DEBUG SYMBOL] Freeing Symbol '%s' at %p in bucket %d.\n", current->name ? current->name : "?", (void*)current, i);
-            // Free memory owned by the Symbol struct (name, value and its contents)
-            if (current->name) free(current->name);
-            if (current->value) { // Check if there is a value pointer before accessing is_alias
+            
+            if (current->name) {
+                free(current->name);
+                current->name = NULL; // Good practice
+            }
+            
+            if (current->value) { // Check if there is a value pointer
                 if (!current->is_alias) {
                     #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG SYMBOL] Freeing Value for Symbol '%s' at %p.\n",
-                            current->name ? current->name : "NULL", (void*)current);
+                    fprintf(stderr, "[DEBUG SYMBOL] Freeing Value contents for NON-ALIASED Symbol '%s' at %p (Value* is %p).\n",
+                            current->name ? current->name : "NULL", (void*)current, (void*)current->value);
                     #endif
-                    // freeValue expects a Value**
-                    freeValue(current->value); // Free the allocated Value struct and its contents
-                    current->value = NULL; // Important: Nullify the pointer!
+                    freeValue(current->value); // Frees the *contents* of the Value struct
+
+                    // --- CORRECTED: Only free the Value struct itself if it's not an alias ---
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG SYMBOL] Freeing Value struct itself for NON-ALIASED Symbol '%s' at %p (Value* was %p).\n",
+                            current->name ? current->name : "NULL", (void*)current, (void*)current->value);
+                    #endif
+                    free(current->value);      // Frees the Value struct itself
+                    // --- END CORRECTION ---
+
                 } else {
                     // If it's an alias, just nullify the pointer in the symbol struct
-                    // to prevent double-free when the original symbol's table is freed.
+                    // to prevent double-free. The memory it points to is owned elsewhere.
                     #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG SYMBOL] Not freeing aliased Value for Symbol '%s' at %p. Value owned by original symbol.\n",
+                    fprintf(stderr, "[DEBUG SYMBOL] Not freeing (neither contents nor struct) for ALIASED Value for Symbol '%s' at %p. Value owned by original symbol.\n",
                             current->name ? current->name : "NULL", (void*)current);
                     #endif
-                    current->value = NULL; // Important: Nullify the pointer!
                 }
-#ifdef DEBUG
-                fprintf(stderr, "[DEBUG SYMBOL] Freeing Value struct itself for Symbol '%s' at %p (Value* was %p).\n",
-                        current->name ? current->name : "NULL", (void*)current, (void*)current->value);
-#endif
-                free(current->value);      // Frees the Value struct itself
-                current->value = NULL;     // Nullify to prevent dangling pointer issues if current is accessed again (though it's about to be freed)
+                current->value = NULL; // Nullify the pointer in the Symbol struct in both cases (alias or freed)
             }
             free(current); // Free the Symbol struct
             current = next;
@@ -110,7 +115,6 @@ void freeHashTable(HashTable *table) {
     // Free the HashTable structure itself
     free(table);
 }
-
 /**
  * Simple hash function for symbol names.
  * Sums ASCII values, multiplies by a prime, and takes modulo HASHTABLE_SIZE.
