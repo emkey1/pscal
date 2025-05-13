@@ -9,6 +9,7 @@ typedef struct {
     char current_char;
     int line;
     int column;
+    size_t text_len;
 } Lexer;
 
 /* Keyword mapping */
