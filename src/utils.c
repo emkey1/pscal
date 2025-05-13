@@ -847,29 +847,37 @@ void freeToken(Token *token) {
 }
 
 void freeProcedureTable(void) {
-    Procedure *proc = procedure_table;
-    while (proc) {
-        Procedure *next = proc->next;
-        // ADDED: Free the AST node owned by this Procedure entry.
-        // This is now the *only* place these specific AST nodes should be freed.
-        // freeAST will skip this node if it's somehow already been freed (unlikely with the new check).
-        if (proc->proc_decl) {
-            // #ifdef DEBUG // Keep debug prints conditional
-            // fprintf(stderr, "[DEBUG freeProcedureTable] Freeing proc_decl AST node %p for routine '%s'.\n",
-            //         (void*)proc->proc_decl, proc->name ? proc->name : "?");
-            // #endif
-            // Use freeAST, which now has the necessary checks to prevent double freeing or freeing type table nodes.
-            // Importantly, freeAST will NOT recursively free other parts of the AST if this node is a declaration node.
-            freeAST(proc->proc_decl); // Free the Procedure/Function declaration AST node
-            proc->proc_decl = NULL; // Prevent double free attempt
-        } else {
-             // #ifdef DEBUG fprintf(stderr, "[DEBUG freeProcedureTable] Skipping free for proc_decl (NULL pointer) for routine '%s'.\n", proc->name ? proc->name : "?"); #endif
-        }
-
-        if (proc->name) free(proc->name); // Free the duplicated name in the Procedure struct
-        free(proc); // Free the Procedure struct itself
-        proc = next;
+    if (!procedure_table) { // procedure_table is now HashTable*
+        return;
     }
+    DEBUG_PRINT("[DEBUG SYMBOL] Freeing Procedure HashTable at %p.\n", (void*)procedure_table);
+
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        // The bucket stores Symbol* which are actually Procedure*
+        Procedure *current_proc = (Procedure*)procedure_table->buckets[i];
+        while (current_proc) {
+            Procedure *next_proc = current_proc->next_in_bucket; // Use the correct 'next' field
+
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG FREE_PROC_TABLE] Freeing Procedure '%s' (AST @ %p).\n",
+                    current_proc->name ? current_proc->name : "?", (void*)current_proc->proc_decl);
+            #endif
+            
+            if (current_proc->name) {
+                free(current_proc->name);
+            }
+            if (current_proc->proc_decl) {
+                // The proc_decl AST node is a deep copy owned by this Procedure struct.
+                // It needs to be freed.
+                freeAST(current_proc->proc_decl);
+            }
+            free(current_proc); // Free the Procedure struct itself
+            
+            current_proc = next_proc;
+        }
+        procedure_table->buckets[i] = NULL;
+    }
+    free(procedure_table); // Free the HashTable struct itself
     procedure_table = NULL;
 }
 

@@ -1,101 +1,64 @@
-/* globals.h */
 #ifndef GLOBALS_H
 #define GLOBALS_H
 
-// The place where stuff that needs to be shared between files is placed
-#include "types.h"
-#include "sdl.h"
+#include "types.h" // Includes symbol.h for HashTable definition
+#include "sdl.h"   // Includes SDL headers
+#include "symbol.h"   // Includes SDL headers
 
-// Forward declare structures that are defined in symbol.h.
-// We declare pointers to these types below, but don't need their full definitions here.
-typedef struct SymbolTable HashTable; // Forward declare HashTable (which is a typedef for struct SymbolTable)
-typedef struct Symbol Symbol;         // Forward declare Symbol struct
+// Forward declare Procedure struct if its definition is in parser.h and parser.h is not included here
+// However, based on your file structure, types.h -> symbol.h defines HashTable.
+// And parser.h (which defines Procedure) includes types.h.
+// So, if globals.h includes parser.h (or types.h which includes symbol.h), HashTable should be known.
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// ... (other extern variables like gCurrentTextColor etc.) ...
-
-
-
-#ifdef __cplusplus
-}
-#endif
-
-#ifdef SUPPRESS_EXIT
-    #define EXIT_FAILURE_HANDLER() fprintf(stderr, "Suppressed\n")
-#else
-    #define EXIT_FAILURE_HANDLER() exit(EXIT_FAILURE)
-#endif
+// Let's assume parser.h is included before this line, or HashTable is known via symbol.h
+// typedef struct SymbolTable HashTable; // This is likely in symbol.h
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// --- CRT State Variables (Declarations) ---
+// --- Symbol Table Globals ---
+extern HashTable *globalSymbols;
+extern HashTable *localSymbols;
+extern Symbol *current_function_symbol; // Definition is in globals.c
+
+// --- Procedure Table (now a Hash Table) ---
+extern HashTable *procedure_table; // <<< KEEP THIS LINE (declaration as HashTable*)
+
+// --- User-defined Type Table ---
+typedef struct TypeEntry TypeEntry; // Keep forward declaration if full def is elsewhere
+extern TypeEntry *type_table;
+
+// --- CRT State Variables ---
 extern int gCurrentTextColor;
 extern int gCurrentTextBackground;
 extern bool gCurrentTextBold;
 extern bool gCurrentColorIsExt;
 extern bool gCurrentBgIsExt;
-// --- End CRT State Variables ---
 
-// For unit parsing...
+// --- Other Globals ---
 #define MAX_RECURSION_DEPTH 10
-
-// Lets implement command line parsing...
-extern int gParamCount; // Number of options passed - 1
+extern int gParamCount;
 extern char **gParamValues;
-extern AST *globalRoot;
+// extern AST *globalRoot; // Usually defined in main.c or parser.c if truly global AST root
 
-/* I/O and type conversion globals */
 extern int last_io_error;
 extern int typeWarn;
 #ifdef DEBUG
 extern int dumpExec;
+extern List *inserted_global_names; // If used for debug symbol tracking
 #endif
 
-/* Symbol table globals */
-typedef struct Symbol Symbol;
-extern Symbol *current_function_symbol;
+extern int break_requested;
 
-/* User-defined type table */
-typedef struct TypeEntry TypeEntry;
-extern TypeEntry *type_table;
+#define DEFAULT_STRING_CAPACITY 255
 
-/* Procedure table for procedures and functions */
-typedef struct Procedure Procedure;
-extern Procedure *procedure_table;
-
-#ifdef __cplusplus
-}
-#endif
-
-// Add this structure to snapshot and restore local environment safely
+// Snapshot structure for saving/restoring local symbol environments
 typedef struct SymbolEnvSnapshot {
     HashTable *head;
 } SymbolEnvSnapshot;
 
-// Define a new structure to hold user-defined type mappings.
-typedef struct TypeEntry {
-    char *name;    // The type name, already lowercased by the lexer.
-    AST *typeAST;  // The AST node that defines the type (e.g. a record type).
-    struct TypeEntry *next;
-} TypeEntry;
-
-extern int break_requested;
-
-/* Symbol table globals - NOW POINTERS TO HASHTABLES */
-// These extern declarations come AFTER symbol.h is included
-extern HashTable *globalSymbols;
-extern HashTable *localSymbols;
-extern Symbol *current_function_symbol; // This remains a pointer to a Symbol struct
-
-
-
-#define DEFAULT_STRING_CAPACITY 255
-
-
+#ifdef __cplusplus
+}
+#endif
 #endif /* GLOBALS_H */
-

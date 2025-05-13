@@ -23,7 +23,7 @@ HashTable *localSymbols = NULL;  // Current local symbol table (initialized to N
 
 // Procedure table for storing information about declared procedures and functions.
 // This remains a linked list of Procedure structs.
-Procedure *procedure_table = NULL; // Initialized to NULL.
+HashTable *procedure_table = NULL; // Initialized to NULL.
 
 // User-defined type table for storing information about declared types (records, enums, etc.).
 // This remains a linked list of TypeEntry structs.

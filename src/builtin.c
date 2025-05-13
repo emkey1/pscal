@@ -1633,7 +1633,7 @@ Value executeBuiltinProcedure(AST *node) {
     return(makeInt(0));
 }
 
-void registerBuiltinFunction(const char *name, ASTNodeType declType) {
+void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     char *lowerName = strdup(name);
     if (!lowerName) {
         fprintf(stderr, "Memory allocation error in register_builtin_function\n");
@@ -2117,7 +2117,7 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType) {
 
 
     // Add the fully prepared dummy AST node to the procedure table
-    addProcedure(dummy);
+    addProcedure(dummy, unit_context_name_param_for_addproc);
 
     // Lowercased name string `lowerName` was freed earlier after funcNameToken was created.
     

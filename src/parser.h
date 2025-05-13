@@ -9,6 +9,7 @@
 typedef struct {
     Lexer *lexer;
     Token *current_token;
+    const char *current_unit_name_context; // To pass unit name for qualified proc names
 } Parser;
 
 AST *parsePointerType(Parser *parser); 
@@ -17,10 +18,12 @@ AST *parsePointerType(Parser *parser);
 typedef struct Procedure {
     char *name;
     AST *proc_decl;  // the AST node for the procedure declaration
-    struct Procedure *next;
+    struct Procedure *next_in_bucket; 
+    
 } Procedure;
 
-void addProcedure(AST *proc_decl);
+void addProcedure(AST *proc_decl, const char* unit_context_name);
+Procedure *lookupProcedure(const char *name); 
 
 // Full parser API
 AST *buildProgramAST(Parser *parser);
@@ -31,8 +34,8 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous);
 AST *typeDeclaration(Parser *parser);
 AST *variable(Parser *parser);
 AST *varDeclaration(Parser *parser, bool isGlobal);
-AST *procedureDeclaration(Parser *parser, bool in_interface);
-AST *functionDeclaration(Parser *parser, bool in_interface);
+AST *procedureDeclaration(Parser *parser, bool in_interface); // Changed
+AST *functionDeclaration(Parser *parser, bool in_interface);   // Changed
 AST *paramList(Parser *parser);
 AST *compoundStatement(Parser *parser);
 AST *statementList(Parser *parser);
