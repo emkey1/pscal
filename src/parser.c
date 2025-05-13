@@ -382,35 +382,38 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
 
     // Store a DEEP COPY of the AST declaration node
     sym->type_def = copyAST(proc_decl_ast_original);
-    if (!sym->type_def) {
-        fprintf(stderr, "Memory allocation error copying AST in addProcedure\n");
-        free(sym->name);
+    if (!sym->type_def && proc_decl_ast_original) { // If copyAST failed but original AST existed
+        fprintf(stderr, "Critical Error: copyAST failed for procedure '%s'. Heap corruption likely.\n", sym->name);
+        if (sym->name) free(sym->name);
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
 
-    // Set the symbol's type (e.g., function's return type, or a generic procedure type)
+    // Determine the symbol's type based on the original AST declaration node's var_type
     if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
-        if (proc_decl_ast_original->right && proc_decl_ast_original->right->var_type != TYPE_VOID) {
-            sym->type = proc_decl_ast_original->right->var_type; // Function's return type
+        // For functions, 'proc_decl_ast_original->var_type' should have been set
+        // in registerBuiltinFunction to the function's actual return type.
+        if (proc_decl_ast_original->var_type != TYPE_VOID) {
+            sym->type = proc_decl_ast_original->var_type;
         } else {
-            // This case should ideally be caught by the parser: function must have a return type
-            fprintf(stderr, "Warning: Function '%s' AST missing return type node or type. Defaulting to VOID.\n", sym->name);
-            sym->type = TYPE_VOID;
+            // This case means registerBuiltinFunction set dummy->var_type to VOID for an AST_FUNCTION_DECL,
+            // or it was corrupted. This implies an issue in registerBuiltinFunction's setup or heap corruption.
+            fprintf(stderr, "Warning: Function '%s' (AST type: %s) has an effective VOID return type based on its declaration's var_type. Check registerBuiltinFunction setup.\n",
+                    sym->name, astTypeToString(proc_decl_ast_original->type));
+            sym->type = TYPE_VOID; // Fallback, but this indicates a setup problem.
         }
     } else { // AST_PROCEDURE_DECL
-        sym->type = TYPE_VOID; // Procedures are effectively void-returning from a type system perspective here
+        sym->type = TYPE_VOID;
     }
 
     sym->value = NULL; // Procedures/functions don't have a 'value' in the same way variables do
     sym->is_const = false;
     sym->is_alias = false;
-    sym->is_local_var = false; // These are global scope entries in procedure_table
-    sym->next = NULL;      // hashTableInsert will manage the ->next pointer for collision chaining
+    sym->is_local_var = false;
+    sym->next = NULL;
 
-    // Insert into the procedure_table (which is a HashTable*)
     if (procedure_table) {
-        hashTableInsert(procedure_table, sym); // This call is fine if sym is a correctly allocated Symbol*
+        hashTableInsert(procedure_table, sym);
     } else {
         // This should not happen if main initializes procedure_table
         fprintf(stderr, "CRITICAL Error: procedure_table hash table not initialized before addProcedure call.\n");
