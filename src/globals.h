@@ -1,36 +1,44 @@
+// src/globals.h
 #ifndef GLOBALS_H
 #define GLOBALS_H
 
-#include "types.h" // Includes symbol.h for HashTable definition
-#include "sdl.h"   // Includes SDL headers
-#include "symbol.h"   // Includes SDL headers
-#include <stdio.h>  // For fprintf, stderr (used in EXIT_FAILURE_HANDLER)
-#include <stdlib.h> // For exit, EXIT_FAILURE (used in EXIT_FAILURE_HANDLER)
+#include <stdio.h>  // For fprintf, stderr
+#include <stdlib.h> // For exit, EXIT_FAILURE
 
-// Forward declare Procedure struct if its definition is in parser.h and parser.h is not included here
-// However, based on your file structure, types.h -> symbol.h defines HashTable.
-// And parser.h (which defines Procedure) includes types.h.
-// So, if globals.h includes parser.h (or types.h which includes symbol.h), HashTable should be known.
+#include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
+#include "sdl.h"   // For SDL related externs or types if any directly in globals.h
+                   // (It's better if specific SDL globals are in sdl.h and sdl.c)
 
-// Let's assume parser.h is included before this line, or HashTable is known via symbol.h
-// typedef struct SymbolTable HashTable; // This is likely in symbol.h
+// --- EXIT_FAILURE_HANDLER Macro ---
+#ifdef SUPPRESS_EXIT
+    #define EXIT_FAILURE_HANDLER() fprintf(stderr, "Suppressed exit call from %s:%d\n", __FILE__, __LINE__)
+#else
+    #define EXIT_FAILURE_HANDLER() exit(EXIT_FAILURE)
+#endif
+
+#define MAX_SYMBOL_LENGTH 255
+
+// --- Forward Declarations and Typedefs needed by this file ---
+// These types are defined in symbol.h
+struct Symbol_s;
+typedef struct Symbol_s Symbol;
+
+struct SymbolTable_s;
+typedef struct SymbolTable_s HashTable;
+
+// TypeEntry is now fully defined in "types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// --- Symbol Table Globals ---
-// Forward declare the struct tags explicitly, then typedef.
-struct SymbolTable_s; // <--- Use the named tag from symbol.h
-typedef struct SymbolTable_s HashTable;
+// --- Global Variable EXTERN Declarations ---
+extern HashTable *globalSymbols;
+extern HashTable *localSymbols;
+extern Symbol *current_function_symbol;
 
-struct Symbol_s;      // <--- Use the named tag from symbol.h
-typedef struct Symbol_s Symbol;
-
-// --- Procedure Table (now a Hash Table) ---
-extern HashTable *procedure_table; 
-
-extern TypeEntry *type_table;
+extern HashTable *procedure_table; // Procedure table is now a HashTable
+extern TypeEntry *type_table;      // TypeEntry definition comes from types.h
 
 // --- CRT State Variables ---
 extern int gCurrentTextColor;
@@ -43,13 +51,15 @@ extern bool gCurrentBgIsExt;
 #define MAX_RECURSION_DEPTH 10
 extern int gParamCount;
 extern char **gParamValues;
-// extern AST *globalRoot; // Usually defined in main.c or parser.c if truly global AST root
+// extern AST *globalRoot; // Defined in main.c typically
 
 extern int last_io_error;
 extern int typeWarn;
+
 #ifdef DEBUG
 extern int dumpExec;
-extern List *inserted_global_names; // If used for debug symbol tracking
+// Assuming List is defined in types.h or list.h (which types.h might include)
+extern List *inserted_global_names;
 #endif
 
 extern int break_requested;
@@ -58,10 +68,11 @@ extern int break_requested;
 
 // Snapshot structure for saving/restoring local symbol environments
 typedef struct SymbolEnvSnapshot {
-    HashTable *head;
+    HashTable *head; // Uses HashTable typedef
 } SymbolEnvSnapshot;
 
 #ifdef __cplusplus
 }
 #endif
+
 #endif /* GLOBALS_H */

@@ -207,7 +207,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL); // Memory Stream: Creates a memory stream object.
     registerBuiltinFunction("mstreamloadfromfile", AST_PROCEDURE_DECL, NULL); // Memory Stream: Loads from file into stream.
     registerBuiltinFunction("mstreamsavetofile", AST_PROCEDURE_DECL, NULL); // Memory Stream: Saves stream to file.
-    registerBuiltinFunction("mstreamfree", AST_PROCEDURE_DECL), NULL; // Memory Stream: Frees a memory stream object.
+    registerBuiltinFunction("mstreamfree", AST_PROCEDURE_DECL, NULL); // Memory Stream: Frees a memory stream object.
     registerBuiltinFunction("api_send",  AST_FUNCTION_DECL, NULL); // Networking: Sends API request.
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL); // Networking: Receives API response.
     registerBuiltinFunction("paramcount", AST_FUNCTION_DECL, NULL); // CmdLine: Returns number of args.
@@ -273,7 +273,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("playsound",         AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("freesound",         AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("quitsoundsystem",   AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("issoundplaying",    AST_FUNCTION_DECL, NULL); // ADDED
+    registerBuiltinFunction("issoundplaying",    AST_FUNCTION_DECL, NULL); 
 
 
     // Note: Write, Writeln, Read, Readln might be handled directly in interpreter.c

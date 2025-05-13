@@ -1424,7 +1424,7 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
             unit_parser_instance.lexer = &lexer;
             unit_parser_instance.current_token = getNextToken(&lexer); // getNextToken allocates the first token
 
-            AST *linked_unit_ast = unitParser(&unit_parser_instance, recursion_depth + 1); // unitParser may return NULL on error
+            AST *linked_unit_ast = unitParser(&unit_parser_instance, recursion_depth + 1, unit_name);
 
             // ADDED: Free the allocated nested_source buffer if it was allocated
             if (nested_source) free(nested_source);

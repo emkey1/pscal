@@ -34,8 +34,8 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous);
 AST *typeDeclaration(Parser *parser);
 AST *variable(Parser *parser);
 AST *varDeclaration(Parser *parser, bool isGlobal);
-AST *procedureDeclaration(Parser *parser, bool in_interface); // Changed
-AST *functionDeclaration(Parser *parser, bool in_interface);   // Changed
+AST *procedureDeclaration(Parser *parser, bool in_interface);
+AST *functionDeclaration(Parser *parser, bool in_interface);
 AST *paramList(Parser *parser);
 AST *compoundStatement(Parser *parser);
 AST *statementList(Parser *parser);
@@ -55,7 +55,7 @@ AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
 AST *term(Parser *parser);
-AST *unitParser(Parser *parser, int recursion_depth);
+AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed); 
 AST *enumDeclaration(Parser *parser);
 Procedure *lookupProcedure(const char *name);
 

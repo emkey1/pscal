@@ -12,7 +12,6 @@
 #include <stdbool.h>
 #include <stdio.h>  
 
-#ifdef DEBUG
 // Define the helper function *only* when DEBUG is enabled
 // No 'static inline' needed here as it's defined only once in this file.
 #ifdef DEBUG
@@ -165,7 +164,7 @@ AST *lvalue(Parser *parser) {
         Token *peeked = peekToken(parser);
         if (peeked && peeked->type == TOKEN_IDENTIFIER) {
             // Potential Unit.Routine or Record.Field
-            Token *secondIdentTokenOriginal = parser->current_token_after_eat_period; // Hypothetical, need to get actual
+            Token *secondIdentTokenOriginal = parser->current_token;
             // We need to consume the period first, then get the second identifier
             eat(parser, TOKEN_PERIOD); // Consume '.'
             secondIdentTokenOriginal = parser->current_token; // This is the second identifier token
@@ -336,98 +335,98 @@ void errorParser(Parser *parser, const char *msg) {
     EXIT_FAILURE_HANDLER();
 }
 
-void addProcedure(AST *proc_decl_node, const char *unit_context_name) {
-    if (!proc_decl_node || !proc_decl_node->token || !proc_decl_node->token->value) {
-        fprintf(stderr, "Internal Error in addProcedure: proc_decl_node or its token/value is NULL.\n");
+void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc) {
+    // Create the name for the symbol table. This might involve mangling
+    // with unit_context_name_param_for_addproc if it's not NULL.
+    // For simplicity, let's assume for now the name is directly from the token,
+    // and unit qualification is handled by lookup.
+    // You will need to implement proper name construction here.
+
+    char *proc_name_original = proc_decl_ast_original->token->value;
+    char *name_for_table = strdup(proc_name_original); // Start with a copy
+    if (!name_for_table) {
+        fprintf(stderr, "Memory allocation error for name_for_table in addProcedure\n");
         EXIT_FAILURE_HANDLER();
     }
-
-    Procedure *proc = malloc(sizeof(Procedure));
-    if (!proc) {
-        fprintf(stderr, "Memory allocation error for Procedure struct in addProcedure\n");
-        EXIT_FAILURE_HANDLER();
+    // Convert name_for_table to lowercase for consistent lookup
+    for (int i = 0; name_for_table[i]; i++) {
+        name_for_table[i] = tolower((unsigned char)name_for_table[i]);
     }
 
-    const char *originalName = proc_decl_node->token->value;
-    char name_buffer[MAX_SYMBOL_LENGTH * 2 + 2];
-    char lower_orig_name_buf[MAX_SYMBOL_LENGTH];
-
-    // Lowercase the originalName first
-    strncpy(lower_orig_name_buf, originalName, MAX_SYMBOL_LENGTH -1);
-    lower_orig_name_buf[MAX_SYMBOL_LENGTH-1] = '\0';
-    for(int k=0; lower_orig_name_buf[k]; k++) lower_orig_name_buf[k] = tolower((unsigned char)lower_orig_name_buf[k]);
-
-    if (unit_context_name && unit_context_name[0] != '\0') {
-        char lower_unit_ctx[MAX_SYMBOL_LENGTH];
-        strncpy(lower_unit_ctx, unit_context_name, MAX_SYMBOL_LENGTH -1);
-        lower_unit_ctx[MAX_SYMBOL_LENGTH-1] = '\0';
-        for(int k=0; lower_unit_ctx[k]; k++) lower_unit_ctx[k] = tolower((unsigned char)lower_unit_ctx[k]);
-        snprintf(name_buffer, sizeof(name_buffer), "%s.%s", lower_unit_ctx, lower_orig_name_buf);
-    } else {
-        strncpy(name_buffer, lower_orig_name_buf, sizeof(name_buffer) - 1);
-        name_buffer[sizeof(name_buffer) - 1] = '\0';
-    }
-    
-    proc->name = strdup(name_buffer);
-    if (!proc->name) { /* error */ free(proc); EXIT_FAILURE_HANDLER(); }
-
-    proc->proc_decl = copyAST(proc_decl_node);
-    if (!proc->proc_decl) { /* error */ free(proc->name); free(proc); EXIT_FAILURE_HANDLER(); }
-    
-    proc->next_in_bucket = NULL;
-
-    if (!procedure_table) { /* error */ EXIT_FAILURE_HANDLER(); }
-    
-    // Check if a routine with this exact name (simple or qualified) already exists.
-    // This handles forward declarations; the first time it's a forward, the AST might be partial.
-    // When the full declaration is encountered, we might replace the proc_decl if it's more complete.
-    Procedure* existing_proc = (Procedure*)hashTableLookup(procedure_table, proc->name);
-    if (existing_proc) {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG PARSER addProcedure] Procedure '%s' already in table.\n", proc->name);
-        #endif
-        // If the existing one is just a forward declaration (e.g., no body in proc_decl->right/extra)
-        // and the new one has a body, update it.
-        bool existing_is_forward = (existing_proc->proc_decl->type == AST_PROCEDURE_DECL && !existing_proc->proc_decl->right) ||
-                                   (existing_proc->proc_decl->type == AST_FUNCTION_DECL && !existing_proc->proc_decl->extra);
-        bool new_has_body = (proc->proc_decl->type == AST_PROCEDURE_DECL && proc->proc_decl->right) ||
-                            (proc->proc_decl->type == AST_FUNCTION_DECL && proc->proc_decl->extra);
-
-        if (existing_is_forward && new_has_body) {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG PARSER addProcedure] Updating forward declaration for '%s' with full body.\n", proc->name);
-            #endif
-            freeAST(existing_proc->proc_decl); // Free the old (forward) AST declaration
-            existing_proc->proc_decl = proc->proc_decl; // Point to the new, complete AST declaration
-            // Free the new 'proc' struct and its name, as we updated the existing one.
-            free(proc->name);
-            free(proc); // proc->proc_decl was transferred
-            return;
-        } else if (!existing_is_forward && new_has_body){
-            fprintf(stderr, "Parser Warning: Redefinition of routine '%s'. Previous definition kept.\n", proc->name);
-            // Free the new 'proc' struct and its copied AST, as we are not using it.
-            free(proc->name);
-            freeAST(proc->proc_decl);
-            free(proc);
-            return;
-        } else {
-            // If both are full, or both are forward, or new is forward and old is full: keep old.
-            // Or just a simple duplicate, ignore the new one.
-             #ifdef DEBUG
-            fprintf(stderr, "[DEBUG PARSER addProcedure] Duplicate or non-improving re-declaration of '%s'. Original kept.\n", proc->name);
-            #endif
-            free(proc->name);
-            freeAST(proc->proc_decl);
-            free(proc);
-            return;
+    // If unit_context_name_param_for_addproc is provided, prepend it: "unit.proc"
+    if (unit_context_name_param_for_addproc && unit_context_name_param_for_addproc[0] != '\0') {
+        // Dynamically create "unit.proc"
+        size_t unit_len = strlen(unit_context_name_param_for_addproc);
+        size_t proc_len = strlen(name_for_table);
+        char* mangled_name = malloc(unit_len + 1 + proc_len + 1); // unit + . + proc + null
+        if (!mangled_name) {
+            fprintf(stderr, "Malloc failed for mangled_name in addProcedure\n");
+            free(name_for_table);
+            EXIT_FAILURE_HANDLER();
         }
+        sprintf(mangled_name, "%s.%s", unit_context_name_param_for_addproc, name_for_table);
+        free(name_for_table); // Free the previously strdup'd name
+        name_for_table = mangled_name; // Use the new mangled name
+    }
+
+
+    // THIS IS THE CRITICAL CHANGE - ALLOCATE A Symbol, NOT A Procedure
+    Symbol *sym = (Symbol *)malloc(sizeof(Symbol)); // <<< THIS SHOULD BE sizeof(Symbol)
+    if (!sym) {
+        fprintf(stderr, "Memory allocation error in addProcedure for Symbol struct\n");
+        free(name_for_table);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    sym->name = name_for_table; // name_for_table is already a strdup'd and potentially mangled copy
+
+    // Store a DEEP COPY of the AST declaration node
+    sym->type_def = copyAST(proc_decl_ast_original);
+    if (!sym->type_def) {
+        fprintf(stderr, "Memory allocation error copying AST in addProcedure\n");
+        free(sym->name);
+        free(sym);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // Set the symbol's type (e.g., function's return type, or a generic procedure type)
+    if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
+        if (proc_decl_ast_original->right && proc_decl_ast_original->right->var_type != TYPE_VOID) {
+            sym->type = proc_decl_ast_original->right->var_type; // Function's return type
+        } else {
+            // This case should ideally be caught by the parser: function must have a return type
+            fprintf(stderr, "Warning: Function '%s' AST missing return type node or type. Defaulting to VOID.\n", sym->name);
+            sym->type = TYPE_VOID;
+        }
+    } else { // AST_PROCEDURE_DECL
+        sym->type = TYPE_VOID; // Procedures are effectively void-returning from a type system perspective here
+    }
+
+    sym->value = NULL; // Procedures/functions don't have a 'value' in the same way variables do
+    sym->is_const = false;
+    sym->is_alias = false;
+    sym->is_local_var = false; // These are global scope entries in procedure_table
+    sym->next = NULL;      // hashTableInsert will manage the ->next pointer for collision chaining
+
+    // Insert into the procedure_table (which is a HashTable*)
+    if (procedure_table) {
+        hashTableInsert(procedure_table, sym); // This call is fine if sym is a correctly allocated Symbol*
+    } else {
+        // This should not happen if main initializes procedure_table
+        fprintf(stderr, "CRITICAL Error: procedure_table hash table not initialized before addProcedure call.\n");
+        // Proper cleanup if not inserting
+        if (sym->name) free(sym->name);
+        if (sym->type_def) freeAST(sym->type_def);
+        free(sym);
+        EXIT_FAILURE_HANDLER();
     }
     
-    hashTableInsert(procedure_table, (Symbol*)proc);
-
+    // Optional Debug Print
     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG PARSER addProcedure] Added '%s' to procedure hash table. AST copy @ %p. Unit context: '%s'\n",
-            proc->name, (void*)proc->proc_decl, unit_context_name ? unit_context_name : "NONE");
+    if (dumpExec) {
+        fprintf(stderr, "[DEBUG parser.c addProcedure] Added routine '%s' to procedure_table. Copied AST node at %p. Symbol type: %s\n",
+                sym->name, (void*)sym->type_def, varTypeToString(sym->type));
+    }
     #endif
 }
 

@@ -231,24 +231,63 @@ Value executeProcedureCall(AST *node) {
     }
 
     // Look up user-defined procedure
-    Procedure *proc = procedure_table;
+    Symbol *procSymbol = NULL;   // Will hold the Symbol for the procedure/function from the hash table
+    AST *proc_decl_ast = NULL;   // Will hold the actual AST_PROCEDURE_DECL or AST_FUNCTION_DECL
+
     char *lowerProcName = strdup(node->token->value);
-    if (!lowerProcName) { fprintf(stderr,"FATAL: strdup failed for proc name lookup\n"); EXIT_FAILURE_HANDLER(); }
-    for(int i=0; lowerProcName[i]; i++){ lowerProcName[i] = (char)tolower((unsigned char)lowerProcName[i]); }
-
-    while (proc) {
-        if (proc->name && strcmp(proc->name, lowerProcName) == 0)
-            break;
-        proc = proc->next;
+    if (!lowerProcName) {
+        fprintf(stderr, "FATAL: strdup failed for proc name lookup in executeProcedureCall\n");
+        EXIT_FAILURE_HANDLER();
     }
-    free(lowerProcName);
+    for(int i=0; lowerProcName[i]; i++){
+        lowerProcName[i] = (char)tolower((unsigned char)lowerProcName[i]);
+    }
 
-    if (!proc || !proc->proc_decl) {
-        fprintf(stderr, "Runtime error: routine '%s' not found or declaration missing.\n", node->token->value);
+    // Perform lookup in the procedure_table (which is now a HashTable*)
+    // Assumes procedures/functions are stored as Symbol entries in this HashTable.
+    // The Symbol's type_def field should point to the AST_PROCEDURE_DECL or AST_FUNCTION_DECL.
+    if (procedure_table) { // Ensure the hash table itself isn't NULL
+        procSymbol = hashTableLookup(procedure_table, lowerProcName); // Uses existing symbol.c helper
+    }
+
+    free(lowerProcName); // Free the lowercase name string
+
+    if (!procSymbol) {
+        fprintf(stderr, "Runtime error: routine '%s' not found in procedure hash table.\n", node->token->value);
+        EXIT_FAILURE_HANDLER();
+    }
+    
+    // The actual AST for the procedure/function declaration is stored in the Symbol.
+    // We assume it's in the 'type_def' field of the Symbol struct.
+    // If you decided to use a different field in the Symbol struct for this when modifying
+    // addProcedure, adjust here.
+    proc_decl_ast = procSymbol->type_def;
+
+    if (!proc_decl_ast) {
+        // This case means the symbol was found, but it doesn't point to a valid AST declaration.
+        fprintf(stderr, "Runtime error: routine '%s' found in hash table, but its AST declaration (type_def) is missing or NULL.\n", node->token->value);
         EXIT_FAILURE_HANDLER();
     }
 
-    int num_params = proc->proc_decl->child_count;
+    // FROM THIS POINT ONWARDS in executeProcedureCall, you must use proc_decl_ast
+    // where you previously used proc->proc_decl.
+    // And use procSymbol->name where you previously used proc->name.
+
+    // Example (the very next lines in your original code):
+    int num_params = proc_decl_ast->child_count; // Use proc_decl_ast
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG EXEC_PROC] ENTERING: Node %p (%s '%s'), Expecting %d params from proc_decl_ast %p.\n",
+            (void*)node, astTypeToString(node->type), node->token->value, num_params, (void*)proc_decl_ast);
+    fprintf(stderr, "[DEBUG EXEC_PROC]            AST Call Node State: child_count=%d, children_ptr=%p\n",
+            node->child_count, (void*)node->children);
+#endif
+
+    if (node->child_count != num_params) {
+        fprintf(stderr, "Runtime error: Argument count mismatch for call to '%s'. Expected %d, got %d.\n",
+                procSymbol->name, num_params, node->child_count); // Use procSymbol->name here
+        EXIT_FAILURE_HANDLER();
+    }
 
 #ifdef DEBUG
     fprintf(stderr, "[DEBUG EXEC_PROC] ENTERING: Node %p (%s '%s'), Expecting %d params.\n",
@@ -258,15 +297,13 @@ Value executeProcedureCall(AST *node) {
 #endif
 
     if (node->child_count != num_params) {
-        fprintf(stderr, "Runtime error: Argument count mismatch for call to '%s'. Expected %d, got %d.\n",
-                proc->name, num_params, node->child_count);
+        fprintf(stderr, "... call to '%s'. Expected %d, got %d.\n", procSymbol->name, num_params, node->child_count);
         EXIT_FAILURE_HANDLER();
     }
     if (num_params > 0 && node->children == NULL) {
-        fprintf(stderr, "CRITICAL ERROR: Procedure '%s' expects %d params, but AST node->children pointer is NULL before argument evaluation!\n",
-                proc->name, num_params);
+        fprintf(stderr, "... expects %s params, but AST node->children pointer is NULL before argument evaluation!\n", procSymbol->name, num_params);
         dumpAST(node, 0);
-        dumpAST(proc->proc_decl, 0);
+        dumpAST(proc_decl_ast, 0);
         EXIT_FAILURE_HANDLER();
     }
 
@@ -283,7 +320,7 @@ Value executeProcedureCall(AST *node) {
     }
 
     for (int i = 0; i < num_params; i++) {
-        AST *paramNode = proc->proc_decl->children[i];
+        AST *paramNode = proc_decl_ast->children[i];
         if (!paramNode) { fprintf(stderr, "Missing formal param %d\n", i); EXIT_FAILURE_HANDLER(); }
 
         if (paramNode->by_ref) {
@@ -297,7 +334,7 @@ Value executeProcedureCall(AST *node) {
             }
             AST* actualArgNode = node->children[i];
             if (!actualArgNode) {
-                fprintf(stderr, "CRITICAL ERROR: Actual argument node at index %d is NULL for call to '%s'.\n", i, proc->name);
+                fprintf(stderr, "... Actual argument AST node is NULL for call to '%s'.\n", procSymbol->name);
                 dumpAST(node,0);
                 EXIT_FAILURE_HANDLER();
             }
@@ -320,9 +357,9 @@ Value executeProcedureCall(AST *node) {
     saveLocalEnv(&snapshot);
 
     for (int i = num_params - 1; i >= 0; i--) {
-        AST *paramNode = proc->proc_decl->children[i];
+        AST *paramNode = proc_decl_ast->children[i];
         if (!paramNode || paramNode->type != AST_VAR_DECL || paramNode->child_count < 1 || !paramNode->children[0] || !paramNode->children[0]->token) {
-             fprintf(stderr, "Internal Error: Invalid formal parameter AST structure for param %d of '%s'.\n", i, proc->name);
+            fprintf(stderr, "... Invalid formal parameter AST structure for param %d of '%s'.\n", i, procSymbol->name);
              EXIT_FAILURE_HANDLER();
         }
 
@@ -493,46 +530,82 @@ Value executeProcedureCall(AST *node) {
     if (arg_values) {
         free(arg_values);
     }
+    
+    // src/interpreter.c - Stage 3: Execute Body & Handle Return
 
-    // --- Stage 3: Execute Body & Handle Return ---
-    Value retVal = makeVoid();
-    if (proc->proc_decl->type == AST_FUNCTION_DECL) {
-        AST *returnTypeDefNode = proc->proc_decl->right;
-        if (!returnTypeDefNode) { fprintf(stderr, "Internal Error: Function '%s' missing return type definition node.\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        VarType retType = returnTypeDefNode->var_type;
+        // ... (Snapshot variable should be in scope from earlier in the function)
+        // SymbolEnvSnapshot snapshot; // Ensure this is declared and saveLocalEnv(&snapshot) was called earlier.
 
+    Value retVal = makeVoid(); // Initialize return value
+
+    if (proc_decl_ast->type == AST_FUNCTION_DECL) {
+        AST *returnTypeDefNode = proc_decl_ast->right; // Get return type AST node
+        if (!returnTypeDefNode) {
+            fprintf(stderr, "Internal Error: Function '%s' missing return type definition node.\n", procSymbol->name); // Use procSymbol->name
+            EXIT_FAILURE_HANDLER();
+        }
+        VarType retType = returnTypeDefNode->var_type; // Get return VarType
+
+        // Create 'result' variable in the local scope for the function's return value
         insertLocalSymbol("result", retType, returnTypeDefNode, false);
         Symbol *resSym = lookupLocalSymbol("result");
-        if (!resSym) { fprintf(stderr, "Internal Error: Could not create 'result' symbol for function '%s'.\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        resSym->is_alias = false;
+        if (!resSym) {
+            fprintf(stderr, "Internal Error: Could not create 'result' symbol for function '%s'.\n", procSymbol->name); // Use procSymbol->name
+            EXIT_FAILURE_HANDLER();
+        }
+        resSym->is_alias = false; // 'result' owns its value
 
-        insertLocalSymbol(proc->name, retType, returnTypeDefNode, false);
-        Symbol *funSym = lookupLocalSymbol(proc->name);
-        if (!funSym) { fprintf(stderr, "Internal Error: Could not create function name alias symbol for '%s'.\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        if(funSym->value) { freeValue(funSym->value); free(funSym->value); }
-        funSym->value = resSym->value;
+        // Create an alias for the function name itself to point to 'result's value
+        insertLocalSymbol(procSymbol->name, retType, returnTypeDefNode, false); // Use procSymbol->name
+        Symbol *funSym = lookupLocalSymbol(procSymbol->name); // Use procSymbol->name for lookup
+        if (!funSym) {
+            fprintf(stderr, "Internal Error: Could not create function name alias symbol for '%s'.\n", procSymbol->name); // Use procSymbol->name
+            EXIT_FAILURE_HANDLER();
+        }
+        if(funSym->value) { // If funSym somehow got a default value, free it
+            freeValue(funSym->value);
+            free(funSym->value);
+        }
+        funSym->value = resSym->value; // Alias: funSym's value pointer now points to resSym's value
         funSym->is_alias = true;
 
-        current_function_symbol = funSym;
+        current_function_symbol = funSym; // Set global pointer to current function symbol
 
-        if (!proc->proc_decl->extra) { fprintf(stderr, "Internal Error: Function '%s' missing body (extra node).\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        executeWithScope(proc->proc_decl->extra, false);
+        // Execute the function's body
+        // Function body is typically in 'extra' child of AST_FUNCTION_DECL
+        if (!proc_decl_ast->extra) {
+            fprintf(stderr, "Internal Error: Function '%s' missing body (extra node).\n", procSymbol->name); // Use procSymbol->name
+            EXIT_FAILURE_HANDLER();
+        }
+        executeWithScope(proc_decl_ast->extra, false); // Execute the block of statements
 
+        // Retrieve the final value of 'result'
         Symbol* finalResultSym = lookupLocalSymbol("result");
-        if (!finalResultSym || !finalResultSym->value) { fprintf(stderr, "Internal Error: Could not retrieve 'result' value for function '%s'.\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        else {
-            retVal = makeCopyOfValue(finalResultSym->value);
+        if (!finalResultSym || !finalResultSym->value) {
+            fprintf(stderr, "Internal Error: Could not retrieve 'result' value for function '%s'.\n", procSymbol->name); // Use procSymbol->name
+            EXIT_FAILURE_HANDLER();
+        } else {
+            retVal = makeCopyOfValue(finalResultSym->value); // Deep copy the result
         }
 
-        restoreLocalEnv(&snapshot);
-        current_function_symbol = NULL;
-        return retVal;
+        restoreLocalEnv(&snapshot); // Restore caller's symbol environment
+        current_function_symbol = NULL; // Clear global current function pointer
+        return retVal; // Return the function's result
 
-    } else { // Procedure
-        if (!proc->proc_decl->right) { fprintf(stderr, "Internal Error: Procedure '%s' missing body (right node).\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        executeWithScope(proc->proc_decl->right, false);
-        restoreLocalEnv(&snapshot);
-        return makeVoid();
+    } else { // It's a Procedure
+        // Procedure body is typically in 'right' child of AST_PROCEDURE_DECL
+        if (!proc_decl_ast->right) {
+            fprintf(stderr, "Internal Error: Procedure '%s' missing body (right node).\n", procSymbol->name); // Use procSymbol->name
+            EXIT_FAILURE_HANDLER();
+        }
+        // CRITICAL CORRECTION: Procedures typically store their body block in ->right,
+        // while functions store it in ->extra (after ->right holds the return type).
+        // Your original code for procedures was: executeWithScope(proc_decl_ast->extra, false);
+        // This should likely be:
+        executeWithScope(proc_decl_ast->right, false); // Execute the procedure's block of statements
+        
+        restoreLocalEnv(&snapshot); // Restore caller's symbol environment
+        return makeVoid(); // Procedures return void
     }
 }
 
