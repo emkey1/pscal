@@ -34,61 +34,49 @@ static Keyword keywords[] = {
 #define NUM_KEYWORDS (sizeof(keywords)/sizeof(Keyword))
 
 void initLexer(Lexer *lexer, const char *text) {
-    // --- Shebang Handling ---
-    lexer->line = 1; // Start assuming line 1
-    lexer->column = 1; // Start assuming column 1
-    lexer->pos = 0;   // Start at position 0
-
-    // Check for UTF-8 BOM first (existing logic)
-    if (text && strncmp(text, "\xEF\xBB\xBF", 3) == 0) {
-        text += 3; // Skip BOM
-        // Note: Adjusting 'text' pointer might affect length calculations
-        // if strlen is used later on the original pointer. It's often safer
-        // to adjust lexer->pos instead. Let's refine this.
-        // Reverting the direct 'text +=' modification for safety.
-        // We'll adjust lexer->pos instead.
-    }
-
-    // Re-initialize position and potentially skip BOM using position adjustment
+    lexer->text = text;
+    lexer->text_len = text ? strlen(text) : 0; // Calculate length once at the start
     lexer->pos = 0;
-    if (text && strncmp(text, "\xEF\xBB\xBF", 3) == 0) {
+    lexer->line = 1;
+    lexer->column = 1;
+
+    // Check for UTF-8 BOM
+    if (lexer->text_len >= 3 && strncmp(lexer->text, "\xEF\xBB\xBF", 3) == 0) {
         lexer->pos = 3; // Start position after BOM
     }
 
-    // Check for Shebang line '#!' at the adjusted starting position
-    if (text && lexer->pos + 1 < strlen(text) && // Ensure text is long enough
-        text[lexer->pos] == '#' && text[lexer->pos + 1] == '!')
-    {
-        // Found shebang, skip to the end of the first line
+    // Check for Shebang line '#!'
+    if (lexer->text_len > lexer->pos + 1 && // Ensure text is long enough from current pos
+        lexer->text[lexer->pos] == '#' && lexer->text[lexer->pos + 1] == '!') {
         lexer->pos += 2; // Skip '#' and '!'
-        while (lexer->pos < strlen(text) && text[lexer->pos] != '\n') {
-            lexer->pos++; // Move position past the rest of the line
+        while (lexer->pos < lexer->text_len && lexer->text[lexer->pos] != '\n') {
+            lexer->pos++;
         }
-        if (lexer->pos < strlen(text) && text[lexer->pos] == '\n') {
-            lexer->pos++; // Move position past the newline character
-            lexer->line = 2; // Start counting from line 2
-            lexer->column = 1; // Reset column for the new line
+        if (lexer->pos < lexer->text_len && lexer->text[lexer->pos] == '\n') {
+            lexer->pos++;
+            lexer->line = 2;
+            lexer->column = 1;
         } else {
-            // Shebang line might not have a newline (EOF)
-            // The loop will end, lexer->pos is at end-of-string
-            lexer->line = 1; // Still effectively line 1 if no newline
-            lexer->column = lexer->pos + 1; // Column is effectively end of file
+            // Reached EOF or line without newline
+            // lexer->line remains 1 (or adjust if needed)
+            // lexer->column needs to be set based on final lexer->pos
+            // This case might need more robust column tracking if shebang is the whole file
         }
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG LEXER] Shebang line detected and skipped. Starting parse at line %d, pos %zu.\n", lexer->line, lexer->pos);
+        fprintf(stderr, "[DEBUG LEXER] Shebang line detected and skipped. Starting parse at line %d, col %d, pos %zu.\n", lexer->line, lexer->column, lexer->pos);
         #endif
     } else {
-        // No shebang found, reset position if only BOM was skipped
-         lexer->pos = 0; // Reset pos if no shebang
-         if (text && strncmp(text, "\xEF\xBB\xBF", 3) == 0) {
-             lexer->pos = 3; // Reset pos correctly if ONLY BOM present
-         }
-         lexer->line = 1; // Ensure line/col start correctly if no shebang
-         lexer->column = 1;
+        // No shebang, reset pos to after BOM if only BOM was present
+        lexer->pos = 0;
+        if (lexer->text_len >= 3 && strncmp(lexer->text, "\xEF\xBB\xBF", 3) == 0) {
+            lexer->pos = 3;
+        }
+        lexer->line = 1; // Ensure line/col start correctly if no shebang/BOM
+        lexer->column = 1;
     }
 
-    lexer->text = text; // Store the original text pointer
-    lexer->current_char = (lexer->pos < strlen(text)) ? text[lexer->pos] : '\0';
+    // Set current_char based on final starting position
+    lexer->current_char = (lexer->pos < lexer->text_len) ? lexer->text[lexer->pos] : '\0';
 }
 
 void skipWhitespace(Lexer *lexer) {
@@ -179,7 +167,8 @@ void advance(Lexer *lexer) {
     }
     lexer->pos++;
     lexer->column++;
-    if (lexer->pos < strlen(lexer->text)) { // <-- Uses strlen
+    // Use stored length
+    if (lexer->pos < lexer->text_len) {
         lexer->current_char = lexer->text[lexer->pos];
     } else {
         lexer->current_char = '\0';
