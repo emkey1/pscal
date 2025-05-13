@@ -11,6 +11,16 @@
 #include "types.h"
 #include <stdbool.h>
 
+// Forward declaration of AST struct, as TypeEntry will use AST*
+struct AST;
+
+// Define TypeEntry here
+typedef struct TypeEntry_s { // Use a named tag for robustness
+    char *name;
+    struct AST *typeAST; // Uses forward-declared struct AST
+    struct TypeEntry_s *next;
+} TypeEntry;
+
 typedef struct FieldValue FieldValue;
 
 typedef enum {

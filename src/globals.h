@@ -4,6 +4,8 @@
 #include "types.h" // Includes symbol.h for HashTable definition
 #include "sdl.h"   // Includes SDL headers
 #include "symbol.h"   // Includes SDL headers
+#include <stdio.h>  // For fprintf, stderr (used in EXIT_FAILURE_HANDLER)
+#include <stdlib.h> // For exit, EXIT_FAILURE (used in EXIT_FAILURE_HANDLER)
 
 // Forward declare Procedure struct if its definition is in parser.h and parser.h is not included here
 // However, based on your file structure, types.h -> symbol.h defines HashTable.
@@ -18,15 +20,16 @@ extern "C" {
 #endif
 
 // --- Symbol Table Globals ---
-extern HashTable *globalSymbols;
-extern HashTable *localSymbols;
-extern Symbol *current_function_symbol; // Definition is in globals.c
+// Forward declare the struct tags explicitly, then typedef.
+struct SymbolTable_s; // <--- Use the named tag from symbol.h
+typedef struct SymbolTable_s HashTable;
+
+struct Symbol_s;      // <--- Use the named tag from symbol.h
+typedef struct Symbol_s Symbol;
 
 // --- Procedure Table (now a Hash Table) ---
-extern HashTable *procedure_table; // <<< KEEP THIS LINE (declaration as HashTable*)
+extern HashTable *procedure_table; 
 
-// --- User-defined Type Table ---
-typedef struct TypeEntry TypeEntry; // Keep forward declaration if full def is elsewhere
 extern TypeEntry *type_table;
 
 // --- CRT State Variables ---

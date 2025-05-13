@@ -5,14 +5,16 @@
 //  Created by Michael Miller on 3/25/25.
 //
 
+
 #ifndef symbol_h
 #define symbol_h
 
 // Include necessary headers that define types used in Symbol and HashTable structs.
 // Need full definitions for VarType, Value, and AST.
 #include "types.h" // For VarType, Value (which includes FieldValue)
-#include "ast.h"   // For AST
-#include "globals.h"   // For AST
+// Forward declare AST if ast.h includes symbol.h to break include cycle for full definitions
+struct AST; // Forward declaration
+#include "globals.h"   // For global variable declarations
 
 // Keep standard library includes if their contents are used directly in this header's definitions or prototypes.
 #include <stdio.h>
@@ -21,31 +23,25 @@
 #include <ctype.h>
 #include <stdint.h> // For uintptr_t
 
+// Define the structure for a node in the symbol table with a named tag.
+struct Symbol_s { // <--- NAMED TAG
+    char *name;
+    VarType type;
+    Value *value;
+    bool is_alias;
+    bool is_local_var;
+    bool is_const;
+    struct AST *type_def;      // Use forward-declared struct AST
+    struct Symbol_s *next; // Self-referential pointer using the tag
+};
+typedef struct Symbol_s Symbol; // Typedef for convenience
 
-// Define the structure for a node in the symbol table.
-// This struct represents a symbol entry (variable, constant, procedure, function, type)
-// and acts as a node in the linked lists used within hash table buckets (separate chaining).
-typedef struct Symbol {
-    char *name;         // The name of the symbol (e.g., variable name, procedure name)
-    VarType type;       // The type of the symbol
-    Value *value;       // Pointer to the Value structure holding the symbol's data.
-    bool is_alias;      // True if 'value' pointer points to another symbol's value.
-    bool is_local_var;  // True if this symbol is a variable declared in a local scope.
-    bool is_const;      // True if this symbol is a constant.
-    AST *type_def;      // Pointer to the AST node that defines the symbol's type.
-    struct Symbol *next; // Pointer to the next Symbol in the linked list within a hash table bucket.
-} Symbol;
-
-
-// Define the hash table structure for symbol tables (global and local scopes).
-#define HASHTABLE_SIZE 256 // The fixed size of the hash table array (number of buckets).
-
-// Use the struct tag in the typedef to define the structure type and its alias.
-typedef struct SymbolTable {
-    Symbol *buckets[HASHTABLE_SIZE]; // Array of pointers to Symbol (head of linked list for each bucket)
-    // Optional: Add fields here for tracking number of symbols, number of occupied buckets, etc.
-} HashTable;
-
+// Define the hash table structure with a named tag.
+#define HASHTABLE_SIZE 256
+struct SymbolTable_s { // <--- NAMED TAG
+    Symbol *buckets[HASHTABLE_SIZE];
+};
+typedef struct SymbolTable_s HashTable; // Typedef for convenience
 
 // --- Public Symbol Table Interface Prototypes ---
 // These functions provide the interface for looking up and inserting symbols.
