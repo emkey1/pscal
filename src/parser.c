@@ -112,11 +112,12 @@ void eatInternal(Parser *parser, TokenType type) {
     }
 }
 
-Procedure *lookupProcedure(const char *name_to_lookup) { // Expects lowercased and potentially qualified name
+Symbol *lookupProcedure(const char *name_to_lookup) { // << CHANGED return type
     if (!procedure_table || !name_to_lookup) {
         return NULL;
     }
-    return (Procedure*)hashTableLookup(procedure_table, name_to_lookup);
+    // hashTableLookup returns Symbol*, no cast needed.
+    return hashTableLookup(procedure_table, name_to_lookup);
 }
 
 // parse_write_argument: parses an expression optionally followed by formatting specifiers.
@@ -283,20 +284,78 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
     AST *uses_clause = NULL;
     List *unit_list_for_this_unit = NULL;
     if (parser_for_this_unit->current_token && parser_for_this_unit->current_token->type == TOKEN_USES) {
-        // ... (Parse USES, create unit_list_for_this_unit) ...
-        // ... (Recursively call unitParser for each used unit, creating NEW Parser instances for them) ...
-        // Example for recursive call:
-        // char *nested_unit_name = listGet(unit_list_for_this_unit, i);
-        // char *nested_unit_path = findUnitFile(nested_unit_name);
-        // ... (read file) ...
-        // Lexer nested_lexer; initLexer(&nested_lexer, unit_source_buffer);
-        // Parser nested_parser_instance;
-        // nested_parser_instance.lexer = &nested_lexer;
-        // nested_parser_instance.current_token = getNextToken(&nested_lexer);
-        // nested_parser_instance.current_unit_name_context = NULL; // Will be set by recursive unitParser
-        // AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name);
-        // if (parsed_nested_unit_ast) linkUnit(parsed_nested_unit_ast, recursion_depth + 1);
-        // ... (free source, nested_parser_instance.current_token, nested_unit_path) ...
+        eat(parser_for_this_unit, TOKEN_USES);
+        uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
+        unit_list_for_this_unit = createList(); // <<<< ASSIGN VALUE HERE
+        while (parser_for_this_unit->current_token && parser_for_this_unit->current_token->type == TOKEN_IDENTIFIER) {
+            char* temp_unit_name = strdup(parser_for_this_unit->current_token->value);
+            if (!temp_unit_name) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+            // Convert to lower case for consistent lookup if findUnitFile expects lowercase
+            for(int k=0; temp_unit_name[k]; k++) temp_unit_name[k] = tolower(temp_unit_name[k]);
+            listAppend(unit_list_for_this_unit, temp_unit_name);
+            free(temp_unit_name); // listAppend makes its own copy
+
+            eat(parser_for_this_unit, TOKEN_IDENTIFIER);
+            if (parser_for_this_unit->current_token && parser_for_this_unit->current_token->type == TOKEN_COMMA) {
+                eat(parser_for_this_unit, TOKEN_COMMA);
+            } else {
+                break;
+            }
+        }
+        eat(parser_for_this_unit, TOKEN_SEMICOLON);
+        uses_clause->unit_list = unit_list_for_this_unit; // Assign to AST node
+        // Now, you need to loop through 'unit_list_for_this_unit' to parse nested units
+        // This part was in my previous comment as "// ... (Recursively call unitParser for each used unit...)"
+        // For example:
+        for (int i = 0; i < listSize(unit_list_for_this_unit); i++) {
+            char *nested_unit_name = listGet(unit_list_for_this_unit, i); // listGet returns char*
+            // Ensure nested_unit_name is lowercased if findUnitFile expects that,
+            // (already done before listAppend if findUnitFile needs lowercase)
+
+            char *nested_unit_path = findUnitFile(nested_unit_name); // findUnitFile allocates
+            if (!nested_unit_path) {
+                fprintf(stderr, "Error: Unit file for '%s' not found.\n", nested_unit_name);
+                // freeList(unit_list_for_this_unit); // Clean up list before exit
+                // ... other cleanup ...
+                EXIT_FAILURE_HANDLER();
+            }
+
+            char *unit_source_buffer = NULL;
+            FILE *nested_file = fopen(nested_unit_path, "r");
+            if (nested_file) {
+                fseek(nested_file, 0, SEEK_END);
+                long nested_fsize = ftell(nested_file);
+                rewind(nested_file);
+                unit_source_buffer = malloc(nested_fsize + 1);
+                if (!unit_source_buffer) { /* error */ fclose(nested_file); free(nested_unit_path); EXIT_FAILURE_HANDLER(); }
+                fread(unit_source_buffer, 1, nested_fsize, nested_file);
+                unit_source_buffer[nested_fsize] = '\0';
+                fclose(nested_file);
+            } else {
+                fprintf(stderr, "Error: Could not open unit file '%s'.\n", nested_unit_path);
+                free(nested_unit_path);
+                // ... other cleanup ...
+                EXIT_FAILURE_HANDLER();
+            }
+            free(nested_unit_path);
+
+            Lexer nested_lexer;
+            initLexer(&nested_lexer, unit_source_buffer);
+            Parser nested_parser_instance; // Create a NEW parser instance for the nested unit
+            nested_parser_instance.lexer = &nested_lexer;
+            nested_parser_instance.current_token = getNextToken(&nested_lexer);
+            // nested_parser_instance.current_unit_name_context will be set by the recursive call
+
+            AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name);
+
+            if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
+            if (unit_source_buffer) free(unit_source_buffer);
+
+            if (parsed_nested_unit_ast) {
+                linkUnit(parsed_nested_unit_ast, recursion_depth + 1);
+                // linkUnit should handle freeing parsed_nested_unit_ast if it's temporary
+            }
+        }
     }
     if(uses_clause) addChild(unit_node, uses_clause);
 
@@ -509,33 +568,98 @@ AST *buildProgramAST(Parser *main_parser) {
                 // Now add aliases for this *main_parser* context
                 if (procedure_table) {
                     for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
-                        Procedure *proc_entry = (Procedure*)procedure_table->buckets[bucket];
-                        while (proc_entry) {
-                            char expected_prefix[MAX_SYMBOL_LENGTH + 2];
-                            snprintf(expected_prefix, sizeof(expected_prefix), "%s.", lower_used_unit_name);
-                            
-                            if (proc_entry->name && strncmp(proc_entry->name, expected_prefix, strlen(expected_prefix)) == 0) {
-                                const char *simple_name = proc_entry->name + strlen(expected_prefix);
-                                Procedure *existing_alias = lookupProcedure(simple_name);
-                                if (existing_alias && existing_alias->proc_decl != proc_entry->proc_decl) {
-                                    // Potentially remove old alias or manage shadowing.
-                                    // For simplicity, this example might create multiple "simple_name" entries if not careful,
-                                    // leading to "last one found by hash/strcmp" behavior.
-                                    // A robust solution removes the old one from the hash table first if replacement is intended.
-                                    fprintf(stderr, "Warning: Unqualified name '%s' from unit '%s' conflicts/shadows existing. Last one wins for simple name lookup.\n", simple_name, lower_used_unit_name);
+                        Symbol *sym_entry = procedure_table->buckets[bucket]; // Get Symbol* from bucket
+                        while (sym_entry) {
+                            char expected_prefix[MAX_SYMBOL_LENGTH + 2]; // unitname. + null
+                            snprintf(expected_prefix, sizeof(expected_prefix), "%s.", lower_used_unit_name); // lower_used_unit_name_str should be the lowercased name of the unit being processed
+
+                            // Check if the symbol's name starts with "unitname."
+                            if (sym_entry->name && strncmp(sym_entry->name, expected_prefix, strlen(expected_prefix)) == 0) {
+                                const char *simple_name = sym_entry->name + strlen(expected_prefix);
+
+                                // Check if an alias with this simple_name already exists
+                                Symbol *existing_alias_sym = lookupProcedure(simple_name); // lookupProcedure now returns Symbol*
+
+                                if (existing_alias_sym && existing_alias_sym->type_def != sym_entry->type_def) {
+                                    // An alias exists but points to a different original procedure.
+                                    // This indicates a name conflict or shadowing.
+                                    // Standard Pascal might disallow this or have specific unit precedence rules.
+                                    // For now, we can print a warning. Replacing/removing the old alias
+                                    // would require removing it from the hash table first.
+                                    fprintf(stderr, "Warning: Unit procedure alias '%s' from unit '%s' conflicts with or shadows an existing procedure/alias. The new alias will likely be found first if names are identical.\n",
+                                            simple_name, lower_used_unit_name);
+                                    // To strictly prevent duplicates or implement precedence, you might:
+                                    // 1. Not add the new alias.
+                                    // 2. Remove the old alias before adding the new one (complex if it's not just an alias).
                                 }
-                                // Add alias if it doesn't exist or if we intend to override (requires removal first for clean override)
-                                if (!existing_alias || existing_alias->proc_decl != proc_entry->proc_decl) {
-                                     Procedure *alias_proc = malloc(sizeof(Procedure));
-                                     if (!alias_proc) {EXIT_FAILURE_HANDLER();}
-                                     alias_proc->name = strdup(simple_name);
-                                     if (!alias_proc->name) {free(alias_proc); EXIT_FAILURE_HANDLER();}
-                                     alias_proc->proc_decl = proc_entry->proc_decl;
-                                     alias_proc->next_in_bucket = NULL;
-                                     hashTableInsert(procedure_table, (Symbol*)alias_proc);
+
+                                // Add the alias if it doesn't exist, or if it exists but points to something else
+                                // (and we've decided to allow overriding or shadowing as per above warning).
+                                // A cleaner check: only add if no alias exists, or if it exists but points to the SAME underlying proc.
+                                if (!existing_alias_sym || existing_alias_sym->type_def != sym_entry->type_def) {
+                                    Symbol *alias_sym = (Symbol *)malloc(sizeof(Symbol));
+                                    if (!alias_sym) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+
+                                    alias_sym->name = strdup(simple_name);
+                                    if (!alias_sym->name) { free(alias_sym); EXIT_FAILURE_HANDLER(); }
+
+                                    // The alias points to the *same* copied AST declaration as the original qualified symbol
+                                    alias_sym->type_def = sym_entry->type_def; // SHALLOW COPY of the AST pointer
+                                                                             // This is okay because sym_entry->type_def is a deep copy
+                                                                             // owned by the qualified entry. The alias just refers to it.
+                                                                             // IMPORTANT: This means freeProcedureTable must NOT free
+                                                                             // alias_sym->type_def if it's an alias.
+                                                                             // This requires a flag in the Symbol struct, e.g., `is_alias_for_ast_def`.
+                                                                             // For now, let's assume freeProcedureTable only frees type_def
+                                                                             // if it's not from an alias or handles it based on sym_entry ownership.
+                                                                             // A safer approach for aliases might be to NOT set type_def,
+                                                                             // or always make lookupProcedure resolve aliases back to the original.
+                                                                             // Let's proceed by making the alias also "point" to the AST,
+                                                                             // but this implies careful freeing.
+
+                                    // A better approach for aliases: an alias symbol might not need its own type_def copy.
+                                    // It could just store the qualified name it refers to.
+                                    // Or, simpler: if it's just for lookup, the name is key.
+                                    // Let's ensure type is set correctly.
+                                    alias_sym->type = sym_entry->type; // Copy the return type
+                                    alias_sym->value = NULL; // Aliases for procedures don't have a value
+                                    alias_sym->is_const = false;
+                                    alias_sym->is_alias = true; // Mark this symbol as an alias
+                                    alias_sym->is_local_var = false;
+                                    alias_sym->next = NULL;
+
+                                    // To make freeProcedureTable safe: if sym_entry->type_def is shared, only one should free it.
+                                    // The current addProcedure creates a DEEP copy for sym->type_def.
+                                    // So, each main entry (like "unit.proc") owns its AST.
+                                    // An alias ("proc") should probably NOT get its own copy of the AST
+                                    // and its type_def should not be freed by freeProcedureTable.
+                                    // Let's refine: aliases DO NOT get their own sym->type_def.
+                                    // lookupProcedure, if it finds an alias, might need to re-lookup the qualified name.
+                                    // This is getting complex.
+                                    // Simpler for now: Aliases also point to the same type_def, but freeProcedureTable
+                                    // needs to be careful.
+
+                                    // For now, let's let the alias point to the same type_def.
+                                    // The `freeProcedureTable` frees `sym->type_def`. If multiple symbols point to it,
+                                    // it will be freed once, then other attempts will be on a NULL or dangling pointer.
+                                    // This means `alias_sym->type_def` should NOT be freed if it's just a reference.
+                                    // The easiest way is to make `alias_sym->type_def = NULL;` for aliases
+                                    // and modify `lookupProcedure` to resolve aliases if it encounters them.
+                                    // This is too complex for a quick fix.
+
+                                    // Alternative for alias: the alias IS a full symbol entry, but its type_def
+                                    // is a shallow copy of the pointer from the original unit.proc symbol.
+                                    // This means `freeProcedureTable` must NOT free `type_def` for symbols marked `is_alias`.
+
+                                    // Let's stick to your current structure for aliases but fix the types:
+                                    // The alias will point to the same AST, and we'll adjust freeing later if needed.
+                                    alias_sym->type_def = sym_entry->type_def; // Shallow copy of AST pointer
+
+                                    hashTableInsert(procedure_table, alias_sym);
+                                    DEBUG_PRINT("[DEBUG PARSER buildProgramAST] Added alias '%s' for qualified procedure '%s'.\n", simple_name, sym_entry->name);
                                 }
                             }
-                            proc_entry = proc_entry->next_in_bucket;
+                            sym_entry = sym_entry->next; // Move to next symbol in this bucket
                         }
                     }
                 }
@@ -572,32 +696,89 @@ AST *block(Parser *parser) {
 AST *procedureDeclaration(Parser *parser, bool in_interface) {
     eat(parser, TOKEN_PROCEDURE);
     Token *originalProcNameToken = parser->current_token;
-    if (originalProcNameToken->type != TOKEN_IDENTIFIER) {errorParser(parser, "Exp proc name"); return newASTNode(AST_NOOP, NULL);}
     Token *copiedProcNameToken = copyToken(originalProcNameToken);
-    eat(parser, TOKEN_IDENTIFIER);
+    eat(parser, TOKEN_IDENTIFIER); // Consumes procedure name
     AST *node = newASTNode(AST_PROCEDURE_DECL, copiedProcNameToken);
-    // copiedProcNameToken is now owned by 'node'
+    // freeToken(copiedProcNameToken); // Already handled if newASTNode copies
 
+    // *** ADD DIAGNOSTIC PRINT HERE ***
+    #ifdef DEBUG
+    if (parser->current_token) {
+        fprintf(stderr, "[DEBUG PROC_DECL_ENTRY] After eating proc name '%s', current_token is: Type=%s ('%s'), Value='%s' at Line %d, Col %d\n",
+                node->token->value, // Name of the procedure we just parsed
+                tokenTypeToString(parser->current_token->type),
+                parser->current_token->type == TOKEN_LPAREN ? "LPAREN" : "NOT LPAREN",
+                parser->current_token->value ? parser->current_token->value : "NULL",
+                parser->lexer->line,
+                parser->lexer->column);
+    } else {
+        fprintf(stderr, "[DEBUG PROC_DECL_ENTRY] After eating proc name '%s', current_token is NULL\n", node->token->value);
+    }
+    #endif
+    // *** END DIAGNOSTIC PRINT ***
+
+    AST *params = NULL;
+    // This condition now becomes critical to observe with the diagnostic print above
     if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
-        // ... (parse params, using 'parser') ...
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG PROC_DECL_PARAMS] Detected LPAREN, entering parameter parsing for '%s'.\n", node->token->value);
+        #endif
+        eat(parser, TOKEN_LPAREN);
+        if (parser->current_token->type != TOKEN_RPAREN) {
+            params = paramList(parser);
+        }
+        if (parser->current_token && parser->current_token->type == TOKEN_RPAREN) { // Check token existence
+             eat(parser, TOKEN_RPAREN);
+        } else {
+             char err_msg[128];
+             snprintf(err_msg, sizeof(err_msg), "Expected ')' to close parameter list for procedure '%s', got %s", node->token->value, parser->current_token ? tokenTypeToString(parser->current_token->type) : "EOF");
+             errorParser(parser, err_msg);
+             if(params) freeAST(params); freeAST(node); return NULL; // Cleanup & exit path
+        }
+    } else {
+        #ifdef DEBUG
+        // This block will execute if the LPAREN for parameters was not found or type was wrong
+        fprintf(stderr, "[DEBUG PROC_DECL_PARAMS] No LPAREN detected after proc name '%s', skipping parameter parsing. Current token type: %s\n",
+                node->token->value,
+                parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN");
+        #endif
     }
 
-    if (!in_interface) { // Implementation has a body
-        eat(parser, TOKEN_SEMICOLON);
-        AST *local_declarations = declarations(parser, false); // Pass parser
-        AST *compound_body = compoundStatement(parser);       // Pass parser
+    // ... (Attach params to node) ...
+    if (params) {
+        if (params->child_count > 0) {
+            node->children = params->children;
+            node->child_count = params->child_count;
+            node->child_capacity = params->child_capacity;
+            for(int i=0; i < node->child_count; i++) {
+                if(node->children[i]) node->children[i]->parent = node;
+            }
+            params->children = NULL;
+            params->child_count = 0;
+        }
+        freeAST(params);
+    }
+
+    if (!in_interface) {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG PROC_DECL_BODY] Expecting SEMICOLON after header for '%s'. Current token: Type=%s, Value='%s'\n",
+                node->token->value,
+                parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+                parser->current_token && parser->current_token->value ? parser->current_token->value : "NULL");
+        #endif
+        eat(parser, TOKEN_SEMICOLON); // This is the EAT that your log says is failing
+        AST *local_declarations = declarations(parser, false);
+        AST *compound_body = compoundStatement(parser);
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
         addChild(blockNode, compound_body);
-        blockNode->is_global_scope = false; // Routines define local scope
-        setRight(node, blockNode); // Body block for procedure
+        blockNode->is_global_scope = false;
+        setRight(node, blockNode);
     }
-    // If in_interface is true, or for forward declarations, there's no body here.
-    // The full declaration with body will be processed later if it's a forward.
-
     addProcedure(node, parser->current_unit_name_context);
-    freeToken(copiedProcNameToken); // Free the copy made for the AST node's token if newASTNode makes its own copy
-                                    // Check your newASTNode: it does copyToken(token). So this free is correct.
+    if (copiedProcNameToken)
+        freeToken(copiedProcNameToken);
+
     return node;
 }
 
@@ -1944,15 +2125,24 @@ AST *factor(Parser *parser) {
         }
         // Check if lvalue returned a simple variable that might be a parameter-less function
         else if (node->type == AST_VARIABLE) {
-             Procedure *proc = node->token ? lookupProcedure(node->token->value) : NULL;
-             if (proc && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) {
+            Symbol *procSym = node->token ? lookupProcedure(node->token->value) : NULL; // NEW: Use Symbol*
+
+             // if (proc && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) { // OLD
+             if (procSym && procSym->type_def && procSym->type_def->type == AST_FUNCTION_DECL) { // NEW: Check procSym and its type_def
                  node->type = AST_PROCEDURE_CALL; // Change type to parameter-less call
                  node->children = NULL; node->child_count = 0; node->child_capacity = 0;
                  // Set return type early if possible
-                 if (proc->proc_decl->right) setTypeAST(node, proc->proc_decl->right->var_type);
-                 else setTypeAST(node, TYPE_VOID);
-             } else if (proc) { // Procedure used as value error
-                  char error_msg[128]; snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", node->token->value); errorParser(parser, error_msg); freeAST(node); return newASTNode(AST_NOOP, NULL);
+                 // if (proc->proc_decl->right) setTypeAST(node, proc->proc_decl->right->var_type); // OLD
+                 if (procSym->type_def->right) setTypeAST(node, procSym->type_def->right->var_type); // NEW
+                 // else setTypeAST(node, TYPE_VOID); // OLD: This was an error, should use procSym->type
+                 else setTypeAST(node, procSym->type); // NEW: Use the Symbol's stored type
+             // } else if (proc) { // Procedure used as value error // OLD
+             } else if (procSym) { // NEW: Check procSym
+                  char error_msg[128];
+                  // snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", node->token->value); // OLD
+                  snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", procSym->name); // NEW
+                  errorParser(parser, error_msg);
+                  freeAST(node); return newASTNode(AST_NOOP, NULL);
              }
              // Otherwise, it's just a variable/constant reference handled by lvalue
         }

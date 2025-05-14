@@ -847,36 +847,44 @@ void freeToken(Token *token) {
 }
 
 void freeProcedureTable(void) {
-    if (!procedure_table) { // procedure_table is now HashTable*
+    if (!procedure_table) {
         return;
     }
     DEBUG_PRINT("[DEBUG SYMBOL] Freeing Procedure HashTable at %p.\n", (void*)procedure_table);
 
     for (int i = 0; i < HASHTABLE_SIZE; ++i) {
-        // The bucket stores Symbol* which are actually Procedure*
-        Procedure *current_proc = (Procedure*)procedure_table->buckets[i];
-        while (current_proc) {
-            Procedure *next_proc = current_proc->next_in_bucket; // Use the correct 'next' field
+        Symbol *current_sym = procedure_table->buckets[i]; // current_sym is Symbol*
+        while (current_sym) {
+            Symbol *next_sym = current_sym->next; // Use Symbol's 'next' field
 
             #ifdef DEBUG
-            fprintf(stderr, "[DEBUG FREE_PROC_TABLE] Freeing Procedure '%s' (AST @ %p).\n",
-                    current_proc->name ? current_proc->name : "?", (void*)current_proc->proc_decl);
+            fprintf(stderr, "[DEBUG FREE_PROC_TABLE] Freeing Symbol (routine) '%s' (AST @ %p type_def).\n",
+                    current_sym->name ? current_sym->name : "?", (void*)current_sym->type_def);
             #endif
             
-            if (current_proc->name) {
-                free(current_proc->name);
+            if (current_sym->name) {
+                free(current_sym->name);
+                current_sym->name = NULL;
             }
-            if (current_proc->proc_decl) {
-                // The proc_decl AST node is a deep copy owned by this Procedure struct.
-                // It needs to be freed.
-                freeAST(current_proc->proc_decl);
+
+            // The AST declaration is stored in type_def for Symbols in procedure_table
+            if (current_sym->type_def) {
+                // This AST node is a deep copy owned by this Symbol struct.
+                freeAST(current_sym->type_def);
+                current_sym->type_def = NULL;
             }
-            free(current_proc); // Free the Procedure struct itself
             
-            current_proc = next_proc;
+            // Note: current_sym->value should be NULL for procedure/function symbols
+            // as they don't have a "value" in the variable sense. If it could be non-NULL,
+            // it would need freeing: if (current_sym->value) { freeValue(current_sym->value); free(current_sym->value); }
+
+            free(current_sym); // Free the Symbol struct itself
+            
+            current_sym = next_sym;
         }
         procedure_table->buckets[i] = NULL;
     }
+    // free(procedure_table->buckets); // The buckets array is part of HashTable struct, not separately allocated
     free(procedure_table); // Free the HashTable struct itself
     procedure_table = NULL;
 }

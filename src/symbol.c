@@ -143,24 +143,26 @@ int hashFunctionName(const char *name) {
  * @param name  The symbol name string to look up.
  * @return A pointer to the found Symbol, or NULL if not found.
  */
-Symbol *hashTableLookup(HashTable *table, const char *name) {
-    if (!table || !name) {
-        return NULL;
-    }
-    // Calculate the hash index for the name
-    int index = hashFunctionName(name);
+Symbol* hashTableLookup(HashTable* table, const char* name) {
+    if (!table || !name) return NULL;
+    char lower_name[MAX_SYMBOL_LENGTH];
+    strncpy(lower_name, name, MAX_SYMBOL_LENGTH -1);
+    lower_name[MAX_SYMBOL_LENGTH-1] = '\0';
+    for(int i = 0; lower_name[i]; i++) lower_name[i] = tolower(lower_name[i]);
 
-    // Traverse the linked list in the corresponding bucket
-    Symbol *current = table->buckets[index];
-    while (current) {
-        // Compare the name (case-insensitive for lookups)
-        if (current->name && strcasecmp(current->name, name) == 0) {
-            return current; // Symbol found
+    int index = hashFunctionName(lower_name);
+    fprintf(stderr, "[DEBUG hashTableLookup] Looking for '%s' (lc: '%s') in bucket %d\n", name, lower_name, index); // DIAGNOSTIC
+    Symbol* current = table->buckets[index];
+    while (current != NULL) {
+        fprintf(stderr, "[DEBUG hashTableLookup]   Checking against: '%s'\n", current->name); // DIAGNOSTIC
+        if (current->name && strcmp(current->name, lower_name) == 0) {
+            fprintf(stderr, "[DEBUG hashTableLookup]   Found '%s'\n", name); // DIAGNOSTIC
+            return current;
         }
         current = current->next;
     }
-
-    return NULL; // Symbol not found in this table
+    fprintf(stderr, "[DEBUG hashTableLookup]   '%s' NOT found in bucket %d\n", name, index); // DIAGNOSTIC
+    return NULL;
 }
 
 /**

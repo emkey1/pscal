@@ -301,7 +301,7 @@ Value executeProcedureCall(AST *node) {
         EXIT_FAILURE_HANDLER();
     }
     if (num_params > 0 && node->children == NULL) {
-        fprintf(stderr, "... expects %s params, but AST node->children pointer is NULL before argument evaluation!\n", procSymbol->name, num_params);
+        fprintf(stderr, "CRITICAL ERROR: Call to '%s' expects %d params, but AST node->children pointer is NULL before argument evaluation!\n", procSymbol->name, num_params);
         dumpAST(node, 0);
         dumpAST(proc_decl_ast, 0);
         EXIT_FAILURE_HANDLER();
