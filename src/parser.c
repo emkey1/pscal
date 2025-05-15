@@ -254,66 +254,92 @@ AST *parseWriteArguments(Parser *parser) {
 
 // lvalue: Parses variable.field[index] etc. Calls expression for index.
 AST *lvalue(Parser *parser) {
-    Token *firstTokenOriginal = parser->current_token;
+    Token *firstTokenOriginal_snapshot = parser->current_token;
     
-    if (!firstTokenOriginal || firstTokenOriginal->type != TOKEN_IDENTIFIER) {
+    if (!firstTokenOriginal_snapshot || firstTokenOriginal_snapshot->type != TOKEN_IDENTIFIER) {
         errorParser(parser, "Expected identifier at start of lvalue");
-        return newASTNode(AST_NOOP, NULL);
+        return newASTNode(AST_NOOP, NULL); // Return a NOOP node on error
     }
-     if (!firstTokenOriginal || firstTokenOriginal->type != TOKEN_IDENTIFIER) {
-         errorParser(parser, "Expected identifier at start of lvalue");
-         return newASTNode(AST_NOOP, NULL);
-    }
-
-    // Store the value of the first token if we might need it later
-    // for qualified names (e.g. record.field or unit.identifier)
-    char* firstTokenOriginalValue = NULL;
-    if (firstTokenOriginal->value) { // Check if value is not NULL
-        firstTokenOriginalValue = strdup(firstTokenOriginal->value);
-        if (!firstTokenOriginalValue) {
-            // Handle strdup allocation failure
-            errorParser(parser, "Memory allocation failure for token value copy in lvalue");
+    
+    char* firstTokenOriginalValue_string_copy = NULL;
+    if (firstTokenOriginal_snapshot->value) {
+        firstTokenOriginalValue_string_copy = strdup(firstTokenOriginal_snapshot->value);
+        if (!firstTokenOriginalValue_string_copy) {
+            errorParser(parser, "Memory allocation failure for token value string copy in lvalue");
+            // No firstTokenCopyForInitialNode created yet to free
             return newASTNode(AST_NOOP, NULL);
         }
     }
-    
-    Token* firstTokenCopyForNode = copyToken(firstTokenOriginal); // For the initial AST_VARIABLE node
-    eat(parser, TOKEN_IDENTIFIER);
-    AST *node = newASTNode(AST_VARIABLE, firstTokenCopyForNode);
-    freeToken(firstTokenCopyForNode); // newASTNode made its own copy
 
-    // Check for Unit.RoutineOrField qualification
+    Token* firstTokenCopyForInitialNode = copyToken(firstTokenOriginal_snapshot);
+    if (!firstTokenCopyForInitialNode) {
+        if (firstTokenOriginalValue_string_copy) free(firstTokenOriginalValue_string_copy);
+        errorParser(parser, "Memory allocation failure for token copy in lvalue (initial node)");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    eat(parser, TOKEN_IDENTIFIER); // Consumes and frees original firstTokenOriginal_snapshot and its value
+
+    AST *node = newASTNode(AST_VARIABLE, firstTokenCopyForInitialNode);
+    freeToken(firstTokenCopyForInitialNode); // newASTNode made its own internal copy
+
+    // Check for Unit.SymbolOrField or Record.Field qualification
+    // This is the part that might use the first token's original value for qualified names.
     if (parser->current_token && parser->current_token->type == TOKEN_PERIOD) {
         Token *peeked = peekToken(parser);
         if (peeked && peeked->type == TOKEN_IDENTIFIER) {
-            // Potential Unit.Routine or Record.Field
+            eat(parser, TOKEN_PERIOD);
             Token *secondIdentTokenOriginal = parser->current_token;
-            // We need to consume the period first, then get the second identifier
-            eat(parser, TOKEN_PERIOD); // Consume '.'
-            secondIdentTokenOriginal = parser->current_token; // This is the second identifier token
 
             if (secondIdentTokenOriginal->type != TOKEN_IDENTIFIER) {
                  errorParser(parser, "Expected identifier after '.' in qualified name or field access.");
                  if(peeked) freeToken(peeked);
-                 return node; // Return the first identifier as AST_VARIABLE
+                 if (firstTokenOriginalValue_string_copy) free(firstTokenOriginalValue_string_copy);
+                 // 'node' is already created from firstTokenCopyForInitialNode, so it's a valid AST_VARIABLE
+                 return node;
             }
             Token* secondIdentTokenCopied = copyToken(secondIdentTokenOriginal);
-            eat(parser, TOKEN_IDENTIFIER); // Consume the second identifier
+             if (!secondIdentTokenCopied) { // Check copyToken result
+                errorParser(parser, "Memory allocation failure for second identifier token copy in lvalue");
+                if (peeked) freeToken(peeked);
+                if (firstTokenOriginalValue_string_copy) free(firstTokenOriginalValue_string_copy);
+                return node; // Or a more specific error node
+            }
+            eat(parser, TOKEN_IDENTIFIER);
 
-            // Form the qualified name: "firstoriginal.secondcopied"
-            // Lexer already lowercased them.
-            char qualified_name_str[MAX_SYMBOL_LENGTH * 2 + 2];
-            snprintf(qualified_name_str, sizeof(qualified_name_str), "%s.%s",
-                     firstTokenOriginal->value, // Use value from the original token of the first identifier
-                     secondIdentTokenCopied->value);
+            char qualified_name_str[MAX_SYMBOL_LENGTH * 2 + 2]; // Ensure MAX_SYMBOL_LENGTH is defined
+
+            // Use the copied string value of the first token
+            if (firstTokenOriginalValue_string_copy && secondIdentTokenCopied->value) {
+                snprintf(qualified_name_str, sizeof(qualified_name_str), "%s.%s",
+                         firstTokenOriginalValue_string_copy,
+                         secondIdentTokenCopied->value);
+
+                if (node->token) freeToken(node->token);
+                node->token = newToken(TOKEN_IDENTIFIER, qualified_name_str);
+                if (!node->token) { // Check newToken result
+                    errorParser(parser, "Memory allocation failure for qualified name token in lvalue");
+                    // Perform cleanup
+                    if (peeked) freeToken(peeked);
+                    if (secondIdentTokenCopied) freeToken(secondIdentTokenCopied);
+                    if (firstTokenOriginalValue_string_copy) free(firstTokenOriginalValue_string_copy);
+                    // 'node' might still exist but its token failed, maybe return node or error node
+                    return node; // Or more robust error handling
+                }
+            } else {
+                 errorParser(parser, "Internal error: NULL value for token components in lvalue qualification path.");
+                 // Fall through, or handle more robustly. node might be partially valid.
+            }
             
-            if (node->token) freeToken(node->token); // Free the old simple name token
-            node->token = newToken(TOKEN_IDENTIFIER, qualified_name_str); // Assign new qualified name token
-            // Node is still AST_VARIABLE; context (statement/factor) will decide if it's a call.
-            
-            freeToken(secondIdentTokenCopied);
+            if(secondIdentTokenCopied) freeToken(secondIdentTokenCopied);
         }
         if (peeked) freeToken(peeked);
+    }
+
+    // Free the strdup'd string copy now if it was created, as it's either used or no longer needed for this path.
+    if (firstTokenOriginalValue_string_copy) {
+        free(firstTokenOriginalValue_string_copy);
+        firstTokenOriginalValue_string_copy = NULL; // Avoid double free if error path taken later
     }
 
     // Handle subsequent field access '.', array '[]', or pointer '^'
@@ -322,11 +348,19 @@ AST *lvalue(Parser *parser) {
             parser->current_token->type == TOKEN_LBRACKET ||
             parser->current_token->type == TOKEN_CARET)) {
         
-        if (parser->current_token->type == TOKEN_PERIOD) { // Actual field access
+        if (parser->current_token->type == TOKEN_PERIOD) {
             eat(parser, TOKEN_PERIOD);
             Token *fieldTokenOriginal = parser->current_token;
-            if (!fieldTokenOriginal || fieldTokenOriginal->type != TOKEN_IDENTIFIER) { errorParser(parser,"Expected field name after '.'"); return node;}
+            if (!fieldTokenOriginal || fieldTokenOriginal->type != TOKEN_IDENTIFIER) {
+                errorParser(parser,"Expected field name after '.'");
+                // No need to free firstTokenOriginalValue_string_copy here, it was freed above
+                return node; // Return current node on error
+            }
             Token *fieldTokenCopied = copyToken(fieldTokenOriginal);
+             if (!fieldTokenCopied) {
+                errorParser(parser, "Memory allocation failure for field token copy in lvalue");
+                return node; // Or more robust error handling
+            }
             eat(parser, TOKEN_IDENTIFIER);
             AST *fa_node = newASTNode(AST_FIELD_ACCESS, fieldTokenCopied);
             freeToken(fieldTokenCopied);
@@ -334,23 +368,51 @@ AST *lvalue(Parser *parser) {
             node = fa_node;
         } else if (parser->current_token->type == TOKEN_LBRACKET) {
             eat(parser, TOKEN_LBRACKET);
-            AST *aa = newASTNode(AST_ARRAY_ACCESS, NULL); setLeft(aa, node);
+            AST *aa = newASTNode(AST_ARRAY_ACCESS, NULL);
+            setLeft(aa, node);
             do {
                 AST *idx = expression(parser);
-                if(!idx || idx->type == AST_NOOP){ errorParser(parser,"Bad index expression"); freeAST(aa); return node; }
+                if(!idx || idx->type == AST_NOOP){
+                    errorParser(parser,"Bad index expression in lvalue");
+                    freeAST(aa); // Free the partially constructed array access node
+                    // No need to free firstTokenOriginalValue_string_copy here
+                    return node; // Return the node before this failed array access
+                }
                 addChild(aa, idx);
-                if(parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA); else break;
+                if(parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+                    eat(parser, TOKEN_COMMA);
+                } else {
+                    break;
+                }
             } while(1);
-            if(!parser->current_token || parser->current_token->type != TOKEN_RBRACKET){ errorParser(parser,"Expected ']' after array indices"); return node;}
-            eat(parser, TOKEN_RBRACKET); node = aa;
+            if(!parser->current_token || parser->current_token->type != TOKEN_RBRACKET){
+                errorParser(parser,"Expected ']' after array indices in lvalue");
+                // aa might be partially valid, but its last index processing failed.
+                // Depending on desired error recovery, either freeAST(aa) and return node,
+                // or just return node letting aa leak (bad), or try to recover more gracefully.
+                // For now, let's assume an error means the lvalue parsing up to aa was the best we could do.
+                // Freeing aa seems safer if it's incomplete/invalid.
+                freeAST(aa);
+                return node; // Return the node before this failed array access
+            }
+            eat(parser, TOKEN_RBRACKET);
+            node = aa;
         } else if (parser->current_token->type == TOKEN_CARET) {
-            eat(parser, TOKEN_CARET); AST *derefNode = newASTNode(AST_DEREFERENCE, NULL);
-            setLeft(derefNode, node); setTypeAST(derefNode, TYPE_VOID); node = derefNode;
+            eat(parser, TOKEN_CARET);
+            AST *derefNode = newASTNode(AST_DEREFERENCE, NULL);
+            setLeft(derefNode, node);
+            setTypeAST(derefNode, TYPE_VOID); // Actual type determined during semantic analysis
+            node = derefNode;
         }
+    }
+    // Ensure firstTokenOriginalValue_string_copy is freed if allocated and not already.
+    // It should have been freed after the qualified name block or if that block wasn't entered.
+    // Adding a safeguard here is defensive if logic paths were missed.
+    if (firstTokenOriginalValue_string_copy) {
+        free(firstTokenOriginalValue_string_copy);
     }
     return node;
 }
-
 
 // parseArrayType: Calls expression for bounds
 AST *parseArrayType(Parser *parser) {
