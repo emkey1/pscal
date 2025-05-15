@@ -629,54 +629,92 @@ AST *lookupType(const char *name) {
 }
 
 
+// In emkey1/pscal/pscal-working/src/parser.c
+// Make sure DEBUG_PRINT is defined, e.g., in utils.h or globals.h:
+// #ifdef DEBUG
+// #define DEBUG_PRINT(fmt, ...) fprintf(stdout, "[DEBUG %s:%d] " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+// #else
+// #define DEBUG_PRINT(fmt, ...)
+// #endif
+
 AST *buildProgramAST(Parser *main_parser) {
     main_parser->current_unit_name_context = NULL;
     Token *copiedProgToken = copyToken(main_parser->current_token);
     if (!copiedProgToken && main_parser->current_token) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
+    DEBUG_PRINT("buildProgramAST: About to eat PROGRAM. Current: %s ('%s')\n", main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE", main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
     eat(main_parser, TOKEN_PROGRAM);
-    
+
     Token *progNameCopied = copyToken(main_parser->current_token);
     if (!progNameCopied && main_parser->current_token) { /* Malloc error check */ freeToken(copiedProgToken); EXIT_FAILURE_HANDLER(); }
+    DEBUG_PRINT("buildProgramAST: About to eat IDENTIFIER (prog name). Current: %s ('%s')\n", main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE", main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
     eat(main_parser, TOKEN_IDENTIFIER);
-    
+
     AST *prog_name_node = newASTNode(AST_VARIABLE, progNameCopied);
     freeToken(progNameCopied); // newASTNode makes its own copy
-    
-    eat(main_parser, TOKEN_SEMICOLON);
+
+    DEBUG_PRINT("buildProgramAST: About to eat SEMICOLON (after prog name). Current: %s ('%s')\n", main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE", main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+    eat(main_parser, TOKEN_SEMICOLON); // After this, current_token was proven to be TOKEN_USES by prior lexer logs
+
+    // SPOT 1: Immediately after eat(TOKEN_SEMICOLON)
+    DEBUG_PRINT("buildProgramAST SPOT 1: Immediately after eat(SEMICOLON). Token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
 
     AST *uses_clause = NULL;
     List *unit_list = NULL; // Will be created if USES is present
 
+    // This is your existing #ifdef DEBUG block with fprintf(stderr, ...).
 #ifdef DEBUG
+    // SPOT 2: Before the fprintf(stderr,...) block.
+    DEBUG_PRINT("buildProgramAST SPOT 2: Before existing stderr DEBUG block. Token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+
     if (main_parser->current_token) { // Check if current_token is not NULL
-        fprintf(stderr, "[DEBUG buildProgramAST] After PROGRAM Semicolon. Next token: %s ('%s')\n",
+        fprintf(stderr, "[DEBUG buildProgramAST] After PROGRAM Semicolon. Next token: %s ('%s') (via fprintf)\n",
                 tokenTypeToString(main_parser->current_token->type),
                 main_parser->current_token->value ? main_parser->current_token->value : "NULL_VAL");
         fflush(stderr);
     } else {
-        fprintf(stderr, "[DEBUG buildProgramAST] After PROGRAM Semicolon. Next token is NULL (EOF?).\n");
+        fprintf(stderr, "[DEBUG buildProgramAST] After PROGRAM Semicolon. Next token is NULL (EOF?) (via fprintf)\n");
         fflush(stderr);
     }
+
+    // SPOT 3: After the fprintf(stderr,...) block.
+    DEBUG_PRINT("buildProgramAST SPOT 3: After existing stderr DEBUG block. Token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
 #endif
 
+    // SPOT 4: This is the critical check point, just before the 'if' for TOKEN_USES.
+    DEBUG_PRINT("buildProgramAST SPOT 4: Just before 'if (current_token->type == TOKEN_USES)'. Token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+
     if (main_parser->current_token && main_parser->current_token->type == TOKEN_USES) {
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG buildProgramAST] Matched TOKEN_USES. About to eat.\n");
+        DEBUG_PRINT("buildProgramAST SPOT 5: Matched TOKEN_USES. About to eat TOKEN_USES.\n");
+#ifdef DEBUG // Your existing stderr print
+        fprintf(stderr, "[DEBUG buildProgramAST] Matched TOKEN_USES. About to eat. (via fprintf)\n");
         fflush(stderr);
 #endif
         eat(main_parser, TOKEN_USES); // Consumes USES token. current_token is now first unit name or error.
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG buildProgramAST] Ate TOKEN_USES. Next token: %s ('%s')\n",
+        DEBUG_PRINT("buildProgramAST SPOT 6: After eating TOKEN_USES. Next token for unit name: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                    main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+#ifdef DEBUG // Your existing stderr print
+        fprintf(stderr, "[DEBUG buildProgramAST] Ate TOKEN_USES. Next token: %s ('%s') (via fprintf)\n",
                 main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
                 (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
         fflush(stderr);
 #endif
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         unit_list = createList();
-        
-        // --- START: Corrected USES list parsing ---
-        // Loop to parse unit identifiers (e.g., unit1, unit2, unit3)
+
+        // --- START: Corrected USES list parsing (from your code) ---
         while (main_parser->current_token && main_parser->current_token->type == TOKEN_IDENTIFIER) {
+            DEBUG_PRINT("buildProgramAST USES_LOOP: Processing unit IDENTIFIER: %s ('%s')\n",
+                        main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                        main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
             char* temp_unit_name_original_case = strdup(main_parser->current_token->value);
             if (!temp_unit_name_original_case) {
                 fprintf(stderr, "Memory allocation failed for unit name in USES clause.\n");
@@ -686,70 +724,70 @@ AST *buildProgramAST(Parser *main_parser) {
                 if(copiedProgToken) freeToken(copiedProgToken);
                 EXIT_FAILURE_HANDLER();
             }
-            
-            // Add original case to the list for use by unitParser if needed,
-            // findUnitFile should handle case-insensitivity or convert to lowercase itself.
+
             listAppend(unit_list, temp_unit_name_original_case);
             free(temp_unit_name_original_case); // listAppend makes its own copy
 
-#ifdef DEBUG
+#ifdef DEBUG // Your existing stderr print
             fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Added unit '%s' to list. About to eat IDENTIFIER.\n",
                 main_parser->current_token->value);
             fflush(stderr);
 #endif
             eat(main_parser, TOKEN_IDENTIFIER); // Consume the unit name identifier
-#ifdef DEBUG
+#ifdef DEBUG // Your existing stderr print
             fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] After eating unit IDENTIFIER. Next token: %s ('%s')\n",
                 main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
                 (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
             fflush(stderr);
 #endif
             if (main_parser->current_token && main_parser->current_token->type == TOKEN_COMMA) {
-#ifdef DEBUG
+#ifdef DEBUG // Your existing stderr print
                 fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Found COMMA in USES list. About to eat.\n");
                 fflush(stderr);
 #endif
                 eat(main_parser, TOKEN_COMMA); // Consume comma
-#ifdef DEBUG
+#ifdef DEBUG // Your existing stderr print
                 fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Ate COMMA. Next token: %s ('%s')\n",
                     main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
                     (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
                 fflush(stderr);
 #endif
             } else {
-                // If not a comma, the list of identifiers is done.
-                // The next token *must* be a semicolon.
                 break;
             }
-        }
-        
-        // After the loop of unit identifiers, a semicolon is expected.
-#ifdef DEBUG
+        } // End while (parsing unit identifiers)
+
+#ifdef DEBUG // Your existing stderr print
         fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Exited identifier list loop. About to eat SEMICOLON. Current token: %s ('%s')\n",
             main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
             (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
         fflush(stderr);
 #endif
+        DEBUG_PRINT("buildProgramAST USES_LOOP: Expecting SEMICOLON to end USES. Current: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                    main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
         eat(main_parser, TOKEN_SEMICOLON); // Consumes the semicolon terminating the USES clause.
-#ifdef DEBUG
+#ifdef DEBUG // Your existing stderr print
         fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Ate USES SEMICOLON. Next token: %s ('%s')\n",
             main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
             (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
         fflush(stderr);
 #endif
-        // --- END: Corrected USES list parsing ---
-        
+        DEBUG_PRINT("buildProgramAST USES_LOOP: After eating USES SEMICOLON. Next token: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                    main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+
         if (uses_clause) { // Should always be true if we are in this block
             uses_clause->unit_list = unit_list; // unit_list can be empty if syntax was "USES ;"
         }
 
-
-        // Now, process each unit in the populated unit_list
-        if (unit_list) { // Check if unit_list was successfully created
+        // Now, process each unit in the populated unit_list (your existing logic)
+        if (unit_list) {
             for (int i = 0; i < listSize(unit_list); i++) {
                 char *used_unit_name_str_from_list = listGet(unit_list, i);
+                DEBUG_PRINT("buildProgramAST: Processing unit from USES list: '%s'\n", used_unit_name_str_from_list ? used_unit_name_str_from_list : "NULL_NAME");
                 
-                char lower_used_unit_name[MAX_SYMBOL_LENGTH]; // Ensure MAX_SYMBOL_LENGTH is defined and sufficient
+                char lower_used_unit_name[MAX_SYMBOL_LENGTH];
                 strncpy(lower_used_unit_name, used_unit_name_str_from_list, MAX_SYMBOL_LENGTH - 1);
                 lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
                 for(int k=0; lower_used_unit_name[k]; k++) {
@@ -759,29 +797,29 @@ AST *buildProgramAST(Parser *main_parser) {
                 char *unit_file_path = findUnitFile(lower_used_unit_name);
                 if (!unit_file_path) {
                     fprintf(stderr, "Parser error: Unit file for '%s' not found.\n", lower_used_unit_name);
-                    // Clean up before exit
-                    if(uses_clause) freeAST(uses_clause); // freeList will be called by freeAST if uses_clause owns unit_list
-                    else if(unit_list) freeList(unit_list); // If uses_clause wasn't created but list was
+                    if(uses_clause) freeAST(uses_clause);
+                    else if(unit_list) freeList(unit_list);
                     if(prog_name_node) freeAST(prog_name_node);
                     if(copiedProgToken) freeToken(copiedProgToken);
                     EXIT_FAILURE_HANDLER();
                 }
+                DEBUG_PRINT("buildProgramAST: Found unit file for '%s' at path: '%s'\n", lower_used_unit_name, unit_file_path);
                 
                 char* unit_source_buffer = NULL;
                 FILE *unit_file = fopen(unit_file_path, "r");
                 if(unit_file) {
+                    // ... (your existing file reading logic) ...
                     fseek(unit_file, 0, SEEK_END);
                     long fsize = ftell(unit_file);
                     rewind(unit_file);
                     unit_source_buffer = malloc(fsize + 1);
-                    if (!unit_source_buffer) { /* Malloc error, cleanup and exit */ fclose(unit_file); free(unit_file_path); /* ... more cleanup ... */ EXIT_FAILURE_HANDLER(); }
+                    if (!unit_source_buffer) { fclose(unit_file); free(unit_file_path); EXIT_FAILURE_HANDLER(); }
                     fread(unit_source_buffer, 1, fsize, unit_file);
                     unit_source_buffer[fsize] = '\0';
                     fclose(unit_file);
                 } else {
                     fprintf(stderr, "Parser error: Could not open unit file '%s'.\n", unit_file_path);
                     free(unit_file_path);
-                    /* ... more cleanup ... */
                     EXIT_FAILURE_HANDLER();
                 }
                 free(unit_file_path);
@@ -792,21 +830,34 @@ AST *buildProgramAST(Parser *main_parser) {
                 nested_parser_instance.lexer = &nested_lexer;
                 nested_parser_instance.current_token = getNextToken(&nested_lexer);
                 
-                AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name); // Pass lower_used_unit_name
+                DEBUG_PRINT("buildProgramAST: Calling unitParser for '%s'.\n", lower_used_unit_name);
+                AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name);
                 
                 if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
                 if (unit_source_buffer) free(unit_source_buffer);
 
                 if (parsed_unit_ast) {
+                    DEBUG_PRINT("buildProgramAST: unitParser succeeded for '%s'. Calling linkUnit.\n", lower_used_unit_name);
                     linkUnit(parsed_unit_ast, 1);
-                    // Note: linkUnit is responsible for freeing parsed_unit_ast if it's temporary
+                } else {
+                    DEBUG_PRINT("buildProgramAST: unitParser FAILED for '%s'.\n", lower_used_unit_name);
                 }
             }
         }
     } // End if (main_parser->current_token && main_parser->current_token->type == TOKEN_USES)
+    else {
+        // This 'else' logs if the 'if (type == TOKEN_USES)' check failed at SPOT 4
+        DEBUG_PRINT("buildProgramAST SPOT 5_ELSE: Did NOT match TOKEN_USES. Token at SPOT 4 was: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                    main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+    }
 
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG buildProgramAST] Before calling block(). Current token: %s ('%s')\n",
+#ifdef DEBUG // Your existing stderr print before block()
+    // SPOT 7: Before calling block()
+    DEBUG_PRINT("buildProgramAST SPOT 7: Before calling block(). Token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+    fprintf(stderr, "[DEBUG buildProgramAST] Before calling block(). Current token: %s ('%s') (via fprintf)\n",
             main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
             (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
     fflush(stderr);
@@ -814,7 +865,7 @@ AST *buildProgramAST(Parser *main_parser) {
 
     AST *block_node = block(main_parser);
 
-#ifdef DEBUG
+#ifdef DEBUG // Your existing stderr print after block()
     fprintf(stderr, "[DEBUG buildProgramAST] Returned from block().\n");
     fflush(stderr);
 #endif

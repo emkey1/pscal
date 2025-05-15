@@ -183,28 +183,46 @@ Token *identifier(Lexer *lexer) {
     char *id_str = malloc(len + 1);
     strncpy(id_str, lexer->text + start, len);
     id_str[len] = '\0';
-    for (size_t i = 0; i < len; i++)
+
+    // ADD DEBUG PRINT 1: See the raw lexeme before lowercasing
+    DEBUG_PRINT("identifier: Raw lexeme formed: \"_%s_\" (len %zu)\n", id_str, len);
+    // Optional: print char by char if you suspect invisible characters
+    // for (size_t k_debug = 0; k_debug < len; ++k_debug) {
+    //     DEBUG_PRINT("identifier: raw_char[%zu] = '%c' (ASCII: %d)\n", k_debug, id_str[k_debug], id_str[k_debug]);
+    // }
+
+    for (size_t i = 0; i < len; i++) // Convert to lowercase
         id_str[i] = tolower((unsigned char)id_str[i]);
+
+    // ADD DEBUG PRINT 2: See the lowercase lexeme
+    DEBUG_PRINT("identifier: Lowercase lexeme: \"_%s_\"\n", id_str);
+
     Token *token = malloc(sizeof(Token));
-    token->type = TOKEN_IDENTIFIER;
+    token->type = TOKEN_IDENTIFIER; // Default to IDENTIFIER
     for (int i = 0; i < NUM_KEYWORDS; i++) {
+        // ADD DEBUG PRINT 3: See the comparison being made
+        // DEBUG_PRINT("identifier: Comparing \"_%s_\" with keyword \"_%s_\"\n", id_str, keywords[i].keyword);
         if (strcmp(id_str, keywords[i].keyword) == 0) {
             token->type = keywords[i].token_type;
+            // ADD DEBUG PRINT 4: Confirm if a keyword was matched
+            DEBUG_PRINT("identifier: Matched keyword! Lexeme: \"_%s_\", Type set to %s\n", id_str, tokenTypeToString(token->type));
             break;
         }
     }
     token->value = id_str;
-#ifdef DEBUG
-    // Debug: Print the token type
+
+#ifdef DEBUG // Your existing debug block
     if (token->type == TOKEN_USES) {
-        printf("Lexer: Tokenized 'uses' as TOKEN_USES\n");
-    } else if (token->type == TOKEN_UNIT) {
-        printf("Lexer: Tokenized 'uses' as TOKEN_UNIT\n");
+        // This existing printf uses stdout, so it should appear if hit.
+        printf("Lexer: Tokenized 'uses' as TOKEN_USES (via existing printf)\n");
+        fflush(stdout); // Ensure it prints immediately
+    } else if (token->type == TOKEN_IDENTIFIER && strcasecmp(token->value, "uses") == 0) {
+        // ADD THIS ELSE IF: To see if "uses" was tokenized as an identifier
+        DEBUG_PRINT("identifier: Lexeme \"uses\" was tokenized as TOKEN_IDENTIFIER, not TOKEN_USES.\n");
     }
 #endif
     return token;
 }
-
 Token *stringLiteral(Lexer *lexer) {
     advance(lexer);  // Skip opening '
     char *buffer = malloc(DEFAULT_STRING_CAPACITY);
@@ -257,6 +275,7 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
     fprintf(stderr, "LEXER_DEBUG: getNextToken\n"); fflush(stderr);
 #endif
+    DEBUG_PRINT("getNextToken: Entry. Current char: '%c' (ASCII: %d) at line %d, col %d\n", lexer->current_char, lexer->current_char, lexer->line, lexer->column);
     while (lexer->current_char) {
         // Skip whitespace
         if (isspace((unsigned char)lexer->current_char)) {
@@ -295,6 +314,8 @@ Token *getNextToken(Lexer *lexer) {
              }
             continue; // Resume token search
         }
+        
+        DEBUG_PRINT("getNextToken: After skip WS/Comment. Current char: '%c' (ASCII: %d)\n", lexer->current_char, lexer->current_char);
 
          // Skip parenthesis/star comments (* ... *) - Added Nested Handling
          if (lexer->current_char == '(' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '*') {
