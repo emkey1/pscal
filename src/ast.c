@@ -402,15 +402,19 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 if (!varName) { node->var_type = TYPE_VOID; break; }
 
                 AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
-                 if (declNode) {
-                     if (declNode->type == AST_VAR_DECL || declNode->type == AST_CONST_DECL) {
-                         node->var_type = declNode->var_type;
-                         // If it's a CONST_DECL, its var_type might be VOID if it's simple,
-                         // need to get type from its expression (declNode->left)
-                         if (declNode->type == AST_CONST_DECL && node->var_type == TYPE_VOID && declNode->left) {
-                             node->var_type = declNode->left->var_type; // Type of the const's value expression
-                         }
-                     } else if (declNode->type == AST_FUNCTION_DECL) {
+                if (declNode) {
+                    if (declNode->type == AST_VAR_DECL) {
+                        node->var_type = declNode->var_type;
+                        // Crucially, link to the type definition AST node stored by varDeclaration
+                        node->type_def = declNode->right; // Assuming varDeclaration stores type AST in 'right'
+                    } else if (declNode->type == AST_CONST_DECL) {
+                        // ... (handle const type and type_def if it's a typed constant) ...
+                        node->var_type = declNode->var_type;
+                        if (node->var_type == TYPE_VOID && declNode->left) { // Simple const
+                             node->var_type = declNode->left->var_type;
+                        }
+                        node->type_def = declNode->right; // For typed constants (like array constants)
+                    } else if (declNode->type == AST_FUNCTION_DECL) {
                          if (declNode->right) node->var_type = declNode->right->var_type;
                          else node->var_type = TYPE_VOID;
                      } else { node->var_type = TYPE_VOID; }
@@ -504,30 +508,61 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
             // ... (other cases like AST_FIELD_ACCESS, AST_ARRAY_ACCESS might need review if they use lookupProcedure) ...
             // For now, assuming they primarily use type information propagated from their left child.
             case AST_FIELD_ACCESS: {
-                 node->var_type = TYPE_VOID;
-                 if(node->left && node->left->var_type == TYPE_RECORD && node->left->type_def) {
-                    AST* recordDefNode = node->left->type_def; // Get the AST_RECORD_TYPE node
-                    if (recordDefNode && recordDefNode->type == AST_TYPE_REFERENCE) recordDefNode = recordDefNode->right; // Resolve reference
+                node->var_type = TYPE_VOID; // Default
+                // Ensure node->left (the record variable) has been annotated first
+                // Its node->left->var_type should be TYPE_RECORD
+                // Its node->left->type_def should point to the AST_RECORD_TYPE
 
-                    if (recordDefNode && recordDefNode->type == AST_RECORD_TYPE) {
-                        for (int i = 0; i < recordDefNode->child_count; i++) { // Iterate field VAR_DECL groups
-                            AST* fieldDeclGroup = recordDefNode->children[i];
-                            if (fieldDeclGroup && fieldDeclGroup->type == AST_VAR_DECL) {
-                                for (int j = 0; j < fieldDeclGroup->child_count; j++) { // Iterate field names
-                                    AST* fieldNameNode = fieldDeclGroup->children[j];
-                                    if (fieldNameNode && fieldNameNode->token && node->token &&
-                                        strcasecmp(fieldNameNode->token->value, node->token->value) == 0) {
-                                        node->var_type = fieldDeclGroup->var_type; // Type of this field
-                                        node->type_def = fieldDeclGroup->right; // Link to field's type def AST
-                                        goto field_found_annotate;
+                if (node->left && node->left->var_type == TYPE_RECORD && node->left->type_def) {
+                    AST* record_definition_node = node->left->type_def;
+                    // If record_definition_node is an AST_TYPE_REFERENCE, resolve it
+                    if (record_definition_node->type == AST_TYPE_REFERENCE && record_definition_node->right) {
+                        record_definition_node = record_definition_node->right;
+                    }
+
+                    if (record_definition_node && record_definition_node->type == AST_RECORD_TYPE) {
+                        // node->token of AST_FIELD_ACCESS holds the field name
+                        const char* field_to_find = node->token ? node->token->value : NULL;
+                        if (field_to_find) {
+                            for (int i = 0; i < record_definition_node->child_count; i++) {
+                                AST* field_decl_group = record_definition_node->children[i]; // This is an AST_VAR_DECL
+                                if (field_decl_group && field_decl_group->type == AST_VAR_DECL) {
+                                    for (int j = 0; j < field_decl_group->child_count; j++) {
+                                        AST* field_name_node = field_decl_group->children[j]; // This is an AST_VARIABLE
+                                        if (field_name_node && field_name_node->token &&
+                                            strcasecmp(field_name_node->token->value, field_to_find) == 0) {
+                                            node->var_type = field_decl_group->var_type; // The type of the var group
+                                            node->type_def = field_decl_group->right;    // The type AST of the var group
+                                            goto field_found_annotate; // Using goto as in your original
+                                        }
                                     }
                                 }
                             }
+                             // If loop finishes, field was not found
+                            #ifdef DEBUG
+                            fprintf(stderr, "[Annotate Warning] Field '%s' not found in record type '%s'.\n",
+                                    field_to_find,
+                                    node->left->token ? node->left->token->value : "UNKNOWN_RECORD");
+                            #endif
                         }
+                    } else {
+                         #ifdef DEBUG
+                         fprintf(stderr, "[Annotate Warning] Left operand of field access '%s' is not a properly defined record or its type_def is not AST_RECORD_TYPE.\n",
+                                 node->left->token ? node->left->token->value : "UNKNOWN_LHS");
+                         if (record_definition_node) {
+                             fprintf(stderr, "[Annotate Debug] record_definition_node type is %s\n", astTypeToString(record_definition_node->type));
+                         }
+                         #endif
                     }
-                 }
-                 field_found_annotate:;
-                 break;
+                } else if (node->left) {
+                    #ifdef DEBUG
+                    fprintf(stderr, "[Annotate Warning] Left operand of field access for field '%s' is not a record (type: %s) or type_def is missing.\n",
+                            node->token ? node->token->value : "UNKNOWN_FIELD",
+                            varTypeToString(node->left->var_type));
+                    #endif
+                }
+                field_found_annotate:;
+                break;
             }
              case AST_ARRAY_ACCESS: {
                   node->var_type = TYPE_VOID;
