@@ -498,6 +498,7 @@ Value executeBuiltinRound(AST *node) {
     else {
         fprintf(stderr, "Runtime error: Round argument must be a Real or Integer type. Got %s.\n", varTypeToString(arg.type));
         freeValue(&arg); // Free evaluated arg before exit
+        result = makeInt(0);
         EXIT_FAILURE_HANDLER();
     }
 
@@ -1158,7 +1159,7 @@ Value executeBuiltinReal(AST *node) {
     }
 
     Value arg = eval(node->children[0]);
-    Value result;
+    Value result = makeInt(0);
 
     switch (arg.type) {
         case TYPE_INTEGER:
@@ -2266,7 +2267,7 @@ Value executeBuiltinSucc(AST *node) {
     }
 
     Value argVal = eval(node->children[0]); // Evaluate the argument
-    long long currentOrdinal;
+    long long currentOrdinal = 0;
     long long maxOrdinal = -1;
     bool checkMax = false;
     Value result = makeVoid();

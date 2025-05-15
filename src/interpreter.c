@@ -610,17 +610,38 @@ Value executeProcedureCall(AST *node) {
 }
 
 // New function to process local declarations within a scope
-void processLocalDeclarations(AST* declarationsNode) {
+static void processLocalDeclarations(AST* declarationsNode) {
     if (!declarationsNode || declarationsNode->type != AST_COMPOUND) {
-        // Should be an AST_COMPOUND node containing decls, or NULL/empty compound if none
-        if (declarationsNode && declarationsNode->type != AST_NOOP) { // Ignore NOOP from empty decls section
-             fprintf(stderr, "Warning: Expected COMPOUND node for local declarations, got %s\n",
+        if (declarationsNode && declarationsNode->type != AST_NOOP) {
+             fprintf(stderr, "Warning: Expected COMPOUND node for declarations, got %s\n",
                      declarationsNode ? astTypeToString(declarationsNode->type) : "NULL");
         }
-        return; // Nothing to process
+        return;
     }
 
-    // Iterate through all declaration nodes (CONST_DECL, TYPE_DECL, VAR_DECL...)
+    // --- Determine if these declarations belong to a global scope ---
+    bool is_processing_global_declarations = false;
+    if (declarationsNode->parent && declarationsNode->parent->type == AST_BLOCK) {
+        is_processing_global_declarations = declarationsNode->parent->is_global_scope;
+    } else {
+        // This case would be unusual if called from executeWithScope's AST_BLOCK case.
+        // It might imply declarationsNode is an orphaned compound or part of a different structure.
+        // For safety, assume local if parentage isn't the expected AST_BLOCK.
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG processLocalDeclarations] Warning: declarationsNode->parent is not an AST_BLOCK or is NULL. Assuming local scope for declarations.\n");
+        if (declarationsNode->parent) {
+            fprintf(stderr, "Parent type is: %s\n", astTypeToString(declarationsNode->parent->type));
+        }
+        #endif
+        is_processing_global_declarations = false;
+    }
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG processLocalDeclarations] Scope determined as: %s\n",
+            is_processing_global_declarations ? "GLOBAL" : "LOCAL");
+    fflush(stderr);
+#endif
+
     for (int i = 0; i < declarationsNode->child_count; i++) {
         AST *declNode = declarationsNode->children[i];
         if (!declNode) continue;
@@ -628,67 +649,105 @@ void processLocalDeclarations(AST* declarationsNode) {
         switch (declNode->type) {
             case AST_CONST_DECL: {
                  const char *constName = declNode->token->value;
-                 DEBUG_PRINT("[DEBUG_LOCALS] Processing local CONST_DECL: %s\n", constName);
+#ifdef DEBUG // Consistent debug message prefix
+                 fprintf(stderr, "[DEBUG processLocalDeclarations] Processing %s CONST_DECL: %s\n",
+                             is_processing_global_declarations ? "global" : "local", constName);
+                 fflush(stderr);
+#endif
                  Value constVal = eval(declNode->left);
-                 Symbol *sym = insertLocalSymbol(constName, constVal.type, declNode->right, false);
+                 Symbol *sym = NULL;
 
-                 if (sym && sym->value) {
-                     freeValue(sym->value);
-                     *sym->value = makeCopyOfValue(&constVal);
+                 if (is_processing_global_declarations) {
+                     insertGlobalSymbol(constName, constVal.type, declNode->right);
+                     sym = lookupGlobalSymbol(constName); // Verify it was inserted
+                 } else {
+                     sym = insertLocalSymbol(constName, constVal.type, declNode->right, false);
+                 }
+
+                 if (sym) { // Check if symbol was successfully inserted/found
+                     if (sym->value) { // Check if value struct exists
+                        freeValue(sym->value); // Free the default value potentially created by insertSymbol
+                        *sym->value = makeCopyOfValue(&constVal); // Assign deep copy
+                     } else {
+                        // If sym->value is NULL, insertSymbol failed to allocate it.
+                        // This should ideally be caught by insertGlobal/LocalSymbol.
+                        // For safety, allocate it here if it's missing.
+                        sym->value = malloc(sizeof(Value));
+                        if (!sym->value) {
+                            fprintf(stderr, "FATAL: malloc failed for Value in const declaration of '%s'\n", constName);
+                            freeValue(&constVal); EXIT_FAILURE_HANDLER();
+                        }
+                        *sym->value = makeCopyOfValue(&constVal);
+                     }
                      sym->is_const = true;
 #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG_LOCALS] Set is_const=TRUE for local constant '%s'\n", constName);
+                     fprintf(stderr, "[DEBUG processLocalDeclarations] Set is_const=TRUE for %s constant '%s'\n",
+                                 is_processing_global_declarations ? "global" : "local", constName);
+                     fflush(stderr);
 #endif
-                 } // ... error handling ...
+                 } else {
+                      fprintf(stderr, "Error: Failed to insert or find symbol for constant '%s'.\n", constName);
+                      // Handle error - though insertGlobal/LocalSymbol usually exits on failure
+                 }
                  freeValue(&constVal);
                  break;
              }
             case AST_VAR_DECL: {
-                // Process local variable declarations
-                AST *typeNode = declNode->right; // The type definition node
+                AST *typeNode = declNode->right;
                 for (int j = 0; j < declNode->child_count; j++) {
-                    AST *varNode = declNode->children[j]; // The VARIABLE node
+                    AST *varNode = declNode->children[j];
+                    if (!varNode || !varNode->token) continue;
                     const char *varName = varNode->token->value;
-                    DEBUG_PRINT("[DEBUG_LOCALS] Processing local VAR_DECL: %s\n", varName);
-
-                    // Insert into local symbol table, mark as variable
-                    Symbol *sym = insertLocalSymbol(varName, declNode->var_type, typeNode, true);
-
-                    // Value initialization happens within insertLocalSymbol via makeValueForType
-                    if (!sym || !sym->value) {
-                        fprintf(stderr, "Error: Failed to insert or initialize local variable '%s'.\n", varName);
-                        // Handle error
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG processLocalDeclarations] Processing %s VAR_DECL: %s of type %s\n",
+                                is_processing_global_declarations ? "global" : "local",
+                                varName,
+                                varTypeToString(declNode->var_type));
+                    fflush(stderr);
+#endif
+                    if (is_processing_global_declarations) {
+                        insertGlobalSymbol(varName, declNode->var_type, typeNode);
+                    } else {
+                        insertLocalSymbol(varName, declNode->var_type, typeNode, true);
                     }
-                     // Handle fixed-length string size if needed (might be redundant if insertLocalSymbol does it)
-                     if (sym && sym->type == TYPE_STRING && typeNode && typeNode->right) {
-                          // ... (code to evaluate length and set sym->value->max_length) ...
-                          // This logic might be better placed entirely within insertLocalSymbol
-                     }
+                    // Value initialization (including base_type_node for pointers)
+                    // is handled within insertGlobalSymbol/insertLocalSymbol via makeValueForType.
                 }
                 break;
             }
             case AST_TYPE_DECL: {
-                // Handling local TYPE declarations is complex.
-                // Standard Pascal often doesn't allow types truly local *only*
-                // to the procedure scope; they might be visible outwards.
-                // For simplicity, we can IGNORE local type declarations for now.
-                // Global types are already handled by the parser/linkUnit.
-                DEBUG_PRINT("[DEBUG_LOCALS] Skipping local TYPE_DECL: %s\n", declNode->token->value);
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG processLocalDeclarations] Skipping %s TYPE_DECL: %s (handled by parser)\n",
+                        is_processing_global_declarations ? "global" : "local",
+                        declNode->token ? declNode->token->value : "?");
+                fflush(stderr);
+#endif
                 break;
             }
             case AST_PROCEDURE_DECL:
             case AST_FUNCTION_DECL: {
-                // Handle nested procedures/functions if you implement them later
-                DEBUG_PRINT("[DEBUG_LOCALS] Skipping nested PROCEDURE/FUNCTION: %s\n", declNode->token->value);
+                // If these are encountered here, it means they are nested inside a block's
+                // general declarations section, rather than at the top level of a unit/program
+                // where they are typically added to procedure_table by the parser.
+                // For now, standard Pascal doesn't have true nested local routines that hide outer ones.
+                // If these are global (e.g. in program block), they should have been handled by parser.
+                // If local, this indicates a nested structure not fully supported or a parser bug.
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG processLocalDeclarations] Encountered nested PROCEDURE/FUNCTION '%s' in %s declarations. Parser should handle top-level routines.\n",
+                        declNode->token ? declNode->token->value : "?",
+                        is_processing_global_declarations ? "global" : "local");
+                fflush(stderr);
+#endif
+                // Optionally, if you want to support adding them to procedure_table from here:
+                // addProcedure(declNode, is_processing_global_declarations ? NULL : current_scope_name_if_available);
+                // But typically, addProcedure is called during the main parsing of routine declarations.
                 break;
             }
             default:
-                // Ignore other node types that might appear in the declarations compound node
                 break;
         }
     }
 }
-
 char *enumValueToString(Type *enum_type, int value) {
     if (!enum_type) return strdup("<invalid>");
     if (value < 0 || value >= enum_type->member_count) return strdup("<out-of-range>");
@@ -1702,75 +1761,6 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
      }
 }
 
-static void processDeclarations(AST *decl, bool is_global_block) {
-    // Check if decl is a valid COMPOUND node containing declarations
-    if (!decl || decl->type != AST_COMPOUND) {
-         if (decl && decl->type != AST_NOOP) { /* Warning or ignore */ }
-         return; // Nothing to process
-     }
-
-    // Iterate through all top-level declaration nodes (VAR_DECL, CONST_DECL, TYPE_DECL...)
-    for (int i = 0; i < decl->child_count; i++) {
-        AST *d = decl->children[i]; // d is a VAR_DECL group, CONST_DECL, TYPE_DECL etc.
-        if (!d) continue;
-
-        // Handle VAR_DECL specifically
-        if (d->type == AST_VAR_DECL) {
-            // d->child_count > 0 holds the VARIABLE nodes (names)
-            // d->right holds the type definition node (e.g., TYPE_REFERENCE to PInt)
-            // d->var_type holds the resolved VarType enum (e.g., TYPE_POINTER)
-
-            for (int j = 0; j < d->child_count; j++) {
-                AST *varNode = d->children[j]; // The AST_VARIABLE node for the name (e.g., p1)
-                if (!varNode || !varNode->token) continue; // Skip invalid variable nodes
-
-                const char *varname = varNode->token->value; // e.g., "p1"
-                VarType varType = d->var_type;         // e.g., TYPE_POINTER
-                AST* typeDefNode = d->right;           // e.g., TYPE_REFERENCE("pint")
-
-                // --- Insert the symbol ---
-                // insertGlobal/LocalSymbol now handles allocation AND initialization via makeValueForType
-                if (is_global_block) {
-                    insertGlobalSymbol(varname, varType, typeDefNode);
-                    #ifdef DEBUG
-                    // Keep this print if desired
-                    // fprintf(stderr, "[DEBUG] processDeclarations: Called insertGlobalSymbol('%s', type=%s)\n", varname, varTypeToString(varType));
-                    #endif
-                } else {
-                    insertLocalSymbol(varname, varType, typeDefNode, true); // true indicates it's a local variable
-                     #ifdef DEBUG
-                    // fprintf(stderr, "[DEBUG] processDeclarations: Called insertLocalSymbol('%s', type=%s)\n", varname, varTypeToString(varType));
-                    #endif
-                }
-
-                // --- REMOVED Redundant/Harmful Initialization Block ---
-                // The symbol's value (including base_type_node for pointers)
-                // is now fully initialized by insertGlobal/LocalSymbol -> makeValueForType.
-                // No further initialization is needed here.
-
-            } // End loop over variable names (j)
-        } // End if VAR_DECL
-        else if (d->type == AST_CONST_DECL) {
-             // Constant evaluation and insertion happens during parsing (declarations function)
-             // No processing needed here during execution walk?
-             // If constants needed re-evaluation for locals, it would go here.
-        }
-        else if (d->type == AST_TYPE_DECL) {
-            // Type declarations are handled during parsing (insertType)
-            // No processing needed here during execution walk.
-        }
-        // Add handling for nested PROCEDURE/FUNCTION declarations if/when implemented
-        else if (d->type == AST_PROCEDURE_DECL || d->type == AST_FUNCTION_DECL) {
-             // Add to procedure table if not already done by parser?
-             // Or handle scoping for nested calls if implemented.
-             #ifdef DEBUG
-             fprintf(stderr, "[DEBUG processDeclarations] Skipping nested procedure/function '%s'\n", d->token ? d->token->value : "?");
-             #endif
-        }
-    } // End loop over declarations (i)
-}
-
-
 //ExecStatus executeWithScope(AST *node, bool is_global_scope) { // Example new signature
 void executeWithScope(AST *node, bool is_global_scope)  {
     if (!node)
@@ -1979,28 +1969,94 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                    break;
         }
         case AST_BLOCK: {
-            if (node->child_count >= 2) {
-                AST *decl = node->children[0];
-                bool is_global_block = node->is_global_scope;
+            // 'node' here is the AST_BLOCK.
+            // 'node->is_global_scope' is set by the parser and indicates if this block
+            // itself represents the global scope of a program/unit or a local scope of a routine.
+            // 'is_global_scope_context_from_caller' is what the *caller* thought its scope was.
+            // For an AST_BLOCK, its own 'node->is_global_scope' is authoritative for its declarations.
 
-                static bool global_symbols_inserted = false;
-                if (!is_global_block || !global_symbols_inserted) {
-                    processDeclarations(decl, is_global_block);
-                    if (is_global_block)
-                        global_symbols_inserted = true;
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Processing block. Node's own is_global_scope flag: %d\n",
+                node->is_global_scope);
+            fflush(stderr);
+#endif
+
+            // Process declarations first
+            // Children[0] of AST_BLOCK is the AST_COMPOUND node containing declarations.
+            if (node->child_count >= 1 && node->children[0] != NULL) {
+                AST *declarationsNode = node->children[0];
+                if (declarationsNode->type == AST_COMPOUND || declarationsNode->type == AST_NOOP) { // NOOP if no declarations
+                    // --- THIS IS WHERE processLocalDeclarations MUST BE CALLED ---
+                    // processLocalDeclarations will look at declarationsNode->parent (which is 'node')
+                    // and use node->is_global_scope to determine if symbols are global or local.
+                    processLocalDeclarations(declarationsNode);
+                } else {
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Warning: Expected declarations (AST_COMPOUND or AST_NOOP) as first child of AST_BLOCK, but got %s.\n",
+                            astTypeToString(declarationsNode->type));
+                    fflush(stderr);
+#endif
                 }
+            } else {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Block node %p has no declarations part (child_count < 1 or children[0] is NULL).\n", (void*)node);
+                fflush(stderr);
+#endif
+            }
 
-                executeWithScope(node->children[1], is_global_block);
+            // Then execute compound statement (body of the block)
+            // Children[1] of AST_BLOCK is the AST_COMPOUND node containing statements.
+            if (node->child_count >= 2 && node->children[1] != NULL) {
+                if (node->children[1]->type == AST_COMPOUND || node->children[1]->type == AST_NOOP) {
+                    // The 'is_global_scope' for the statements within this block is
+                    // determined by the block itself.
+                    executeWithScope(node->children[1], node->is_global_scope);
+                } else {
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Warning: Expected compound statement (AST_COMPOUND or AST_NOOP) as second child of AST_BLOCK, but got %s.\n",
+                            astTypeToString(node->children[1]->type));
+                    fflush(stderr);
+#endif
+                }
+            } else if (node->child_count == 1) {
+                // This could mean an empty block (only declarations, no statements)
+                // or a block that was parsed where children[0] was expected to be statements
+                // if there were no declarations. Standard Pascal requires a statement part.
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Block node %p has declarations but no statement part (child_count is 1).\n", (void*)node);
+                fflush(stderr);
+#endif
             }
             break;
         }
+
         case AST_COMPOUND:
+            // This is for a sequence of statements. The 'is_global_scope_context_from_caller'
+            // correctly reflects the scope in which these statements execute.
             for (int i = 0; i < node->child_count; i++) {
                 if (!node->children[i]) {
                     fprintf(stderr, "[BUG] AST_COMPOUND: child %d is NULL\n", i);
+                    fflush(stderr);
                     continue;
                 }
-                executeWithScope(node->children[i], false);
+                // Pass down the current scope context.
+                executeWithScope(node->children[i], node->is_global_scope);
+                
+                // Check for break statement propagation
+                if (break_requested) {
+                    // If the parent of this compound statement is a loop, we need to stop executing statements in this compound
+                    // and let the break_requested flag be handled by the loop construct itself.
+                    if (node->parent && (node->parent->type == AST_WHILE ||
+                                         node->parent->type == AST_REPEAT ||
+                                         node->parent->type == AST_FOR_TO ||
+                                         node->parent->type == AST_FOR_DOWNTO)) {
+#ifdef DEBUG
+                        fprintf(stderr, "[DEBUG executeWithScope AST_COMPOUND] Break requested within a loop's body. Stopping execution of further statements in this compound block.\n");
+                        fflush(stderr);
+#endif
+                        break; // Stop processing more statements in *this* compound block
+                    }
+                }
             }
             break;
         case AST_IF: {

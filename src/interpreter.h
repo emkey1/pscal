@@ -10,7 +10,6 @@ Value eval(AST *node);
 Value executeProcedureCall(AST *node);
 //ExecStatus executeWithScope(AST *node, bool is_global_scope);
 void executeWithScope(AST *node, bool is_global_scope);
-void processLocalDeclarations(AST* declarationsNode);
 
 Value makeCopyOfValue(Value *src);
 

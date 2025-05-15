@@ -151,17 +151,25 @@ Symbol* hashTableLookup(HashTable* table, const char* name) {
     for(int i = 0; lower_name[i]; i++) lower_name[i] = tolower(lower_name[i]);
 
     int index = hashFunctionName(lower_name);
+#ifdef DEBUG
     fprintf(stderr, "[DEBUG hashTableLookup] Looking for '%s' (lc: '%s') in bucket %d\n", name, lower_name, index); // DIAGNOSTIC
+#endif
     Symbol* current = table->buckets[index];
     while (current != NULL) {
+#ifdef DEBUG
         fprintf(stderr, "[DEBUG hashTableLookup]   Checking against: '%s'\n", current->name); // DIAGNOSTIC
+#endif
         if (current->name && strcmp(current->name, lower_name) == 0) {
+#ifdef DEBUG
             fprintf(stderr, "[DEBUG hashTableLookup]   Found '%s'\n", name); // DIAGNOSTIC
+#endif
             return current;
         }
         current = current->next;
     }
+#ifdef DEBUG
     fprintf(stderr, "[DEBUG hashTableLookup]   '%s' NOT found in bucket %d\n", name, index); // DIAGNOSTIC
+#endif
     return NULL;
 }
 
@@ -474,7 +482,7 @@ void popLocalEnv(void) {
  * Looks up a symbol in a specific hash table environment.
  * This helper is used by save/restore and other internal functions.
  *
- * @param table A pointer to the HashTable environment to search.
+ * @param env A pointer to the HashTable environment to search.
  * @param name  The symbol name string to look up.
  * @return A pointer to the found Symbol, or NULL if not found.
  */

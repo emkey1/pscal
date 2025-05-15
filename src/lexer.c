@@ -254,6 +254,9 @@ Token *stringLiteral(Lexer *lexer) {
 }
 
 Token *getNextToken(Lexer *lexer) {
+#ifdef DEBUG
+    fprintf(stderr, "LEXER_DEBUG: getNextToken\n"); fflush(stderr);
+#endif
     while (lexer->current_char) {
         // Skip whitespace
         if (isspace((unsigned char)lexer->current_char)) {
@@ -322,27 +325,42 @@ Token *getNextToken(Lexer *lexer) {
         if (lexer->current_char == '#') {
             // Check if the next char is a hex digit. number() will handle validation.
              if (lexer->pos + 1 < strlen(lexer->text) && isHexDigit(lexer->text[lexer->pos+1])) {
+#ifdef DEBUG
+                  fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 1)\n"); fflush(stderr);
+#endif
                   return number(lexer); // Parses #...
              } else {
                   // If '#' is not followed by a hex digit, treat as UNKNOWN
                   char bad_char[2] = {lexer->current_char, '\0'};
                   advance(lexer);
+#ifdef DEBUG
+                  fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 2)\n"); fflush(stderr);
+#endif
                   return newToken(TOKEN_UNKNOWN, bad_char);
              }
         }
 
         // Handle Identifiers and Keywords
         if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return identifier)\n"); fflush(stderr);
+#endif
             return identifier(lexer);
         }
 
         // Handle Integer or Real Constants (starting with a digit)
         if (isdigit((unsigned char)lexer->current_char)) {
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return number)\n"); fflush(stderr);
+#endif
             return number(lexer);
         }
 
         // Handle String Literals
         if (lexer->current_char == '\'') {
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return stringLiteral)\n"); fflush(stderr);
+#endif
             return stringLiteral(lexer);
         }
 
@@ -351,6 +369,9 @@ Token *getNextToken(Lexer *lexer) {
         // Caret (Pointer symbol)
         if (lexer->current_char == '^') { // <<< ADDED
             advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_CARET)\n"); fflush(stderr);
+#endif
             return newToken(TOKEN_CARET, "^");
         }
 
@@ -359,8 +380,14 @@ Token *getNextToken(Lexer *lexer) {
             advance(lexer);
             if (lexer->current_char == '=') {
                 advance(lexer);
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_ASSIGN)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_ASSIGN, ":=");
             } else {
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_COLON)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_COLON, ":");
             }
         }
@@ -368,12 +395,18 @@ Token *getNextToken(Lexer *lexer) {
         // Semicolon
         if (lexer->current_char == ';') {
             advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_SEMICOLON)\n"); fflush(stderr);
+#endif
             return newToken(TOKEN_SEMICOLON, ";");
         }
 
         // Comma
         if (lexer->current_char == ',') {
             advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_COMMA)\n"); fflush(stderr);
+#endif
             return newToken(TOKEN_COMMA, ",");
         }
 
@@ -382,12 +415,21 @@ Token *getNextToken(Lexer *lexer) {
             advance(lexer);
             if (lexer->current_char == '.') {
                 advance(lexer);
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_DOTDOT)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_DOTDOT, "..");
             } else {
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_PERIOD)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_PERIOD, ".");
             }
         }
 
+#ifdef DEBUG
+        fprintf(stderr, "LEXER_DEBUG: getNextToken(Math Section)\n"); fflush(stderr);
+#endif
         // Simple operators: +, -, *, /
         if (lexer->current_char == '+') { advance(lexer); return newToken(TOKEN_PLUS, "+"); }
         if (lexer->current_char == '-') { advance(lexer); return newToken(TOKEN_MINUS, "-"); }

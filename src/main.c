@@ -279,7 +279,11 @@ int runProgram(const char *source, const char *programName) {
     // Note: Write, Writeln, Read, Readln might be handled directly in interpreter.c
     // based on AST node type, rather than dispatched via the builtin table.
     // If they were registered here, they would need AST_PROCEDURE_DECL and correct parameter setup.
-
+    
+#ifdef DEBUG
+    fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
+    fflush(stderr); // Ensure it prints immediately
+#endif
 
     /* Initialize lexer and parser. */
     Lexer lexer; // Assumes Lexer struct and initLexer are defined in lexer.h/lexer.c

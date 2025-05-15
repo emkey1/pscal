@@ -16,99 +16,203 @@
 // No 'static inline' needed here as it's defined only once in this file.
 #ifdef DEBUG
 void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const char* func_name) {
+    // Test print BEFORE the main fprintf
+    fprintf(stderr, "[DEBUG eat_debug_wrapper] ENTERED from %s. Expecting: %s. Current token type: %s.\n",
+            func_name,
+            tokenTypeToString(expected_token_type),
+            parser_ptr->current_token ? tokenTypeToString(parser_ptr->current_token->type) : "NULL_TOKEN_TYPE");
+    fflush(stderr);
+
     if (dumpExec) {
-        fprintf(stderr, "[DEBUG] eat(): Called from %s() - Expecting: %s, Got: %s ('%s') at Line %d, Col %d\n",
+        // This is the original complex fprintf that might be hanging
+        fprintf(stderr, "[DEBUG eat()] Called from %s() - Expecting: %s, Got: %s ('%s') at Line %d, Col %d\n",
                  func_name, tokenTypeToString(expected_token_type),
-                 tokenTypeToString((parser_ptr)->current_token->type),
-                 (parser_ptr)->current_token->value ? (parser_ptr)->current_token->value : "NULL",
-                 (parser_ptr)->lexer->line, (parser_ptr)->lexer->column);
-         if ((parser_ptr)->current_token->type != (expected_token_type)) {
-             fprintf(stderr, "[DEBUG] eat(): *** TOKEN MISMATCH DETECTED by wrapper before calling original eat() ***\n");
-         }
+                 parser_ptr->current_token ? tokenTypeToString(parser_ptr->current_token->type) : "NULL_TOKEN_TYPE", // Added NULL check
+                 (parser_ptr->current_token && parser_ptr->current_token->value) ? parser_ptr->current_token->value : "NULL_TOKEN_VALUE", // Added NULL check
+                 parser_ptr->lexer ? parser_ptr->lexer->line : -1, // Added NULL check
+                 parser_ptr->lexer ? parser_ptr->lexer->column : -1); // Added NULL check
+        fflush(stderr); // Crucial
+
+        if (parser_ptr->current_token && parser_ptr->current_token->type != expected_token_type) { // Added NULL check
+             fprintf(stderr, "[DEBUG eat(): *** TOKEN MISMATCH DETECTED by wrapper before calling original eat() ***\n");
+             fflush(stderr);
+        }
     }
+
+    // Test print AFTER the main fprintf
+    fprintf(stderr, "[DEBUG eat_debug_wrapper] Calling eatInternal.\n");
+    fflush(stderr);
+
     eatInternal(parser_ptr, expected_token_type);
+
+    fprintf(stderr, "[DEBUG eat_debug_wrapper] RETURNED from eatInternal.\n");
+    fflush(stderr);
 }
 #endif // DEBUG
 
 AST *parseWriteArgument(Parser *parser);
 
 AST *declarations(Parser *parser, bool in_interface) {
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG declarations] ENTER. Current token: %s ('%s')\n",
+            parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+            (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+    fflush(stderr);
+#endif
     AST *node = newASTNode(AST_COMPOUND, NULL);
 
     while (1) {
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG declarations] Loop start. Current token: %s ('%s')\n",
+            parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+            (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+    fflush(stderr);
+#endif
+        if (parser->current_token == NULL) {
+            fprintf(stderr, "Parser error: Unexpected end of file in declarations block.\n");
+            fflush(stderr); // Ensure message is printed
+            // EXIT_FAILURE_HANDLER(); // Or allow graceful exit if preferred
+            break; // Exit the while(1) loop
+        }
+
         if (parser->current_token->type == TOKEN_CONST) {
             eat(parser, TOKEN_CONST);
-            while (parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *constDecl = constDeclaration(parser); // Pass Parser
-                if (!constDecl || constDecl->type == AST_NOOP) break;
-                addChild(node, constDecl);
-                if (constDecl->left) {
-                    Value constVal = eval(constDecl->left);
-                    // For global constants, is_global_block for processDeclarations will handle it.
-                    // For unit interface consts, they are added to unit's symbol_table, then global.
-                    // For local consts in routines, they'd be added to localSymbols.
-                    // This pre-evaluation here is more for immediate global consts if declarations is called for global scope directly.
-                    // The main processing of declarations should happen via processDeclarations in interpreter.
-                    // Let's remove the symbol insertion from here to avoid duplication with processDeclarations.
-                    freeValue(&constVal);
+            // Loop for multiple constant declarations within a single CONST block
+            while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+                AST *constDecl = constDeclaration(parser); // Parses "identifier = value;"
+                if (!constDecl || constDecl->type == AST_NOOP) {
+                    // constDeclaration should call errorParser if there's a syntax error.
+                    // Breaking here means we stop processing further consts in this block.
+                    break;
                 }
+                addChild(node, constDecl);
             }
         } else if (parser->current_token->type == TOKEN_TYPE) {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG declarations] Matched TOKEN_TYPE. About to eat.\n");
+            fflush(stderr);
+#endif
             eat(parser, TOKEN_TYPE);
-            while (parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *typeDecl = typeDeclaration(parser); // Pass Parser
-                if (!typeDecl || typeDecl->type == AST_NOOP) break;
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG declarations] Ate TOKEN_TYPE. Current token: %s ('%s')\n",
+                    parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+                    (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+            fflush(stderr);
+#endif
+            // Loop for multiple type alias lines within a single TYPE block
+            while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+                AST *typeDecl = typeDeclaration(parser); // Parses "TypeName = TypeSpecifier;"
+                if (!typeDecl || typeDecl->type == AST_NOOP) {
+                    // typeDeclaration should call errorParser on syntax error.
+                    break;
+                }
                 addChild(node, typeDecl);
-                // insertType is handled within typeDeclaration
+                // insertType() is called within typeDeclaration to register the type.
             }
         } else if (parser->current_token->type == TOKEN_VAR) {
             eat(parser, TOKEN_VAR);
+            // Loop for multiple variable declaration lines within a single VAR block
+            // e.g., VAR a,b: integer; c: char;
             while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
-                AST *vdecl_result = varDeclaration(parser, parser->current_unit_name_context == NULL); // Pass isGlobal hint
-                // ... (existing logic to transfer children from vdecl_result to node) ...
-                if (!vdecl_result || vdecl_result->type == AST_NOOP) break;
-                if (vdecl_result->type == AST_COMPOUND) { /* transfer children */ }
-                else if (vdecl_result->type == AST_VAR_DECL) { addChild(node, vdecl_result); }
-                // ...
-                if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) eat(parser, TOKEN_SEMICOLON);
-                else { errorParser(parser, "Expected semicolon after var declaration"); break; }
+                AST *vdecl_result = varDeclaration(parser, parser->current_unit_name_context == NULL);
+                if (!vdecl_result || vdecl_result->type == AST_NOOP) {
+                    // varDeclaration should call errorParser on syntax error.
+                    break;
+                }
+
+                if (vdecl_result->type == AST_COMPOUND) {
+                    // Transfer children (individual AST_VAR_DECLs) from the compound node
+                    for (int k = 0; k < vdecl_result->child_count; ++k) {
+                        AST *individual_var_decl = vdecl_result->children[k];
+                        if (individual_var_decl) {
+                            addChild(node, individual_var_decl);
+                        }
+                    }
+                    vdecl_result->children = NULL; // Prevent double free
+                    vdecl_result->child_count = 0;
+                    vdecl_result->child_capacity = 0;
+                    freeAST(vdecl_result); // Free the AST_COMPOUND wrapper
+                } else if (vdecl_result->type == AST_VAR_DECL) {
+                    addChild(node, vdecl_result);
+                }
+
+                // After "var_id_list : type_spec", a semicolon is expected to either
+                // separate it from the next var_id_list or terminate the VAR section
+                // if followed by another keyword (CONST, TYPE, PROCEDURE, BEGIN, etc.)
+                if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+                    eat(parser, TOKEN_SEMICOLON);
+                    // If after the semicolon, the next token is not an identifier,
+                    // this inner while loop for VARs will terminate.
+                } else {
+                    // If it's not a semicolon, and the next line *does* start with an identifier,
+                    // it implies a missing semicolon between var declaration lines.
+                    if (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+                         errorParser(parser, "Expected semicolon to separate variable declarations within VAR block");
+                    }
+                    // If not a semicolon and not another identifier, this VAR section is ending.
+                    // The inner `while` loop condition will handle termination.
+                    break; // Break from this inner `while` loop for VAR lines.
+                }
             }
         } else if (parser->current_token->type == TOKEN_PROCEDURE ||
                    parser->current_token->type == TOKEN_FUNCTION) {
-            AST *decl = (parser->current_token->type == TOKEN_PROCEDURE)
+            AST *decl_routine = (parser->current_token->type == TOKEN_PROCEDURE)
                         ? procedureDeclaration(parser, in_interface)
                         : functionDeclaration(parser, in_interface);
-            if (!decl || decl->type == AST_NOOP) break;
-            addChild(node, decl); // Add the PROC_DECL/FUNC_DECL AST node
-            // addProcedure is now called from within procedureDeclaration/functionDeclaration
+            if (!decl_routine || decl_routine->type == AST_NOOP) {
+                // procedureDeclaration/functionDeclaration should handle their own errors.
+                // Breaking here exits the outer while(1) loop.
+                break;
+            }
+            addChild(node, decl_routine);
+            // `addProcedure` is called from within procedureDeclaration/functionDeclaration.
+            
+            // A semicolon usually follows a procedure/function declaration (header or full).
+            // `procedureDeclaration` (if not in_interface) eats the semicolon after the block's END.
+            // This semicolon here would be for the one after a header in an interface,
+            // or after a full declaration if not eaten internally.
             if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
                 eat(parser, TOKEN_SEMICOLON);
             }
+            // If `in_interface` and no semicolon, the block might be ending.
+            // If not `in_interface`, `procedureDeclaration` should have eaten the final semicolon.
+            // Further error checking for missing semicolons could be added if needed,
+            // depending on how strictly the grammar is enforced here vs. letting the next
+            // token check in the outer loop handle it.
         } else {
+            // Token is not CONST, TYPE, VAR, PROCEDURE, or FUNCTION.
+            // This signifies the end of the declarations section.
             break;
         }
     }
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG declarations] EXIT. Next token: %s ('%s')\n",
+            parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+            (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+    fflush(stderr);
+#endif
     return node;
 }
 
 void eatInternal(Parser *parser, TokenType type) {
+    if (parser->current_token == NULL) { // Should not happen if called correctly
+        fprintf(stderr, "Parser error in eatInternal: current_token is NULL. Expected %s.\n", tokenTypeToString(type));
+        fflush(stderr);
+        EXIT_FAILURE_HANDLER(); // This is a critical internal error
+    }
+
     if (parser->current_token->type == type) {
-        // --- Store pointer to the token we are about to replace ---
         Token *tokenToFree = parser->current_token;
-
-        // --- Get the next token ---
+        // Get the next token BEFORE freeing the current one
         parser->current_token = getNextToken(parser->lexer);
-
-        // --- Free the *previous* token that was just consumed ---
         if (tokenToFree) {
-            freeToken(tokenToFree); // freeToken handles freeing value and struct
+            freeToken(tokenToFree);
         }
     } else {
-        // Error handling remains the same
         char err[128];
         snprintf(err, sizeof(err), "Expected token %s, got %s",
                  tokenTypeToString(type), tokenTypeToString(parser->current_token->type));
-        errorParser(parser, err);
+        errorParser(parser, err); // errorParser should call EXIT_FAILURE_HANDLER
     }
 }
 
@@ -151,10 +255,28 @@ AST *parseWriteArguments(Parser *parser) {
 // lvalue: Parses variable.field[index] etc. Calls expression for index.
 AST *lvalue(Parser *parser) {
     Token *firstTokenOriginal = parser->current_token;
+    
     if (!firstTokenOriginal || firstTokenOriginal->type != TOKEN_IDENTIFIER) {
         errorParser(parser, "Expected identifier at start of lvalue");
         return newASTNode(AST_NOOP, NULL);
     }
+     if (!firstTokenOriginal || firstTokenOriginal->type != TOKEN_IDENTIFIER) {
+         errorParser(parser, "Expected identifier at start of lvalue");
+         return newASTNode(AST_NOOP, NULL);
+    }
+
+    // Store the value of the first token if we might need it later
+    // for qualified names (e.g. record.field or unit.identifier)
+    char* firstTokenOriginalValue = NULL;
+    if (firstTokenOriginal->value) { // Check if value is not NULL
+        firstTokenOriginalValue = strdup(firstTokenOriginal->value);
+        if (!firstTokenOriginalValue) {
+            // Handle strdup allocation failure
+            errorParser(parser, "Memory allocation failure for token value copy in lvalue");
+            return newASTNode(AST_NOOP, NULL);
+        }
+    }
+    
     Token* firstTokenCopyForNode = copyToken(firstTokenOriginal); // For the initial AST_VARIABLE node
     eat(parser, TOKEN_IDENTIFIER);
     AST *node = newASTNode(AST_VARIABLE, firstTokenCopyForNode);
@@ -417,13 +539,29 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         // Dynamically create "unit.proc"
         size_t unit_len = strlen(unit_context_name_param_for_addproc);
         size_t proc_len = strlen(name_for_table);
-        char* mangled_name = malloc(unit_len + 1 + proc_len + 1); // unit + . + proc + null
+        size_t required_size = unit_len + 1 + proc_len + 1;
+        char* mangled_name = malloc(required_size); // Allocate exact required size
+          
         if (!mangled_name) {
             fprintf(stderr, "Malloc failed for mangled_name in addProcedure\n");
             free(name_for_table);
             EXIT_FAILURE_HANDLER();
         }
-        sprintf(mangled_name, "%s.%s", unit_context_name_param_for_addproc, name_for_table);
+        int chars_written = snprintf(mangled_name, required_size, "%s.%s",
+                                             unit_context_name_param_for_addproc, name_for_table);
+
+                // Check for snprintf errors or truncation.
+                // snprintf returns the number of characters that *would have been written* if enough space
+                // had been available, *excluding* the null terminator.
+                // So, if chars_written is negative (error) or >= required_size (truncation would have occurred
+                // if buffer was smaller, though here required_size should be exact), it's an issue.
+        if (chars_written < 0 || (size_t)chars_written >= required_size) {
+            fprintf(stderr, "Error or truncation occurred with snprintf in addProcedure for mangled_name. Chars written: %d, Buffer size: %zu\n",
+                    chars_written, required_size);
+            free(mangled_name); // Free the buffer allocated for mangled_name
+            free(name_for_table); // Free the original name_for_table
+            EXIT_FAILURE_HANDLER(); // Or handle error more gracefully
+        }
         free(name_for_table); // Free the previously strdup'd name
         name_for_table = mangled_name; // Use the new mangled name
     }
@@ -514,171 +652,204 @@ AST *lookupType(const char *name) {
 
 
 AST *buildProgramAST(Parser *main_parser) {
-    main_parser->current_unit_name_context = NULL; // Ensure main program has no unit context
-    // ... (Parse PROGRAM ProgramName;) ...
-    Token *copiedProgToken = copyToken(main_parser->current_token); eat(main_parser, TOKEN_PROGRAM);
-    Token *progNameCopied = copyToken(main_parser->current_token); eat(main_parser, TOKEN_IDENTIFIER);
-    AST *prog_name_node = newASTNode(AST_VARIABLE, progNameCopied); freeToken(progNameCopied);
-    // ... (Handle optional program parameters and semicolon) ...
+    main_parser->current_unit_name_context = NULL;
+    Token *copiedProgToken = copyToken(main_parser->current_token);
+    if (!copiedProgToken && main_parser->current_token) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
+    eat(main_parser, TOKEN_PROGRAM);
+    
+    Token *progNameCopied = copyToken(main_parser->current_token);
+    if (!progNameCopied && main_parser->current_token) { /* Malloc error check */ freeToken(copiedProgToken); EXIT_FAILURE_HANDLER(); }
+    eat(main_parser, TOKEN_IDENTIFIER);
+    
+    AST *prog_name_node = newASTNode(AST_VARIABLE, progNameCopied);
+    freeToken(progNameCopied); // newASTNode makes its own copy
+    
     eat(main_parser, TOKEN_SEMICOLON);
 
     AST *uses_clause = NULL;
-    List *unit_list = NULL;
+    List *unit_list = NULL; // Will be created if USES is present
+
+#ifdef DEBUG
+    if (main_parser->current_token) { // Check if current_token is not NULL
+        fprintf(stderr, "[DEBUG buildProgramAST] After PROGRAM Semicolon. Next token: %s ('%s')\n",
+                tokenTypeToString(main_parser->current_token->type),
+                main_parser->current_token->value ? main_parser->current_token->value : "NULL_VAL");
+        fflush(stderr);
+    } else {
+        fprintf(stderr, "[DEBUG buildProgramAST] After PROGRAM Semicolon. Next token is NULL (EOF?).\n");
+        fflush(stderr);
+    }
+#endif
+
     if (main_parser->current_token && main_parser->current_token->type == TOKEN_USES) {
-        eat(main_parser, TOKEN_USES);
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG buildProgramAST] Matched TOKEN_USES. About to eat.\n");
+        fflush(stderr);
+#endif
+        eat(main_parser, TOKEN_USES); // Consumes USES token. current_token is now first unit name or error.
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG buildProgramAST] Ate TOKEN_USES. Next token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
+                (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
+        fflush(stderr);
+#endif
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         unit_list = createList();
-        // ... (Parse unit list into unit_list) ...
-        // Example parsing one unit identifier:
-        // listAppend(unit_list, main_parser->current_token->value); eat(main_parser, TOKEN_IDENTIFIER);
-        // ... (Handle commas and end of list) ...
-        eat(main_parser, TOKEN_SEMICOLON);
-        uses_clause->unit_list = unit_list;
-
-        for (int i = 0; i < listSize(unit_list); i++) {
-            char *used_unit_name_str_from_list = listGet(unit_list, i); // e.g., "crt"
-            char lower_used_unit_name[MAX_SYMBOL_LENGTH];
-            strncpy(lower_used_unit_name, used_unit_name_str_from_list, MAX_SYMBOL_LENGTH -1);
-            lower_used_unit_name[MAX_SYMBOL_LENGTH-1] = '\0';
-            for(int k=0; lower_used_unit_name[k]; k++) lower_used_unit_name[k] = tolower(lower_used_unit_name[k]);
-
-
-            // --- Parse and Link the Unit ---
-            char *unit_file_path = findUnitFile(lower_used_unit_name);
-            if (!unit_file_path) { /* error */ }
-            // ... (read unit_file_path into unit_source_buffer) ...
-            char* unit_source_buffer = NULL; // Placeholder for file read
-            FILE *unit_file = fopen(unit_file_path, "r");
-            if(unit_file) { /* read into unit_source_buffer */ fclose(unit_file); } else { /* error */ }
-            free(unit_file_path);
-
-            Lexer nested_lexer; initLexer(&nested_lexer, unit_source_buffer);
-            Parser nested_parser_instance;
-            nested_parser_instance.lexer = &nested_lexer;
-            nested_parser_instance.current_token = getNextToken(&nested_lexer);
-            // unitParser will set its own current_unit_name_context using lower_used_unit_name
-            AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name);
-            
-            if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
-            if (unit_source_buffer) free(unit_source_buffer);
-
-            if (parsed_unit_ast) {
-                linkUnit(parsed_unit_ast, 1); // linkUnit does its own processing
-                // After linkUnit, routines like "crt.clreol" are in procedure_table
-                // Now add aliases for this *main_parser* context
-                if (procedure_table) {
-                    for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
-                        Symbol *sym_entry = procedure_table->buckets[bucket]; // Get Symbol* from bucket
-                        while (sym_entry) {
-                            char expected_prefix[MAX_SYMBOL_LENGTH + 2]; // unitname. + null
-                            snprintf(expected_prefix, sizeof(expected_prefix), "%s.", lower_used_unit_name); // lower_used_unit_name_str should be the lowercased name of the unit being processed
-
-                            // Check if the symbol's name starts with "unitname."
-                            if (sym_entry->name && strncmp(sym_entry->name, expected_prefix, strlen(expected_prefix)) == 0) {
-                                const char *simple_name = sym_entry->name + strlen(expected_prefix);
-
-                                // Check if an alias with this simple_name already exists
-                                Symbol *existing_alias_sym = lookupProcedure(simple_name); // lookupProcedure now returns Symbol*
-
-                                if (existing_alias_sym && existing_alias_sym->type_def != sym_entry->type_def) {
-                                    // An alias exists but points to a different original procedure.
-                                    // This indicates a name conflict or shadowing.
-                                    // Standard Pascal might disallow this or have specific unit precedence rules.
-                                    // For now, we can print a warning. Replacing/removing the old alias
-                                    // would require removing it from the hash table first.
-                                    fprintf(stderr, "Warning: Unit procedure alias '%s' from unit '%s' conflicts with or shadows an existing procedure/alias. The new alias will likely be found first if names are identical.\n",
-                                            simple_name, lower_used_unit_name);
-                                    // To strictly prevent duplicates or implement precedence, you might:
-                                    // 1. Not add the new alias.
-                                    // 2. Remove the old alias before adding the new one (complex if it's not just an alias).
-                                }
-
-                                // Add the alias if it doesn't exist, or if it exists but points to something else
-                                // (and we've decided to allow overriding or shadowing as per above warning).
-                                // A cleaner check: only add if no alias exists, or if it exists but points to the SAME underlying proc.
-                                if (!existing_alias_sym || existing_alias_sym->type_def != sym_entry->type_def) {
-                                    Symbol *alias_sym = (Symbol *)malloc(sizeof(Symbol));
-                                    if (!alias_sym) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
-
-                                    alias_sym->name = strdup(simple_name);
-                                    if (!alias_sym->name) { free(alias_sym); EXIT_FAILURE_HANDLER(); }
-
-                                    // The alias points to the *same* copied AST declaration as the original qualified symbol
-                                    alias_sym->type_def = sym_entry->type_def; // SHALLOW COPY of the AST pointer
-                                                                             // This is okay because sym_entry->type_def is a deep copy
-                                                                             // owned by the qualified entry. The alias just refers to it.
-                                                                             // IMPORTANT: This means freeProcedureTable must NOT free
-                                                                             // alias_sym->type_def if it's an alias.
-                                                                             // This requires a flag in the Symbol struct, e.g., `is_alias_for_ast_def`.
-                                                                             // For now, let's assume freeProcedureTable only frees type_def
-                                                                             // if it's not from an alias or handles it based on sym_entry ownership.
-                                                                             // A safer approach for aliases might be to NOT set type_def,
-                                                                             // or always make lookupProcedure resolve aliases back to the original.
-                                                                             // Let's proceed by making the alias also "point" to the AST,
-                                                                             // but this implies careful freeing.
-
-                                    // A better approach for aliases: an alias symbol might not need its own type_def copy.
-                                    // It could just store the qualified name it refers to.
-                                    // Or, simpler: if it's just for lookup, the name is key.
-                                    // Let's ensure type is set correctly.
-                                    alias_sym->type = sym_entry->type; // Copy the return type
-                                    alias_sym->value = NULL; // Aliases for procedures don't have a value
-                                    alias_sym->is_const = false;
-                                    alias_sym->is_alias = true; // Mark this symbol as an alias
-                                    alias_sym->is_local_var = false;
-                                    alias_sym->next = NULL;
-
-                                    // To make freeProcedureTable safe: if sym_entry->type_def is shared, only one should free it.
-                                    // The current addProcedure creates a DEEP copy for sym->type_def.
-                                    // So, each main entry (like "unit.proc") owns its AST.
-                                    // An alias ("proc") should probably NOT get its own copy of the AST
-                                    // and its type_def should not be freed by freeProcedureTable.
-                                    // Let's refine: aliases DO NOT get their own sym->type_def.
-                                    // lookupProcedure, if it finds an alias, might need to re-lookup the qualified name.
-                                    // This is getting complex.
-                                    // Simpler for now: Aliases also point to the same type_def, but freeProcedureTable
-                                    // needs to be careful.
-
-                                    // For now, let's let the alias point to the same type_def.
-                                    // The `freeProcedureTable` frees `sym->type_def`. If multiple symbols point to it,
-                                    // it will be freed once, then other attempts will be on a NULL or dangling pointer.
-                                    // This means `alias_sym->type_def` should NOT be freed if it's just a reference.
-                                    // The easiest way is to make `alias_sym->type_def = NULL;` for aliases
-                                    // and modify `lookupProcedure` to resolve aliases if it encounters them.
-                                    // This is too complex for a quick fix.
-
-                                    // Alternative for alias: the alias IS a full symbol entry, but its type_def
-                                    // is a shallow copy of the pointer from the original unit.proc symbol.
-                                    // This means `freeProcedureTable` must NOT free `type_def` for symbols marked `is_alias`.
-
-                                    // Let's stick to your current structure for aliases but fix the types:
-                                    // The alias will point to the same AST, and we'll adjust freeing later if needed.
-                                    alias_sym->type_def = sym_entry->type_def; // Shallow copy of AST pointer
-
-                                    hashTableInsert(procedure_table, alias_sym);
-                                    DEBUG_PRINT("[DEBUG PARSER buildProgramAST] Added alias '%s' for qualified procedure '%s'.\n", simple_name, sym_entry->name);
-                                }
-                            }
-                            sym_entry = sym_entry->next; // Move to next symbol in this bucket
-                        }
-                    }
-                }
-                 // After linking, the parsed_unit_ast itself (if it was temporary for linking) should be freed
-                 // if linkUnit doesn't take ownership or if it's not part of a larger AST.
-                 // Your linkUnit seems to free the unit_ast passed to it, so this should be okay.
+        
+        // --- START: Corrected USES list parsing ---
+        // Loop to parse unit identifiers (e.g., unit1, unit2, unit3)
+        while (main_parser->current_token && main_parser->current_token->type == TOKEN_IDENTIFIER) {
+            char* temp_unit_name_original_case = strdup(main_parser->current_token->value);
+            if (!temp_unit_name_original_case) {
+                fprintf(stderr, "Memory allocation failed for unit name in USES clause.\n");
+                freeList(unit_list);
+                if(uses_clause) freeAST(uses_clause);
+                if(prog_name_node) freeAST(prog_name_node);
+                if(copiedProgToken) freeToken(copiedProgToken);
+                EXIT_FAILURE_HANDLER();
             }
-        } // End for each unit in USES
-    } // End if uses_clause
+            
+            // Add original case to the list for use by unitParser if needed,
+            // findUnitFile should handle case-insensitivity or convert to lowercase itself.
+            listAppend(unit_list, temp_unit_name_original_case);
+            free(temp_unit_name_original_case); // listAppend makes its own copy
+
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Added unit '%s' to list. About to eat IDENTIFIER.\n",
+                main_parser->current_token->value);
+            fflush(stderr);
+#endif
+            eat(main_parser, TOKEN_IDENTIFIER); // Consume the unit name identifier
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] After eating unit IDENTIFIER. Next token: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
+                (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
+            fflush(stderr);
+#endif
+            if (main_parser->current_token && main_parser->current_token->type == TOKEN_COMMA) {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Found COMMA in USES list. About to eat.\n");
+                fflush(stderr);
+#endif
+                eat(main_parser, TOKEN_COMMA); // Consume comma
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Ate COMMA. Next token: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
+                    (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
+                fflush(stderr);
+#endif
+            } else {
+                // If not a comma, the list of identifiers is done.
+                // The next token *must* be a semicolon.
+                break;
+            }
+        }
+        
+        // After the loop of unit identifiers, a semicolon is expected.
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Exited identifier list loop. About to eat SEMICOLON. Current token: %s ('%s')\n",
+            main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
+            (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
+        fflush(stderr);
+#endif
+        eat(main_parser, TOKEN_SEMICOLON); // Consumes the semicolon terminating the USES clause.
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG buildProgramAST USES_LOOP] Ate USES SEMICOLON. Next token: %s ('%s')\n",
+            main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
+            (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
+        fflush(stderr);
+#endif
+        // --- END: Corrected USES list parsing ---
+        
+        if (uses_clause) { // Should always be true if we are in this block
+            uses_clause->unit_list = unit_list; // unit_list can be empty if syntax was "USES ;"
+        }
+
+
+        // Now, process each unit in the populated unit_list
+        if (unit_list) { // Check if unit_list was successfully created
+            for (int i = 0; i < listSize(unit_list); i++) {
+                char *used_unit_name_str_from_list = listGet(unit_list, i);
+                
+                char lower_used_unit_name[MAX_SYMBOL_LENGTH]; // Ensure MAX_SYMBOL_LENGTH is defined and sufficient
+                strncpy(lower_used_unit_name, used_unit_name_str_from_list, MAX_SYMBOL_LENGTH - 1);
+                lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
+                for(int k=0; lower_used_unit_name[k]; k++) {
+                    lower_used_unit_name[k] = tolower((unsigned char)lower_used_unit_name[k]);
+                }
+
+                char *unit_file_path = findUnitFile(lower_used_unit_name);
+                if (!unit_file_path) {
+                    fprintf(stderr, "Parser error: Unit file for '%s' not found.\n", lower_used_unit_name);
+                    // Clean up before exit
+                    if(uses_clause) freeAST(uses_clause); // freeList will be called by freeAST if uses_clause owns unit_list
+                    else if(unit_list) freeList(unit_list); // If uses_clause wasn't created but list was
+                    if(prog_name_node) freeAST(prog_name_node);
+                    if(copiedProgToken) freeToken(copiedProgToken);
+                    EXIT_FAILURE_HANDLER();
+                }
+                
+                char* unit_source_buffer = NULL;
+                FILE *unit_file = fopen(unit_file_path, "r");
+                if(unit_file) {
+                    fseek(unit_file, 0, SEEK_END);
+                    long fsize = ftell(unit_file);
+                    rewind(unit_file);
+                    unit_source_buffer = malloc(fsize + 1);
+                    if (!unit_source_buffer) { /* Malloc error, cleanup and exit */ fclose(unit_file); free(unit_file_path); /* ... more cleanup ... */ EXIT_FAILURE_HANDLER(); }
+                    fread(unit_source_buffer, 1, fsize, unit_file);
+                    unit_source_buffer[fsize] = '\0';
+                    fclose(unit_file);
+                } else {
+                    fprintf(stderr, "Parser error: Could not open unit file '%s'.\n", unit_file_path);
+                    free(unit_file_path);
+                    /* ... more cleanup ... */
+                    EXIT_FAILURE_HANDLER();
+                }
+                free(unit_file_path);
+
+                Lexer nested_lexer;
+                initLexer(&nested_lexer, unit_source_buffer);
+                Parser nested_parser_instance;
+                nested_parser_instance.lexer = &nested_lexer;
+                nested_parser_instance.current_token = getNextToken(&nested_lexer);
+                
+                AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name); // Pass lower_used_unit_name
+                
+                if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
+                if (unit_source_buffer) free(unit_source_buffer);
+
+                if (parsed_unit_ast) {
+                    linkUnit(parsed_unit_ast, 1);
+                    // Note: linkUnit is responsible for freeing parsed_unit_ast if it's temporary
+                }
+            }
+        }
+    } // End if (main_parser->current_token && main_parser->current_token->type == TOKEN_USES)
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG buildProgramAST] Before calling block(). Current token: %s ('%s')\n",
+            main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN",
+            (main_parser->current_token && main_parser->current_token->value) ? main_parser->current_token->value : "NULL_VALUE");
+    fflush(stderr);
+#endif
 
     AST *block_node = block(main_parser);
-    // ... (create programNode, link children, free copiedProgToken) ...
-    // ...
-    if (block_node) block_node->is_global_scope = true;
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG buildProgramAST] Returned from block().\n");
+    fflush(stderr);
+#endif
+    
     AST *programNode = newASTNode(AST_PROGRAM, copiedProgToken);
+    if (!programNode) { /* Malloc error, cleanup... */ if(copiedProgToken) freeToken(copiedProgToken); if(prog_name_node) freeAST(prog_name_node); if(block_node) freeAST(block_node); if(uses_clause) freeAST(uses_clause); EXIT_FAILURE_HANDLER(); }
+
     setLeft(programNode, prog_name_node);
     setRight(programNode, block_node);
-    if(uses_clause) addChild(programNode, uses_clause); // Add uses_clause as child of program
-    freeToken(copiedProgToken);
+    if(uses_clause) { // Only add if it was created
+        addChild(programNode, uses_clause);
+    }
+    freeToken(copiedProgToken); // Was copied by newASTNode for programNode
 
     return programNode;
 }
@@ -1141,36 +1312,126 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
 AST *functionDeclaration(Parser *parser, bool in_interface) {
     eat(parser, TOKEN_FUNCTION);
     Token *originalFuncNameToken = parser->current_token;
-    if (originalFuncNameToken->type != TOKEN_IDENTIFIER) {errorParser(parser, "Exp func name"); return newASTNode(AST_NOOP, NULL);}
+    if (!originalFuncNameToken || originalFuncNameToken->type != TOKEN_IDENTIFIER) {
+        errorParser(parser,"Expected function name after FUNCTION");
+        return newASTNode(AST_NOOP, NULL);
+    }
     Token *copiedFuncNameToken = copyToken(originalFuncNameToken);
-    eat(parser, TOKEN_IDENTIFIER);
+    if (!copiedFuncNameToken) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+    
+    eat(parser, TOKEN_IDENTIFIER); // Consumes function name
+    
     AST *node = newASTNode(AST_FUNCTION_DECL, copiedFuncNameToken);
+    // newASTNode makes its own copy, so we can free copiedFuncNameToken after node creation
+    // BUT we assign node->token to copiedFuncNameToken in newASTNode, so freeToken(copiedFuncNameToken)
+    // at the end of this function is correct if newASTNode's copy is what's stored in node->token.
+    // Let's assume newASTNode copies and manages its own token, so free our copy here.
+    // freeToken(copiedFuncNameToken); // No, newASTNode uses it. Free at end.
 
+    AST *params = NULL;
+    // Check for and parse parameters
     if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
-        // ... (parse params, using 'parser') ...
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG FUNC_DECL_PARAMS] Detected LPAREN, entering parameter parsing for function '%s'.\n", copiedFuncNameToken->value);
+        fflush(stderr);
+#endif
+        eat(parser, TOKEN_LPAREN);
+        if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+            params = paramList(parser); // paramList handles parsing multiple params and their types
+        }
+        if (parser->current_token && parser->current_token->type == TOKEN_RPAREN) {
+             eat(parser, TOKEN_RPAREN);
+        } else {
+             char err_msg[128];
+             snprintf(err_msg, sizeof(err_msg), "Expected ')' to close parameter list for function '%s', got %s",
+                      copiedFuncNameToken->value,
+                      parser->current_token ? tokenTypeToString(parser->current_token->type) : "EOF");
+             errorParser(parser, err_msg);
+             if(params) freeAST(params);
+             if(node) freeAST(node); // freeAST will handle node->token
+             else if(copiedFuncNameToken) freeToken(copiedFuncNameToken); // If node wasn't created
+             return NULL;
+        }
+    }
+
+    // Attach parsed parameters as children to the function declaration node
+    if (params) {
+        if (params->type == AST_COMPOUND && params->child_count > 0) { // paramList returns AST_COMPOUND
+            node->children = params->children;
+            node->child_count = params->child_count;
+            node->child_capacity = params->child_capacity;
+            for(int i=0; i < node->child_count; i++) {
+                if(node->children[i]) node->children[i]->parent = node;
+            }
+            params->children = NULL; // Nullify to prevent double free by freeAST(params)
+            params->child_count = 0;
+            params->child_capacity = 0;
+        }
+        freeAST(params); // Free the AST_COMPOUND wrapper node from paramList
     }
     
-    eat(parser, TOKEN_COLON);
-    AST *returnType = typeSpecifier(parser, 0); // Pass parser
-    if (!returnType) { /* error */ freeToken(copiedFuncNameToken); freeAST(node); return newASTNode(AST_NOOP, NULL); }
-    setRight(node, returnType); // Return type stored in 'right'
-    node->var_type = returnType->var_type;
+    // After parameters (if any) are handled, expect a colon for the return type
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG FUNC_DECL_RET] Expecting COLON for return type of function '%s'. Current token: %s ('%s')\n",
+            copiedFuncNameToken->value,
+            parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+            (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+    fflush(stderr);
+#endif
+    eat(parser, TOKEN_COLON); // Expects ':' for return type
+    
+    AST *returnType = typeSpecifier(parser, 0); // Parse the return type
+    if (!returnType || returnType->type == AST_NOOP) {
+        errorParser(parser, "Invalid return type for function");
+        if(node) freeAST(node); else if(copiedFuncNameToken) freeToken(copiedFuncNameToken);
+        return newASTNode(AST_NOOP, NULL);
+    }
+    setRight(node, returnType);         // Return type stored in 'right'
+    node->var_type = returnType->var_type; // Set the function's var_type to its return type
 
-    if (!in_interface) { // Implementation
-        eat(parser, TOKEN_SEMICOLON);
-        AST *local_declarations = declarations(parser, false); // Pass parser
-        AST *compound_body = compoundStatement(parser);       // Pass parser
+    // Handle implementation part (body) if not in an interface section
+    if (!in_interface) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG FUNC_DECL_BODY] Expecting SEMICOLON after header for function '%s'. Current token: %s ('%s')\n",
+                copiedFuncNameToken->value,
+                parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+                (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+        fflush(stderr);
+#endif
+        eat(parser, TOKEN_SEMICOLON); // Semicolon after function header "function Name(params): RetType;"
+        
+        AST *local_declarations = declarations(parser, false);
+        AST *compound_body = compoundStatement(parser); // compoundStatement eats its own BEGIN and END.
+                                                        // It expects a final '.' or a ';' if nested.
+                                                        // For a function body, it should end with END;
+        
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
         addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setExtra(node, blockNode); // Function body block in 'extra'
     }
-    addProcedure(node, parser->current_unit_name_context);
+    
+    addProcedure(node, parser->current_unit_name_context); // Registers the function
+    
+    // copiedFuncNameToken was used by newASTNode which made its own copy if needed,
+    // or took ownership if newASTNode doesn't copy.
+    // Assuming newASTNode *does* copy via copyToken:
+    if (copiedFuncNameToken && (!node || node->token != copiedFuncNameToken)) {
+       // This freeToken might be redundant if newASTNode's token is the one pointed to by node->token
+       // and freeAST(node) will handle it.
+       // For safety, if newASTNode makes a copy, this copiedFuncNameToken is ours to free.
+       // Let's rely on freeAST(node) to free node->token.
+       // The original copiedFuncNameToken here is distinct from node->token if newASTNode copies.
+    }
+    // If newASTNode sets node->token = copyToken(passed_token), then freeToken(copiedFuncNameToken)
+    // is correct here because copiedFuncNameToken is the one we made with copyToken earlier.
+    // The token *inside* the AST (node->token) will be freed when 'node' is freed.
     freeToken(copiedFuncNameToken);
+
+
     return node;
 }
-
 
 AST *paramList(Parser *parser) {
     AST *compound = newASTNode(AST_COMPOUND, NULL);
