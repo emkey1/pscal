@@ -65,7 +65,7 @@ void freeToken(Token *token);
 void freeProcedureTable(void);
 void freeTypeTable(void);
 int getTerminalSize(int *rows, int *cols);
-
+void toLowerString(char *str);
 void parseError(Parser *parser, const char *message);
 void debugASTFile(AST *node);
 Value makeEnum(const char *enum_name, int ordinal);

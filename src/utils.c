@@ -1385,7 +1385,66 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
         insertType(type_decl->token->value, type_decl->left);
         type_decl = type_decl->right; // Move to next sibling? Or structure is different?
     }
+    
+    AST *interface_compound_node = unit_ast->left; // unit_ast->left is the AST_COMPOUND for INTERFACE declarations
+    if (interface_compound_node && interface_compound_node->type == AST_COMPOUND) {
+        DEBUG_PRINT("[DEBUG] linkUnit: Processing interface routines for unit '%s' to add unqualified aliases to implementations.\n",
+                    unit_ast->token ? unit_ast->token->value : "UNKNOWN_UNIT");
 
+        for (int i = 0; i < interface_compound_node->child_count; i++) {
+            AST *interface_decl_node = interface_compound_node->children[i]; // e.g., AST_PROCEDURE_DECL for "Procedure ClrScr;" (header from interface)
+
+            if (interface_decl_node && interface_decl_node->token &&
+                (interface_decl_node->type == AST_PROCEDURE_DECL || interface_decl_node->type == AST_FUNCTION_DECL)) {
+
+                const char* unqualified_name_original_case = interface_decl_node->token->value;
+                char unqualified_name_lower[MAX_ID_LENGTH + 1]; // For case-insensitive lookup
+
+                strncpy(unqualified_name_lower, unqualified_name_original_case, MAX_ID_LENGTH);
+                unqualified_name_lower[MAX_ID_LENGTH] = '\0';
+                toLowerString(unqualified_name_lower); // Convert to lowercase for procedure_table lookups
+
+                const char* unit_name_original_case = unit_ast->token ? unit_ast->token->value : NULL;
+                if (!unit_name_original_case) {
+                    fprintf(stderr, "[ERROR] linkUnit: Cannot determine unit name for aliasing routine '%s'.\n", unqualified_name_original_case);
+                    continue;
+                }
+
+                // Construct qualified name (lowercase for lookup), e.g., "crt.clrscr"
+                char qualified_name_lower[MAX_ID_LENGTH * 2 + 2]; // Max unit name + '.' + max proc name + null
+                snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", unit_name_original_case, unqualified_name_original_case);
+                toLowerString(qualified_name_lower);
+
+                // Lookup the qualified symbol, which should point to the implementation AST
+                Symbol* qualified_proc_symbol = hashTableLookup(procedure_table, qualified_name_lower);
+
+                if (qualified_proc_symbol && qualified_proc_symbol->type_def && qualified_proc_symbol->type_def != (AST*)0x1 /* not a built-in sentinel */) {
+                    // Found the qualified symbol with its implementation AST (qualified_proc_symbol->type_def).
+                    // Now, check if an unqualified alias already exists.
+                    Symbol* existing_unqualified_alias = hashTableLookup(procedure_table, unqualified_name_lower);
+
+                    if (!existing_unqualified_alias) {
+                        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias for routine '%s' (from '%s') using its implementation AST to procedure_table.\n",
+                                    unqualified_name_original_case, qualified_name_lower);
+                        // Call addProcedure with the *implementation AST* (from the qualified symbol)
+                        // and NULL context (to use the unqualified name from the AST token itself).
+                        // addProcedure will make a new copy of qualified_proc_symbol->type_def.
+                        addProcedure(qualified_proc_symbol->type_def, NULL);
+                    } else {
+                        // This might happen if a built-in has the same name or due to other linking complexities.
+                        // Or if the user explicitly qualified a call to a routine that also matches an unqualified one.
+                        // Depending on desired behavior, could overwrite or just log.
+                        // For now, if it exists, assume it's correctly handled or was a built-in.
+                        DEBUG_PRINT("[DEBUG] linkUnit: Unqualified routine '%s' already exists in procedure_table. Skipping duplicate alias add from unit '%s'.\n",
+                                    unqualified_name_original_case, unit_name_original_case);
+                    }
+                } else {
+                    DEBUG_PRINT("[WARN] linkUnit: Could not find valid *implementation AST* for qualified routine '%s' to create alias for '%s'. Interface declaration might exist without full implementation being linked.\n",
+                                qualified_name_lower, unqualified_name_original_case);
+                }
+            }
+        }
+    }
 
     // Handle nested uses clauses
     // The logic here uses unitParser to get a new AST for the nested unit
@@ -1632,5 +1691,12 @@ void freeUnitSymbolTable(Symbol *symbol_table) {
         }
         free(current); // Free the Symbol struct
         current = next;
+    }
+}
+
+void toLowerString(char *str) {
+    if (!str) return;
+    for (int i = 0; str[i]; i++) {
+        str[i] = tolower(str[i]);
     }
 }

@@ -17,6 +17,7 @@
 #endif
 
 #define MAX_SYMBOL_LENGTH 255
+#define MAX_ID_LENGTH 256
 
 // --- Forward Declarations and Typedefs needed by this file ---
 // These types are defined in symbol.h
