@@ -223,6 +223,7 @@ Token *identifier(Lexer *lexer) {
 #endif
     return token;
 }
+
 Token *stringLiteral(Lexer *lexer) {
     advance(lexer);  // Skip opening '
     char *buffer = malloc(DEFAULT_STRING_CAPACITY);
