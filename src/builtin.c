@@ -498,6 +498,7 @@ Value executeBuiltinRound(AST *node) {
     else {
         fprintf(stderr, "Runtime error: Round argument must be a Real or Integer type. Got %s.\n", varTypeToString(arg.type));
         freeValue(&arg); // Free evaluated arg before exit
+        result = makeInt(0);
         EXIT_FAILURE_HANDLER();
     }
 
@@ -1158,7 +1159,7 @@ Value executeBuiltinReal(AST *node) {
     }
 
     Value arg = eval(node->children[0]);
-    Value result;
+    Value result = makeInt(0);
 
     switch (arg.type) {
         case TYPE_INTEGER:
@@ -1590,6 +1591,8 @@ Value executeBuiltinResult(AST *node) {
     return *(current_function_symbol->value);
 }
 
+
+
 Value executeBuiltinProcedure(AST *node) {
     if (!node || !node->token || !node->token->value) {
         fprintf(stderr, "Internal Error: Invalid AST node passed to executeBuiltinProcedure.\n");
@@ -1633,495 +1636,328 @@ Value executeBuiltinProcedure(AST *node) {
     return(makeInt(0));
 }
 
-void registerBuiltinFunction(const char *name, ASTNodeType declType) {
-    char *lowerName = strdup(name);
-    if (!lowerName) {
-        fprintf(stderr, "Memory allocation error in register_builtin_function\n");
-        EXIT_FAILURE_HANDLER();
-    }
-    // Convert the duplicated name to lowercase for consistent storage/lookup
-    for (int i = 0; lowerName[i] != '\0'; i++) {
-        lowerName[i] = tolower((unsigned char)lowerName[i]);
+static void configureBuiltinDummyAST(AST *dummy, const char *name) {
+    // Ensure dummy is not NULL before proceeding
+    if (!dummy) {
+        fprintf(stderr, "Error: configureBuiltinDummyAST called with NULL dummy AST node for name: %s\n", name ? name : "NULL_NAME");
+        return; // Or EXIT_FAILURE_HANDLER();
     }
 
-    // Create the initial token for the function name.
-    // This token is TEMPORARY, only used to pass the name to newASTNode.
-    Token *funcNameToken = newToken(TOKEN_IDENTIFIER, lowerName);
-    if (!funcNameToken) { // Check if newToken failed
+    // Note: 'name' here is the original case-sensitive name passed to registerBuiltinFunction.
+    // The strcasecmp will handle case-insensitivity.
+
+    // --- Functions Returning REAL ---
+    if (strcasecmp(name, "cos") == 0 ||
+        strcasecmp(name, "sin") == 0 ||
+        strcasecmp(name, "tan") == 0 ||
+        strcasecmp(name, "sqrt") == 0 ||
+        strcasecmp(name, "ln") == 0 ||
+        strcasecmp(name, "exp") == 0 ||
+        strcasecmp(name, "real") == 0) { // Added "real" here
+
+        // All these take one numeric argument (can be represented as REAL for dummy) and return REAL.
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_REAL); // Dummy param type
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_param1_real"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "real"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_REAL); setRight(dummy, retNode); dummy->var_type = TYPE_REAL;
+    }
+    // --- Functions Returning INTEGER ---
+    else if (strcasecmp(name, "abs") == 0) { // abs can return INT or REAL, C code handles it. Dummy can be INT.
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_REAL); // Param can be Real or Int
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_abs_arg"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
+    else if (strcasecmp(name, "pos") == 0) {
+        dummy->child_capacity = 2;
+        dummy->children = malloc(sizeof(AST*) * 2);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_pos_substr"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_STRING); Token* pn2 = newToken(TOKEN_IDENTIFIER, "_pos_str"); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2,v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
+    else if (strcasecmp(name, "ioresult") == 0 ||
+             strcasecmp(name, "paramcount") == 0 ||
+             strcasecmp(name, "getmaxx") == 0 ||
+             strcasecmp(name, "getmaxy") == 0 ||
+             strcasecmp(name, "screencols") == 0 ||    // Added from previous list
+             strcasecmp(name, "screenrows") == 0 ||    // Added
+             strcasecmp(name, "ord") == 0 ||           // Added
+             strcasecmp(name, "round") == 0 ||         // Added
+             strcasecmp(name, "trunc") == 0 ||
+             strcasecmp(name, "length") == 0 ||        // Added
+             strcasecmp(name, "wherex") == 0 ||        // Added from builtin.c
+             strcasecmp(name, "wherey") == 0 ||        // Added from builtin.c
+             strcasecmp(name, "createtexture") == 0 || // Added
+             strcasecmp(name, "loadsound") == 0 ) {    // Added
+
+        // These functions take 0 or 1 argument (ord, round, trunc, length, loadsound) and return INTEGER.
+        // For simplicity, we'll set up a generic single parameter if applicable, or none.
+        // The C execution will handle exact parameter requirements.
+
+        if (strcasecmp(name, "ord") == 0 || strcasecmp(name, "round") == 0 || strcasecmp(name, "trunc") == 0 || strcasecmp(name, "length") == 0 || strcasecmp(name, "loadsound") == 0) {
+            dummy->child_capacity = 1;
+            dummy->children = malloc(sizeof(AST*));
+            if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+            AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+            // Determine appropriate dummy param type
+            if (strcasecmp(name, "length") == 0 || strcasecmp(name, "loadsound") == 0) setTypeAST(p1, TYPE_STRING);
+            else if (strcasecmp(name, "round") == 0 || strcasecmp(name, "trunc") == 0) setTypeAST(p1, TYPE_REAL);
+            else setTypeAST(p1, TYPE_CHAR); // for ord (can be other ordinals too)
+
+            Token* pn1 = newToken(TOKEN_IDENTIFIER, "_param1"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+            dummy->children[0] = p1; dummy->child_count = 1;
+        } else if (strcasecmp(name, "createtexture") == 0) {
+             dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+             AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); Token* p1n = newToken(TOKEN_IDENTIFIER, "_ct_w"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
+             AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER); Token* p2n = newToken(TOKEN_IDENTIFIER, "_ct_h"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2); dummy->children[1] = p2;
+             dummy->child_count = 2;
+        }
+        else { // 0 parameters
+            dummy->child_count = 0;
+        }
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
+    // --- Functions Returning CHAR ---
+    else if (strcasecmp(name, "upcase") == 0 ||
+             strcasecmp(name, "chr") == 0) {    // Added "chr"
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, (strcasecmp(name, "chr") == 0 ? TYPE_INTEGER : TYPE_CHAR) ); // chr takes int, upcase char
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_param1_char_int"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "char"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_CHAR); setRight(dummy, retNode); dummy->var_type = TYPE_CHAR;
+    }
+    // --- Functions Returning STRING ---
+    else if (strcasecmp(name, "paramstr") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_paramstr_idx"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcasecmp(name, "readkey") == 0) {
+        dummy->child_count = 0;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcasecmp(name, "copy") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_cpy_s"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER); Token* pn2 = newToken(TOKEN_IDENTIFIER, "_cpy_idx"); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2,v2); dummy->children[1] = p2;
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_INTEGER); Token* pn3 = newToken(TOKEN_IDENTIFIER, "_cpy_cnt"); AST* v3 = newASTNode(AST_VARIABLE, pn3); freeToken(pn3); addChild(p3,v3); dummy->children[2] = p3;
+        dummy->child_count = 3;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcasecmp(name, "inttostr") == 0) { // Added
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_itos_val"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcmp(name, "api_receive") == 0) { // Already had this
+        // Param: MStream
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_MEMORYSTREAM); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_apirecv_ms"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    // --- Functions Returning BOOLEAN ---
+    else if (strcasecmp(name, "keypressed") == 0 ||
+             strcasecmp(name, "quitrequested") == 0 ||
+             strcasecmp(name, "issoundplaying") == 0 || // Added from previous list
+             strcasecmp(name, "eof") == 0 ) {           // Added
+        dummy->child_count = 0; // keypressed, quitrequested, issoundplaying take 0 args. eof takes 1 file arg.
+        if (strcasecmp(name, "eof") == 0) {
+            dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+            AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_FILE); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_eof_fvar"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
+            dummy->children[0] = p1; dummy->child_count = 1;
+        }
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "boolean"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_BOOLEAN); setRight(dummy, retNode); dummy->var_type = TYPE_BOOLEAN;
+    }
+    // --- Functions Returning MEMORYSTREAM ---
+    else if (strcasecmp(name, "api_send") == 0) { // Already had this
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_apisend_url"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_STRING); Token* pn2 = newToken(TOKEN_IDENTIFIER, "_apisend_body"); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2,v2); dummy->children[1] = p2; // Body can also be MStream, C code handles
+        dummy->child_count = 2;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "mstream"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_MEMORYSTREAM); setRight(dummy, retNode); dummy->var_type = TYPE_MEMORYSTREAM;
+    }
+    else if (strcasecmp(name, "mstreamcreate") == 0) { // Already had this
+        dummy->child_count = 0;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "mstream"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_MEMORYSTREAM); setRight(dummy, retNode); dummy->var_type = TYPE_MEMORYSTREAM;
+    }
+    // --- Ordinal functions (Low, High, Succ) ---
+    // These are special as their return type matches their argument's base type,
+    // and their argument is a type identifier rather than a value.
+    // For dummy setup, we can make the return type INTEGER as a placeholder.
+    // The actual C execution will determine the correct type.
+    else if (strcasecmp(name, "low") == 0 || strcasecmp(name, "high") == 0 || strcasecmp(name, "succ") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); // Param is type identifier, dummy type
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_ord_type_arg"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); // Placeholder return type
+        AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
+    // --- Procedures (TYPE_VOID return type) ---
+    // Most procedures listed in the original long if/else chain don't strictly need
+    // specific dummy AST setup here unless you want to define their parameter list
+    // for very early (parser/annotation time) arity checks.
+    // If they are AST_PROCEDURE_DECL, dummy->var_type will default to TYPE_VOID
+    // from newASTNode, which is correct.
+    // Example for a procedure with specific params:
+    else if (strcasecmp(name, "getmousestate") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames[] = {"_gms_x", "_gms_y", "_gms_b"};
+        for(int i=0; i<3; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER); p->by_ref = 1; // VAR params
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID; // Explicitly VOID for procedures
+    } else if (strcasecmp(name, "random") == 0) {
+        // Random can be called with 0 or 1 (integer) argument.
+        // The C execution `executeBuiltinRandom` handles both.
+        // For the dummy AST, we can define it as taking an optional integer
+        // or simply define the 0-argument version which returns REAL.
+        // Let's set up for the 0-argument version primarily for return type.
+        dummy->child_count = 0; // For Random()
+        // If you wanted to represent the optional Random(N):
+        // dummy->child_capacity = 1;
+        // dummy->children = malloc(sizeof(AST*));
+        // if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        // AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        // Token* pn1 = newToken(TOKEN_IDENTIFIER, "_random_n_arg"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        // dummy->children[0] = p1;
+        // dummy->child_count = 1; // Or 0 if primarily defining Random()
+
+        // Return: REAL (for Random() without arguments)
+        // If Random(N) is called, executeBuiltinRandom returns INTEGER.
+        // The dummy->var_type here helps if annotation needs a hint for the no-arg case.
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "real");
+        AST* retNode = newASTNode(AST_VARIABLE, retTok);
+        freeToken(retTok);
+        setTypeAST(retNode, TYPE_REAL);
+        setRight(dummy, retNode);
+        dummy->var_type = TYPE_REAL; // For Random()
+    } else if (strcasecmp(name, "sqr") == 0) {
+        // Parameter: Integer or Real. C code executeBuiltinSqr handles both.
+        // For dummy AST, we can specify REAL as the parameter type.
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, TYPE_REAL); // Dummy parameter type
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_sqr_arg");
+        AST* v1 = newASTNode(AST_VARIABLE, pn1);
+        freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+
+        // Return type: Matches argument type (Integer or Real).
+        // For the dummy AST, we can set it to REAL, as Sqr(Integer) can be promoted.
+        // The C execution `executeBuiltinSqr` will return the correctly typed Value.
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "real");
+        AST* retNode = newASTNode(AST_VARIABLE, retTok);
+        freeToken(retTok);
+        setTypeAST(retNode, TYPE_REAL);
+        setRight(dummy, retNode);
+        dummy->var_type = TYPE_REAL;
+    }
+    // ... add other specific procedures if parameter list checking via dummy AST is desired ...
+    else {
+        // If it's an AST_FUNCTION_DECL and not handled above, it will retain TYPE_VOID
+        // from newASTNode, which will trigger the warning in addProcedure.
+        // If it's an AST_PROCEDURE_DECL, TYPE_VOID is appropriate.
+        if (dummy->type == AST_FUNCTION_DECL) {
+            // This is a function we haven't explicitly configured.
+            // It will get TYPE_VOID by default from newASTNode and trigger the warning.
+            // To fix, it needs its own 'else if' block above.
+            // No action needed here, the warning will guide.
+        } else { // AST_PROCEDURE_DECL
+            dummy->var_type = TYPE_VOID; // Ensure procedures are typed VOID
+        }
+    }
+}
+
+void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
+    // --- Basic setup for the dummy AST node ---
+    char *lowerNameCopy = strdup(name); // Use original 'name' for strcmp in helper, but lowercase for token value
+    if (!lowerNameCopy) {
+        fprintf(stderr, "Memory allocation error (strdup lowerNameCopy) in registerBuiltinFunction\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    for (int i = 0; lowerNameCopy[i] != '\0'; i++) {
+        lowerNameCopy[i] = tolower((unsigned char)lowerNameCopy[i]);
+    }
+
+    Token *funcNameToken = newToken(TOKEN_IDENTIFIER, lowerNameCopy); // Token value is lowercase
+    if (!funcNameToken) {
         fprintf(stderr, "Memory allocation error creating token in registerBuiltinFunction\n");
-        free(lowerName);
+        free(lowerNameCopy);
         EXIT_FAILURE_HANDLER();
     }
+    free(lowerNameCopy); // Free the strdup'd lowercase name, token has its own copy
 
-    // Create the main dummy AST node for the built-in routine.
-    // newASTNode makes its *own internal copy* of funcNameToken (struct and value).
-    AST *dummy = newASTNode(declType, funcNameToken);
-    if (!dummy) { // Check if newASTNode failed
-         fprintf(stderr, "Memory allocation error creating AST node in registerBuiltinFunction\n");
-         freeToken(funcNameToken); // Free the original temporary token
-         free(lowerName);
-         EXIT_FAILURE_HANDLER();
+    AST *dummy = newASTNode(declType, funcNameToken); // newASTNode copies funcNameToken
+    if (!dummy) {
+        fprintf(stderr, "Memory allocation error creating AST node in registerBuiltinFunction\n");
+        freeToken(funcNameToken);
+        EXIT_FAILURE_HANDLER();
     }
+    freeToken(funcNameToken); // Free the initial token, dummy AST has its own copy
 
-    // Free the ORIGINAL temporary function name token.
-    // Its content has been copied into dummy->token by newASTNode.
-    freeToken(funcNameToken);
-    // The lowerName string itself can now be freed as funcNameToken owned its copy.
-    free(lowerName); // Free the lowercased string
-
-    // Initialize basic AST node fields
+    // Initialize basic AST node fields - newASTNode sets var_type to TYPE_VOID by default
     dummy->child_count = 0;
     dummy->child_capacity = 0;
     setLeft(dummy, NULL);
-    setRight(dummy, NULL);
+    setRight(dummy, NULL); // Helper will set this for functions
     setExtra(dummy, NULL);
+    // dummy->var_type is already TYPE_VOID from newASTNode; configureBuiltinDummyAST will set it for functions.
 
-    // --- Logic to set return types and parameter info based on function name ---
-    // For nodes created below (retTypeNode, param, var), newASTNode makes
-    // its own copy of the temporary tokens used (typeNameToken, paramNameToken).
-    // We free the temporary token *immediately after* newASTNode uses it.
-    // We DO NOT free the token *inside* the resulting AST node (e.g., retTypeNode->token).
+    // --- Call helper to configure parameters and return type based on 'name' ---
+    // Pass the original 'name' (not lowercased) because configureBuiltinDummyAST uses strcasecmp.
+    configureBuiltinDummyAST(dummy, name);
 
-    // -- Functions with Return Types --
-    if (strcmp(name, "api_send") == 0) { // Use original name 'name' for clarity in conditions
-        Token* typeNameToken = newToken(TOKEN_IDENTIFIER, "mstream");
-        AST *retTypeNode = newASTNode(AST_VARIABLE, typeNameToken);
-        freeToken(typeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_MEMORYSTREAM);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_MEMORYSTREAM; // Set function's return type
-        
-    } else if (strcasecmp(name, "round") == 0) { // <<< ADD THIS ELSE IF BLOCK
-        // Round(X: Real): Integer;
-        dummy->child_capacity = 1;
-        dummy->children = malloc(sizeof(AST*));
-        if (!dummy->children) { /* Malloc error */ freeAST(dummy); EXIT_FAILURE_HANDLER(); }
-
-        // Parameter 1: X (Real)
-        AST* param = newASTNode(AST_VAR_DECL, NULL);
-        setTypeAST(param, TYPE_REAL); // Parameter type
-        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_round_arg_x"); // Dummy param name
-        AST* varNode = newASTNode(AST_VARIABLE, paramNameToken);
-        freeToken(paramNameToken); // Free temp token
-        addChild(param, varNode);
-        dummy->children[0] = param;
-        dummy->child_count = 1;
-
-        // Return type: Integer
-        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer"); // Type name for return
-        AST* retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-        freeToken(retTypeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_INTEGER); // Actual VarType for return
-        setRight(dummy, retTypeNode);          // Link return type node
-        dummy->var_type = TYPE_INTEGER;        // Set function's overall return type
-    } else if (strcasecmp(name, "createtexture") == 0) {
-        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_ct_w"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
-        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
-        Token* p2n = newToken(TOKEN_IDENTIFIER, "_ct_h"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2); dummy->children[1] = p2;
-        dummy->child_count = 2;
-        // Set return type for the function
-        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok); setTypeAST(retNode, TYPE_INTEGER);
-        setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
-        
-    } else if (strcasecmp(name, "real") == 0) { // <<< ADD THIS ELSE IF BLOCK
-        // Pscal: function Real(IntValue: Integer): Real; (or other ordinals)
-        dummy->child_capacity = 1;
-        dummy->children = malloc(sizeof(AST*));
-        if (!dummy->children) { freeAST(dummy); EXIT_FAILURE_HANDLER(); }
-
-        // Parameter 1: Value (Integer or Ordinal, represented as Integer for dummy)
-        AST* param = newASTNode(AST_VAR_DECL, NULL);
-        setTypeAST(param, TYPE_INTEGER); // Dummy parameter type, C code handles more
-        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_real_arg_val");
-        AST* varNode = newASTNode(AST_VARIABLE, paramNameToken);
-        freeToken(paramNameToken);
-        addChild(param, varNode);
-        dummy->children[0] = param;
-        dummy->child_count = 1;
-
-        // Return type: Real
-        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "real");
-        AST* retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-        freeToken(retTypeNameToken);
-        setTypeAST(retTypeNode, TYPE_REAL);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_REAL;
-    } else if (strcasecmp(name, "sqr") == 0) {
-        dummy->child_capacity = 1;
-        dummy->children = malloc(sizeof(AST*));
-        if (!dummy->children) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
-
-        AST* param = newASTNode(AST_VAR_DECL, NULL);
-        // We can make the dummy param type REAL, as Sqr(Integer) also works
-        // and the C implementation will handle both INTEGER and REAL inputs.
-        setTypeAST(param, TYPE_REAL); // Or TYPE_INTEGER, C code handles either
-        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_sqr_arg");
-        AST* varNode = newASTNode(AST_VARIABLE, paramNameToken);
-        freeToken(paramNameToken);
-        addChild(param, varNode);
-        dummy->children[0] = param;
-        dummy->child_count = 1;
-
-        // Return type depends on argument type.
-        // The dummy AST's var_type here is a hint; actual eval handles it.
-        // Let's set it to REAL as that's a common use.
-        // Alternatively, set to TYPE_VOID and let eval determine precise return.
-        // For functions, it's better to be more specific if possible.
-        // Since it can return Int or Real, let's mark it as Real for the dummy.
-        Token* retTok = newToken(TOKEN_IDENTIFIER, "real"); // Or "integer" - depends on convention
-        AST* retNode = newASTNode(AST_VARIABLE, retTok);
-        freeToken(retTok);
-        setTypeAST(retNode, TYPE_REAL); // Or TYPE_INTEGER
-        setRight(dummy, retNode);
-        dummy->var_type = TYPE_REAL; // Or TYPE_INTEGER. The C impl will return correct type.
-    } else if (strcasecmp(name, "destroytexture") == 0) {
-        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* check */
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_dt_id"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
-        dummy->child_count = 1; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "updatetexture") == 0) {
-        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); // TextureID
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_ut_id"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
-        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_ARRAY); // PixelData (ARRAY OF Byte)
-        // We don't specify element type here in dummy AST; runtime will check.
-        // Or you could create a dummy AST_ARRAY_TYPE node for p2->right if needed for stricter parsing.
-        Token* p2n = newToken(TOKEN_IDENTIFIER, "_ut_data"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2); dummy->children[1] = p2;
-        dummy->child_count = 2; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "rendercopy") == 0) {
-        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* check */
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_rc_id"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
-        dummy->child_count = 1; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "rendercopyrect") == 0) {
-        dummy->child_capacity = 5; dummy->children = malloc(sizeof(AST*) * 5); /* check */
-        const char* pnames[] = {"_rcr_id", "_rcr_dx", "_rcr_dy", "_rcr_dw", "_rcr_dh"};
-        for(int i=0; i<5; ++i) {
-            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
-            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
-            dummy->children[i] = p;
-        }
-        dummy->child_count = 5; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "fillcircle") == 0) {
-        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
-        const char* pnames[] = {"_fc_cx", "_fc_cy", "_fc_r"};
-        for(int i=0; i<3; ++i) {
-            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
-            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
-            dummy->children[i] = p;
-        }
-        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "setrgbcolor") == 0) { // New built-in
-        dummy->child_capacity = 3;
-        dummy->children = malloc(sizeof(AST*) * 3);
-        if (!dummy->children) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
-
-        // Param 1: R (Byte or Integer)
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_BYTE); // Or TYPE_INTEGER
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_rgb_r"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1);
-        dummy->children[0] = p1;
-
-        // Param 2: G (Byte or Integer)
-        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_BYTE); // Or TYPE_INTEGER
-        Token* p2n = newToken(TOKEN_IDENTIFIER, "_rgb_g"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2);
-        dummy->children[1] = p2;
-
-        // Param 3: B (Byte or Integer)
-        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_BYTE); // Or TYPE_INTEGER
-        Token* p3n = newToken(TOKEN_IDENTIFIER, "_rgb_b"); AST* v3 = newASTNode(AST_VARIABLE, p3n); freeToken(p3n); addChild(p3,v3);
-        dummy->children[2] = p3;
-
-        dummy->child_count = 3;
-        dummy->var_type = TYPE_VOID; // It's a procedure
-    } else if (strcasecmp(name, "drawline") == 0) {
-        dummy->child_capacity = 4; dummy->children = malloc(sizeof(AST*) * 4); /* check */
-        const char* pnames[] = {"_dl_x1", "_dl_y1", "_dl_x2", "_dl_y2"};
-        for(int i=0; i<4; ++i) {
-            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
-            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
-            dummy->children[i] = p;
-        }
-        dummy->child_count = 4; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "fillrect") == 0) {
-        dummy->child_capacity = 4; dummy->children = malloc(sizeof(AST*) * 4); /* check */
-        const char* pnames[] = {"_fr_x1", "_fr_y1", "_fr_x2", "_fr_y2"}; // or x,y,w,h depending on your preference
-        for(int i=0; i<4; ++i) {
-            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
-            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
-            dummy->children[i] = p;
-        }
-        dummy->child_count = 4; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "drawcircle") == 0) {
-        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
-        const char* pnames[] = {"_dc_cx", "_dc_cy", "_dc_r"};
-        for(int i=0; i<3; ++i) {
-            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
-            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
-            dummy->children[i] = p;
-        }
-        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "inittextsystem") == 0) {
-        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* check */
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_its_font"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1);
-        dummy->children[0] = p1;
-        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
-        Token* p2n = newToken(TOKEN_IDENTIFIER, "_its_size"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2);
-        dummy->children[1] = p2;
-        dummy->child_count = 2; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "outtextxy") == 0) {
-        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
-        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
-        Token* p1n = newToken(TOKEN_IDENTIFIER, "_ot_x"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1);
-        dummy->children[0] = p1;
-        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
-        Token* p2n = newToken(TOKEN_IDENTIFIER, "_ot_y"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2);
-        dummy->children[1] = p2;
-        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_STRING);
-        Token* p3n = newToken(TOKEN_IDENTIFIER, "_ot_s"); AST* v3 = newASTNode(AST_VARIABLE, p3n); freeToken(p3n); addChild(p3,v3);
-        dummy->children[2] = p3;
-        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
-    } else if (strcasecmp(name, "getmousestate") == 0) {
-        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* check */
-        const char* pnames[] = {"_gms_x", "_gms_y", "_gms_b"};
-        for(int i=0; i<3; ++i) {
-            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER); p->by_ref = 1; // VAR parameters
-            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
-            dummy->children[i] = p;
-        }
-        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
-    } else if (strcmp(name, "textcolore") == 0 || strcmp(name, "textbackgrounde") == 0 ) {
-        // Param: byte/integer
-        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST *)); if (!dummy->children) { /* Error */ }
-        AST *p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_BYTE); // Expect byte
-        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_tc_color"); AST *v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
-        dummy->children[0] = p1; dummy->child_count = 1;
-    } else if (strcmp(name, "api_receive") == 0) {
-        Token* typeNameToken = newToken(TOKEN_IDENTIFIER, "string");
-        AST *retTypeNode = newASTNode(AST_VARIABLE, typeNameToken);
-        freeToken(typeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_STRING);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_STRING;
-    } else if (strcmp(name, "chr") == 0) {
-        // Define parameter (integer)
-        dummy->child_capacity = 1;
-        dummy->children = malloc(sizeof(AST *));
-        if (!dummy->children) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
-        AST *param = newASTNode(AST_VAR_DECL, NULL);
-        setTypeAST(param, TYPE_INTEGER);
-        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_chr_arg");
-        AST *var = newASTNode(AST_VARIABLE, paramNameToken);
-        freeToken(paramNameToken); // Free temp token
-        addChild(param, var);
-        dummy->children[0] = param;
-        dummy->child_count = 1;
-        // Define return type (char)
-        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "char");
-        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-        freeToken(retTypeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_CHAR);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_CHAR;
-    } else if (strcmp(name, "ord") == 0) {
-        // Define parameter (ordinal type, represented as CHAR here for simplicity)
-        dummy->child_capacity = 1;
-        dummy->children = malloc(sizeof(AST *));
-        if (!dummy->children) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
-        AST *param = newASTNode(AST_VAR_DECL, NULL);
-        setTypeAST(param, TYPE_CHAR); // Example parameter type
-        Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_ord_arg");
-        AST *var = newASTNode(AST_VARIABLE, paramNameToken);
-        freeToken(paramNameToken); // Free temp token
-        addChild(param, var);
-        dummy->children[0] = param;
-        dummy->child_count = 1;
-        // Define return type (integer)
-        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
-        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-        freeToken(retTypeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_INTEGER);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_INTEGER;
-    } else if (strcmp(name, "wherex") == 0) {
-        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
-        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-        freeToken(retTypeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_INTEGER);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_INTEGER;
-   } else if (strcmp(name, "wherey") == 0) {
-        Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
-        AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-        freeToken(retTypeNameToken); // Free temp token
-        setTypeAST(retTypeNode, TYPE_INTEGER);
-        setRight(dummy, retTypeNode);
-        dummy->var_type = TYPE_INTEGER;
-   } else if (strcasecmp(name, "keypressed") == 0) { // Use strcasecmp if needed
-       Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "boolean");
-       AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-       freeToken(retTypeNameToken); // Free temp token
-       setTypeAST(retTypeNode, TYPE_BOOLEAN);
-       setRight(dummy, retTypeNode);
-       dummy->var_type = TYPE_BOOLEAN;
-  } else if (strcmp(name, "inttostr") == 0) {
-      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "string");
-      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-      freeToken(retTypeNameToken); // Free temp token
-      setTypeAST(retTypeNode, TYPE_STRING);
-      setRight(dummy, retTypeNode);
-      dummy->var_type = TYPE_STRING;
-  } else if (strcasecmp(name, "screencols") == 0) {
-      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
-      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-      freeToken(retTypeNameToken); // Free temp token
-      setTypeAST(retTypeNode, TYPE_INTEGER);
-      setRight(dummy, retTypeNode);
-      dummy->var_type = TYPE_INTEGER;
- } else if (strcasecmp(name, "screenrows") == 0) {
-      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
-      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-      freeToken(retTypeNameToken); // Free temp token
-      setTypeAST(retTypeNode, TYPE_INTEGER);
-      setRight(dummy, retTypeNode);
-      dummy->var_type = TYPE_INTEGER;
- } else if (strcmp(name, "length") == 0) { // Example: length function
-      // Define parameter (string)
-      dummy->child_capacity = 1;
-      dummy->children = malloc(sizeof(AST *));
-      if (!dummy->children) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
-      AST *param = newASTNode(AST_VAR_DECL, NULL);
-      setTypeAST(param, TYPE_STRING);
-      Token* paramNameToken = newToken(TOKEN_IDENTIFIER, "_len_arg");
-      AST *var = newASTNode(AST_VARIABLE, paramNameToken);
-      freeToken(paramNameToken); // Free temp token
-      addChild(param, var);
-      dummy->children[0] = param;
-      dummy->child_count = 1;
-      // Define return type (integer)
-      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "integer");
-      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-      freeToken(retTypeNameToken); // Free temp token
-      setTypeAST(retTypeNode, TYPE_INTEGER);
-      setRight(dummy, retTypeNode);
-      dummy->var_type = TYPE_INTEGER;
- } else if (strcmp(name, "copy") == 0) { // Example: copy function
-      // Define parameters (string, integer, integer) - simplified, assumes order
-      dummy->child_capacity = 3;
-      dummy->children = malloc(sizeof(AST *) * 3);
-      if (!dummy->children) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
-      // Param 1 (string)
-      AST *param1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(param1, TYPE_STRING);
-      Token* p1Name = newToken(TOKEN_IDENTIFIER, "_cpy_s"); AST *v1 = newASTNode(AST_VARIABLE, p1Name); freeToken(p1Name); addChild(param1, v1);
-      dummy->children[0] = param1;
-      // Param 2 (integer)
-      AST *param2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(param2, TYPE_INTEGER);
-      Token* p2Name = newToken(TOKEN_IDENTIFIER, "_cpy_idx"); AST *v2 = newASTNode(AST_VARIABLE, p2Name); freeToken(p2Name); addChild(param2, v2);
-      dummy->children[1] = param2;
-      // Param 3 (integer)
-      AST *param3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(param3, TYPE_INTEGER);
-      Token* p3Name = newToken(TOKEN_IDENTIFIER, "_cpy_cnt"); AST *v3 = newASTNode(AST_VARIABLE, p3Name); freeToken(p3Name); addChild(param3, v3);
-      dummy->children[2] = param3;
-      dummy->child_count = 3;
-      // Define return type (string)
-      Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "string");
-      AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-      freeToken(retTypeNameToken); // Free temp token
-      setTypeAST(retTypeNode, TYPE_STRING);
-      setRight(dummy, retTypeNode);
-      dummy->var_type = TYPE_STRING;
- } else if (strcasecmp(name, "mstreamcreate") == 0) {
-     Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "mstream"); // Use the type name recognized by the parser
-     AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken);
-     freeToken(retTypeNameToken); // Free temp token
-     setTypeAST(retTypeNode, TYPE_MEMORYSTREAM); // Set the VarType enum
-     setRight(dummy, retTypeNode); // Link the type node as the return type
-     dummy->var_type = TYPE_MEMORYSTREAM; // Set the function node's return type hint
- } else if (strcasecmp(name, "initsoundsystem") == 0) { // Procedure, 0 args
-     dummy->child_count = 0;
-     dummy->var_type = TYPE_VOID;
- } else if (strcasecmp(name, "loadsound") == 0) { // Function, 1 string arg
-     dummy->child_capacity = 1;
-     dummy->children = malloc(sizeof(AST*));
-     if (!dummy->children) { /* check malloc */ EXIT_FAILURE_HANDLER(); }
-     AST* p1 = newASTNode(AST_VAR_DECL, NULL); // Dummy VAR_DECL for the parameter
-     setTypeAST(p1, TYPE_STRING); // Parameter type is String
-     Token* p1n = newToken(TOKEN_IDENTIFIER, "_ls_filename"); // Dummy parameter name
-     AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); // Dummy variable node
-     addChild(p1, v1); // Add dummy var to dummy VAR_DECL
-     dummy->children[0] = p1; // Add dummy VAR_DECL to dummy procedure node's children
-     dummy->child_count = 1; // <<< Set child_count to 1
-     // Set return type for the function (already exists for loadsound)
-
- } else if (strcasecmp(name, "playsound") == 0) { // Procedure, 1 integer arg
-     dummy->child_capacity = 1;
-     dummy->children = malloc(sizeof(AST*));
-      if (!dummy->children) { /* check malloc */ EXIT_FAILURE_HANDLER(); }
-     AST* p1 = newASTNode(AST_VAR_DECL, NULL); // Dummy VAR_DECL
-     setTypeAST(p1, TYPE_INTEGER); // Parameter type is Integer (SoundID)
-     Token* p1n = newToken(TOKEN_IDENTIFIER, "_ps_soundid"); // Dummy parameter name
-     AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
-     addChild(p1, v1);
-     dummy->children[0] = p1;
-     dummy->child_count = 1; // <<< Set child_count to 1
-     dummy->var_type = TYPE_VOID; // It's a procedure
-
- } else if (strcasecmp(name, "quitsoundsystem") == 0) { // Procedure, 0 args
-     dummy->child_count = 0;
-     dummy->var_type = TYPE_VOID;
- } else if (strcasecmp(name, "freesound") == 0) { // Procedure, 1 integer arg
-     dummy->child_capacity = 1;
-     dummy->children = malloc(sizeof(AST*));
-      if (!dummy->children) { /* check malloc */ EXIT_FAILURE_HANDLER(); }
-     AST* p1 = newASTNode(AST_VAR_DECL, NULL); // Dummy VAR_DECL
-     setTypeAST(p1, TYPE_INTEGER); // Parameter type is Integer (SoundID)
-     Token* p1n = newToken(TOKEN_IDENTIFIER, "_fs_soundid"); // Dummy parameter name
-     AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
-     addChild(p1, v1);
-     dummy->children[0] = p1;
-     dummy->child_count = 1; // <<< Set child_count to 1
-     dummy->var_type = TYPE_VOID; // It's a procedure
- } else if (strcasecmp(name, "issoundplaying") == 0) { // Function, 0 args, returns Boolean
-     dummy->child_count = 0; // Explicitly confirm 0 args (default is already 0)
-
-     // Set return type for the function (Boolean)
-     Token* retTypeNameToken = newToken(TOKEN_IDENTIFIER, "boolean"); // Create a temporary token for the type name "boolean"
-     AST *retTypeNode = newASTNode(AST_VARIABLE, retTypeNameToken); // Create a dummy AST node representing the Boolean type
-     freeToken(retTypeNameToken); // Free the temporary token after newASTNode copies it
-
-     setTypeAST(retTypeNode, TYPE_BOOLEAN); // Set the VarType enum for the return type node
-
-     setRight(dummy, retTypeNode); // Link the return type node to the dummy function declaration node's 'right' child
-     dummy->var_type = TYPE_BOOLEAN; // Set the function declaration node's VarType hint to Boolean
-
- }
-    // --- Add similar blocks for ALL other built-in functions ---
-    // --- that require specific return type or parameter setup. ---
-    // --- Ensure the pattern is followed: ---
-    // --- 1. Create temp token with newToken ---
-    // --- 2. Create AST node with newASTNode using temp token ---
-    // --- 3. Free temp token with freeToken ---
-    // --- 4. DO NOT free token inside the created AST node ---
-
-    // -- Procedures (no return type to set on 'dummy' itself, var_type remains VOID) --
-    // Procedures might still have parameter definitions added to dummy->children if needed
-    // for type checking later, but the basic registration doesn't require setting dummy->right.
-
-    // else if (strcmp(name, "writeln") == 0) {
-    //     // Writeln is variadic, parameter definition is complex/skipped here
-    //     dummy->var_type = TYPE_VOID;
-    // }
-    // ... add parameter definitions for other procedures if strict checking is desired ...
-
-
-    // Add the fully prepared dummy AST node to the procedure table
-    addProcedure(dummy);
-
-    // Lowercased name string `lowerName` was freed earlier after funcNameToken was created.
-    
-    freeAST(dummy); // This will free the dummy node and its tree
+    // --- Add to procedure table and free dummy AST ---
+    addProcedure(dummy, unit_context_name_param_for_addproc);
+    freeAST(dummy); // This will free the dummy node and its tree (params, return type node)
 }
 
 Value executeBuiltinParamcount(AST *node) {
@@ -2431,7 +2267,7 @@ Value executeBuiltinSucc(AST *node) {
     }
 
     Value argVal = eval(node->children[0]); // Evaluate the argument
-    long long currentOrdinal;
+    long long currentOrdinal = 0;
     long long maxOrdinal = -1;
     bool checkMax = false;
     Value result = makeVoid();

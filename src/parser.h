@@ -9,18 +9,13 @@
 typedef struct {
     Lexer *lexer;
     Token *current_token;
+    const char *current_unit_name_context;
 } Parser;
 
-AST *parsePointerType(Parser *parser); 
+AST *parsePointerType(Parser *parser);
 
-// Define Procedure structure
-typedef struct Procedure {
-    char *name;
-    AST *proc_decl;  // the AST node for the procedure declaration
-    struct Procedure *next;
-} Procedure;
-
-void addProcedure(AST *proc_decl);
+void addProcedure(AST *proc_decl, const char* unit_context_name);
+Symbol *lookupProcedure(const char *name_to_lookup);
 
 // Full parser API
 AST *buildProgramAST(Parser *parser);
@@ -52,9 +47,9 @@ AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
 AST *term(Parser *parser);
-AST *unitParser(Parser *parser, int recursion_depth);
+AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed); 
 AST *enumDeclaration(Parser *parser);
-Procedure *lookupProcedure(const char *name);
+Symbol *lookupProcedure(const char *name_to_lookup);
 
 // Other stuff
 void errorParser(Parser *parser, const char *msg);

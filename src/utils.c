@@ -847,29 +847,45 @@ void freeToken(Token *token) {
 }
 
 void freeProcedureTable(void) {
-    Procedure *proc = procedure_table;
-    while (proc) {
-        Procedure *next = proc->next;
-        // ADDED: Free the AST node owned by this Procedure entry.
-        // This is now the *only* place these specific AST nodes should be freed.
-        // freeAST will skip this node if it's somehow already been freed (unlikely with the new check).
-        if (proc->proc_decl) {
-            // #ifdef DEBUG // Keep debug prints conditional
-            // fprintf(stderr, "[DEBUG freeProcedureTable] Freeing proc_decl AST node %p for routine '%s'.\n",
-            //         (void*)proc->proc_decl, proc->name ? proc->name : "?");
-            // #endif
-            // Use freeAST, which now has the necessary checks to prevent double freeing or freeing type table nodes.
-            // Importantly, freeAST will NOT recursively free other parts of the AST if this node is a declaration node.
-            freeAST(proc->proc_decl); // Free the Procedure/Function declaration AST node
-            proc->proc_decl = NULL; // Prevent double free attempt
-        } else {
-             // #ifdef DEBUG fprintf(stderr, "[DEBUG freeProcedureTable] Skipping free for proc_decl (NULL pointer) for routine '%s'.\n", proc->name ? proc->name : "?"); #endif
-        }
-
-        if (proc->name) free(proc->name); // Free the duplicated name in the Procedure struct
-        free(proc); // Free the Procedure struct itself
-        proc = next;
+    if (!procedure_table) {
+        return;
     }
+    DEBUG_PRINT("[DEBUG SYMBOL] Freeing Procedure HashTable at %p.\n", (void*)procedure_table);
+
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        Symbol *current_sym = procedure_table->buckets[i]; // current_sym is Symbol*
+        while (current_sym) {
+            Symbol *next_sym = current_sym->next; // Use Symbol's 'next' field
+
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG FREE_PROC_TABLE] Freeing Symbol (routine) '%s' (AST @ %p type_def).\n",
+                    current_sym->name ? current_sym->name : "?", (void*)current_sym->type_def);
+            #endif
+            
+            if (current_sym->name) {
+                free(current_sym->name);
+                current_sym->name = NULL;
+            }
+
+            // The AST declaration is stored in type_def for Symbols in procedure_table
+            if (current_sym->type_def) {
+                // This AST node is a deep copy owned by this Symbol struct.
+                freeAST(current_sym->type_def);
+                current_sym->type_def = NULL;
+            }
+            
+            // Note: current_sym->value should be NULL for procedure/function symbols
+            // as they don't have a "value" in the variable sense. If it could be non-NULL,
+            // it would need freeing: if (current_sym->value) { freeValue(current_sym->value); free(current_sym->value); }
+
+            free(current_sym); // Free the Symbol struct itself
+            
+            current_sym = next_sym;
+        }
+        procedure_table->buckets[i] = NULL;
+    }
+    // free(procedure_table->buckets); // The buckets array is part of HashTable struct, not separately allocated
+    free(procedure_table); // Free the HashTable struct itself
     procedure_table = NULL;
 }
 
@@ -1369,7 +1385,66 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
         insertType(type_decl->token->value, type_decl->left);
         type_decl = type_decl->right; // Move to next sibling? Or structure is different?
     }
+    
+    AST *interface_compound_node = unit_ast->left; // unit_ast->left is the AST_COMPOUND for INTERFACE declarations
+    if (interface_compound_node && interface_compound_node->type == AST_COMPOUND) {
+        DEBUG_PRINT("[DEBUG] linkUnit: Processing interface routines for unit '%s' to add unqualified aliases to implementations.\n",
+                    unit_ast->token ? unit_ast->token->value : "UNKNOWN_UNIT");
 
+        for (int i = 0; i < interface_compound_node->child_count; i++) {
+            AST *interface_decl_node = interface_compound_node->children[i]; // e.g., AST_PROCEDURE_DECL for "Procedure ClrScr;" (header from interface)
+
+            if (interface_decl_node && interface_decl_node->token &&
+                (interface_decl_node->type == AST_PROCEDURE_DECL || interface_decl_node->type == AST_FUNCTION_DECL)) {
+
+                const char* unqualified_name_original_case = interface_decl_node->token->value;
+                char unqualified_name_lower[MAX_ID_LENGTH + 1]; // For case-insensitive lookup
+
+                strncpy(unqualified_name_lower, unqualified_name_original_case, MAX_ID_LENGTH);
+                unqualified_name_lower[MAX_ID_LENGTH] = '\0';
+                toLowerString(unqualified_name_lower); // Convert to lowercase for procedure_table lookups
+
+                const char* unit_name_original_case = unit_ast->token ? unit_ast->token->value : NULL;
+                if (!unit_name_original_case) {
+                    fprintf(stderr, "[ERROR] linkUnit: Cannot determine unit name for aliasing routine '%s'.\n", unqualified_name_original_case);
+                    continue;
+                }
+
+                // Construct qualified name (lowercase for lookup), e.g., "crt.clrscr"
+                char qualified_name_lower[MAX_ID_LENGTH * 2 + 2]; // Max unit name + '.' + max proc name + null
+                snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", unit_name_original_case, unqualified_name_original_case);
+                toLowerString(qualified_name_lower);
+
+                // Lookup the qualified symbol, which should point to the implementation AST
+                Symbol* qualified_proc_symbol = hashTableLookup(procedure_table, qualified_name_lower);
+
+                if (qualified_proc_symbol && qualified_proc_symbol->type_def && qualified_proc_symbol->type_def != (AST*)0x1 /* not a built-in sentinel */) {
+                    // Found the qualified symbol with its implementation AST (qualified_proc_symbol->type_def).
+                    // Now, check if an unqualified alias already exists.
+                    Symbol* existing_unqualified_alias = hashTableLookup(procedure_table, unqualified_name_lower);
+
+                    if (!existing_unqualified_alias) {
+                        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias for routine '%s' (from '%s') using its implementation AST to procedure_table.\n",
+                                    unqualified_name_original_case, qualified_name_lower);
+                        // Call addProcedure with the *implementation AST* (from the qualified symbol)
+                        // and NULL context (to use the unqualified name from the AST token itself).
+                        // addProcedure will make a new copy of qualified_proc_symbol->type_def.
+                        addProcedure(qualified_proc_symbol->type_def, NULL);
+                    } else {
+                        // This might happen if a built-in has the same name or due to other linking complexities.
+                        // Or if the user explicitly qualified a call to a routine that also matches an unqualified one.
+                        // Depending on desired behavior, could overwrite or just log.
+                        // For now, if it exists, assume it's correctly handled or was a built-in.
+                        DEBUG_PRINT("[DEBUG] linkUnit: Unqualified routine '%s' already exists in procedure_table. Skipping duplicate alias add from unit '%s'.\n",
+                                    unqualified_name_original_case, unit_name_original_case);
+                    }
+                } else {
+                    DEBUG_PRINT("[WARN] linkUnit: Could not find valid *implementation AST* for qualified routine '%s' to create alias for '%s'. Interface declaration might exist without full implementation being linked.\n",
+                                qualified_name_lower, unqualified_name_original_case);
+                }
+            }
+        }
+    }
 
     // Handle nested uses clauses
     // The logic here uses unitParser to get a new AST for the nested unit
@@ -1416,7 +1491,7 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
             unit_parser_instance.lexer = &lexer;
             unit_parser_instance.current_token = getNextToken(&lexer); // getNextToken allocates the first token
 
-            AST *linked_unit_ast = unitParser(&unit_parser_instance, recursion_depth + 1); // unitParser may return NULL on error
+            AST *linked_unit_ast = unitParser(&unit_parser_instance, recursion_depth + 1, unit_name);
 
             // ADDED: Free the allocated nested_source buffer if it was allocated
             if (nested_source) free(nested_source);
@@ -1616,5 +1691,12 @@ void freeUnitSymbolTable(Symbol *symbol_table) {
         }
         free(current); // Free the Symbol struct
         current = next;
+    }
+}
+
+void toLowerString(char *str) {
+    if (!str) return;
+    for (int i = 0; str[i]; i++) {
+        str[i] = tolower(str[i]);
     }
 }

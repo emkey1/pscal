@@ -183,23 +183,42 @@ Token *identifier(Lexer *lexer) {
     char *id_str = malloc(len + 1);
     strncpy(id_str, lexer->text + start, len);
     id_str[len] = '\0';
-    for (size_t i = 0; i < len; i++)
+
+    // ADD DEBUG PRINT 1: See the raw lexeme before lowercasing
+    DEBUG_PRINT("identifier: Raw lexeme formed: \"_%s_\" (len %zu)\n", id_str, len);
+    // Optional: print char by char if you suspect invisible characters
+    // for (size_t k_debug = 0; k_debug < len; ++k_debug) {
+    //     DEBUG_PRINT("identifier: raw_char[%zu] = '%c' (ASCII: %d)\n", k_debug, id_str[k_debug], id_str[k_debug]);
+    // }
+
+    for (size_t i = 0; i < len; i++) // Convert to lowercase
         id_str[i] = tolower((unsigned char)id_str[i]);
+
+    // ADD DEBUG PRINT 2: See the lowercase lexeme
+    DEBUG_PRINT("identifier: Lowercase lexeme: \"_%s_\"\n", id_str);
+
     Token *token = malloc(sizeof(Token));
-    token->type = TOKEN_IDENTIFIER;
+    token->type = TOKEN_IDENTIFIER; // Default to IDENTIFIER
     for (int i = 0; i < NUM_KEYWORDS; i++) {
+        // ADD DEBUG PRINT 3: See the comparison being made
+        // DEBUG_PRINT("identifier: Comparing \"_%s_\" with keyword \"_%s_\"\n", id_str, keywords[i].keyword);
         if (strcmp(id_str, keywords[i].keyword) == 0) {
             token->type = keywords[i].token_type;
+            // ADD DEBUG PRINT 4: Confirm if a keyword was matched
+            DEBUG_PRINT("identifier: Matched keyword! Lexeme: \"_%s_\", Type set to %s\n", id_str, tokenTypeToString(token->type));
             break;
         }
     }
     token->value = id_str;
-#ifdef DEBUG
-    // Debug: Print the token type
+
+#ifdef DEBUG // Your existing debug block
     if (token->type == TOKEN_USES) {
-        printf("Lexer: Tokenized 'uses' as TOKEN_USES\n");
-    } else if (token->type == TOKEN_UNIT) {
-        printf("Lexer: Tokenized 'uses' as TOKEN_UNIT\n");
+        // This existing printf uses stdout, so it should appear if hit.
+        printf("Lexer: Tokenized 'uses' as TOKEN_USES (via existing printf)\n");
+        fflush(stdout); // Ensure it prints immediately
+    } else if (token->type == TOKEN_IDENTIFIER && strcasecmp(token->value, "uses") == 0) {
+        // ADD THIS ELSE IF: To see if "uses" was tokenized as an identifier
+        DEBUG_PRINT("identifier: Lexeme \"uses\" was tokenized as TOKEN_IDENTIFIER, not TOKEN_USES.\n");
     }
 #endif
     return token;
@@ -254,6 +273,10 @@ Token *stringLiteral(Lexer *lexer) {
 }
 
 Token *getNextToken(Lexer *lexer) {
+#ifdef DEBUG
+    fprintf(stderr, "LEXER_DEBUG: getNextToken\n"); fflush(stderr);
+#endif
+    DEBUG_PRINT("getNextToken: Entry. Current char: '%c' (ASCII: %d) at line %d, col %d\n", lexer->current_char, lexer->current_char, lexer->line, lexer->column);
     while (lexer->current_char) {
         // Skip whitespace
         if (isspace((unsigned char)lexer->current_char)) {
@@ -292,6 +315,8 @@ Token *getNextToken(Lexer *lexer) {
              }
             continue; // Resume token search
         }
+        
+        DEBUG_PRINT("getNextToken: After skip WS/Comment. Current char: '%c' (ASCII: %d)\n", lexer->current_char, lexer->current_char);
 
          // Skip parenthesis/star comments (* ... *) - Added Nested Handling
          if (lexer->current_char == '(' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '*') {
@@ -322,27 +347,42 @@ Token *getNextToken(Lexer *lexer) {
         if (lexer->current_char == '#') {
             // Check if the next char is a hex digit. number() will handle validation.
              if (lexer->pos + 1 < strlen(lexer->text) && isHexDigit(lexer->text[lexer->pos+1])) {
+#ifdef DEBUG
+                  fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 1)\n"); fflush(stderr);
+#endif
                   return number(lexer); // Parses #...
              } else {
                   // If '#' is not followed by a hex digit, treat as UNKNOWN
                   char bad_char[2] = {lexer->current_char, '\0'};
                   advance(lexer);
+#ifdef DEBUG
+                  fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 2)\n"); fflush(stderr);
+#endif
                   return newToken(TOKEN_UNKNOWN, bad_char);
              }
         }
 
         // Handle Identifiers and Keywords
         if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return identifier)\n"); fflush(stderr);
+#endif
             return identifier(lexer);
         }
 
         // Handle Integer or Real Constants (starting with a digit)
         if (isdigit((unsigned char)lexer->current_char)) {
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return number)\n"); fflush(stderr);
+#endif
             return number(lexer);
         }
 
         // Handle String Literals
         if (lexer->current_char == '\'') {
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return stringLiteral)\n"); fflush(stderr);
+#endif
             return stringLiteral(lexer);
         }
 
@@ -351,6 +391,9 @@ Token *getNextToken(Lexer *lexer) {
         // Caret (Pointer symbol)
         if (lexer->current_char == '^') { // <<< ADDED
             advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_CARET)\n"); fflush(stderr);
+#endif
             return newToken(TOKEN_CARET, "^");
         }
 
@@ -359,8 +402,14 @@ Token *getNextToken(Lexer *lexer) {
             advance(lexer);
             if (lexer->current_char == '=') {
                 advance(lexer);
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_ASSIGN)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_ASSIGN, ":=");
             } else {
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_COLON)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_COLON, ":");
             }
         }
@@ -368,12 +417,18 @@ Token *getNextToken(Lexer *lexer) {
         // Semicolon
         if (lexer->current_char == ';') {
             advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_SEMICOLON)\n"); fflush(stderr);
+#endif
             return newToken(TOKEN_SEMICOLON, ";");
         }
 
         // Comma
         if (lexer->current_char == ',') {
             advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_COMMA)\n"); fflush(stderr);
+#endif
             return newToken(TOKEN_COMMA, ",");
         }
 
@@ -382,12 +437,21 @@ Token *getNextToken(Lexer *lexer) {
             advance(lexer);
             if (lexer->current_char == '.') {
                 advance(lexer);
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_DOTDOT)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_DOTDOT, "..");
             } else {
+#ifdef DEBUG
+                fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_PERIOD)\n"); fflush(stderr);
+#endif
                 return newToken(TOKEN_PERIOD, ".");
             }
         }
 
+#ifdef DEBUG
+        fprintf(stderr, "LEXER_DEBUG: getNextToken(Math Section)\n"); fflush(stderr);
+#endif
         // Simple operators: +, -, *, /
         if (lexer->current_char == '+') { advance(lexer); return newToken(TOKEN_PLUS, "+"); }
         if (lexer->current_char == '-') { advance(lexer); return newToken(TOKEN_MINUS, "-"); }

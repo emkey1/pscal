@@ -55,7 +55,7 @@ Value executeBuiltinMstreamFree(AST *node);
 // Support
 Value executeBuiltinResult(AST *node);
 Value executeBuiltinProcedure(AST *node);
-void registerBuiltinFunction(const char *name, ASTNodeType declType);
+void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc); 
 int isBuiltin(const char *name);
 
 // Networking

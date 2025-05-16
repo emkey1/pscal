@@ -220,53 +220,101 @@ Value executeProcedureCall(AST *node) {
     }
     // --- End Verify ---
 
-    // Handle Built-in procedures first
+    // Handle Built-in procedures/functions first
+    // The isBuiltin and executeBuiltinProcedure should handle qualified built-ins if necessary,
+    // or assume built-ins are not qualified.
+    // For now, we pass the base name (node->token->value) to isBuiltin.
+    // If your builtins can be qualified (e.g. "crt.delay"), isBuiltin/executeBuiltinProcedure
+    // would also need logic similar to the user-defined procedure lookup below.
+    // Assuming built-ins are always simple names for now:
     if (isBuiltin(node->token->value)) {
-        Value retVal = executeBuiltinProcedure(node);
+        Value retVal = executeBuiltinProcedure(node); // executeBuiltinProcedure uses node->token->value
 #ifdef DEBUG
-        fprintf(stderr, "DEBUG: Builtin procedure '%s' returned type %s\n",
+        fprintf(stderr, "DEBUG: Builtin procedure/function '%s' returned type %s\n",
                 node->token->value, varTypeToString(retVal.type));
 #endif
         return retVal;
     }
 
     // Look up user-defined procedure
-    Procedure *proc = procedure_table;
-    char *lowerProcName = strdup(node->token->value);
-    if (!lowerProcName) { fprintf(stderr,"FATAL: strdup failed for proc name lookup\n"); EXIT_FAILURE_HANDLER(); }
-    for(int i=0; lowerProcName[i]; i++){ lowerProcName[i] = (char)tolower((unsigned char)lowerProcName[i]); }
+    Symbol *procSymbol = NULL;
+    AST *proc_decl_ast = NULL;
+    char *name_to_lookup = NULL;
+    char qualified_name_buffer[MAX_SYMBOL_LENGTH * 2 + 2]; // Buffer for "unit.proc"
 
-    while (proc) {
-        if (proc->name && strcmp(proc->name, lowerProcName) == 0)
-            break;
-        proc = proc->next;
+    // Determine the name to use for lookup based on the AST node structure
+    if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
+        // This is a qualified call (e.g., unit.proc)
+        // node->left (AST_VARIABLE) holds the unit name.
+        // node->token holds the procedure name.
+        snprintf(qualified_name_buffer, sizeof(qualified_name_buffer), "%s.%s",
+                 node->left->token->value, // Unit name
+                 node->token->value);      // Procedure name
+        name_to_lookup = qualified_name_buffer;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG EXEC_PROC] Qualified call detected. Full name for lookup: '%s'\n", name_to_lookup);
+        #endif
+    } else {
+        // This is a simple call (e.g., proc)
+        name_to_lookup = node->token->value;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG EXEC_PROC] Simple call detected. Name for lookup: '%s'\n", name_to_lookup);
+        #endif
     }
-    free(lowerProcName);
 
-    if (!proc || !proc->proc_decl) {
-        fprintf(stderr, "Runtime error: routine '%s' not found or declaration missing.\n", node->token->value);
+    // Convert the determined name to lowercase for case-insensitive lookup
+    // (assuming procedure_table stores keys in lowercase)
+    char *lower_name_for_lookup = strdup(name_to_lookup);
+    if (!lower_name_for_lookup) {
+        fprintf(stderr, "FATAL: strdup failed for proc name lookup in executeProcedureCall\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    toLowerString(lower_name_for_lookup); // Helper function to convert string to lowercase
+
+    // Perform lookup in the global procedure_table
+    if (procedure_table) {
+        procSymbol = hashTableLookup(procedure_table, lower_name_for_lookup);
+    }
+
+    if (!procSymbol) {
+        fprintf(stderr, "Runtime error: routine '%s' (looked up as '%s') not found in procedure hash table.\n",
+                name_to_lookup, // Original case name (simple or qualified)
+                lower_name_for_lookup); // Lowercase version actually used for lookup
+        #ifdef DEBUG
+        dumpSymbolTable(); // This now includes procedure_table dump if you've integrated it
+        #endif
+        free(lower_name_for_lookup);
         EXIT_FAILURE_HANDLER();
     }
 
-    int num_params = proc->proc_decl->child_count;
+    free(lower_name_for_lookup); // Free the lowercase name string
+
+    proc_decl_ast = procSymbol->type_def;
+
+    if (!proc_decl_ast) {
+        fprintf(stderr, "Runtime error: routine '%s' found in hash table, but its AST declaration (type_def) is missing or NULL.\n", name_to_lookup);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    int num_params = proc_decl_ast->child_count;
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG EXEC_PROC] ENTERING: Node %p (%s '%s'), Expecting %d params.\n",
-            (void*)node, astTypeToString(node->type), node->token->value, num_params);
-    fprintf(stderr, "[DEBUG EXEC_PROC]            AST Node State: child_count=%d, children_ptr=%p\n",
+    fprintf(stderr, "[DEBUG EXEC_PROC] ENTERING: Node %p (%s '%s'), Expecting %d params from proc_decl_ast %p.\n",
+            (void*)node, astTypeToString(node->type), name_to_lookup, num_params, (void*)proc_decl_ast);
+    fprintf(stderr, "[DEBUG EXEC_PROC]            AST Call Node State: child_count=%d, children_ptr=%p\n",
             node->child_count, (void*)node->children);
+    fflush(stderr);
 #endif
 
     if (node->child_count != num_params) {
         fprintf(stderr, "Runtime error: Argument count mismatch for call to '%s'. Expected %d, got %d.\n",
-                proc->name, num_params, node->child_count);
+                name_to_lookup, num_params, node->child_count);
         EXIT_FAILURE_HANDLER();
     }
     if (num_params > 0 && node->children == NULL) {
-        fprintf(stderr, "CRITICAL ERROR: Procedure '%s' expects %d params, but AST node->children pointer is NULL before argument evaluation!\n",
-                proc->name, num_params);
+        fprintf(stderr, "CRITICAL ERROR: Call to '%s' expects %d params, but AST node->children pointer is NULL before argument evaluation!\n", name_to_lookup, num_params);
         dumpAST(node, 0);
-        dumpAST(proc->proc_decl, 0);
+        dumpAST(proc_decl_ast, 0);
         EXIT_FAILURE_HANDLER();
     }
 
@@ -278,276 +326,236 @@ Value executeProcedureCall(AST *node) {
             EXIT_FAILURE_HANDLER();
         }
         for (int i = 0; i < num_params; i++) {
-            arg_values[i].type = TYPE_VOID;
+            arg_values[i].type = TYPE_VOID; // Initialize
         }
     }
 
+    // Evaluate actual arguments and store them
     for (int i = 0; i < num_params; i++) {
-        AST *paramNode = proc->proc_decl->children[i];
-        if (!paramNode) { fprintf(stderr, "Missing formal param %d\n", i); EXIT_FAILURE_HANDLER(); }
+        AST *paramNode = proc_decl_ast->children[i]; // Formal parameter declaration
+        if (!paramNode) { fprintf(stderr, "Missing formal param AST for index %d in call to %s\n", i, name_to_lookup); EXIT_FAILURE_HANDLER(); }
 
         if (paramNode->by_ref) {
-            arg_values[i].type = TYPE_VOID;
+            // For VAR parameters, we don't evaluate the argument here.
+            // We'll bind the alias in the next loop.
+            // Mark arg_values[i] to indicate it's a placeholder for a VAR param.
+            // We could use a special type or just ensure it's not TYPE_VOID if that helps downstream.
+            // For now, just ensuring it's not evaluated is key.
+             arg_values[i].type = TYPE_VOID; // Placeholder, will be handled by aliasing
         } else {
-            if (i >= node->child_count || node->children == NULL) {
-                fprintf(stderr, "CRITICAL ERROR: Trying to access actual argument node->children[%d], but child_count=%d or children=%p\n",
-                        i, node->child_count, (void*)node->children);
+            // For value parameters, evaluate the actual argument expression
+            if (i >= node->child_count || node->children == NULL || !node->children[i]) {
+                fprintf(stderr, "CRITICAL ERROR: Trying to access actual argument node->children[%d] for '%s', but child_count=%d or children=%p or child is NULL\n",
+                        i, name_to_lookup, node->child_count, (void*)node->children);
                 dumpAST(node,0);
+                if (arg_values) free(arg_values);
                 EXIT_FAILURE_HANDLER();
             }
             AST* actualArgNode = node->children[i];
-            if (!actualArgNode) {
-                fprintf(stderr, "CRITICAL ERROR: Actual argument node at index %d is NULL for call to '%s'.\n", i, proc->name);
-                dumpAST(node,0);
-                EXIT_FAILURE_HANDLER();
-            }
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC] Evaluating value parameter %d (AST Type: %s)\n", i, astTypeToString(actualArgNode->type));
+            fprintf(stderr, "[DEBUG EXEC_PROC] Evaluating VALUE parameter %d (AST Type: %s) for '%s'\n", i, astTypeToString(actualArgNode->type), name_to_lookup);
+            fflush(stderr);
 #endif
             Value actualVal = eval(actualArgNode);
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC] Arg %d evaluated to type %s\n", i, varTypeToString(actualVal.type));
+            fprintf(stderr, "[DEBUG EXEC_PROC] Arg %d for '%s' evaluated to type %s\n", i, name_to_lookup, varTypeToString(actualVal.type));
+            fflush(stderr);
 #endif
-            arg_values[i] = makeCopyOfValue(&actualVal);
+            arg_values[i] = makeCopyOfValue(&actualVal); // Store a deep copy
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC] Copied arg %d value (type %s)\n", i, varTypeToString(arg_values[i].type));
+            fprintf(stderr, "[DEBUG EXEC_PROC] Copied arg %d value (type %s) for '%s'\n", i, varTypeToString(arg_values[i].type), name_to_lookup);
+            fflush(stderr);
 #endif
-            freeValue(&actualVal);
+            freeValue(&actualVal); // Free the temporary value returned by eval
         }
     }
 
     SymbolEnvSnapshot snapshot;
-    saveLocalEnv(&snapshot);
+    saveLocalEnv(&snapshot); // Save caller's local environment
 
-    for (int i = num_params - 1; i >= 0; i--) {
-        AST *paramNode = proc->proc_decl->children[i];
+    // Bind arguments to local symbols in the new scope
+    for (int i = 0; i < num_params; i++) { // Iterate from 0 to num_params-1
+        AST *paramNode = proc_decl_ast->children[i]; // Formal parameter (AST_VAR_DECL)
         if (!paramNode || paramNode->type != AST_VAR_DECL || paramNode->child_count < 1 || !paramNode->children[0] || !paramNode->children[0]->token) {
-             fprintf(stderr, "Internal Error: Invalid formal parameter AST structure for param %d of '%s'.\n", i, proc->name);
+            fprintf(stderr, "Internal error: Invalid formal parameter AST structure for param %d of '%s'.\n", i, name_to_lookup);
+             if (arg_values) free(arg_values); // Cleanup before exit
+             restoreLocalEnv(&snapshot);
              EXIT_FAILURE_HANDLER();
         }
 
-        char *paramName = paramNode->children[0]->token->value;
-        VarType ptype = paramNode->var_type;
-        AST *type_def = paramNode->right;
+        char *paramName = paramNode->children[0]->token->value; // Formal parameter name
+        VarType ptype = paramNode->var_type;                   // Formal parameter type
+        AST *type_def = paramNode->right;                      // Formal parameter type definition AST
 
         if (paramNode->by_ref) {
-            AST* actualArgNode = node->children[i]; // AST node for the argument passed
-             if (!actualArgNode) {
-                 fprintf(stderr, "CRITICAL ERROR: Actual argument AST node is NULL for VAR parameter '%s' (index %d).\n", paramName, i);
-                 EXIT_FAILURE_HANDLER();
-             }
+            AST* actualArgNode = node->children[i]; // AST node for the actual argument passed
+             if (!actualArgNode) { /* Should have been caught earlier */ }
 
-            // Check if the argument is a valid variable reference for VAR param
             if (actualArgNode->type != AST_VARIABLE && actualArgNode->type != AST_FIELD_ACCESS && actualArgNode->type != AST_ARRAY_ACCESS) {
-                fprintf(stderr, "Runtime error: var parameter '%s' must be a variable reference, field, or array element. Got %s.\n", paramName, astTypeToString(actualArgNode->type));
-                EXIT_FAILURE_HANDLER();
-            }
-
-            char *argVarName = NULL;
-            // For simple variables, the name is directly in the token.
-            // For field/array access, argVarName will be more complex to extract if needed for error messages,
-            // but resolveLValueToPtr will handle finding the actual symbol/memory.
-            // Here, we primarily need argVarName for the lookup.
-            if (actualArgNode->type == AST_VARIABLE && actualArgNode->token && actualArgNode->token->value) {
-                argVarName = actualArgNode->token->value;
-            } else if (actualArgNode->type == AST_FIELD_ACCESS && actualArgNode->left && actualArgNode->left->token && actualArgNode->token) {
-                // For error messages, construct a name like "recordVar.fieldName"
-                // This is just for a better error message; the core lookup will use the base name.
-                // For now, we'll just use the field name or a generic if the base is complex.
-                // This part can be improved for more descriptive errors for complex LValues.
-                argVarName = actualArgNode->token->value; // Fallback to field name for messages
-            } else if (actualArgNode->type == AST_ARRAY_ACCESS && actualArgNode->left && actualArgNode->left->token) {
-                 argVarName = actualArgNode->left->token->value; // Base name of the array
-            }
-             else {
-                 fprintf(stderr, "Runtime error: Could not determine variable name for VAR parameter '%s'. Actual argument AST type: %s.\n", paramName, astTypeToString(actualArgNode->type));
-                 EXIT_FAILURE_HANDLER();
+                fprintf(stderr, "Runtime error: VAR parameter '%s' for routine '%s' must be a variable reference, field, or array element. Got %s.\n", paramName, name_to_lookup, astTypeToString(actualArgNode->type));
+                if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
             }
             
-            if (!argVarName) { // Should be caught by above, but defensive
-                fprintf(stderr, "CRITICAL ERROR: argVarName is NULL for VAR parameter '%s'.\n", paramName);
-                EXIT_FAILURE_HANDLER();
-            }
+            // Resolve the LValue in the CALLER'S scope (snapshot.head or globalSymbols)
+            // to get a pointer to the Value struct of the variable being passed by reference.
+            Value* actual_var_value_ptr = NULL;
+            SymbolEnvSnapshot original_caller_env; // Temporary snapshot to use caller's environment for resolveLValueToPtr
+            original_caller_env.head = localSymbols; // Current localSymbols is the NEW (empty) scope for this call
+            localSymbols = snapshot.head; // Temporarily switch to CALLER'S local scope for resolving
 
-            // --- MODIFIED AND ENHANCED LOOKUP FOR VAR PARAMETERS ---
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC_VAR] Binding VAR parameter '%s'. Actual argument LValue is (token: '%s', AST type: %s).\n",
-                    paramName, argVarName, astTypeToString(actualArgNode->type));
-            fprintf(stderr, "[DEBUG EXEC_PROC_VAR]   snapshot.head (caller's localSymbols) is: %p\n", (void*)snapshot.head);
-            fprintf(stderr, "[DEBUG EXEC_PROC_VAR]   globalSymbols is: %p\n", (void*)globalSymbols);
-            fflush(stderr);
-            #endif
+            actual_var_value_ptr = resolveLValueToPtr(actualArgNode);
 
-            Symbol *callerSym = NULL;
-            // If actualArgNode is a simple variable, look it up by its name.
-            // For complex LValues (field/array), resolveLValueToPtr gets the target Value*,
-            // and the symbol is the one owning that Value*. This is more complex.
-            // The current `lookupSymbolIn` and `lookupGlobalSymbol` expect a simple name.
-            // For `BallPixels` (AST_VARIABLE), `argVarName` will be "ballpixels".
+            localSymbols = original_caller_env.head; // Switch back to the NEW local scope for this call
 
-            if (snapshot.head) { // Check caller's local scope first
-                callerSym = lookupSymbolIn(snapshot.head, argVarName);
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG EXEC_PROC_VAR]   Lookup in snapshot.head for '%s' found: %p\n", argVarName, (void*)callerSym);
-                if (callerSym) dumpSymbol(callerSym); else fprintf(stderr, "    (Not found in snapshot.head for '%s')\n", argVarName);
-                fflush(stderr);
-                #endif
+            if (!actual_var_value_ptr) {
+                fprintf(stderr, "Runtime error: Could not resolve LValue for VAR parameter '%s' in call to '%s'.\n", paramName, name_to_lookup);
+                if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
             }
-
-            if (!callerSym) { // If not in caller's locals, or if caller was global (snapshot.head is NULL)
-                callerSym = lookupGlobalSymbol(argVarName); // This uses argVarName ("ballpixels")
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG EXEC_PROC_VAR]   Lookup in globalSymbols for '%s' found: %p\n", argVarName, (void*)callerSym);
-                if (callerSym) dumpSymbol(callerSym); else fprintf(stderr, "    (Not found in globalSymbols for '%s')\n", argVarName);
-                fflush(stderr);
-                #endif
-            }
-            // --- END MODIFIED LOOKUP ---
-
-            if (!callerSym) {
-                fprintf(stderr, "Runtime error: variable '%s' (passed as VAR parameter '%s') not declared in accessible scope.\n", argVarName, paramName);
-                #ifdef DEBUG
-                fprintf(stderr, "\n--- BEGIN SYMBOL TABLE DUMP (from executeProcedureCall VAR param error) ---\n");
-                dumpSymbolTable();
-                fprintf(stderr, "--- END SYMBOL TABLE DUMP ---\n");
-                fflush(stderr);
-                #endif
-                EXIT_FAILURE_HANDLER();
-            }
-            if (!callerSym->value) {
-                fprintf(stderr, "CRITICAL ERROR: Caller symbol '%s' for VAR parameter '%s' has NULL value pointer.\n", callerSym->name, paramName);
-                EXIT_FAILURE_HANDLER();
-            }
-            
-            // Type Compatibility Check for VAR parameters
-            // This needs to be more robust for structural types like arrays/records.
-            // For now, simple VarType comparison.
-            bool types_compatible_for_var = (callerSym->type == ptype);
-            if (!types_compatible_for_var) {
-                // Special case: Allow passing an array of byte if the formal param is also array of byte,
-                // even if their named types are different but structure matches.
-                // This requires a deeper type check.
-                if (callerSym->type == TYPE_ARRAY && ptype == TYPE_ARRAY &&
-                    callerSym->value && callerSym->value->element_type == TYPE_BYTE &&
-                    type_def && type_def->type == AST_ARRAY_TYPE && type_def->right && type_def->right->var_type == TYPE_BYTE) {
-                    // Basic check for element type byte, could extend to dimensions/bounds
-                    types_compatible_for_var = true;
-                     #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG EXEC_PROC_VAR] Allowing VAR param type mismatch due to array of byte compatibility for '%s'. Formal: %s, Actual: %s\n", paramName, varTypeToString(ptype), varTypeToString(callerSym->type));
-                     #endif
-                } else {
-                    fprintf(stderr, "Runtime error: Type mismatch for VAR parameter '%s'. Expected %s, got %s for variable '%s'.\n", paramName, varTypeToString(ptype), varTypeToString(callerSym->type), callerSym->name);
-                    EXIT_FAILURE_HANDLER();
-                }
+             // Type Compatibility Check for VAR parameters
+            if (actual_var_value_ptr->type != ptype) {
+                // More detailed compatibility checks might be needed here (e.g., for arrays of byte)
+                 if (! (actual_var_value_ptr->type == TYPE_ARRAY && ptype == TYPE_ARRAY &&
+                        actual_var_value_ptr->element_type == TYPE_BYTE &&
+                        type_def && type_def->type == AST_ARRAY_TYPE && type_def->right && type_def->right->var_type == TYPE_BYTE) )
+                 {
+                    fprintf(stderr, "Runtime error: Type mismatch for VAR parameter '%s' in call to '%s'. Expected %s, got %s.\n", paramName, name_to_lookup, varTypeToString(ptype), varTypeToString(actual_var_value_ptr->type));
+                    if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+                 }
             }
 
 
-            insertLocalSymbol(paramName, ptype, type_def, false); // is_variable_declaration is false for params
+            // Insert local symbol for the parameter, make it an alias to the caller's variable's Value
+            insertLocalSymbol(paramName, ptype, type_def, false);
             Symbol *localSym = lookupLocalSymbol(paramName);
-            if (!localSym || !localSym->value) {
-                fprintf(stderr, "CRITICAL ERROR: Failed to insert/find local symbol for VAR parameter '%s'.\n", paramName);
-                EXIT_FAILURE_HANDLER();
-            }
+            if (!localSym || !localSym->value) { /* Critical error */ }
 
             freeValue(localSym->value); // Free the default value created by insertLocalSymbol
             free(localSym->value);      // Free the Value struct itself
 
-            localSym->value = callerSym->value; // Alias: Make local symbol point to the caller's Value struct
+            localSym->value = actual_var_value_ptr; // Alias: Make local symbol point to the caller's Value struct
             localSym->is_alias = true;
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC] Aliased VAR parameter '%s' to caller symbol '%s' (Value* %p)\n", paramName, callerSym->name, (void*)localSym->value);
+            fprintf(stderr, "[DEBUG EXEC_PROC] Aliased VAR parameter '%s' to caller's LValue (Value* %p) for call to '%s'\n", paramName, (void*)localSym->value, name_to_lookup);
+            fflush(stderr);
 #endif
         } else { // Handle VALUE parameter
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC] Inserting value parameter '%s' (type %s)\n", paramName, varTypeToString(ptype));
+            fprintf(stderr, "[DEBUG EXEC_PROC] Inserting VALUE parameter '%s' (type %s) for call to '%s'\n", paramName, varTypeToString(ptype), name_to_lookup);
+            fflush(stderr);
 #endif
-            insertLocalSymbol(paramName, ptype, type_def, false);
-            Symbol *sym = lookupLocalSymbol(paramName);
-            if (!sym) {
-                fprintf(stderr, "CRITICAL ERROR: Failed to insert/find local symbol for VALUE parameter '%s'.\n", paramName);
-                EXIT_FAILURE_HANDLER();
-            }
-            sym->is_alias = false;
+            insertLocalSymbol(paramName, ptype, type_def, false); // is_variable_declaration is false for params
+            Symbol *sym = lookupLocalSymbol(paramName); // Find the local symbol just created
+            if (!sym) { /* Critical error */ }
+            sym->is_alias = false; // It's a copy, not an alias
 
-            if (arg_values[i].type == TYPE_VOID && ptype != TYPE_VOID) { // Check if value wasn't prepared
-                fprintf(stderr, "CRITICAL ERROR: Value for parameter '%s' (index %d, type %s) was not evaluated/copied correctly (is TYPE_VOID).\n", paramName, i, varTypeToString(ptype));
-                EXIT_FAILURE_HANDLER();
+            if (arg_values[i].type == TYPE_VOID && ptype != TYPE_VOID) {
+                fprintf(stderr, "CRITICAL ERROR: Value for parameter '%s' (index %d, formal type %s) for call to '%s' was not correctly evaluated/copied (is TYPE_VOID in arg_values).\n", paramName, i, varTypeToString(ptype), name_to_lookup);
+                 if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
             }
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG EXEC_PROC] Updating symbol '%s' with copied value (type %s from arg_values[%d])\n", paramName, varTypeToString(arg_values[i].type), i);
+            fprintf(stderr, "[DEBUG EXEC_PROC] Updating symbol '%s' with copied value (type %s from arg_values[%d]) for call to '%s'\n", paramName, varTypeToString(arg_values[i].type), i, name_to_lookup);
+            fflush(stderr);
 #endif
-            updateSymbol(paramName, arg_values[i]); // updateSymbol makes the final copy and handles types
+            // updateSymbol will free sym->value's current content and then assign a copy of arg_values[i]
+            updateSymbol(paramName, arg_values[i]);
 
             // The value from arg_values[i] has been deep copied by updateSymbol.
-            // We now need to free the intermediate copy stored in arg_values[i].
-            // freeValue(&arg_values[i]); // This was correct.
-            // updateSymbol is now responsible for handling the input `val` it receives.
-            // If updateSymbol consumes `val` (e.g., takes ownership of its s_val), then arg_values[i] is "empty".
-            // If updateSymbol makes its own copy from `val`, then `val` (arg_values[i]) needs freeing here.
-            // Assuming updateSymbol makes a copy, so free arg_values[i]
-             freeValue(&arg_values[i]); // Original was correct if updateSymbol copies.
-            arg_values[i].type = TYPE_VOID; // Mark as freed/processed
+            // The intermediate copy in arg_values[i] itself now needs its dynamic contents freed.
+            freeValue(&arg_values[i]); // Free contents of the arg_values[i] (e.g. if it was a string)
+            arg_values[i].type = TYPE_VOID; // Mark as processed
         }
-    } // End Stage 2 Loop
-
-    if (arg_values) {
-        free(arg_values);
     }
 
-    // --- Stage 3: Execute Body & Handle Return ---
+    if (arg_values) {
+        free(arg_values); // Free the array that held argument Values
+        arg_values = NULL;
+    }
+    
+    // Stage 3: Execute Body & Handle Return (copied from your existing `interpreter.c`)
     Value retVal = makeVoid();
-    if (proc->proc_decl->type == AST_FUNCTION_DECL) {
-        AST *returnTypeDefNode = proc->proc_decl->right;
-        if (!returnTypeDefNode) { fprintf(stderr, "Internal Error: Function '%s' missing return type definition node.\n", proc->name); EXIT_FAILURE_HANDLER(); }
+
+    if (proc_decl_ast->type == AST_FUNCTION_DECL) {
+        AST *returnTypeDefNode = proc_decl_ast->right;
+        if (!returnTypeDefNode) {
+            fprintf(stderr, "Internal Error: Function '%s' missing return type definition node.\n", name_to_lookup);
+            restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+        }
         VarType retType = returnTypeDefNode->var_type;
 
         insertLocalSymbol("result", retType, returnTypeDefNode, false);
         Symbol *resSym = lookupLocalSymbol("result");
-        if (!resSym) { fprintf(stderr, "Internal Error: Could not create 'result' symbol for function '%s'.\n", proc->name); EXIT_FAILURE_HANDLER(); }
+        if (!resSym) { /* ... */ restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER(); }
         resSym->is_alias = false;
 
-        insertLocalSymbol(proc->name, retType, returnTypeDefNode, false);
-        Symbol *funSym = lookupLocalSymbol(proc->name);
-        if (!funSym) { fprintf(stderr, "Internal Error: Could not create function name alias symbol for '%s'.\n", proc->name); EXIT_FAILURE_HANDLER(); }
+        insertLocalSymbol(procSymbol->name, retType, returnTypeDefNode, false); // Use procSymbol->name for the function's own name symbol
+        Symbol *funSym = lookupLocalSymbol(procSymbol->name);
+        if (!funSym) { /* ... */ restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER(); }
         if(funSym->value) { freeValue(funSym->value); free(funSym->value); }
         funSym->value = resSym->value;
         funSym->is_alias = true;
 
         current_function_symbol = funSym;
 
-        if (!proc->proc_decl->extra) { fprintf(stderr, "Internal Error: Function '%s' missing body (extra node).\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        executeWithScope(proc->proc_decl->extra, false);
+        if (!proc_decl_ast->extra) {
+            fprintf(stderr, "Internal Error: Function '%s' missing body (extra node).\n", name_to_lookup);
+            restoreLocalEnv(&snapshot); current_function_symbol = NULL; EXIT_FAILURE_HANDLER();
+        }
+        executeWithScope(proc_decl_ast->extra, false);
 
         Symbol* finalResultSym = lookupLocalSymbol("result");
-        if (!finalResultSym || !finalResultSym->value) { fprintf(stderr, "Internal Error: Could not retrieve 'result' value for function '%s'.\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        else {
-            retVal = makeCopyOfValue(finalResultSym->value);
-        }
+        if (!finalResultSym || !finalResultSym->value) { /* ... */ restoreLocalEnv(&snapshot); current_function_symbol = NULL; EXIT_FAILURE_HANDLER(); }
+        else { retVal = makeCopyOfValue(finalResultSym->value); }
 
         restoreLocalEnv(&snapshot);
         current_function_symbol = NULL;
         return retVal;
 
-    } else { // Procedure
-        if (!proc->proc_decl->right) { fprintf(stderr, "Internal Error: Procedure '%s' missing body (right node).\n", proc->name); EXIT_FAILURE_HANDLER(); }
-        executeWithScope(proc->proc_decl->right, false);
+    } else { // AST_PROCEDURE_DECL
+        if (!proc_decl_ast->right) {
+            fprintf(stderr, "Internal Error: Procedure '%s' missing body (right node).\n", name_to_lookup);
+            restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+        }
+        executeWithScope(proc_decl_ast->right, false);
+        
         restoreLocalEnv(&snapshot);
         return makeVoid();
     }
 }
 
+
 // New function to process local declarations within a scope
-void processLocalDeclarations(AST* declarationsNode) {
+static void processLocalDeclarations(AST* declarationsNode) {
     if (!declarationsNode || declarationsNode->type != AST_COMPOUND) {
-        // Should be an AST_COMPOUND node containing decls, or NULL/empty compound if none
-        if (declarationsNode && declarationsNode->type != AST_NOOP) { // Ignore NOOP from empty decls section
-             fprintf(stderr, "Warning: Expected COMPOUND node for local declarations, got %s\n",
+        if (declarationsNode && declarationsNode->type != AST_NOOP) {
+             fprintf(stderr, "Warning: Expected COMPOUND node for declarations, got %s\n",
                      declarationsNode ? astTypeToString(declarationsNode->type) : "NULL");
         }
-        return; // Nothing to process
+        return;
     }
 
-    // Iterate through all declaration nodes (CONST_DECL, TYPE_DECL, VAR_DECL...)
+    // --- Determine if these declarations belong to a global scope ---
+    bool is_processing_global_declarations = false;
+    if (declarationsNode->parent && declarationsNode->parent->type == AST_BLOCK) {
+        is_processing_global_declarations = declarationsNode->parent->is_global_scope;
+    } else {
+        // This case would be unusual if called from executeWithScope's AST_BLOCK case.
+        // It might imply declarationsNode is an orphaned compound or part of a different structure.
+        // For safety, assume local if parentage isn't the expected AST_BLOCK.
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG processLocalDeclarations] Warning: declarationsNode->parent is not an AST_BLOCK or is NULL. Assuming local scope for declarations.\n");
+        if (declarationsNode->parent) {
+            fprintf(stderr, "Parent type is: %s\n", astTypeToString(declarationsNode->parent->type));
+        }
+        #endif
+        is_processing_global_declarations = false;
+    }
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG processLocalDeclarations] Scope determined as: %s\n",
+            is_processing_global_declarations ? "GLOBAL" : "LOCAL");
+    fflush(stderr);
+#endif
+
     for (int i = 0; i < declarationsNode->child_count; i++) {
         AST *declNode = declarationsNode->children[i];
         if (!declNode) continue;
@@ -555,67 +563,105 @@ void processLocalDeclarations(AST* declarationsNode) {
         switch (declNode->type) {
             case AST_CONST_DECL: {
                  const char *constName = declNode->token->value;
-                 DEBUG_PRINT("[DEBUG_LOCALS] Processing local CONST_DECL: %s\n", constName);
+#ifdef DEBUG // Consistent debug message prefix
+                 fprintf(stderr, "[DEBUG processLocalDeclarations] Processing %s CONST_DECL: %s\n",
+                             is_processing_global_declarations ? "global" : "local", constName);
+                 fflush(stderr);
+#endif
                  Value constVal = eval(declNode->left);
-                 Symbol *sym = insertLocalSymbol(constName, constVal.type, declNode->right, false);
+                 Symbol *sym = NULL;
 
-                 if (sym && sym->value) {
-                     freeValue(sym->value);
-                     *sym->value = makeCopyOfValue(&constVal);
+                 if (is_processing_global_declarations) {
+                     insertGlobalSymbol(constName, constVal.type, declNode->right);
+                     sym = lookupGlobalSymbol(constName); // Verify it was inserted
+                 } else {
+                     sym = insertLocalSymbol(constName, constVal.type, declNode->right, false);
+                 }
+
+                 if (sym) { // Check if symbol was successfully inserted/found
+                     if (sym->value) { // Check if value struct exists
+                        freeValue(sym->value); // Free the default value potentially created by insertSymbol
+                        *sym->value = makeCopyOfValue(&constVal); // Assign deep copy
+                     } else {
+                        // If sym->value is NULL, insertSymbol failed to allocate it.
+                        // This should ideally be caught by insertGlobal/LocalSymbol.
+                        // For safety, allocate it here if it's missing.
+                        sym->value = malloc(sizeof(Value));
+                        if (!sym->value) {
+                            fprintf(stderr, "FATAL: malloc failed for Value in const declaration of '%s'\n", constName);
+                            freeValue(&constVal); EXIT_FAILURE_HANDLER();
+                        }
+                        *sym->value = makeCopyOfValue(&constVal);
+                     }
                      sym->is_const = true;
 #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG_LOCALS] Set is_const=TRUE for local constant '%s'\n", constName);
+                     fprintf(stderr, "[DEBUG processLocalDeclarations] Set is_const=TRUE for %s constant '%s'\n",
+                                 is_processing_global_declarations ? "global" : "local", constName);
+                     fflush(stderr);
 #endif
-                 } // ... error handling ...
+                 } else {
+                      fprintf(stderr, "Error: Failed to insert or find symbol for constant '%s'.\n", constName);
+                      // Handle error - though insertGlobal/LocalSymbol usually exits on failure
+                 }
                  freeValue(&constVal);
                  break;
              }
             case AST_VAR_DECL: {
-                // Process local variable declarations
-                AST *typeNode = declNode->right; // The type definition node
+                AST *typeNode = declNode->right;
                 for (int j = 0; j < declNode->child_count; j++) {
-                    AST *varNode = declNode->children[j]; // The VARIABLE node
+                    AST *varNode = declNode->children[j];
+                    if (!varNode || !varNode->token) continue;
                     const char *varName = varNode->token->value;
-                    DEBUG_PRINT("[DEBUG_LOCALS] Processing local VAR_DECL: %s\n", varName);
-
-                    // Insert into local symbol table, mark as variable
-                    Symbol *sym = insertLocalSymbol(varName, declNode->var_type, typeNode, true);
-
-                    // Value initialization happens within insertLocalSymbol via makeValueForType
-                    if (!sym || !sym->value) {
-                        fprintf(stderr, "Error: Failed to insert or initialize local variable '%s'.\n", varName);
-                        // Handle error
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG processLocalDeclarations] Processing %s VAR_DECL: %s of type %s\n",
+                                is_processing_global_declarations ? "global" : "local",
+                                varName,
+                                varTypeToString(declNode->var_type));
+                    fflush(stderr);
+#endif
+                    if (is_processing_global_declarations) {
+                        insertGlobalSymbol(varName, declNode->var_type, typeNode);
+                    } else {
+                        insertLocalSymbol(varName, declNode->var_type, typeNode, true);
                     }
-                     // Handle fixed-length string size if needed (might be redundant if insertLocalSymbol does it)
-                     if (sym && sym->type == TYPE_STRING && typeNode && typeNode->right) {
-                          // ... (code to evaluate length and set sym->value->max_length) ...
-                          // This logic might be better placed entirely within insertLocalSymbol
-                     }
+                    // Value initialization (including base_type_node for pointers)
+                    // is handled within insertGlobalSymbol/insertLocalSymbol via makeValueForType.
                 }
                 break;
             }
             case AST_TYPE_DECL: {
-                // Handling local TYPE declarations is complex.
-                // Standard Pascal often doesn't allow types truly local *only*
-                // to the procedure scope; they might be visible outwards.
-                // For simplicity, we can IGNORE local type declarations for now.
-                // Global types are already handled by the parser/linkUnit.
-                DEBUG_PRINT("[DEBUG_LOCALS] Skipping local TYPE_DECL: %s\n", declNode->token->value);
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG processLocalDeclarations] Skipping %s TYPE_DECL: %s (handled by parser)\n",
+                        is_processing_global_declarations ? "global" : "local",
+                        declNode->token ? declNode->token->value : "?");
+                fflush(stderr);
+#endif
                 break;
             }
             case AST_PROCEDURE_DECL:
             case AST_FUNCTION_DECL: {
-                // Handle nested procedures/functions if you implement them later
-                DEBUG_PRINT("[DEBUG_LOCALS] Skipping nested PROCEDURE/FUNCTION: %s\n", declNode->token->value);
+                // If these are encountered here, it means they are nested inside a block's
+                // general declarations section, rather than at the top level of a unit/program
+                // where they are typically added to procedure_table by the parser.
+                // For now, standard Pascal doesn't have true nested local routines that hide outer ones.
+                // If these are global (e.g. in program block), they should have been handled by parser.
+                // If local, this indicates a nested structure not fully supported or a parser bug.
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG processLocalDeclarations] Encountered nested PROCEDURE/FUNCTION '%s' in %s declarations. Parser should handle top-level routines.\n",
+                        declNode->token ? declNode->token->value : "?",
+                        is_processing_global_declarations ? "global" : "local");
+                fflush(stderr);
+#endif
+                // Optionally, if you want to support adding them to procedure_table from here:
+                // addProcedure(declNode, is_processing_global_declarations ? NULL : current_scope_name_if_available);
+                // But typically, addProcedure is called during the main parsing of routine declarations.
                 break;
             }
             default:
-                // Ignore other node types that might appear in the declarations compound node
                 break;
         }
     }
 }
-
 char *enumValueToString(Type *enum_type, int value) {
     if (!enum_type) return strdup("<invalid>");
     if (value < 0 || value >= enum_type->member_count) return strdup("<out-of-range>");
@@ -1629,75 +1675,6 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
      }
 }
 
-static void processDeclarations(AST *decl, bool is_global_block) {
-    // Check if decl is a valid COMPOUND node containing declarations
-    if (!decl || decl->type != AST_COMPOUND) {
-         if (decl && decl->type != AST_NOOP) { /* Warning or ignore */ }
-         return; // Nothing to process
-     }
-
-    // Iterate through all top-level declaration nodes (VAR_DECL, CONST_DECL, TYPE_DECL...)
-    for (int i = 0; i < decl->child_count; i++) {
-        AST *d = decl->children[i]; // d is a VAR_DECL group, CONST_DECL, TYPE_DECL etc.
-        if (!d) continue;
-
-        // Handle VAR_DECL specifically
-        if (d->type == AST_VAR_DECL) {
-            // d->child_count > 0 holds the VARIABLE nodes (names)
-            // d->right holds the type definition node (e.g., TYPE_REFERENCE to PInt)
-            // d->var_type holds the resolved VarType enum (e.g., TYPE_POINTER)
-
-            for (int j = 0; j < d->child_count; j++) {
-                AST *varNode = d->children[j]; // The AST_VARIABLE node for the name (e.g., p1)
-                if (!varNode || !varNode->token) continue; // Skip invalid variable nodes
-
-                const char *varname = varNode->token->value; // e.g., "p1"
-                VarType varType = d->var_type;         // e.g., TYPE_POINTER
-                AST* typeDefNode = d->right;           // e.g., TYPE_REFERENCE("pint")
-
-                // --- Insert the symbol ---
-                // insertGlobal/LocalSymbol now handles allocation AND initialization via makeValueForType
-                if (is_global_block) {
-                    insertGlobalSymbol(varname, varType, typeDefNode);
-                    #ifdef DEBUG
-                    // Keep this print if desired
-                    // fprintf(stderr, "[DEBUG] processDeclarations: Called insertGlobalSymbol('%s', type=%s)\n", varname, varTypeToString(varType));
-                    #endif
-                } else {
-                    insertLocalSymbol(varname, varType, typeDefNode, true); // true indicates it's a local variable
-                     #ifdef DEBUG
-                    // fprintf(stderr, "[DEBUG] processDeclarations: Called insertLocalSymbol('%s', type=%s)\n", varname, varTypeToString(varType));
-                    #endif
-                }
-
-                // --- REMOVED Redundant/Harmful Initialization Block ---
-                // The symbol's value (including base_type_node for pointers)
-                // is now fully initialized by insertGlobal/LocalSymbol -> makeValueForType.
-                // No further initialization is needed here.
-
-            } // End loop over variable names (j)
-        } // End if VAR_DECL
-        else if (d->type == AST_CONST_DECL) {
-             // Constant evaluation and insertion happens during parsing (declarations function)
-             // No processing needed here during execution walk?
-             // If constants needed re-evaluation for locals, it would go here.
-        }
-        else if (d->type == AST_TYPE_DECL) {
-            // Type declarations are handled during parsing (insertType)
-            // No processing needed here during execution walk.
-        }
-        // Add handling for nested PROCEDURE/FUNCTION declarations if/when implemented
-        else if (d->type == AST_PROCEDURE_DECL || d->type == AST_FUNCTION_DECL) {
-             // Add to procedure table if not already done by parser?
-             // Or handle scoping for nested calls if implemented.
-             #ifdef DEBUG
-             fprintf(stderr, "[DEBUG processDeclarations] Skipping nested procedure/function '%s'\n", d->token ? d->token->value : "?");
-             #endif
-        }
-    } // End loop over declarations (i)
-}
-
-
 //ExecStatus executeWithScope(AST *node, bool is_global_scope) { // Example new signature
 void executeWithScope(AST *node, bool is_global_scope)  {
     if (!node)
@@ -1906,28 +1883,94 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                    break;
         }
         case AST_BLOCK: {
-            if (node->child_count >= 2) {
-                AST *decl = node->children[0];
-                bool is_global_block = node->is_global_scope;
+            // 'node' here is the AST_BLOCK.
+            // 'node->is_global_scope' is set by the parser and indicates if this block
+            // itself represents the global scope of a program/unit or a local scope of a routine.
+            // 'is_global_scope_context_from_caller' is what the *caller* thought its scope was.
+            // For an AST_BLOCK, its own 'node->is_global_scope' is authoritative for its declarations.
 
-                static bool global_symbols_inserted = false;
-                if (!is_global_block || !global_symbols_inserted) {
-                    processDeclarations(decl, is_global_block);
-                    if (is_global_block)
-                        global_symbols_inserted = true;
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Processing block. Node's own is_global_scope flag: %d\n",
+                node->is_global_scope);
+            fflush(stderr);
+#endif
+
+            // Process declarations first
+            // Children[0] of AST_BLOCK is the AST_COMPOUND node containing declarations.
+            if (node->child_count >= 1 && node->children[0] != NULL) {
+                AST *declarationsNode = node->children[0];
+                if (declarationsNode->type == AST_COMPOUND || declarationsNode->type == AST_NOOP) { // NOOP if no declarations
+                    // --- THIS IS WHERE processLocalDeclarations MUST BE CALLED ---
+                    // processLocalDeclarations will look at declarationsNode->parent (which is 'node')
+                    // and use node->is_global_scope to determine if symbols are global or local.
+                    processLocalDeclarations(declarationsNode);
+                } else {
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Warning: Expected declarations (AST_COMPOUND or AST_NOOP) as first child of AST_BLOCK, but got %s.\n",
+                            astTypeToString(declarationsNode->type));
+                    fflush(stderr);
+#endif
                 }
+            } else {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Block node %p has no declarations part (child_count < 1 or children[0] is NULL).\n", (void*)node);
+                fflush(stderr);
+#endif
+            }
 
-                executeWithScope(node->children[1], is_global_block);
+            // Then execute compound statement (body of the block)
+            // Children[1] of AST_BLOCK is the AST_COMPOUND node containing statements.
+            if (node->child_count >= 2 && node->children[1] != NULL) {
+                if (node->children[1]->type == AST_COMPOUND || node->children[1]->type == AST_NOOP) {
+                    // The 'is_global_scope' for the statements within this block is
+                    // determined by the block itself.
+                    executeWithScope(node->children[1], node->is_global_scope);
+                } else {
+#ifdef DEBUG
+                    fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Warning: Expected compound statement (AST_COMPOUND or AST_NOOP) as second child of AST_BLOCK, but got %s.\n",
+                            astTypeToString(node->children[1]->type));
+                    fflush(stderr);
+#endif
+                }
+            } else if (node->child_count == 1) {
+                // This could mean an empty block (only declarations, no statements)
+                // or a block that was parsed where children[0] was expected to be statements
+                // if there were no declarations. Standard Pascal requires a statement part.
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Block node %p has declarations but no statement part (child_count is 1).\n", (void*)node);
+                fflush(stderr);
+#endif
             }
             break;
         }
+
         case AST_COMPOUND:
+            // This is for a sequence of statements. The 'is_global_scope_context_from_caller'
+            // correctly reflects the scope in which these statements execute.
             for (int i = 0; i < node->child_count; i++) {
                 if (!node->children[i]) {
                     fprintf(stderr, "[BUG] AST_COMPOUND: child %d is NULL\n", i);
+                    fflush(stderr);
                     continue;
                 }
-                executeWithScope(node->children[i], false);
+                // Pass down the current scope context.
+                executeWithScope(node->children[i], node->is_global_scope);
+                
+                // Check for break statement propagation
+                if (break_requested) {
+                    // If the parent of this compound statement is a loop, we need to stop executing statements in this compound
+                    // and let the break_requested flag be handled by the loop construct itself.
+                    if (node->parent && (node->parent->type == AST_WHILE ||
+                                         node->parent->type == AST_REPEAT ||
+                                         node->parent->type == AST_FOR_TO ||
+                                         node->parent->type == AST_FOR_DOWNTO)) {
+#ifdef DEBUG
+                        fprintf(stderr, "[DEBUG executeWithScope AST_COMPOUND] Break requested within a loop's body. Stopping execution of further statements in this compound block.\n");
+                        fflush(stderr);
+#endif
+                        break; // Stop processing more statements in *this* compound block
+                    }
+                }
             }
             break;
         case AST_IF: {

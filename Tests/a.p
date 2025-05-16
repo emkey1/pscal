@@ -1,6 +1,9 @@
 Program foo;
+Uses CRT;
 
 Begin
-writeln(upcase('a'));  { prints 'A' }
+  clrscr;
+
+  writeln(upcase('a'));  { prints 'A' }
 end.
 

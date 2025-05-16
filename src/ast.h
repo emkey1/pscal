@@ -3,6 +3,9 @@
 #include "types.h"
 #include "symbol.h"
 
+struct Symbol_s; // Forward declaration of the struct tag
+typedef struct Symbol_s Symbol; // Typedef
+
 typedef struct AST {
     ASTNodeType type;
     Token *token;            /* For names, field names, type names, nil, ^, etc. */
@@ -19,6 +22,7 @@ typedef struct AST {
     int child_capacity;
     int i_val;               // Used for enum ordinal value storage in AST_ENUM_VALUE
     bool is_global_scope;    // Flag for block nodes
+    struct AST *type_def;    // For TYPE_REFERENCE etc.
 } AST;
 
 AST *newASTNode(ASTNodeType type, Token *token);
