@@ -3,213 +3,171 @@ cmake_minimum_required(VERSION 3.24)
 project(pscal C)
 
 # ---- Version Generation Logic ----
-# YYYYMMDD.HHMM format
 string(TIMESTAMP CURRENT_YEAR "%Y")
 string(TIMESTAMP CURRENT_MONTH "%m")
 string(TIMESTAMP CURRENT_DAY "%d")
 string(TIMESTAMP CURRENT_HOUR "%H")
 string(TIMESTAMP CURRENT_MINUTE "%M")
-
-set(BASE_VERSION "${CURRENT_YEAR}${CURRENT_MONTH}${CURRENT_DAY}.${CURRENT_HOUR}${CURRENT_MINUTE}") # YYYYMMDD.HHMM
-
-# Add an option for RELEASE build, default to OFF (meaning DEV)
-# This allows "cmake .. -DRELEASE_BUILD=ON"
+set(BASE_VERSION "${CURRENT_YEAR}${CURRENT_MONTH}${CURRENT_DAY}.${CURRENT_HOUR}${CURRENT_MINUTE}")
 option(RELEASE_BUILD "Build as a release version (appends _REL)" OFF)
-
 if(RELEASE_BUILD)
     set(VERSION_SUFFIX "_REL")
 else()
     set(VERSION_SUFFIX "_DEV")
 endif()
-
 set(PROGRAM_VERSION_STRING "${BASE_VERSION}${VERSION_SUFFIX}")
 message(STATUS "Building Pscal Version: ${PROGRAM_VERSION_STRING}")
 # ---- End Version Generation Logic ----
 
-# ---- options -------------------------------------------------------------
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
-
-# Put all executables in <repo>/bin
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-
-# ---- Common compile definitions for version ----
-# This definition will be used by main.c
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
-# ---- gather sources ------------------------------------------------------
-file(GLOB SRC_FILES CONFIGURE_DEPENDS src/*.c src/*.h)
+# ---- Include Directories (Project Structure) ----
+include_directories(
+    src
+    src/core
+    src/frontend
+    src/symbol
+    src/backend_ast
+    # src/compiler
+    # src/vm
+)
 
-# ---- Release build -------------------------------------------------------
-add_executable(pscal ${SRC_FILES})
-target_compile_options(pscal PRIVATE -O3)
-if(RELEASE_BUILD) # If you use the CMake option RELEASE_BUILD
-    target_compile_definitions(pscal PRIVATE RELEASE) # Define RELEASE C macro for pscal target
-endif()
+# ---- Dependencies ----
+find_package(PkgConfig REQUIRED)
 
-# ---- ASan debug build ----------------------------------------------------
-#add_executable(dscal ${SRC_FILES})
-#target_compile_definitions(dscal PRIVATE DEBUG)
-#target_compile_options( dscal PRIVATE -fsanitize=address -g)
-#target_link_options( dscal PRIVATE -fsanitize=address)
-add_executable(dscal ${SRC_FILES})
-target_compile_definitions(dscal PRIVATE DEBUG)
-target_compile_options( dscal PRIVATE -fsanitize=address -g)
-target_link_options( dscal PRIVATE -fsanitize=address)
-
-# ---- “no-exit” build -----------------------------------------------------
-add_executable(hscal ${SRC_FILES})
-target_compile_definitions(hscal PRIVATE SUPPRESS_EXIT)
-target_compile_options( hscal PRIVATE -g)
-
-# ---- optional install ----------------------------------------------------
-include(GNUInstallDirs)
-install(TARGETS pscal dscal RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-
-# --------------------------------------------------------------------------
-# SDL Support  ──────────────────────────────────────────────────────────────
+# --- SDL2 Core ---
 find_package(SDL2 REQUIRED)
-find_package(SDL2_image REQUIRED)
-find_package(SDL2_mixer REQUIRED)
-find_package(SDL2_ttf REQUIRED)
-message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}") # Core SDL2 includes
-# For SDL2::SDL2, SDL2_LIBRARIES might not be the primary way to get link info,
-# but FindSDL2.cmake often still populates it.
-message(STATUS "SDL2_LIBRARIES    = ${SDL2_LIBRARIES}")
+message(STATUS "SDL2 Core Include Dirs: ${SDL2_INCLUDE_DIRS}")
+message(STATUS "SDL2 Core Libraries Variable: ${SDL2_LIBRARIES}") # e.g., /path/to/libSDL2.dylib or SDL2::SDL2
 
-# Initialize PLATFORM_ specific variables for SDL components
-foreach(comp TTF MIXER IMAGE)
-    set(PLATFORM_SDL2_${comp}_INCLUDE_DIRS "")
-    set(PLATFORM_SDL2_${comp}_LIBRARIES "")
-endforeach()
+# --- SDL2_image ---
+pkg_check_modules(PC_SDL2_IMAGE REQUIRED SDL2_image)
+message(STATUS "SDL2_image (pkg-config) Include Dirs: ${PC_SDL2_IMAGE_INCLUDE_DIRS}")
+message(STATUS "SDL2_image (pkg-config) Libs: ${PC_SDL2_IMAGE_LIBRARIES}")
+message(STATUS "SDL2_image (pkg-config) Lib Dirs: ${PC_SDL2_IMAGE_LIBRARY_DIRS}")
+message(STATUS "SDL2_image (pkg-config) Other LDFLAGS: ${PC_SDL2_IMAGE_LDFLAGS_OTHER}")
 
-# --------------------------------------------------------------------------
-if(APPLE)
-    message(STATUS "Platform: Apple macOS – hunting SDL2_* components")
+# --- SDL2_mixer ---
+pkg_check_modules(PC_SDL2_MIXER REQUIRED SDL2_mixer)
+message(STATUS "SDL2_mixer (pkg-config) Include Dirs: ${PC_SDL2_MIXER_INCLUDE_DIRS}")
+message(STATUS "SDL2_mixer (pkg-config) Libs: ${PC_SDL2_MIXER_LIBRARIES}")
+message(STATUS "SDL2_mixer (pkg-config) Lib Dirs: ${PC_SDL2_MIXER_LIBRARY_DIRS}")
+message(STATUS "SDL2_mixer (pkg-config) Other LDFLAGS: ${PC_SDL2_MIXER_LDFLAGS_OTHER}")
 
-    macro(_find_sdl_component COMPONENT brew_name header_name)
-        string(TOLOWER "${COMPONENT}" lc_comp) # Use a different variable name like lc_comp
-        # Try find_package first which might populate SDL2_${lc_comp}_INCLUDE_DIRS and SDL2_${lc_comp}_LIBRARIES
-        find_package(SDL2_${lc_comp} QUIET)
+# --- SDL2_ttf ---
+pkg_check_modules(PC_SDL2_TTF REQUIRED SDL2_ttf)
+message(STATUS "SDL2_ttf (pkg-config) Include Dirs: ${PC_SDL2_TTF_INCLUDE_DIRS}")
+message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
+message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
+message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
 
-        set(_inc_dirs "${SDL2_${lc_comp}_INCLUDE_DIRS}") # Use the result from find_package
-        set(_libs "${SDL2_${lc_comp}_LIBRARIES}")       # Use the result from find_package
+# --- CURL ---
+find_package(CURL REQUIRED)
+message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
+message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
 
-        # If find_package didn't find include dirs or the header doesn't exist at that path
-        if(NOT _inc_dirs OR NOT EXISTS "${_inc_dirs}/SDL2/${header_name}")
-            execute_process(
-                COMMAND brew --prefix "${brew_name}"
-                OUTPUT_VARIABLE _brew_pref
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                RESULT_VARIABLE _brew_ok
-                ERROR_QUIET)
-            if(_brew_ok EQUAL 0 AND _brew_pref AND EXISTS "${_brew_pref}/include/SDL2/${header_name}")
-                message(STATUS "Found SDL2_${lc_comp} include path via brew: ${_brew_pref}/include")
-                list(APPEND _inc_dirs "${_brew_pref}/include") # Append brew path
-                find_library(_lib_path NAMES SDL2_${lc_comp}
-                                   PATHS "${_brew_pref}/lib" NO_DEFAULT_PATH)
-                if(_lib_path)
-                    message(STATUS "Found SDL2_${lc_comp} library via brew: ${_lib_path}")
-                    list(APPEND _libs "${_lib_path}")
-                else()
-                    message(WARNING "Could not find SDL2_${lc_comp} library in brew path, using name 'SDL2_${lc_comp}'.")
-                    list(APPEND _libs "SDL2_${lc_comp}") # Fallback to name
-                endif()
-            else()
-                message(WARNING "Could not find SDL2_${lc_comp} via brew or standard find_package for includes.")
-            endif()
-        endif()
 
-        # After attempting find_package and brew, check if we have what we need
-        if(NOT _inc_dirs OR NOT _libs) # If still not found, it's an error
-             # If find_package provided SDL2_${lc_comp}::SDL2_${lc_comp} target, _libs might be empty but linking works
-             # This check might be too strict if modern imported targets are used for extensions too.
-             # However, for manual path collection, we need _libs to be populated.
-             # Let's assume if find_package(SDL2_${lc_comp}) found something, it's okay.
-            if (NOT TARGET SDL2_${lc_comp}::SDL2_${lc_comp} AND (NOT _inc_dirs OR NOT _libs))
-                message(FATAL_ERROR "SDL2_${lc_comp} is REQUIRED but could not be properly located on macOS.")
-            elseif(TARGET SDL2_${lc_comp}::SDL2_${lc_comp})
-                message(STATUS "SDL2_${lc_comp} found as imported target SDL2_${lc_comp}::SDL2_${lc_comp}. Manual paths might be empty if target handles all.")
-                # If imported target exists, _libs might be empty, which is fine if we link to the target.
-                # We will prioritize linking to the target SDL2_xxx::SDL2_xxx below.
-            endif()
-        endif()
+# ---- Source Files ----
+set(PSCAL_SOURCES
+    src/main.c src/globals.c
+    src/core/types.c src/core/utils.c src/core/list.c
+    src/frontend/lexer.c src/frontend/parser.c src/frontend/ast.c
+    src/symbol/symbol.c
+    src/backend_ast/interpreter.c src/backend_ast/builtin.c
+    src/backend_ast/builtin_network_api.c src/backend_ast/sdl.c src/backend_ast/audio.c
+)
 
-        # Set the platform-specific variables
-        set(PLATFORM_SDL2_${COMPONENT}_INCLUDE_DIRS "${_inc_dirs}")
-        set(PLATFORM_SDL2_${COMPONENT}_LIBRARIES "${_libs}")
-    endmacro()
+# ---- Executable Targets Function ----
+function(add_pscal_executable target_name)
+    add_executable(${target_name} ${PSCAL_SOURCES})
 
-    _find_sdl_component(TTF   sdl2_ttf   "SDL_ttf.h")
-    _find_sdl_component(MIXER sdl2_mixer "SDL_mixer.h")
-    _find_sdl_component(IMAGE sdl2_image "SDL_image.h")
+    target_include_directories(${target_name} PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+        ${CURL_INCLUDE_DIRS}
+    )
 
-elseif(UNIX)
-    message(STATUS "Platform: Generic UNIX – assuming standard system paths")
-    # For generic Unix, find_package should work, or we use system defaults.
-    # We will primarily rely on the imported targets SDL2_xxx::SDL2_xxx if available.
-    # The PLATFORM_ variables can serve as fallbacks if direct target linking fails
-    # or if find_package doesn't create imported targets for these extensions.
-    foreach(comp TTF MIXER IMAGE)
-        string(TOLOWER "${comp}" lc_comp)
-        find_package(SDL2_${lc_comp} QUIET) # Try to find it to see if imported target is created
-        if(TARGET SDL2_${lc_comp}::SDL2_${lc_comp})
-            message(STATUS "Found SDL2_${lc_comp} as imported target SDL2_${lc_comp}::SDL2_${lc_comp} on UNIX.")
-            set(PLATFORM_SDL2_${comp}_INCLUDE_DIRS "${SDL2_${lc_comp}_INCLUDE_DIRS}") # Use what find_package found
-            set(PLATFORM_SDL2_${comp}_LIBRARIES "${SDL2_${lc_comp}_LIBRARIES}") # Might be empty if target handles it
-        else()
-            message(STATUS "SDL2_${lc_comp} not found as imported target on UNIX. Assuming standard /usr/include and libSDL2_${lc_comp}.")
-            set(PLATFORM_SDL2_${comp}_INCLUDE_DIRS "/usr/include") # Fallback
-            set(PLATFORM_SDL2_${comp}_LIBRARIES "SDL2_${lc_comp}") # Fallback
-        endif()
-    endforeach()
-else()
-    message(FATAL_ERROR "Unsupported platform for SDL component configuration.")
-endif()
+    # Add library search paths from pkg-config
+    target_link_directories(${target_name} PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
 
-# --- Final Status Messages for Platform Variables ---
-foreach(comp TTF MIXER IMAGE)
-    message(STATUS "Platform SDL2_${comp} Include Dirs = ${PLATFORM_SDL2_${comp}_INCLUDE_DIRS}")
-    message(STATUS "Platform SDL2_${comp} Libraries    = ${PLATFORM_SDL2_${comp}_LIBRARIES}")
-endforeach()
+    # Construct the list of libraries and flags to link
+    set(TARGET_LINK_LIBS "")
 
-# --- Consolidate Include Directories ---
-set(ALL_SDL_INCLUDE_DIRS ${SDL2_INCLUDE_DIRS}) # From find_package(SDL2 REQUIRED)
-foreach(comp TTF MIXER IMAGE)
-    if(PLATFORM_SDL2_${comp}_INCLUDE_DIRS)
-        list(APPEND ALL_SDL_INCLUDE_DIRS ${PLATFORM_SDL2_${comp}_INCLUDE_DIRS})
-    endif()
-endforeach()
-list(REMOVE_DUPLICATES ALL_SDL_INCLUDE_DIRS)
-message(STATUS "Consolidated All SDL Include Dirs = ${ALL_SDL_INCLUDE_DIRS}")
-
-# --- Consolidate Libraries ---
-# We will try to link against the imported targets if they exist,
-# otherwise fall back to the collected library names/paths.
-set(ALL_SDL_LIBRARIES SDL2::SDL2) # Core SDL2 target
-foreach(comp TTF MIXER IMAGE)
-    string(TOLOWER "${comp}" lc_comp)
-    if(TARGET SDL2_${lc_comp}::SDL2_${lc_comp})
-        list(APPEND ALL_SDL_LIBRARIES SDL2_${lc_comp}::SDL2_${lc_comp})
-    elseif(PLATFORM_SDL2_${comp}_LIBRARIES)
-        list(APPEND ALL_SDL_LIBRARIES ${PLATFORM_SDL2_${comp}_LIBRARIES})
+    # Core SDL2
+    if(TARGET SDL2::SDL2)
+        list(APPEND TARGET_LINK_LIBS SDL2::SDL2)
     else()
-        # As a last resort, just add the name if no path or target was found
-        list(APPEND ALL_SDL_LIBRARIES "SDL2_${lc_comp}")
-        message(WARNING "Could not find imported target or library path for SDL2_${lc_comp}. Linking by name 'SDL2_${lc_comp}'.")
+        list(APPEND TARGET_LINK_LIBS ${SDL2_LIBRARIES})
     endif()
-endforeach()
-list(REMOVE_DUPLICATES ALL_SDL_LIBRARIES)
-message(STATUS "Consolidated All SDL Libraries to Link = ${ALL_SDL_LIBRARIES}")
 
-# --- Apply to targets ---
-foreach(TARGET_EXE pscal dscal hscal)
-    target_include_directories(${TARGET_EXE} PRIVATE ${ALL_SDL_INCLUDE_DIRS})
-    target_link_libraries(${TARGET_EXE} PRIVATE ${ALL_SDL_LIBRARIES} m curl) # Added m and curl here
-endforeach()
-# --------------------------------------------------------------------------
+    # SDL Extensions - using the library names from pkg-config
+    # These variables (e.g. PC_SDL2_IMAGE_LIBRARIES) often contain a list like "SDL2_image;SDL2"
+    # CMake handles linking these by name (e.g. -lSDL2_image -lSDL2)
+    # The target_link_directories above tells the linker where to find them.
+    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LIBRARIES})
+    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LIBRARIES})
+    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LIBRARIES})
 
-# ---- common libs - m and curl are now linked in the loop above ----
-# target_link_libraries(pscal PRIVATE m curl) # These are redundant now
-# target_link_libraries(dscal PRIVATE m curl)
-# target_link_libraries(hscal PRIVATE m curl)
+    # Add other linker flags from pkg-config (these might include rpath, etc.)
+    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LDFLAGS_OTHER})
+    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LDFLAGS_OTHER})
+    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LDFLAGS_OTHER})
+
+    # CURL
+    if(TARGET CURL::libcurl)
+        list(APPEND TARGET_LINK_LIBS CURL::libcurl)
+    else()
+        list(APPEND TARGET_LINK_LIBS ${CURL_LIBRARIES})
+    endif()
+    
+    list(APPEND TARGET_LINK_LIBS m) # Math library
+
+    # Specific options for dscal (ASan)
+    if(${target_name} STREQUAL "dscal")
+        list(APPEND TARGET_LINK_LIBS "-fsanitize=address")
+    endif()
+    
+    # Optional: Remove duplicate library names from the list before linking
+    # This helps with the ld warning but might not be strictly necessary if the linker handles it.
+    if(TARGET_LINK_LIBS)
+        list(REMOVE_DUPLICATES TARGET_LINK_LIBS)
+    endif()
+    
+    message(STATUS "Linking ${target_name} with: ${TARGET_LINK_LIBS}")
+    target_link_libraries(${target_name} PRIVATE ${TARGET_LINK_LIBS})
+
+    # Specific compile definitions and options
+    if(${target_name} STREQUAL "pscal")
+        target_compile_options(${target_name} PRIVATE -O3)
+        if(RELEASE_BUILD)
+            target_compile_definitions(${target_name} PRIVATE RELEASE)
+        else()
+            target_compile_definitions(${target_name} PRIVATE DEBUGNOT)
+        endif()
+    elseif(${target_name} STREQUAL "dscal")
+        target_compile_definitions(${target_name} PRIVATE DEBUG)
+        target_compile_options(${target_name} PRIVATE -fsanitize=address -g)
+        # target_link_options(${target_name} PRIVATE INTERFACE -fsanitize=address) # Covered by adding to TARGET_LINK_LIBS
+    elseif(${target_name} STREQUAL "hscal")
+        target_compile_definitions(${target_name} PRIVATE DEBUG SUPPRESS_EXIT)
+        target_compile_options(${target_name} PRIVATE -g)
+    endif()
+endfunction()
+
+add_pscal_executable(pscal)
+add_pscal_executable(dscal)
+add_pscal_executable(hscal)
+
+# ---- optional install ----
+include(GNUInstallDirs)
+install(TARGETS pscal dscal
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
