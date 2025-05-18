@@ -1024,28 +1024,21 @@ void freeValue(Value *v) {
              break;
         }
         case TYPE_MEMORYSTREAM:
-             if (v->mstream) {
-         #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG]   Attempting to free MStream content for Value* at %p (mstream=%p)\n", (void*)v, (void*)v->mstream);
-         #endif
-                 if (v->mstream->buffer) {
-         #ifdef DEBUG
-                     fprintf(stderr, "[DEBUG]     Freeing MStream buffer at %p (size=%d)\n", (void*)v->mstream->buffer, v->mstream->size);
-         #endif
-                     free(v->mstream->buffer);
-                     v->mstream->buffer = NULL;
-                 }
-         #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG]     Freeing MStream struct itself at %p\n", (void*)v->mstream);
-         #endif
-                 free(v->mstream);
-                 v->mstream = NULL;
-             } else {
-         #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG]   MStream pointer is NULL, nothing to free for MStream.\n");
-         #endif
-             }
-             break;
+              // When a Value struct of TYPE_MEMORYSTREAM is freed,
+              // we DO NOT free the MStream* it points to, nor its buffer.
+              // The actual MStream object is managed explicitly by built-ins like MStreamCreate/MStreamFree.
+              // This Value struct is just a container for the pointer (handle).
+              // Its only responsibility is to ensure that if the Value struct itself
+              // had allocated anything for its *own members* (which it doesn't for mstream directly),
+              // that would be freed. The mstream pointer is just a shallow copy.
+              #ifdef DEBUG
+              fprintf(stderr, "[DEBUG freeValue] TYPE_MEMORYSTREAM for Value* %p. The mstream handle %p and its buffer are NOT freed by this freeValue call.\n", (void*)v, (void*)v->mstream);
+              #endif
+              // No action needed here to free v->mstream or v->mstream->buffer.
+              // We can set v->mstream to NULL in this *copy* of the Value to be safe,
+              // although if the Value struct itself is about to be popped from stack or go out of scope, it's minor.
+              v->mstream = NULL;
+              break;
         // Add other types if they allocate memory pointed to by Value struct members
         default:
 #ifdef DEBUG

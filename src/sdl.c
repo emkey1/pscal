@@ -107,7 +107,7 @@ Value executeBuiltinInitGraph(AST *node) {
     fprintf(stderr, "[DEBUG InitGraph] Creating renderer...\n");
     #endif
     // Consider making VSync configurable or testing without it for macOS issues
-    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED /* | SDL_RENDERER_PRESENTVSYNC */);
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!gSdlRenderer) {
         fprintf(stderr, "Runtime error: SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
@@ -2072,5 +2072,98 @@ Value executeBuiltinGetTicks(AST *node) {
     #endif
 
     return makeInt((long long)ticks); // Cast Uint32 to long long for makeInt
+}
+
+// Pscal: FUNCTION RenderTextToTexture(TextToRender: String; R, G, B: Byte): Integer;
+Value executeBuiltinRenderTextToTexture(AST *node) {
+    if (node->child_count != 4) { // Text, R, G, B
+        fprintf(stderr, "Runtime error: RenderTextToTexture expects 4 arguments (Text: String; R, G, B: Byte).\n");
+        return makeInt(-1); // Error code
+    }
+
+    // Ensure graphics and text systems are initialized
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics system not initialized before RenderTextToTexture.\n");
+        return makeInt(-1);
+    }
+    if (!gSdlTtfInitialized || !gSdlFont) {
+        fprintf(stderr, "Runtime error: Text system or font not initialized before RenderTextToTexture.\n");
+        return makeInt(-1);
+    }
+
+    // Evaluate arguments
+    Value textVal = eval(node->children[0]);
+    Value rVal = eval(node->children[1]);
+    Value gVal = eval(node->children[2]);
+    Value bVal = eval(node->children[3]);
+
+    // Type checking
+    if (textVal.type != TYPE_STRING ||
+        (rVal.type != TYPE_INTEGER && rVal.type != TYPE_BYTE) ||
+        (gVal.type != TYPE_INTEGER && gVal.type != TYPE_BYTE) ||
+        (bVal.type != TYPE_INTEGER && bVal.type != TYPE_BYTE)) {
+        fprintf(stderr, "Runtime error: RenderTextToTexture argument type mismatch. Expected (String, Byte, Byte, Byte).\n");
+        freeValue(&textVal);
+        freeValue(&rVal);
+        freeValue(&gVal);
+        freeValue(&bVal);
+        return makeInt(-1);
+    }
+
+    const char* text_to_render = textVal.s_val ? textVal.s_val : "";
+    SDL_Color textColor;
+    textColor.r = (Uint8)(rVal.i_val & 0xFF);
+    textColor.g = (Uint8)(gVal.i_val & 0xFF);
+    textColor.b = (Uint8)(bVal.i_val & 0xFF);
+    textColor.a = 255; // Full opacity for text rendering
+
+    // Free evaluated color arguments
+    freeValue(&rVal);
+    freeValue(&gVal);
+    freeValue(&bVal);
+
+    // Render text to surface
+    SDL_Surface* textSurface = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, textColor);
+    if (!textSurface) {
+        fprintf(stderr, "Runtime error: TTF_RenderUTF8_Solid failed in RenderTextToTexture: %s\n", TTF_GetError());
+        freeValue(&textVal);
+        return makeInt(-1);
+    }
+
+    // Free the evaluated text string now that the surface is created
+    freeValue(&textVal);
+
+    // Create texture from surface
+    SDL_Texture* newTexture = SDL_CreateTextureFromSurface(gSdlRenderer, textSurface);
+    if (!newTexture) {
+        fprintf(stderr, "Runtime error: SDL_CreateTextureFromSurface failed in RenderTextToTexture: %s\n", SDL_GetError());
+        SDL_FreeSurface(textSurface);
+        return makeInt(-1);
+    }
+
+    // The surface is no longer needed after creating the texture
+    SDL_FreeSurface(textSurface);
+
+    // Find a free slot for the new texture
+    int textureID = findFreeTextureID(); // Ensure this function is accessible
+    if (textureID == -1) {
+        fprintf(stderr, "Runtime error: Maximum number of textures reached. Cannot create text texture.\n");
+        SDL_DestroyTexture(newTexture); // Clean up the created texture
+        return makeInt(-1);
+    }
+
+    // Store the texture and its dimensions
+    gSdlTextures[textureID] = newTexture;
+    SDL_QueryTexture(newTexture, NULL, NULL, &gSdlTextureWidths[textureID], &gSdlTextureHeights[textureID]);
+
+    // Important for rendering text with transparent backgrounds correctly
+    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SDL] RenderTextToTexture: Created texture ID %d for text \"%s\" (%dx%d).\n",
+            textureID, text_to_render, gSdlTextureWidths[textureID], gSdlTextureHeights[textureID]);
+    #endif
+
+    return makeInt(textureID); // Return the 0-based TextureID
 }
 

@@ -94,6 +94,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"rendercopy", executeBuiltinRenderCopy},
     {"rendercopyex", executeBuiltinRenderCopyEx},
     {"rendercopyrect", executeBuiltinRenderCopyRect},
+    {"rendertexttotexture", executeBuiltinRenderTextToTexture},
     {"reset",     executeBuiltinReset},
     // {"result",    executeBuiltinResult}, // 'result' is special, handled differently? Let's assume not dispatched here.
     {"rewrite",   executeBuiltinRewrite},
@@ -1969,7 +1970,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->children[0] = p1;
         dummy->child_count = 1;
         dummy->var_type = TYPE_VOID; // It's a procedure
-    }      else if (strcasecmp(name, "rendercopyex") == 0) {
+    } else if (strcasecmp(name, "rendercopyex") == 0) {
         dummy->child_capacity = 13;
         dummy->children = malloc(sizeof(AST*) * 13);
         if (!dummy->children) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
@@ -2050,6 +2051,44 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setTypeAST(retNode, TYPE_STRING);
         setRight(dummy, retNode);      // For functions, ->right points to the return type AST node
         dummy->var_type = TYPE_STRING; // Set the function's own var_type to its return type
+    } else if (strcasecmp(name, "rendertexttotexture") == 0) { // <<< ADD THIS CASE
+        dummy->type = AST_FUNCTION_DECL; // It's a function returning an Integer (TextureID)
+        dummy->child_capacity = 4; // Text, R, G, B
+        dummy->children = malloc(sizeof(AST*) * 4);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+
+        // Param 1: Text (String)
+        AST* p1_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1_decl, TYPE_STRING);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_textToRender"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
+        setTypeAST(v1, TYPE_STRING); addChild(p1_decl, v1);
+        dummy->children[0] = p1_decl;
+
+        // Param 2: R (Byte)
+        AST* p2_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2_decl, TYPE_BYTE);
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_red"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n);
+        setTypeAST(v2, TYPE_BYTE); addChild(p2_decl, v2);
+        dummy->children[1] = p2_decl;
+
+        // Param 3: G (Byte)
+        AST* p3_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3_decl, TYPE_BYTE);
+        Token* p3n = newToken(TOKEN_IDENTIFIER, "_green"); AST* v3 = newASTNode(AST_VARIABLE, p3n); freeToken(p3n);
+        setTypeAST(v3, TYPE_BYTE); addChild(p3_decl, v3);
+        dummy->children[2] = p3_decl;
+
+        // Param 4: B (Byte)
+        AST* p4_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p4_decl, TYPE_BYTE);
+        Token* p4n = newToken(TOKEN_IDENTIFIER, "_blue"); AST* v4 = newASTNode(AST_VARIABLE, p4n); freeToken(p4n);
+        setTypeAST(v4, TYPE_BYTE); addChild(p4_decl, v4);
+        dummy->children[3] = p4_decl;
+
+        dummy->child_count = 4;
+
+        // Return type: Integer (TextureID)
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "_textureID_result");
+        AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER);
+        setRight(dummy, retNode);      // For functions, ->right points to the return type AST node
+        dummy->var_type = TYPE_INTEGER; // Set the function's own var_type to its return type
     }
     // ... add other specific procedures if parameter list checking via dummy AST is desired ...
     else {

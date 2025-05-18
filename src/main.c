@@ -277,6 +277,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("rendercopyrect", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("setAlphaBlend", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("createTargetTexture", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("RenderTextToTexture", AST_FUNCTION_DECL, NULL);
 
     // SDL Sound subsystem
     registerBuiltinFunction("initsoundsystem",   AST_PROCEDURE_DECL, NULL);

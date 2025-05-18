@@ -100,6 +100,7 @@ Value executeBuiltinRenderCopy(AST *node);
 Value executeBuiltinRenderCopyRect(AST *node);
 Value executeBuiltinSetRenderTarget(AST *node);
 Value executeBuiltinCreateTargetTexture(AST *node);
+Value executeBuiltinRenderTextToTexture(AST *node);
 
 // Misc Built-ins
 Value executeBuiltinQuitRequested(AST *node);
