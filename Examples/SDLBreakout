@@ -1,0 +1,403 @@
+#!/usr/bin/env pscal
+program PscalBreakout;
+
+uses CRT; // For Delay, potentially KeyPressed/ReadKey if not using full GraphLoop for input
+
+const
+  ScreenWidth = 800;
+  ScreenHeight = 600;
+  PaddleWidth = 80;
+  PaddleHeight = 20;
+  BallSize = 10;
+  BrickRows = 5;
+  BricksPerRow = 8;
+  BrickWidth = ScreenWidth div BricksPerRow;
+  BrickHeight = 20;
+  BrickGap = 2;
+  PaddleInfluenceFactor = 4.0; // How much impact position affects BallDX. Higher = more angled shots.
+  MaxBallDX = 5; // Maximum horizontal speed for the ball after paddle hit
+  MinBallAbsDY = 2; // Minimum absolute vertical speed to prevent overly flat shots
+
+type
+  BrickRecord = record
+    X, Y: Integer;
+    Width, Height: Integer;
+    IsVisible: Boolean;
+    ColorR, ColorG, ColorB: Byte;
+  end;
+
+  TBrickArray = array[1..BrickRows, 1..BricksPerRow] of BrickRecord;
+
+var
+  // --- Game State Variables ---
+  PaddleX, PaddleY: Integer;
+  BallX, BallY: Integer;
+  BallDX, BallDY: Integer;
+  Bricks: TBrickArray;
+  Score: Integer;
+  Lives: Integer;
+
+  // --- SDL/System Variables ---
+  mouseX, mouseY, mouseButtons: Integer;
+  LoopDelay: Integer;
+
+  // --- Sound Effect IDs ---
+  PaddleHitSoundID, BrickHitSoundID, WallHitSoundID, LoseLifeSoundID: Integer;
+
+  // --- HUD Texture Variables ---
+  ScoreTextureID, LivesTextureID: Integer;
+  ScoreTextWidth, ScoreTextHeight: Integer; // To store dimensions from RenderTextToTexture
+  LivesTextWidth, LivesTextHeight: Integer;
+  LastScoreRendered: Integer; // To track when score text needs updating
+  LastLivesRendered: Integer; // To track when lives text needs updating
+
+//******************************************************************************
+// PROCEDURES AND FUNCTIONS
+//******************************************************************************
+
+procedure InitializeGame;
+var
+  r, c: Integer;
+  colorSeed: Integer;
+begin
+  InitGraph(ScreenWidth, ScreenHeight, 'Pscal Breakout');
+  InitSoundSystem;
+  InitTextSystem('/System/Library/Fonts/Supplemental/Arial.ttf', 18); // Ensure this font path is correct for your system
+
+  PaddleHitSoundID := LoadSound('paddle_hit.wav');
+  BrickHitSoundID  := LoadSound('brick_hit.wav');
+  WallHitSoundID   := LoadSound('wall_hit.wav');
+  LoseLifeSoundID  := LoadSound('lose_life.wav');
+
+  PaddleX := (ScreenWidth - PaddleWidth) div 2;
+  PaddleY := ScreenHeight - PaddleHeight - 10;
+
+  BallX := ScreenWidth div 2;
+  BallY := PaddleY - BallSize - 5;
+  BallDX := 3;
+  BallDY := -3;
+
+  for r := 1 to BrickRows do
+  begin
+    colorSeed := r * 30;
+    for c := 1 to BricksPerRow do
+    begin
+      Bricks[r,c].X := (c - 1) * BrickWidth + BrickGap div 2;
+      Bricks[r,c].Y := (r - 1) * BrickHeight + BrickGap div 2 + 50;
+      Bricks[r,c].Width := BrickWidth - BrickGap;
+      Bricks[r,c].Height := BrickHeight - BrickGap;
+      Bricks[r,c].IsVisible := True;
+      Bricks[r,c].ColorR := (100 + colorSeed + c*10) mod 256;
+      Bricks[r,c].ColorG := (50 + colorSeed + c*5) mod 256;
+      Bricks[r,c].ColorB := (150 + colorSeed + c*15) mod 256;
+    end;
+  end;
+
+  Score := 0;
+  Lives := 3;
+  LoopDelay := 16;
+  SetAlphaBlend(True); // Good for textures
+
+  // Initialize HUD texture variables
+  ScoreTextureID := -1; // Indicates no texture yet
+  LivesTextureID := -1;
+  LastScoreRendered := -1; // Force initial render
+  LastLivesRendered := -1; // Force initial render
+end;
+
+//------------------------------------------------------------------------------
+
+procedure UpdateHUDTextures;
+var
+  TempText: String;
+begin
+  // Update Score Texture if Score has changed
+  if Score <> LastScoreRendered then
+  begin
+    if ScoreTextureID <> -1 then
+      DestroyTexture(ScoreTextureID); // Free the old texture
+
+    TempText := 'Score: ' + IntToStr(Score);
+    ScoreTextureID := RenderTextToTexture(TempText, 255, 255, 255); // White text
+    if ScoreTextureID <> -1 then
+    begin
+      // GetTextSize is a procedure that takes VAR parameters
+      // We need to call it to get the width/height of the new texture
+      GetTextSize(TempText, ScoreTextWidth, ScoreTextHeight);
+    end
+    else
+    begin
+      ScoreTextWidth := 0; ScoreTextHeight := 0; // Error case
+    end;
+    LastScoreRendered := Score;
+  end;
+
+  // Update Lives Texture if Lives has changed
+  if Lives <> LastLivesRendered then
+  begin
+    if LivesTextureID <> -1 then
+      DestroyTexture(LivesTextureID);
+
+    TempText := 'Lives: ' + IntToStr(Lives);
+    LivesTextureID := RenderTextToTexture(TempText, 255, 255, 255); // White text
+    if LivesTextureID <> -1 then
+    begin
+      GetTextSize(TempText, LivesTextWidth, LivesTextHeight);
+    end
+    else
+    begin
+      LivesTextWidth := 0; LivesTextHeight := 0; // Error case
+    end;
+    LastLivesRendered := Lives;
+  end;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure HandleInput;
+begin
+  GetMouseState(mouseX, mouseY, mouseButtons);
+  PaddleX := mouseX - (PaddleWidth div 2);
+
+  if PaddleX < 0 then PaddleX := 0;
+  if PaddleX + PaddleWidth > GetMaxX then PaddleX := GetMaxX - PaddleWidth;
+end;
+
+//------------------------------------------------------------------------------
+procedure UpdateGame;
+var
+  r, c: Integer;
+  brickLeft, brickRight, brickTop, brickBottom: Integer;
+  ballLeft, ballRight, ballTop, ballBottom: Integer;
+  paddleLeft, paddleRight, paddleTop: Integer;
+  allBricksCleared: Boolean;
+
+  // Variables for paddle impact calculation (can be local to this proc)
+  ballCenterX: Real;
+  paddleCenterX: Real;
+  impactOffset: Real;
+  normalizedImpact: Real;
+  newBallDX_Real: Real;
+begin
+  // 1. Move Ball
+  BallX := BallX + BallDX;
+  BallY := BallY + BallDY;
+
+  // 2. Ball Collision with Walls
+  // Left or Right Wall
+  if (BallX <= 0) or (BallX + BallSize >= ScreenWidth) then
+  begin
+    BallDX := -BallDX;
+    if BallX <= 0 then BallX := 0
+    else BallX := ScreenWidth - BallSize;
+    if WallHitSoundID <> -1 then PlaySound(WallHitSoundID);
+  end;
+
+  // Top Wall
+  if BallY <= 0 then
+  begin
+    BallDY := -BallDY;
+    BallY := 0;
+    if WallHitSoundID <> -1 then PlaySound(WallHitSoundID);
+  end;
+
+  // Bottom Wall (lose life)
+  if BallY + BallSize >= ScreenHeight then
+  begin
+    Lives := Lives - 1;
+    if LoseLifeSoundID <> -1 then PlaySound(LoseLifeSoundID);
+    if Lives > 0 then
+    begin // Reset ball and paddle
+      PaddleX := (ScreenWidth - PaddleWidth) div 2;
+      BallX := ScreenWidth div 2;
+      BallY := PaddleY - BallSize - 5; // Position ball above paddle
+      BallDY := -Abs(BallDY);         // Ensure it goes up, maintain some speed
+      if Abs(BallDY) < MinBallAbsDY then BallDY := -MinBallAbsDY; // Ensure minimum upward speed
+    end
+    else
+    begin
+      UpdateHUDTextures; // Update HUD one last time before showing game over
+      RenderGame;        // Render final state
+      SetRGBColor(255,255,255); // White text for game over
+      OutTextXY((ScreenWidth div 2) - Length('GAME OVER') * 4, ScreenHeight div 2, 'GAME OVER'); // Approx center
+      UpdateScreen;
+      Delay(3000); // Show message for 3 seconds
+      Halt;
+    end;
+  end;
+
+  // 3. Ball Collision with Paddle
+  ballLeft := BallX;
+  ballRight := BallX + BallSize;
+  ballTop := BallY;
+  ballBottom := BallY + BallSize;
+
+  paddleLeft := PaddleX;
+  paddleRight := PaddleX + PaddleWidth;
+  paddleTop := PaddleY; // Paddle's top Y coordinate
+
+  if (ballBottom >= paddleTop) and            // Ball's bottom is at or below paddle's top
+     (ballTop < (paddleTop + PaddleHeight)) and // Ball's top is above paddle's bottom (ensures vertical overlap)
+     (ballRight > paddleLeft) and             // Ball's right is to the right of paddle's left
+     (ballLeft < paddleRight) then            // Ball's left is to the left of paddle's right
+  begin
+    // Collision occurred!
+
+    // Reverse vertical direction first
+    BallDY := -Abs(BallDY);
+    // Ensure minimum upward speed
+    if Abs(BallDY) < MinBallAbsDY then
+       BallDY := -MinBallAbsDY;
+
+    // Reposition ball slightly above the paddle to prevent sticking
+    BallY := paddleTop - BallSize - 1;
+
+    // Calculate impact position on paddle to influence horizontal direction
+    ballCenterX := BallX + (BallSize / 2.0);
+    paddleCenterX := PaddleX + (PaddleWidth / 2.0);
+    impactOffset := ballCenterX - paddleCenterX;
+
+    // Normalize the impact: -1.0 (far left of paddle) to +1.0 (far right)
+    if (PaddleWidth / 2.0) <> 0 then // Avoid division by zero if paddle width could be 0
+        normalizedImpact := impactOffset / (PaddleWidth / 2.0)
+    else
+        normalizedImpact := 0.0;
+
+    // Calculate new BallDX based on normalized impact
+    newBallDX_Real := normalizedImpact * PaddleInfluenceFactor;
+
+    // Apply and clamp the new BallDX
+    BallDX := Round(newBallDX_Real);
+
+    if BallDX > MaxBallDX then BallDX := MaxBallDX
+    else if BallDX < -MaxBallDX then BallDX := -MaxBallDX;
+
+    // Ensure ball doesn't get "stuck" with BallDX = 0 if hit dead center
+    if BallDX = 0 then
+    begin
+      if normalizedImpact > 0.05 then BallDX := 1 // Slight nudge right
+      else if normalizedImpact < -0.05 then BallDX := -1 // Slight nudge left
+      else if BallDY <> 0 then // If it was perfectly centered, check previous DX or default
+      begin
+        if BallDX >= 0 then BallDX := 1 else BallDX := -1; // Default based on previous tendency or just pick one
+      end
+      else BallDX := 1; // Absolute fallback
+    end;
+
+    if PaddleHitSoundID <> -1 then PlaySound(PaddleHitSoundID);
+  end;
+
+  // 4. Ball Collision with Bricks
+  allBricksCleared := True;
+  for r := 1 to BrickRows do
+  begin
+    for c := 1 to BricksPerRow do
+    begin
+      if Bricks[r,c].IsVisible then
+      begin
+        allBricksCleared := False; // At least one brick is still visible
+        brickLeft := Bricks[r,c].X;
+        brickRight := Bricks[r,c].X + Bricks[r,c].Width;
+        brickTop := Bricks[r,c].Y;
+        brickBottom := Bricks[r,c].Y + Bricks[r,c].Height;
+
+        if (ballRight > brickLeft) and
+           (ballLeft < brickRight) and
+           (ballBottom > brickTop) and
+           (ballTop < brickBottom) then
+        begin
+          Bricks[r,c].IsVisible := False;
+          Score := Score + 10;
+          BallDY := -BallDY; // Simple bounce: just reverse vertical direction
+          if BrickHitSoundID <> -1 then PlaySound(BrickHitSoundID);
+          // Could add more sophisticated bounce logic here (which side did it hit?)
+          // For instance, if primarily horizontal collision, reverse DX, else DY.
+          // But for simple Breakout, just reversing DY is common.
+        end;
+      end;
+    end;
+  end;
+
+  // 5. Check for Win Condition
+  if allBricksCleared then
+  begin
+    UpdateHUDTextures; // Update HUD one last time
+    RenderGame;        // Render final state
+    SetRGBColor(255,255,255); // White text
+    OutTextXY((ScreenWidth div 2) - Length('YOU WIN!') * 4, ScreenHeight div 2, 'YOU WIN!'); // Approx center
+    UpdateScreen;
+    Delay(3000); // Show message
+    Halt;
+  end;
+
+  // Update HUD textures at the end of game logic updates
+  UpdateHUDTextures;
+end;
+
+procedure RenderGame;
+var
+  r, c: Integer;
+  // scoreText, livesText: String; // No longer needed here
+begin
+  ClearDevice;
+
+  SetRGBColor(200, 200, 200);
+  FillRect(PaddleX, PaddleY, PaddleX + PaddleWidth -1, PaddleY + PaddleHeight -1);
+
+  SetRGBColor(255, 255, 0);
+  FillRect(BallX, BallY, BallX + BallSize -1, BallY + BallSize -1);
+
+  for r := 1 to BrickRows do
+  begin
+    for c := 1 to BricksPerRow do
+    begin
+      if Bricks[r,c].IsVisible then
+      begin
+        SetRGBColor(Bricks[r,c].ColorR, Bricks[r,c].ColorG, Bricks[r,c].ColorB);
+        FillRect(Bricks[r,c].X, Bricks[r,c].Y,
+                 Bricks[r,c].X + Bricks[r,c].Width -1,
+                 Bricks[r,c].Y + Bricks[r,c].Height -1);
+      end;
+    end;
+  end;
+
+  // Render Score Texture
+  if ScoreTextureID <> -1 then
+    RenderCopyRect(ScoreTextureID, 10, 10, ScoreTextWidth, ScoreTextHeight);
+
+  // Render Lives Texture
+  if LivesTextureID <> -1 then
+    RenderCopyRect(LivesTextureID, ScreenWidth - LivesTextWidth - 10, 10, LivesTextWidth, LivesTextHeight);
+
+  UpdateScreen;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure ShutdownGame;
+begin
+  // Clean up HUD textures
+  if ScoreTextureID <> -1 then DestroyTexture(ScoreTextureID);
+  if LivesTextureID <> -1 then DestroyTexture(LivesTextureID);
+
+  QuitTextSystem;
+  QuitSoundSystem;
+  CloseGraph;
+end;
+
+//******************************************************************************
+// MAIN PROGRAM
+//******************************************************************************
+begin
+  InitializeGame;
+
+  while not QuitRequested do
+  begin
+    HandleInput;
+    UpdateGame; // This now calls UpdateHUDTextures
+    RenderGame;
+    GraphLoop(LoopDelay);
+  end;
+
+  ShutdownGame;
+end.
