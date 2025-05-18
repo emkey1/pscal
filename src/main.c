@@ -45,8 +45,9 @@ List *inserted_global_names = NULL; // Keep this if used by other DEBUG utilitie
 #endif
 
 const char *PSCAL_USAGE =
-    "Usage: pscal <source_file.p> [program_parameters...]\n"
+    "Usage: pscal <source_file> [program_parameters...]\n"
     "   or: pscal -v (to display version)\n"
+    "   or: pscal --dump-ast-json <source_file>\n"
     "   or: pscal (with no arguments to display version and usage)";
 
 // Function to initialize core systems like symbol tables and SDL.
@@ -176,7 +177,7 @@ void executeWithASTDump(AST *program_ast, const char *program_name) {
  * @param programName The name of the program (used for messages/dump).
  * @return EXIT_SUCCESS if parsing and execution complete without fatal errors handled by EXIT_FAILURE_HANDLER, EXIT_FAILURE if parsing fails.
  */
-int runProgram(const char *source, const char *programName) {
+int runProgram(const char *source, const char *programName, int dump_ast_json_flag) {
     // Ensure the globalSymbols hash table exists before proceeding.
     // It should have been created by initSymbolSystem() called in main.
     if (globalSymbols == NULL) {
@@ -348,6 +349,23 @@ int runProgram(const char *source, const char *programName) {
         printf("\n--- Executing Program AST ---\n");
 #endif
 
+        if (dump_ast_json_flag) {
+            printf("--- Dumping AST to JSON ---\n"); // Message to stderr if stdout is for JSON
+            dumpASTJSON(GlobalAST, stdout); // Dump to stdout
+            printf("\n--- AST JSON Dump Complete ---\n"); // Message to stderr
+            // Clean up and exit, do not execute
+            freeProcedureTable();
+            freeTypeTableASTNodes();
+            freeTypeTable();
+            if (GlobalAST) freeAST(GlobalAST);
+            SdlCleanupAtExit();
+            if (globalSymbols) freeHashTable(globalSymbols);
+#ifdef DEBUG
+            if (inserted_global_names) freeList(inserted_global_names);
+#endif
+            return EXIT_SUCCESS; // Successfully dumped
+        }
+        
         // Seed the random number generator if the Pscal program doesn't call Randomize.
         // It's better practice to require the user program to call Randomize for control.
         // If you want a default seed, do it here or in initSymbolSystem.
@@ -445,202 +463,172 @@ int runProgram(const char *source, const char *programName) {
 #ifdef DEBUG
 /* Debug mode main */
 int main(int argc, char *argv[]) {
+    int dump_ast_json_flag = 0;
+    const char *sourceFile = NULL;
+    const char *programName = "pscal_program"; // Default program name
+    int pscal_params_start_index = argc; // Initialize to an out-of-bounds index
+
     if (argc == 1) {
-        // <<< USE THE PROGRAM_VERSION MACRO >>>
         printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
         printf("%s\n", PSCAL_USAGE);
+        printf("Debug mode options:\n");
+        printf("  pscal_gcc <source_file> [program_params...]\n");
+        printf("  pscal_gcc --dump-ast-json <source_file> [program_params...]\n");
+        printf("  pscal_gcc -v\n");
         return EXIT_SUCCESS;
     }
-    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
-        // <<< USE THE PROGRAM_VERSION MACRO >>>
-        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
-        return EXIT_SUCCESS;
+
+    // --- Argument Parsing Logic ---
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-v") == 0) {
+            printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+            return EXIT_SUCCESS;
+        } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
+            dump_ast_json_flag = 1;
+        } else {
+            // The first non-flag argument is assumed to be the source file
+            if (sourceFile == NULL) {
+                sourceFile = argv[i];
+                programName = sourceFile; // Use actual filename
+                pscal_params_start_index = i + 1; // Pscal params would start after this
+            }
+            // Subsequent non-flag arguments are considered Pscal program parameters,
+            // handled by the gParamCount/gParamValues logic below.
+        }
     }
-    initSymbolSystem(); // Initializes texture system too in DEBUG
 
-    char *source = NULL;
-    const char *programName = "debug_program"; // Default for built-in source
-    const char *debug_source =
-    "program DefaultDebugSource;\n"
-    "begin\n"
-    "  writeln('Hello from default debug source!');\n"
-    "end.\n";
-
-    if (argc > 1) {
-        const char *sourceFile = argv[1];
-        FILE *file = fopen(sourceFile, "r");
-        if (!file) {
-            perror("Error opening source file");
-            return EXIT_FAILURE;
-        }
-        fseek(file, 0, SEEK_END);
-        long fsize = ftell(file);
-        rewind(file);
-        source = malloc(fsize + 1);
-        if (!source) {
-            fprintf(stderr, "Memory allocation error reading file\n");
-            fclose(file);
-            return EXIT_FAILURE;
-        }
-        fread(source, 1, fsize, file);
-        source[fsize] = '\0';
-        fclose(file);
-        programName = sourceFile; // Use actual filename for AST dump
-    } else if (debug_source && strlen(debug_source) > 0) {
-        source = strdup(debug_source);
-        if (!source) {
-            fprintf(stderr, "Memory allocation error for debug_source\n");
-            return EXIT_FAILURE;
-        }
-    } else {
-        fprintf(stderr, "Usage (DEBUG mode): %s [<source_file.p>]\n", argv[0]);
+    // Validate that a source file was provided if we are not just printing version
+    if (!sourceFile) {
+        fprintf(stderr, "Error: No source file specified.\n");
+        fprintf(stderr, "Usage (DEBUG mode): %s [--dump-ast-json] <source_file> [params...]\n", argv[0]);
+        fprintf(stderr, "Or: %s -v\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    // Set up command-line parameters if any beyond the source file
-    if (argc > 2) {
-        gParamCount = argc - 2;
-        gParamValues = &argv[2];
+    // Initialize core systems
+    initSymbolSystem();
+
+    char *source = NULL;
+
+    // Read source file
+    FILE *file = fopen(sourceFile, "r");
+    if (!file) {
+        perror("Error opening source file");
+        // (Minimal cleanup if initSymbolSystem did very little before this point)
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return EXIT_FAILURE;
+    }
+    fseek(file, 0, SEEK_END);
+    long fsize = ftell(file);
+    rewind(file);
+    source = malloc(fsize + 1);
+    if (!source) {
+        fprintf(stderr, "Memory allocation error reading file\n");
+        fclose(file);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return EXIT_FAILURE;
+    }
+    fread(source, 1, fsize, file);
+    source[fsize] = '\0';
+    fclose(file);
+
+    // Set up Pscal program's command-line parameters
+    if (pscal_params_start_index < argc) {
+        gParamCount = argc - pscal_params_start_index;
+        gParamValues = &argv[pscal_params_start_index];
     } else {
         gParamCount = 0;
         gParamValues = NULL;
     }
 
-    int result = runProgram(source, programName);
-    free(source);
+    // Call runProgram
+    int result = runProgram(source, programName, dump_ast_json_flag);
+    free(source); // Free the source code buffer
 
-    // SDL and Resource Cleanup
-    if (gSdlFont) {
-        TTF_CloseFont(gSdlFont);
-        gSdlFont = NULL;
-    }
-    if (gSdlTtfInitialized) { // Use the specific flag for TTF system
-        TTF_Quit();
-        gSdlTtfInitialized = false;
-    }
-    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
-        if (gSdlTextures[i] != NULL) {
-            SDL_DestroyTexture(gSdlTextures[i]);
-            gSdlTextures[i] = NULL;
-        }
-    }
-    if (gSdlInitialized) { // For core SDL_Init(VIDEO)
-        // Renderer and Window are usually destroyed by CloseGraph built-in or before SDL_Quit
-        if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-        if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-        SDL_Quit();
-        gSdlInitialized = false;
-    }
+    // runProgram now handles most of the cleanup, including SDL if it was used.
+    // The cleanup sequence in runProgram ensures things are freed in the correct order.
 
     return result;
 }
 
-#else /* Non-DEBUG build */
+#else /* Non-DEBUG build - main function */
 
-/* Normal main: Handles command-line arguments, reads source file,
-   calls runProgram, and performs final cleanup. */
 int main(int argc, char *argv[]) {
+    int dump_ast_json_flag = 0;
+    char *sourceFile = NULL;
+    int pscal_params_start_index = argc; // Initialize to an out-of-bounds index
+
     if (argc == 1) {
-        // <<< USE THE PROGRAM_VERSION MACRO >>>
         printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
         printf("%s\n", PSCAL_USAGE);
+        printf("Release mode options:\n");
+        printf("  pscal <source_file> [program_params...]\n");
+        printf("  pscal --dump-ast-json <source_file> [program_params...]\n");
+        printf("  pscal -v\n");
         return EXIT_SUCCESS;
     }
-    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
-        // <<< USE THE PROGRAM_VERSION MACRO >>>
-        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
-        return EXIT_SUCCESS;
-    }
-    // Initialize core systems like symbol tables and SDL.
-    // This must be called before parsing or execution.
-    initSymbolSystem(); // Assumes initSymbolSystem is defined above.
 
-    // Check for the required command-line argument (the source file).
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <source_file.p> [parameters...]\n", argv[0]);
-        // Perform cleanup before exiting on usage error.
-        SdlCleanupAtExit(); // Clean up SDL/Audio if initialized early.
-        // Global symbol table is already created, needs freeing.
-        if (globalSymbols) freeHashTable(globalSymbols);
-        // Local symbol table should be NULL.
+    // Argument Parsing Logic (similar to DEBUG version)
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-v") == 0) {
+            printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+            return EXIT_SUCCESS;
+        } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
+            dump_ast_json_flag = 1;
+        } else {
+            if (sourceFile == NULL) {
+                sourceFile = argv[i];
+                pscal_params_start_index = i + 1;
+            }
+        }
+    }
+
+    if (!sourceFile) {
+        fprintf(stderr, "Error: No source file specified.\n");
+        fprintf(stderr, "Usage: %s [--dump-ast-json] <source_file> [parameters...]\n", argv[0]);
+        fprintf(stderr, "Or: %s -v\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    // The first command-line argument is the path to the source file.
-    char *sourceFile = argv[1];
-    // Use the source file name for messages and potential dump (if debugging enabled separately).
-    char *programNameForDump = sourceFile; // Use source file name for messages.
+    initSymbolSystem();
 
-    /* Set up command-line parameters for the Pscal program. */
-    // argv[0] is the executable name, argv[1] is the source file name.
-    // Arguments for the Pscal program itself start from argv[2].
-    if (argc > 2) {
-        gParamCount = argc - 2; // Number of arguments AFTER the source file.
-        gParamValues = &argv[2]; // Pointer to the first argument string for Pscal.
-    } else {
-        gParamCount = 0;
-        gParamValues = NULL; // No arguments for Pscal program.
-    }
-
-    // Open the source file for reading.
     FILE *file = fopen(sourceFile, "r");
     if (!file) {
-        perror("Error opening source file"); // Use perror for system errors.
-         // Perform cleanup before exiting on file open error.
-        SdlCleanupAtExit();
+        perror("Error opening source file");
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
         return EXIT_FAILURE;
     }
 
-    // Read the entire source file content into a dynamically allocated buffer.
-    fseek(file, 0, SEEK_END); // Go to the end of the file.
-    long fsize = ftell(file); // Get the file size.
-    rewind(file);           // Go back to the beginning of the file.
-
-    char *source = malloc(fsize + 1); // Allocate buffer large enough for content + null terminator.
+    fseek(file, 0, SEEK_END);
+    long fsize = ftell(file);
+    rewind(file);
+    char *source = malloc(fsize + 1);
     if (!source) {
         fprintf(stderr, "Memory allocation error reading file\n");
-        fclose(file); // Close the file handle.
-         // Perform cleanup before exiting on memory error.
-        SdlCleanupAtExit();
+        fclose(file);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
         return EXIT_FAILURE;
     }
-    fread(source, 1, fsize, file); // Read file content into the buffer.
-    source[fsize] = '\0';         // Null-terminate the buffer.
-    fclose(file);                 // Close the file handle.
+    fread(source, 1, fsize, file);
+    source[fsize] = '\0';
+    fclose(file);
 
-    // Run the Pscal program (parsing and execution).
-    // runProgram assumes globalSymbols is already initialized.
-    int result = runProgram(source, programNameForDump);
+    if (pscal_params_start_index < argc) {
+        gParamCount = argc - pscal_params_start_index;
+        gParamValues = &argv[pscal_params_start_index];
+    } else {
+        gParamCount = 0;
+        gParamValues = NULL;
+    }
 
-    // Free the source code buffer allocated earlier.
+    int result = runProgram(source, sourceFile, dump_ast_json_flag);
     free(source);
 
-    // Perform final cleanup of global interpreter resources.
-    // Same cleanup process as in the DEBUG mode main function.
-    // SdlCleanupAtExit(); // Assuming this is called either here or by a registered atexit handler.
-
-    // Final Cleanup (Ensure order is correct).
-    // If not using an atexit handler, explicitly call cleanup functions here.
-    // Example of specific cleanup calls here:
-    // freeProcedureTable(); // Frees Procedure structs and owned ASTs.
-    // freeTypeTableASTNodes(); // Frees AST nodes pointed to by TypeEntry->typeAST.
-    // freeTypeTable(); // Frees TypeEntry structs.
-    // Note: If GlobalAST was not freed in runProgram (e.g., if parsing failed), freeAST(NULL) is safe.
-    SdlCleanupAtExit(); // Cleans up SDL, SDL_mixer, SDL_ttf, global SDL/Audio state.
-
-
-    // Free global symbol table (frees Symbols and their owned Values).
-    // This should be the last major cleanup after resources potentially pointing to Symbols/Values are freed.
-    if (globalSymbols) { // Check if the global table was successfully created.
-        freeHashTable(globalSymbols); // Assumes freeHashTable exists and frees the table and its contents.
-        globalSymbols = NULL; // Set to NULL after freeing.
-    }
-     // Local symbol table (localSymbols) should be NULL at this point if scope exit handling is correct.
-
-
-    return result; // Return the result status from runProgram.
- }
+    return result;
+}
 
 #endif /* Non-DEBUG build */

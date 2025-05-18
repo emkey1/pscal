@@ -42,4 +42,5 @@ void freeTypeTableASTNodes(void);
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode);
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode);
 VarType getBuiltinReturnType(const char* name);
+void dumpASTJSON(AST *node, FILE *outFile);
 #endif // AST_H
