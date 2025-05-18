@@ -1,0 +1,61 @@
+//
+//  bytecode.h
+//  Pscal
+//
+//  Created by Michael Miller on 5/18/25.
+//
+
+#ifndef PSCAL_BYTECODE_H
+#define PSCAL_BYTECODE_H
+
+#include "core/types.h" // For Value struct, as constants will be Values
+
+// --- Opcode Definitions ---
+// We'll start with a very basic set for SimpleMath.p
+typedef enum {
+    OP_RETURN,        // Return from current function/script (implicit at end of main block)
+    OP_CONSTANT,      // Push a constant from the constant pool onto the stack
+    OP_ADD,           // Pop two values, add, push result
+    OP_SUBTRACT,      // Pop two values, subtract, push result
+    OP_MULTIPLY,      // Pop two values, multiply, push result
+    OP_DIVIDE,        // Pop two values, divide, push result (handle integer/real later)
+    OP_NEGATE,        // Pop one value, negate it, push result (for unary minus)
+    OP_NOT,           // Pop one value (boolean), invert, push result
+
+    OP_DEFINE_GLOBAL, // Define a new global variable (takes constant index for name)
+    OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
+    OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
+
+    // For now, built-ins might be handled specially, or we can add a generic call
+    OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
+                      // Needs: index of builtin, argument count
+
+    OP_WRITE_LN,      // Specific opcode for WriteLn for now (simpler than generic call)
+                      // Operand: number of arguments to pop from stack for writeln
+
+    OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
+    OP_HALT           // Stop the VM (though OP_RETURN from main might suffice)
+} OpCode;
+
+// --- Bytecode Chunk Structure ---
+// A "chunk" represents a compiled piece of code (e.g., a procedure, function, or the main program block)
+typedef struct {
+    int count;          // Number of bytes currently in use in 'code'
+    int capacity;       // Allocated capacity for 'code'
+    uint8_t* code;      // The array of bytecode instructions and operands
+
+    int constants_count; // Number of constants currently in use
+    int constants_capacity; // Allocated capacity for 'constants'
+    Value* constants;   // Array of constants (Value structs: numbers, strings)
+
+    // Optional: For debugging runtime errors
+    int* lines;         // Array storing the source line number for each byte of code
+} BytecodeChunk;
+
+// --- Function Prototypes for BytecodeChunk ---
+void initBytecodeChunk(BytecodeChunk* chunk);
+void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add byte to chunk
+void freeBytecodeChunk(BytecodeChunk* chunk);
+int addConstantToChunk(BytecodeChunk* chunk, Value value); // Add a value to constant pool, return index
+
+#endif // PSCAL_BYTECODE_H
