@@ -393,7 +393,11 @@ Value executeProcedureCall(AST *node) {
 
             if (actualArgNode->type != AST_VARIABLE && actualArgNode->type != AST_FIELD_ACCESS && actualArgNode->type != AST_ARRAY_ACCESS) {
                 fprintf(stderr, "Runtime error: VAR parameter '%s' for routine '%s' must be a variable reference, field, or array element. Got %s.\n", paramName, name_to_lookup, astTypeToString(actualArgNode->type));
-                if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+                if (arg_values) {
+                    free(arg_values);
+                }
+                restoreLocalEnv(&snapshot);
+                EXIT_FAILURE_HANDLER();
             }
             
             // Resolve the LValue in the CALLER'S scope (snapshot.head or globalSymbols)
@@ -409,7 +413,11 @@ Value executeProcedureCall(AST *node) {
 
             if (!actual_var_value_ptr) {
                 fprintf(stderr, "Runtime error: Could not resolve LValue for VAR parameter '%s' in call to '%s'.\n", paramName, name_to_lookup);
-                if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+                if (arg_values) {
+                    free(arg_values);
+                }
+                restoreLocalEnv(&snapshot);
+                EXIT_FAILURE_HANDLER();
             }
              // Type Compatibility Check for VAR parameters
             if (actual_var_value_ptr->type != ptype) {
@@ -419,7 +427,12 @@ Value executeProcedureCall(AST *node) {
                         type_def && type_def->type == AST_ARRAY_TYPE && type_def->right && type_def->right->var_type == TYPE_BYTE) )
                  {
                     fprintf(stderr, "Runtime error: Type mismatch for VAR parameter '%s' in call to '%s'. Expected %s, got %s.\n", paramName, name_to_lookup, varTypeToString(ptype), varTypeToString(actual_var_value_ptr->type));
-                    if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+                     if (arg_values) {
+                         free(arg_values);
+                     }
+                     
+                     restoreLocalEnv(&snapshot);
+                     EXIT_FAILURE_HANDLER();
                  }
             }
 
@@ -450,7 +463,12 @@ Value executeProcedureCall(AST *node) {
 
             if (arg_values[i].type == TYPE_VOID && ptype != TYPE_VOID) {
                 fprintf(stderr, "CRITICAL ERROR: Value for parameter '%s' (index %d, formal type %s) for call to '%s' was not correctly evaluated/copied (is TYPE_VOID in arg_values).\n", paramName, i, varTypeToString(ptype), name_to_lookup);
-                 if (arg_values) free(arg_values); restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
+                if (arg_values) {
+                    free(arg_values);
+                }
+                
+                restoreLocalEnv(&snapshot);
+                EXIT_FAILURE_HANDLER();
             }
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG EXEC_PROC] Updating symbol '%s' with copied value (type %s from arg_values[%d]) for call to '%s'\n", paramName, varTypeToString(arg_values[i].type), i, name_to_lookup);
@@ -1143,27 +1161,66 @@ Value eval(AST *node) {
             return val;
         }
         case AST_FIELD_ACCESS: {
-            Value recVal = eval(node->left);
+            Value recVal = eval(node->left); // Evaluates the record part, e.g., Orbs[i]
             if (recVal.type != TYPE_RECORD) {
-                fprintf(stderr, "Runtime error: field access on non-record type.\n");
+                fprintf(stderr, "Runtime error: field access on non-record type (%s) for field '%s'.\n",
+                        varTypeToString(recVal.type), node->token ? node->token->value : "<unknown_field>");
+                freeValue(&recVal);
                 EXIT_FAILURE_HANDLER();
             }
+            if (!recVal.record_val) {
+                fprintf(stderr, "Runtime error: field access on uninitialized record variable for field '%s'.\n",
+                        node->token ? node->token->value : "<unknown_field>");
+                freeValue(&recVal);
+                EXIT_FAILURE_HANDLER();
+            }
+
             FieldValue *fv = recVal.record_val;
-            const char *targetField = node->token->value;
+            const char *targetField = node->token ? node->token->value : NULL; // Ensure token exists
+
+            if (!targetField) { // Should not happen if parser is correct
+                fprintf(stderr, "Runtime error: AST_FIELD_ACCESS node is missing field name token.\n");
+                freeValue(&recVal);
+                EXIT_FAILURE_HANDLER();
+            }
 
             while (fv) {
-                if (strcmp(fv->name, targetField) == 0) {
-                    Value result = makeCopyOfValue(&fv->value);
-                    freeValue(&recVal);
-                    return result;                             
+                if (fv->name && strcmp(fv->name, targetField) == 0) {
+                    Value temp_copy = makeCopyOfValue(&fv->value);
+
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG EVAL_FIELD_ACCESS] Field '%s' found.\n", targetField);
+                    fprintf(stderr, "  Original fv->value.type = %s (%d)\n", varTypeToString(fv->value.type), fv->value.type);
+                    fprintf(stderr, "  Value from makeCopyOfValue (temp_copy.type) = %s (%d)\n", varTypeToString(temp_copy.type), temp_copy.type);
+                    if (temp_copy.type == TYPE_REAL) fprintf(stderr, "    temp_copy.r_val = %f\n", temp_copy.r_val);
+                    fflush(stderr);
+                    #endif
+
+                    freeValue(&recVal); // Free the temporary record copy
+
+                    // <<< DIAGNOSTIC CHANGE: Re-make REAL values >>>
+                    if (temp_copy.type == TYPE_REAL) {
+                        #ifdef DEBUG
+                        fprintf(stderr, "  Re-making REAL for field '%s' before returning. Original r_val: %f\n", targetField, temp_copy.r_val);
+                        fflush(stderr);
+                        #endif
+                        Value freshReal = makeReal(temp_copy.r_val);
+                        // temp_copy itself for TYPE_REAL doesn't have heap data that makeReal wouldn't also create,
+                        // so freeing temp_copy here if it's REAL is just freeing a stack-like object.
+                        // freeValue(&temp_copy); // Not strictly necessary for TYPE_REAL temp_copy if makeReal creates a new one.
+                        return freshReal; // Return the freshly made TYPE_REAL
+                    }
+                    // <<< END DIAGNOSTIC CHANGE >>>
+
+                    return temp_copy; // For other types, return the direct copy
                 }
                 fv = fv->next;
             }
 
-            fprintf(stderr, "Runtime error: field '%s' not found.\n", targetField);
+            fprintf(stderr, "Runtime error: field '%s' not found in record for eval.\n", targetField);
+            freeValue(&recVal);
             EXIT_FAILURE_HANDLER();
         }
-
         case AST_BINARY_OP: {
             Value left = eval(node->left);
             Value right = eval(node->right);
@@ -2242,7 +2299,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 fflush(stderr);
 #endif
                 char escape_sequence[64] = "\x1B[";
-                char code_str[10];
+                char code_str[64];  // Probably larger than it needs to be, but better safe than sorry
                 bool first_attr = true;
 
                 // 1. Handle Bold/Intensity
@@ -2279,7 +2336,9 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                      if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");
                      else fprintf(output, "[formatted_eval_error]");
                  } else { // Standard printing
-                     if (val.type == TYPE_INTEGER) fprintf(output, "%lld", val.i_val);
+                     if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN /*if bool prints as 0/1 int */) {
+                          fprintf(output, "%lld", val.i_val);
+                     }
                      else if (val.type == TYPE_REAL) fprintf(output, "%f", val.r_val);
                      else if (val.type == TYPE_BOOLEAN) fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
                      else if (val.type == TYPE_STRING) fprintf(output, "%s", val.s_val ? val.s_val : "");

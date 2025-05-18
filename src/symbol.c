@@ -310,19 +310,21 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     DEBUG_PRINT("[DEBUG SYMBOL] Created Symbol '%s' at %p (Value @ %p, base_type_node @ %p).\n",
                 new_symbol->name, (void*)new_symbol, (void*)new_symbol->value, (void*)(new_symbol->value ? new_symbol->value->base_type_node : NULL));
 
-
-    // <<< MODIFIED: Insert into the global hash table >>>
     // The globalSymbols hash table must be created before calling this function.
     if (!globalSymbols) {
          fprintf(stderr, "Internal error: globalSymbols hash table is NULL during insertGlobalSymbol.\n");
          // Clean up allocated symbol and value before exiting
-         if (new_symbol->value) freeValue(new_symbol->value); free(new_symbol->value);
-         if (new_symbol->name) free(new_symbol->name);
-         free(new_symbol);
+         if (new_symbol->value) {
+             freeValue(new_symbol->value); // Free the contents of the Value struct
+             free(new_symbol->value);      // Then free the Value struct itself
+         }
+         if (new_symbol->name) {
+             free(new_symbol->name);
+         }
+         free(new_symbol); // Free the Symbol struct
          EXIT_FAILURE_HANDLER();
     }
     hashTableInsert(globalSymbols, new_symbol);
-    // <<< END MODIFIED >>>
 
     // The symbol is now owned by the hash table structure.
 }
@@ -839,15 +841,22 @@ void updateSymbol(const char *name, Value val) {
              break;
 
         case TYPE_MEMORYSTREAM:
-             // Free existing memory stream content (if needed, freeValue(sym->value) should handle this).
-             // Memory streams are typically shallow copied (pointers are copied).
-             // This assumes MStream structs are shared or have separate ownership models.
-             // If MStream structs themselves need deep copying, makeCopyOfValue should handle it.
-             // Assuming makeCopyOfValue handles MStream correctly or shallow copy is intended:
-             *(sym->value) = makeCopyOfValue(&val); // Use makeCopyOfValue for consistency.
-             sym->value->type = TYPE_MEMORYSTREAM;
-             break;
+              freeValue(sym->value); // Frees the *old* MStream struct and its buffer pointed to by sym->value->mstream
 
+              // Note: freeValue sets v->mstream to NULL on the Value it operates on, but sym->value is the container.
+              // The sym->value struct itself is not changed by freeValue, only its members like sym->value->mstream.
+
+              Value temp_copy = makeCopyOfValue(&val);
+              
+              *(sym->value) = temp_copy; // Assign the shallow copy to the symbol's value struct.
+                                         // This copies all fields of Value, including the mstream pointer.
+              
+              // Ensure the symbol's type is correctly set to MEMORYSTREAM,
+              // especially if makeCopyOfValue only did a shallow struct copy and val's type was different somehow.
+              // However, makeCopyOfValue starts with v = *src, so type should be copied.
+              sym->value->type = TYPE_MEMORYSTREAM;
+              fflush(stderr);
+              break;
         case TYPE_ENUM:
              // Free existing enum name string if present (freeValue(sym->value) handles this).
              // Assign the new enum value.

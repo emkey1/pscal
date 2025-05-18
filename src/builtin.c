@@ -26,8 +26,8 @@ static int compareBuiltinMappings(const void *key, const void *element) {
 // Define the dispatch table - MUST BE SORTED ALPHABETICALLY BY NAME (lowercase)
 static const BuiltinMapping builtin_dispatch_table[] = {
     {"abs",       executeBuiltinAbs},
-    {"api_receive", executeBuiltinAPIReceive}, // From builtin_network_api.c
-    {"api_send",  executeBuiltinAPISend},      // From builtin_network_api.c
+    {"api_receive", executeBuiltinAPIReceive},
+    {"api_send",  executeBuiltinAPISend},
     {"assign",    executeBuiltinAssign},
     {"chr",       executeBuiltinChr},
     {"cleardevice", executeBuiltinClearDevice},
@@ -35,6 +35,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"closegraph", executeBuiltinCloseGraph},
     {"copy",      executeBuiltinCopy},
     {"cos",       executeBuiltinCos},
+    {"createtargettexture", executeBuiltinCreateTargetTexture},
     {"createtexture", executeBuiltinCreateTexture},
     {"dec",       executeBuiltinDec},         // Include Dec
     {"delay",     executeBuiltinDelay},
@@ -42,6 +43,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"dispose",   executeBuiltinDispose},
     {"drawcircle", executeBuiltinDrawCircle},
     {"drawline", executeBuiltinDrawLine},
+    {"drawpolygon", executeBuiltinDrawPolygon},
     {"drawrect",  executeBuiltinDrawRect},
     {"eof",       executeBuiltinEOF},
     {"exp",       executeBuiltinExp},
@@ -50,6 +52,9 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"getmaxx",   executeBuiltinGetMaxX},
     {"getmaxy",   executeBuiltinGetMaxY},
     {"getmousestate", executeBuiltinGetMouseState},
+    {"getpixelcolor", executeBuiltinGetPixelColor},
+    {"gettextsize", executeBuiltinGetTextSize},
+    {"getticks", executeBuiltinGetTicks},
     {"graphloop", executeBuiltinGraphLoop},
     {"halt",      executeBuiltinHalt},
     {"high",      executeBuiltinHigh},
@@ -63,6 +68,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"keypressed", executeBuiltinKeyPressed},
     {"length",    executeBuiltinLength},
     {"ln",        executeBuiltinLn},
+    {"loadimagetotexture", executeBuiltinLoadImageToTexture},
     {"loadsound", executeBuiltinLoadSound},
     {"low",       executeBuiltinLow},
     {"mstreamcreate", executeBuiltinMstreamCreate},
@@ -84,16 +90,20 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"randomize", executeBuiltinRandomize},
     {"readkey",   executeBuiltinReadKey},
     {"real",      executeBuiltinReal},
+    {"realtostr", executeBuiltinRealToStr},
     {"rendercopy", executeBuiltinRenderCopy},
     {"rendercopyex", executeBuiltinRenderCopyEx},
     {"rendercopyrect", executeBuiltinRenderCopyRect},
+    {"rendertexttotexture", executeBuiltinRenderTextToTexture},
     {"reset",     executeBuiltinReset},
     // {"result",    executeBuiltinResult}, // 'result' is special, handled differently? Let's assume not dispatched here.
     {"rewrite",   executeBuiltinRewrite},
     {"round",     executeBuiltinRound},
     {"screencols", executeBuiltinScreenCols},
     {"screenrows", executeBuiltinScreenRows},
+    {"setalphablend", executeBuiltinSetAlphaBlend},
     {"setcolor",  executeBuiltinSetColor},
+    {"setrendertarget",  executeBuiltinSetRenderTarget},
     {"setrgbcolor", executeBuiltinSetRGBColor},
     {"sin",       executeBuiltinSin},
     {"sqr",       executeBuiltinSqr},
@@ -1107,49 +1117,56 @@ Value executeBuiltinIntToStr(AST *node) {
     }
     Value arg = eval(node->children[0]); // Evaluate the argument
 
-    if (arg.type != TYPE_INTEGER) {
-        fprintf(stderr, "Runtime error: IntToStr expects an integer argument. Got %s.\n",
-                varTypeToString(arg.type));
-        EXIT_FAILURE_HANDLER();
-    }
+    long long value_to_convert = 0; // Use long long to hold the value
 
-    // --- MODIFICATION START: Dynamic Allocation ---
-    // 1. Determine required size using snprintf with size 0
-    //    (Returns number of chars needed *excluding* null terminator)
-    int required_size = snprintf(NULL, 0, "%lld", arg.i_val);
+    // <<< MODIFICATION START: Accept Byte, Word, Boolean, Char as well as Integer >>>
+    switch (arg.type) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:    // Word is also essentially an integer
+        case TYPE_BYTE:    // Byte is also essentially an integer
+        case TYPE_BOOLEAN: // Boolean (0 or 1) can be converted
+            value_to_convert = arg.i_val;
+            break;
+        case TYPE_CHAR:    // Convert char to its ordinal value
+            value_to_convert = (long long)arg.c_val;
+            break;
+        default:
+            fprintf(stderr, "Runtime error: IntToStr expects an integer-compatible argument (Integer, Byte, Word, Boolean, Char). Got %s.\n",
+                    varTypeToString(arg.type));
+            freeValue(&arg); // Free the evaluated argument before exiting
+            EXIT_FAILURE_HANDLER();
+    }
+    // <<< MODIFICATION END >>>
+
+    // Dynamic Allocation for the string buffer
+    int required_size = snprintf(NULL, 0, "%lld", value_to_convert);
     if (required_size < 0) {
          fprintf(stderr, "Runtime error: snprintf failed to determine size in IntToStr.\n");
+         freeValue(&arg);
          return makeString(""); // Return empty string on error
     }
 
-    // 2. Allocate buffer on the heap (+1 for null terminator)
     char *buffer = malloc(required_size + 1);
     if (!buffer) {
          fprintf(stderr, "Runtime error: Memory allocation failed for buffer in IntToStr.\n");
-         // No EXIT_FAILURE_HANDLER needed here, just return empty string? Or maybe exit is safer.
-         // EXIT_FAILURE_HANDLER();
-         return makeString(""); // Let's return empty for now
+         freeValue(&arg);
+         return makeString("");
     }
 
-    // 3. Perform the actual formatting into the allocated buffer
-    //    Pass the allocated size (required_size + 1) to snprintf.
-    int chars_written = snprintf(buffer, required_size + 1, "%lld", arg.i_val);
+    int chars_written = snprintf(buffer, required_size + 1, "%lld", value_to_convert);
 
     if (chars_written < 0 || chars_written >= (required_size + 1)) {
-        // Handle potential snprintf error (shouldn't happen if size calculation was correct)
         fprintf(stderr, "Runtime error: Failed to convert integer to string in IntToStr (step 2).\n");
-        free(buffer); // Free the allocated buffer before returning
-        return makeString(""); // Return empty string on error
+        free(buffer);
+        freeValue(&arg);
+        return makeString("");
     }
 
-    // 4. Create the Value using makeString (which copies the buffer content to new heap memory)
     Value result = makeString(buffer);
-
-    // 5. Free the dynamically allocated buffer used for formatting
     free(buffer);
-    // --- MODIFICATION END ---
+    freeValue(&arg); // Free the evaluated argument AFTER its value has been used
 
-    return result; // Return the string Value (contains its own heap copy)
+    return result;
 }
 
 Value executeBuiltinReal(AST *node) {
@@ -1899,6 +1916,179 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setTypeAST(retNode, TYPE_REAL);
         setRight(dummy, retNode);
         dummy->var_type = TYPE_REAL;
+    } else if (strcasecmp(name, "loadimagetotexture") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* Malloc check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_filePath"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    } else if (strcasecmp(name, "gettextsize") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); /* Malloc check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_text"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER); p2->by_ref = 1; Token* pn2 = newToken(TOKEN_IDENTIFIER, "_width"); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2,v2); dummy->children[1] = p2;
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_INTEGER); p3->by_ref = 1; Token* pn3 = newToken(TOKEN_IDENTIFIER, "_height"); AST* v3 = newASTNode(AST_VARIABLE, pn3); freeToken(pn3); addChild(p3,v3); dummy->children[2] = p3;
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID; // It's a procedure
+    } else if (strcasecmp(name, "setrendertarget") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); /* Malloc check */
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_textureID"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
+        dummy->children[0] = p1; dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "drawpolygon") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); /* Malloc check */
+        // Represent ARRAY OF PointRecord parameter simply as ARRAY for dummy AST
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_ARRAY); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_points"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER); Token* pn2 = newToken(TOKEN_IDENTIFIER, "_numPoints"); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2,v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "getpixelcolor") == 0) {
+        dummy->child_capacity = 6; dummy->children = malloc(sizeof(AST*) * 6); /* Malloc check */
+        const char* pnames[] = {"_x", "_y", "_r", "_g", "_b", "_a"};
+        for(int i=0; i<6; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL);
+            setTypeAST(p, TYPE_INTEGER); // X, Y are Integer
+            if (i >= 2) setTypeAST(p, TYPE_BYTE); // R,G,B,A are Byte
+            if (i >= 2) p->by_ref = 1; // R,G,B,A are VAR params
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i]); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p,v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 6;
+        dummy->var_type = TYPE_VOID;
+    } else if (strcasecmp(name, "createtargettexture") == 0) { // <<< NEW
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER); Token* p1n = newToken(TOKEN_IDENTIFIER, "_ctt_w"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n); addChild(p1,v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER); Token* p2n = newToken(TOKEN_IDENTIFIER, "_ctt_h"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n); addChild(p2,v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer"); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    } else if (strcasecmp(name, "setalphablend") == 0) { // <<< NEW
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_BOOLEAN);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_enable"); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID; // It's a procedure
+    } else if (strcasecmp(name, "rendercopyex") == 0) {
+        dummy->child_capacity = 13;
+        dummy->children = malloc(sizeof(AST*) * 13);
+        if (!dummy->children) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+
+        // Parameters for RenderCopyEx:
+        // TextureID: Integer
+        // SrcX, SrcY, SrcW, SrcH: Integer (Source Rect)
+        // DstX, DstY, DstW, DstH: Integer (Destination Rect)
+        // Angle: Real
+        // RotationCenterX, RotationCenterY: Integer (Point for rotation center)
+        // FlipMode: Integer (SDL_RendererFlip enum: 0=none, 1=horizontal, 2=vertical)
+        const char* pnames[] = {
+            "_textureID",       // 0
+            "_srcX",            // 1
+            "_srcY",            // 2
+            "_srcW",            // 3
+            "_srcH",            // 4
+            "_dstX",            // 5
+            "_dstY",            // 6
+            "_dstW",            // 7
+            "_dstH",            // 8
+            "_angle",           // 9 <<< ANGLE HERE
+            "_rotationCenterX", // 10
+            "_rotationCenterY", // 11
+            "_flipMode"         // 12
+        };
+        VarType ptypes[] = {
+            TYPE_INTEGER, TYPE_INTEGER, TYPE_INTEGER, TYPE_INTEGER, TYPE_INTEGER,
+            TYPE_INTEGER, TYPE_INTEGER, TYPE_INTEGER, TYPE_INTEGER,
+            TYPE_REAL,    // _angle (index 9)
+            TYPE_INTEGER, TYPE_INTEGER, TYPE_INTEGER
+        };
+
+        for(int k=0; k < 13; ++k) {
+            AST* param_var_decl_node = newASTNode(AST_VAR_DECL, NULL);
+            setTypeAST(param_var_decl_node, ptypes[k]);
+
+            Token* param_name_token = newToken(TOKEN_IDENTIFIER, pnames[k]);
+            AST* param_var_name_node = newASTNode(AST_VARIABLE, param_name_token);
+            setTypeAST(param_var_name_node, ptypes[k]); // Also set type on the variable name AST node
+            freeToken(param_name_token);
+
+            addChild(param_var_decl_node, param_var_name_node);
+            dummy->children[k] = param_var_decl_node;
+        }
+        dummy->child_count = 13;
+        dummy->var_type = TYPE_VOID; // RenderCopyEx is a Procedure
+    } else if (strcasecmp(name, "getticks") == 0) { // <<< NEW
+        dummy->child_capacity = 0; // No parameters
+        dummy->children = NULL;
+        dummy->child_count = 0;
+        // Return type is Cardinal (unsigned integer). We'll represent it as INTEGER in the dummy AST's type system
+        // Your Pscal type system should ideally have a TYPE_CARDINAL or handle this appropriately.
+        // For the dummy AST, TYPE_INTEGER is often used as a stand-in for various integer-like types.
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "cardinal_or_integer"); // Name doesn't strictly matter here
+        AST* retNode = newASTNode(AST_VARIABLE, retTok);
+        freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); // Or TYPE_CARDINAL if you add it
+        setRight(dummy, retNode);          // For functions, ->right points to the return type AST node
+        dummy->var_type = TYPE_INTEGER;    // Set the function's own var_type to its return type
+                                           // (or TYPE_CARDINAL)
+    } else if (strcasecmp(name, "realtostr") == 0) {
+        dummy->type = AST_FUNCTION_DECL;
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+
+        // Param 1: Value (Real)
+        AST* p1_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1_decl, TYPE_REAL);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_valueR"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
+        setTypeAST(v1, TYPE_REAL); addChild(p1_decl, v1);
+        dummy->children[0] = p1_decl;
+        dummy->child_count = 1;
+
+        // Return type: String
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string_result");
+        AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING);
+        setRight(dummy, retNode);      // For functions, ->right points to the return type AST node
+        dummy->var_type = TYPE_STRING; // Set the function's own var_type to its return type
+    } else if (strcasecmp(name, "rendertexttotexture") == 0) { // <<< ADD THIS CASE
+        dummy->type = AST_FUNCTION_DECL; // It's a function returning an Integer (TextureID)
+        dummy->child_capacity = 4; // Text, R, G, B
+        dummy->children = malloc(sizeof(AST*) * 4);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+
+        // Param 1: Text (String)
+        AST* p1_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1_decl, TYPE_STRING);
+        Token* p1n = newToken(TOKEN_IDENTIFIER, "_textToRender"); AST* v1 = newASTNode(AST_VARIABLE, p1n); freeToken(p1n);
+        setTypeAST(v1, TYPE_STRING); addChild(p1_decl, v1);
+        dummy->children[0] = p1_decl;
+
+        // Param 2: R (Byte)
+        AST* p2_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2_decl, TYPE_BYTE);
+        Token* p2n = newToken(TOKEN_IDENTIFIER, "_red"); AST* v2 = newASTNode(AST_VARIABLE, p2n); freeToken(p2n);
+        setTypeAST(v2, TYPE_BYTE); addChild(p2_decl, v2);
+        dummy->children[1] = p2_decl;
+
+        // Param 3: G (Byte)
+        AST* p3_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3_decl, TYPE_BYTE);
+        Token* p3n = newToken(TOKEN_IDENTIFIER, "_green"); AST* v3 = newASTNode(AST_VARIABLE, p3n); freeToken(p3n);
+        setTypeAST(v3, TYPE_BYTE); addChild(p3_decl, v3);
+        dummy->children[2] = p3_decl;
+
+        // Param 4: B (Byte)
+        AST* p4_decl = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p4_decl, TYPE_BYTE);
+        Token* p4n = newToken(TOKEN_IDENTIFIER, "_blue"); AST* v4 = newASTNode(AST_VARIABLE, p4n); freeToken(p4n);
+        setTypeAST(v4, TYPE_BYTE); addChild(p4_decl, v4);
+        dummy->children[3] = p4_decl;
+
+        dummy->child_count = 4;
+
+        // Return type: Integer (TextureID)
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "_textureID_result");
+        AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER);
+        setRight(dummy, retNode);      // For functions, ->right points to the return type AST node
+        dummy->var_type = TYPE_INTEGER; // Set the function's own var_type to its return type
     }
     // ... add other specific procedures if parameter list checking via dummy AST is desired ...
     else {
@@ -2116,7 +2306,6 @@ Value executeBuiltinLow(AST *node) {
 
     const char* typeName = argNode->token->value; // Get the type name string
 
-    // --- ADDED: Handle Built-in Types Directly ---
     if (strcasecmp(typeName, "integer") == 0 || strcasecmp(typeName, "longint") == 0 || strcasecmp(typeName, "cardinal") == 0) {
         // Assuming 32-bit signed integer minimum for simplicity, adjust if needed
         return makeInt(-2147483648); // Or MIN_INT if defined, or 0 for Cardinal? TP used 0 for cardinal Low. Let's use 0 for Cardinal.
@@ -2131,7 +2320,6 @@ Value executeBuiltinLow(AST *node) {
     } else if (strcasecmp(typeName, "word") == 0) {
         return makeInt(0); // Low(Word) is 0
     }
-    // --- END ADDED ---
 
     // --- If not a built-in, assume user-defined type and lookup ---
     AST* typeDef = lookupType(typeName);
@@ -2195,7 +2383,6 @@ Value executeBuiltinHigh(AST *node) {
 
     const char* typeName = argNode->token->value;
 
-    // --- ADDED: Handle Built-in Types Directly ---
     if (strcasecmp(typeName, "integer") == 0 || strcasecmp(typeName, "longint") == 0) {
         // Assuming 32-bit signed integer maximum for simplicity, adjust if needed
         return makeInt(2147483647); // Or MAX_INT if defined
@@ -2211,7 +2398,6 @@ Value executeBuiltinHigh(AST *node) {
     } else if (strcasecmp(typeName, "word") == 0) {
         return makeInt(65535); // High(Word) is 65535
     }
-    // --- END ADDED ---
 
     // --- If not a built-in, assume user-defined type and lookup ---
     AST* typeDef = lookupType(typeName);
@@ -2628,4 +2814,53 @@ Value executeBuiltinDispose(AST *node) {
      nullifyPointerAliasesByAddrValue(localSymbols, disposedAddrValue);
     
     return makeVoid();
+}
+
+// Pscal: FUNCTION RealToStr(Value: Real): String;
+Value executeBuiltinRealToStr(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: RealToStr expects 1 argument (Value: Real).\n");
+        // Consider EXIT_FAILURE_HANDLER() or return an error string
+        return makeString("Error:RealToStrArgCount");
+    }
+
+    Value arg = eval(node->children[0]); // Evaluate the Real argument
+
+    if (arg.type != TYPE_REAL) {
+        // Optionally, allow integer to be promoted to real for RealToStr
+        if (arg.type == TYPE_INTEGER || arg.type == TYPE_BYTE || arg.type == TYPE_WORD) {
+            // Promote to real for string conversion
+            arg.r_val = (double)arg.i_val;
+            arg.type = TYPE_REAL; // Treat as real for formatting
+        } else {
+            fprintf(stderr, "Runtime error: RealToStr expects a Real or Integer compatible argument. Got %s.\n",
+                    varTypeToString(arg.type));
+            freeValue(&arg);
+            return makeString("Error:RealToStrArgType");
+        }
+    }
+
+    // Determine buffer size for snprintf
+    // Standard %f can produce many digits. %g is often more compact.
+    // A generous buffer size: sign, up to ~308 digits for mantissa, decimal point, exponent (e.g., e+308), null.
+    // Or use a fixed precision for now for simplicity.
+    char buffer[128]; // Should be sufficient for typical doubles with reasonable precision.
+
+    // Use snprintf to convert double to string.
+    // %g uses the shorter of %e or %f.
+    // You can specify precision, e.g., "%.6g" for up to 6 significant digits.
+    // For simplicity, let's use a default precision that snprintf's %f or %g chooses.
+    // Standard Pascal often has a default width/precision for reals.
+    int chars_written = snprintf(buffer, sizeof(buffer), "%f", arg.r_val); // Or "%g"
+
+    if (chars_written < 0 || chars_written >= sizeof(buffer)) {
+        fprintf(stderr, "Runtime error: Failed to convert real to string in RealToStr (snprintf error or buffer too small).\n");
+        freeValue(&arg); // Free the evaluated argument
+        return makeString("Error:RealToStrConversion");
+    }
+
+    Value result = makeString(buffer); // makeString copies the buffer
+    freeValue(&arg);                   // Free the evaluated argument
+
+    return result;
 }

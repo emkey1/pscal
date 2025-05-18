@@ -36,6 +36,7 @@ Value executeBuiltinOrd(AST *node);
 Value executeBuiltinChr(AST *node);
 Value executeBuiltinIntToStr(AST *node);
 Value executeBuiltinReal(AST *node);
+Value executeBuiltinRealToStr(AST *node); 
 
 // System
 Value executeBuiltinHalt(AST *node);
