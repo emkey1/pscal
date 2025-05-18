@@ -310,19 +310,21 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     DEBUG_PRINT("[DEBUG SYMBOL] Created Symbol '%s' at %p (Value @ %p, base_type_node @ %p).\n",
                 new_symbol->name, (void*)new_symbol, (void*)new_symbol->value, (void*)(new_symbol->value ? new_symbol->value->base_type_node : NULL));
 
-
-    // <<< MODIFIED: Insert into the global hash table >>>
     // The globalSymbols hash table must be created before calling this function.
     if (!globalSymbols) {
          fprintf(stderr, "Internal error: globalSymbols hash table is NULL during insertGlobalSymbol.\n");
          // Clean up allocated symbol and value before exiting
-         if (new_symbol->value) freeValue(new_symbol->value); free(new_symbol->value);
-         if (new_symbol->name) free(new_symbol->name);
-         free(new_symbol);
+         if (new_symbol->value) {
+             freeValue(new_symbol->value); // Free the contents of the Value struct
+             free(new_symbol->value);      // Then free the Value struct itself
+         }
+         if (new_symbol->name) {
+             free(new_symbol->name);
+         }
+         free(new_symbol); // Free the Symbol struct
          EXIT_FAILURE_HANDLER();
     }
     hashTableInsert(globalSymbols, new_symbol);
-    // <<< END MODIFIED >>>
 
     // The symbol is now owned by the hash table structure.
 }

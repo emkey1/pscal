@@ -933,7 +933,13 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
              char err_msg[128];
              snprintf(err_msg, sizeof(err_msg), "Expected ')' to close parameter list for procedure '%s', got %s", node->token->value, parser->current_token ? tokenTypeToString(parser->current_token->type) : "EOF");
              errorParser(parser, err_msg);
-             if(params) freeAST(params); freeAST(node); return NULL; // Cleanup & exit path
+             // If errorParser() could return (e.g., if EXIT_FAILURE_HANDLER is suppressed),
+             // the following cleanup would be executed.
+             if(params) { // Conditionally free params
+                 freeAST(params);
+             }
+             freeAST(node); // Always free node in this error path
+             return NULL;  // Always return NULL in this error path
         }
     } else {
         #ifdef DEBUG

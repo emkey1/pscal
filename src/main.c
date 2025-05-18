@@ -40,6 +40,14 @@ char **gParamValues = NULL;
 List *inserted_global_names = NULL; // Keep this if used by other DEBUG utilities
 #endif
 
+#ifndef PROGRAM_VERSION
+#define PROGRAM_VERSION "undefined.version_DEV" // Fallback version
+#endif
+
+const char *PSCAL_USAGE =
+    "Usage: pscal <source_file.p> [program_parameters...]\n"
+    "   or: pscal -v (to display version)\n"
+    "   or: pscal (with no arguments to display version and usage)";
 
 // Function to initialize core systems like symbol tables and SDL.
 // This function should be called early in main, before parsing or execution.
@@ -229,6 +237,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("dispose",   AST_PROCEDURE_DECL, NULL); // Memory: Frees memory for pointer.
     registerBuiltinFunction("round",     AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("real",      AST_FUNCTION_DECL, NULL);  // Convert value to type real
+    registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
 
     // SDL Graphics built-ins
     registerBuiltinFunction("initgraph", AST_PROCEDURE_DECL, NULL);
@@ -266,6 +275,8 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("updatetexture", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("rendercopy", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("rendercopyrect", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("setAlphaBlend", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("createTargetTexture", AST_FUNCTION_DECL, NULL);
 
     // SDL Sound subsystem
     registerBuiltinFunction("initsoundsystem",   AST_PROCEDURE_DECL, NULL);
@@ -273,8 +284,10 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("playsound",         AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("freesound",         AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("quitsoundsystem",   AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("issoundplaying",    AST_FUNCTION_DECL, NULL); 
-
+    registerBuiltinFunction("issoundplaying",    AST_FUNCTION_DECL, NULL);
+    
+    // SDL Misc
+    registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
 
     // Note: Write, Writeln, Read, Readln might be handled directly in interpreter.c
     // based on AST node type, rather than dispatched via the builtin table.
@@ -431,6 +444,17 @@ int runProgram(const char *source, const char *programName) {
 #ifdef DEBUG
 /* Debug mode main */
 int main(int argc, char *argv[]) {
+    if (argc == 1) {
+        // <<< USE THE PROGRAM_VERSION MACRO >>>
+        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+        printf("%s\n", PSCAL_USAGE);
+        return EXIT_SUCCESS;
+    }
+    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
+        // <<< USE THE PROGRAM_VERSION MACRO >>>
+        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+        return EXIT_SUCCESS;
+    }
     initSymbolSystem(); // Initializes texture system too in DEBUG
 
     char *source = NULL;
@@ -515,6 +539,17 @@ int main(int argc, char *argv[]) {
 /* Normal main: Handles command-line arguments, reads source file,
    calls runProgram, and performs final cleanup. */
 int main(int argc, char *argv[]) {
+    if (argc == 1) {
+        // <<< USE THE PROGRAM_VERSION MACRO >>>
+        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+        printf("%s\n", PSCAL_USAGE);
+        return EXIT_SUCCESS;
+    }
+    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
+        // <<< USE THE PROGRAM_VERSION MACRO >>>
+        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+        return EXIT_SUCCESS;
+    }
     // Initialize core systems like symbol tables and SDL.
     // This must be called before parsing or execution.
     initSymbolSystem(); // Assumes initSymbolSystem is defined above.

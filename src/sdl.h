@@ -13,6 +13,7 @@
 // These headers define the types used in the global variable declarations below
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_image.h> // For IMG_LoadTexture, needs to be included where SDL.h is
 // --- END INCLUDE ---
 
 // Include types.h which should NOT include SDL headers (confirmed by your content)
@@ -25,19 +26,6 @@
 extern "C" {
 #endif
 
-// --- REMOVE REDUNDANT FORWARD DECLARATIONS ---
-// The full definitions are provided by the includes above.
-// Remove these lines:
-/*
-struct SDL_Window;
-struct SDL_Renderer;
-struct SDL_Color; // Used directly in globals.h/globals.c, but forward decl for pointers
-struct _TTF_Font; // Forward declaration for TTF_Font*
-struct SDL_Texture; // Forward declaration for SDL_Texture*
-*/
-// --- END REMOVE ---
-
-
 // --- SDL Graphics Globals (Declarations) ---
 // These global variables are defined in symbol.c
 // Use the standard type names (SDL_Window*, SDL_Renderer*, etc.)
@@ -46,6 +34,7 @@ extern SDL_Window* gSdlWindow;
 extern SDL_Renderer* gSdlRenderer;
 extern SDL_Color gSdlCurrentColor; // Use the standard type name
 extern bool gSdlInitialized;       // Tracks if core SDL_Init(VIDEO) was called
+extern bool gSdlImageInitialized; // To track IMG_Init
 extern int gSdlWidth;
 extern int gSdlHeight;
 extern TTF_Font* gSdlFont; // Use TTF_Font* (standard type name)
@@ -84,17 +73,21 @@ Value executeBuiltinGetMaxY(AST *node);
 Value executeBuiltinSetColor(AST *node); // For indexed color (if you keep it)
 Value executeBuiltinSetRGBColor(AST *node);
 Value executeBuiltinPutPixel(AST *node);
+Value executeBuiltinGetPixelColor(AST *node);
 Value executeBuiltinDrawLine(AST *node);
 Value executeBuiltinDrawRect(AST *node); // Outline
 Value executeBuiltinFillRect(AST *node); // Filled
 Value executeBuiltinDrawCircle(AST *node); // Outline
 Value executeBuiltinFillCircle(AST *node); // Filled
-Value executeBuiltinRenderCopyEx(AST *node); // <<< ADD THIS LINE
+Value executeBuiltinRenderCopyEx(AST *node); 
+Value executeBuiltinDrawPolygon(AST *node); // For outline
+Value executeBuiltinSetAlphaBlend(AST *node); 
 
 // SDL_ttf Text System
 Value executeBuiltinInitTextSystem(AST *node);
 Value executeBuiltinOutTextXY(AST *node);
 Value executeBuiltinQuitTextSystem(AST *node);
+Value executeBuiltinGetTextSize(AST *node);
 
 // Mouse Input
 Value executeBuiltinGetMouseState(AST *node);
@@ -105,10 +98,16 @@ Value executeBuiltinDestroyTexture(AST *node);
 Value executeBuiltinUpdateTexture(AST *node);
 Value executeBuiltinRenderCopy(AST *node);
 Value executeBuiltinRenderCopyRect(AST *node);
+Value executeBuiltinSetRenderTarget(AST *node);
+Value executeBuiltinCreateTargetTexture(AST *node);
 
 // Misc Built-ins
 Value executeBuiltinQuitRequested(AST *node);
 void SdlCleanupAtExit(void);
+Value executeBuiltinGetTicks(AST *node); 
+
+// Image Built-ins
+Value executeBuiltinLoadImageToTexture(AST *node);
 
 
 #ifdef __cplusplus
