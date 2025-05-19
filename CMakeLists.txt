@@ -31,8 +31,8 @@ include_directories(
     src/frontend
     src/symbol
     src/backend_ast
-    # src/compiler
-    # src/vm
+    src/compiler
+    src/vm
 )
 
 # ---- Dependencies ----
@@ -82,7 +82,7 @@ set(PSCAL_SOURCES
     # --- Add new files for bytecode compiler and VM here ---
     src/compiler/bytecode.c src/compiler/compiler.c   
 
-    # src/vm/vm.c             # Add when you create it
+    src/vm/vm.c             # Add when you create it
 )
 
 # ---- Executable Targets Function ----

@@ -28,6 +28,12 @@
 #include <SDL2/SDL_ttf.h>
 // Note: No need for a separate "#include "sdl.h"" if globals.h or its includes handle it
 
+// Bytecode Compiler and VM
+#include "compiler/bytecode.h"
+#include "compiler/compiler.h"
+#include "vm/vm.h"
+#include "frontend/ast.h"
+
 
 /* Global variables */
 // These are declared as extern in globals.h and defined here.
@@ -181,19 +187,27 @@ void executeWithASTDump(AST *program_ast, const char *program_name) {
  * @param programName The name of the program (used for messages/dump).
  * @return EXIT_SUCCESS if parsing and execution complete without fatal errors handled by EXIT_FAILURE_HANDLER, EXIT_FAILURE if parsing fails.
  */
+
+#ifdef DEBUG
+// List *inserted_global_names = NULL; // Already declared in globals.h as extern, defined in globals.c or initSymbolSystem
+#endif
+
+#ifndef PROGRAM_VERSION
+#define PROGRAM_VERSION "undefined.version_DEV"
+#endif
+
+// const char *PSCAL_USAGE = ...; // This is fine, or move to globals.c if not already
+
+// initSymbolSystem, executeWithASTDump can remain as you have them in your full main.c file
+
+// Updated runProgram function
 int runProgram(const char *source, const char *programName, int dump_ast_json_flag) {
-    // Ensure the globalSymbols hash table exists before proceeding.
-    // It should have been created by initSymbolSystem() called in main.
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
-        EXIT_FAILURE_HANDLER(); // This indicates a critical internal setup problem.
+        EXIT_FAILURE_HANDLER();
     }
 
-
     /* Register built-in functions and procedures. */
-    // This populates the procedure_table with dummy AST nodes representing builtins.
-    // The registerBuiltinFunction should correctly configure these dummy nodes
-    // based on the builtin's parameters and return type.
     registerBuiltinFunction("cos",       AST_FUNCTION_DECL, NULL); // Assumes AST_FUNCTION_DECL and AST_PROCEDURE_DECL are defined in ast.h
     registerBuiltinFunction("sin",       AST_FUNCTION_DECL, NULL); // Assumes registerBuiltinFunction is defined in builtin.h/builtin.c
     registerBuiltinFunction("tan",       AST_FUNCTION_DECL, NULL);
@@ -294,199 +308,186 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     
     // SDL Misc
     registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
-
-    // Note: Write, Writeln, Read, Readln might be handled directly in interpreter.c
-    // based on AST node type, rather than dispatched via the builtin table.
-    // If they were registered here, they would need AST_PROCEDURE_DECL and correct parameter setup.
     
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
-    fflush(stderr); // Ensure it prints immediately
+    fflush(stderr);
 #endif
 
-    /* Initialize lexer and parser. */
-    Lexer lexer; // Assumes Lexer struct and initLexer are defined in lexer.h/lexer.c
+    Lexer lexer;
     initLexer(&lexer, source);
 
 #ifdef DEBUG
-    // Print debug message indicating the start of the parsing phase.
-    printf("\n--- Build AST Before Execution START---\n");
+    fprintf(stderr, "\n--- Build AST Before Execution START (stderr print)---\n");
 #endif
 
-    Parser parser; // Assumes Parser struct is defined in parser.h
+    Parser parser;
     parser.lexer = &lexer;
-    parser.current_token = getNextToken(&lexer); // Assumes getNextToken is defined in lexer.h/lexer.c
+    parser.current_token = getNextToken(&lexer);
 
-    // Build the Program AST. This function parses the source code and creates the AST structure.
-    // It also handles Unit parsing and linking, which will use insertGlobalSymbol and addProcedure.
-    AST *GlobalAST = buildProgramAST(&parser); // Assumes buildProgramAST is defined in parser.h/parser.c
+    AST *GlobalAST = buildProgramAST(&parser);
 
-    // Free the final token owned by the parser after parsing is complete.
-    // The parser's current_token holds the token that caused parsing to stop (usually EOF).
     if (parser.current_token) {
-        freeToken(parser.current_token); // Assumes freeToken is defined in utils.h/utils.c
-        parser.current_token = NULL; // Prevent dangling pointer.
+        freeToken(parser.current_token);
+        parser.current_token = NULL;
     }
 
+    bool compilation_ok_for_vm = false; // Flag for VM path success
 
-    // Check if parsing was successful before proceeding to annotation and execution.
-    // buildProgramAST should return a valid AST_PROGRAM node or NULL/error indicator on failure.
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
-        // Annotate the AST with type information after parsing.
-        // This pass resolves types and performs static type checking.
-        // It needs access to global symbols (including builtins) and registered types.
-        annotateTypes(GlobalAST, NULL, GlobalAST); // Assumes annotateTypes is defined in ast.h/ast.c
-        
-        if (!dump_ast_json_flag) { // Only compile if not just dumping AST
-            BytecodeChunk chunk;
-            initBytecodeChunk(&chunk);
-            fprintf(stderr, "--- Compiling AST to Bytecode ---\n");
-            if (compileASTToBytecode(GlobalAST, &chunk)) {
-                fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
-                
-                // <<< ADD THIS CALL TO THE DISASSEMBLER >>>
-                #ifdef DEBUG // Only disassemble in debug builds, or if a flag is set
-                if (dumpExec) { // Or some other flag to control verbosity
-                    disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk");
-                }
-                #endif
-                // <<< END OF ADDED CALL >>>
-
-                // TODO: Eventually, pass 'chunk' to the VM for execution.
-                // vmExecuteChunk(&chunk);
-            } else {
-                fprintf(stderr, "Compilation failed.\n");
-            }
-            freeBytecodeChunk(&chunk);
-        }
+        annotateTypes(GlobalAST, NULL, GlobalAST);
 
 #ifdef DEBUG
-        // In DEBUG mode, verify the parent/child links in the AST for structural correctness.
+        // This block handles AST verification and the old text-based AST dump
         fprintf(stderr, "--- Verifying AST Links ---\n");
-        if (verifyASTLinks(GlobalAST, NULL)) { // Assumes verifyASTLinks is defined in ast.h/ast.c
+        if (verifyASTLinks(GlobalAST, NULL)) {
             fprintf(stderr, "--- AST Link Verification Passed ---\n");
         } else {
             fprintf(stderr, "--- AST Link Verification FAILED ---\n");
-            // Decide if link failure should be fatal. It often indicates a parser bug.
-            // EXIT_FAILURE_HANDLER(); // Consider if this should be fatal.
         }
-        // Dump the final annotated AST for debugging the structure and types.
-        DEBUG_DUMP_AST(GlobalAST, 0); // Assumes DEBUG_DUMP_AST is defined in utils.h (macro)
-        printf("\n--- Build AST Before Execution END---\n");
-        printf("\n--- Executing Program AST ---\n");
+        // The DEBUG_DUMP_AST macro calls debugAST (your original text dumper)
+        // This might be verbose if you're also JSON dumping or disassembling.
+        // You can choose to keep it or comment it out.
+        // DEBUG_DUMP_AST(GlobalAST, 0);
+        fprintf(stderr, "\n--- Build AST Before Execution END (stderr print)---\n");
 #endif
 
         if (dump_ast_json_flag) {
-            printf("--- Dumping AST to JSON ---\n"); // Message to stderr if stdout is for JSON
-            dumpASTJSON(GlobalAST, stdout); // Dump to stdout
-            printf("\n--- AST JSON Dump Complete ---\n"); // Message to stderr
-            // Clean up and exit, do not execute
+            fprintf(stderr, "--- Dumping AST to JSON (stdout) ---\n");
+            dumpASTJSON(GlobalAST, stdout); // Assumes DumpASTJSON is prototyped in utils.h
+            fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
+            
+            // Perform necessary cleanup and exit early as AST is dumped
             freeProcedureTable();
             freeTypeTableASTNodes();
             freeTypeTable();
             if (GlobalAST) freeAST(GlobalAST);
-            SdlCleanupAtExit();
+            SdlCleanupAtExit(); // Assuming SdlCleanupAtExit is defined elsewhere (e.g. sdl.c / utils.c)
             if (globalSymbols) freeHashTable(globalSymbols);
 #ifdef DEBUG
             if (inserted_global_names) freeList(inserted_global_names);
 #endif
-            return EXIT_SUCCESS; // Successfully dumped
+            return EXIT_SUCCESS; // Successfully dumped, so we exit.
         }
         
-        // Seed the random number generator if the Pscal program doesn't call Randomize.
-        // It's better practice to require the user program to call Randomize for control.
-        // If you want a default seed, do it here or in initSymbolSystem.
-        // srand((unsigned int)time(NULL)); // Assumes time is included from <time.h>
-
+        // --- If not just dumping JSON, proceed to compile and/or execute ---
 
 #ifdef DEBUG
-        // Dump the final state of the symbol tables after parsing/annotation/builtin registration.
-        printf(" ===== FINAL AST DUMP START =====\n");
-        // Use dumpAST (to stdout/stderr) or debugASTFile (to a file) for the AST structure.
-        // debugASTFile(GlobalAST, programName); // If you want to dump AST to file.
-        dumpAST(GlobalAST, 0); // If you want to dump AST to stderr/console. Assumes dumpAST is defined in ast.h/ast.c
-        printf(" ===== FINAL AST DUMP END =====\n");
-
-        // Dump symbol tables after parsing/annotation/registration.
-        dumpSymbolTable(); // Assumes dumpSymbolTable is defined in utils.h/symbol.c
+        // This is your original block for the text-based AST dump and symbol table dump
+        // before execution. You might want to keep this if you're comparing
+        // the AST walker with the new VM path.
+        fprintf(stderr, " ===== FINAL AST DUMP START (Textual to stderr) =====\n");
+        dumpAST(GlobalAST, 0); // Your original text dump to stderr/stdout
+        fprintf(stderr, " ===== FINAL AST DUMP END (Textual to stderr) =====\n");
+        dumpSymbolTable(); // Your original symbol table dump
 #endif
 
-        // Execute the parsed program AST.
-        // The initial call starts execution from the root of the AST (the PROGRAM node).
-        // The initial scope is the global scope (is_global_scope = true).
-        executeWithScope(GlobalAST, true); // Assumes executeWithScope is defined in interpreter.h/interpreter.c
+        // --- COMPILE TO BYTECODE ---
+        BytecodeChunk chunk;
+        initBytecodeChunk(&chunk);
+        fprintf(stderr, "--- Compiling AST to Bytecode ---\n");
+        compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
 
-    } else {
-        // If parsing failed (buildProgramAST returned NULL or an invalid AST).
-        fprintf(stderr, "Failed to build Program AST. Execution aborted.\n");
-        // The parser's errorParser should ideally handle printing specific parser errors.
-        // This message is a fallback if buildProgramAST returns NULL or an invalid AST type.
-        // No AST to free if it returned NULL. Other tables might need freeing if partially populated.
-        // The cleanup section below will handle freeing global resources like symbol tables.
+        if (compilation_ok_for_vm) {
+            fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+            #ifdef DEBUG
+            if (dumpExec) { // Your global flag to control verbose debug output
+                disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk");
+            }
+            #endif
+
+            // --- EXECUTE WITH VM ---
+            fprintf(stderr, "\n--- Executing Program with VM ---\n");
+            VM vm;
+            initVM(&vm);
+            InterpretResult result_vm = interpretBytecode(&vm, &chunk);
+            freeVM(&vm);
+
+            if (result_vm == INTERPRET_OK) {
+                fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
+            } else if (result_vm == INTERPRET_RUNTIME_ERROR) {
+                fprintf(stderr, "--- VM Execution Failed (Runtime Error) ---\n");
+                compilation_ok_for_vm = false; // Mark as failure for overall program status
+            } else if (result_vm == INTERPRET_COMPILE_ERROR) { // Should be caught by compileASTToBytecode
+                 fprintf(stderr, "--- VM Execution Aborted (Compile Error - though should be caught earlier) ---\n");
+                 compilation_ok_for_vm = false;
+            }
+            // --- END EXECUTE WITH VM ---
+
+        } else {
+            fprintf(stderr, "Compilation to bytecode failed.\n");
+            // compilation_ok_for_vm is already false
+        }
+        freeBytecodeChunk(&chunk); // Always free the chunk resources
+        
+        // --- OLD AST Walker Execution (Commented out - enable for comparison if needed) ---
+        /*
+        #ifdef DEBUG
+        if (!compilation_ok_for_vm) { // Optionally run AST walker if bytecode path had issues
+            fprintf(stderr, "\n--- Bytecode path failed. Attempting AST Walker Execution (for comparison/fallback) ---\n");
+            executeWithScope(GlobalAST, true);
+        }
+        #else
+        // In non-debug, if you want the AST walker as a fallback if compilation fails:
+        // if (!compilation_ok_for_vm) {
+        //     fprintf(stderr, "\n--- Bytecode compilation failed. Falling back to AST execution ---\n");
+        //     executeWithScope(GlobalAST, true);
+        // }
+        #endif
+        */
+        // --- End AST Walker ---
+
+    } else if (!dump_ast_json_flag) {
+        fprintf(stderr, "Failed to build Program AST for execution.\n");
+        // GlobalAST would be NULL or not AST_PROGRAM type
     }
 
-    // --- Cleanup: Free dynamically allocated interpreter resources. ---
-    // Ensure memory allocated for AST nodes, symbol tables, type table,
-    // procedure table, SDL/Audio resources, etc., is released to prevent memory leaks.
-    // The order of cleanup needs careful consideration based on resource ownership.
-
-    // The main GlobalAST structure owns most AST nodes, but some are owned by
-    // the type_table (type definitions) and procedure_table (copied proc declarations).
-    // Symbol table entries own their Value structs. Value structs own their contents (strings, records, arrays...).
-    // HashTables own their Symbol struct nodes.
-
-    // Suggested Cleanup Order (ensure your free functions handle NULL pointers safely):
-
-    // 1. Free Procedure Table: Frees the Procedure structs and the copied/dummy AST nodes they own.
-    freeProcedureTable(); // Assumes this function exists and frees Procedure structs and their owned ASTs.
-
-    // 2. Free AST nodes owned by the Type Table: These are the actual type definition ASTs (RECORD_TYPE, ENUM_TYPE, etc.).
-    freeTypeTableASTNodes(); // Assumes this function exists and frees ASTs pointed to by TypeEntry->typeAST.
-
-    // 3. Free the Type Table structure itself: Frees the list of TypeEntry structs and their names.
-    freeTypeTable(); // Assumes this function exists and frees TypeEntry structs and their names.
-
-    // 4. Free the main Program AST: Recursively frees the rest of the AST nodes.
-    //    The freeAST function should be designed to SKIP nodes that are owned by
-    //    the type_table or procedure_table to avoid double freeing.
-    if (GlobalAST) { // Check if parsing was successful and GlobalAST is not NULL
-        freeAST(GlobalAST); // Assumes freeAST exists and handles recursive freeing and ownership checks.
-        GlobalAST = NULL; // Set to NULL after freeing to prevent dangling pointer.
-    } else {
-        // If parsing failed (GlobalAST is NULL), no main AST structure to free.
+    // --- Cleanup (Standard execution path) ---
+    freeProcedureTable();
+    freeTypeTableASTNodes();
+    freeTypeTable();
+    if (GlobalAST) {
+        freeAST(GlobalAST);
+        GlobalAST = NULL;
     }
-
-    // 5. Free SDL/Audio resources: Clean up SDL, SDL_mixer, SDL_ttf systems and associated global state (windows, renderers, fonts, loaded sounds, textures).
-    SdlCleanupAtExit(); // Assumes this exists and cleans up SDL/SDL_mixer/SDL_ttf systems and global state.
-
-    // 6. Free global symbol table: Frees the HashTable structure and all Symbol structs within its buckets,
-    //    including the Value structs owned by Symbols (and their contents).
-    //    The local symbol table (localSymbols) should be NULL at this point
-    //    if popLocalEnv was correctly called for the outermost scope.
-    if (globalSymbols) { // Check if the global table was successfully created
-        freeHashTable(globalSymbols); // This frees Symbols and their Values within the global table
-        globalSymbols = NULL; // Set to NULL after freeing.
+    SdlCleanupAtExit();
+    if (globalSymbols) {
+        freeHashTable(globalSymbols);
+        globalSymbols = NULL;
     }
-
-    // Local symbol table (localSymbols) should be NULL if the scope exit handling is correct.
-    // If there's a possibility localSymbols is not NULL here, a final freeHashTable(localSymbols)
-    // might be needed, but the scope-based popLocalEnv is the intended mechanism.
-
-
 #ifdef DEBUG
-    // Free debug-only resources that might have been allocated.
-    if (inserted_global_names) { // Check if the debug list was created
-        freeList(inserted_global_names); // Assumes freeList frees nodes and string values.
+    if (inserted_global_names) {
+        freeList(inserted_global_names);
         inserted_global_names = NULL;
     }
 #endif
 
-
-    // Return the result status from runProgram (typically EXIT_SUCCESS or EXIT_FAILURE).
-    // If EXIT_FAILURE_HANDLER() was called, the program would have already exited.
-    return GlobalAST ? EXIT_SUCCESS : EXIT_FAILURE; // Return failure status if parsing failed.
+    // Determine overall success for return code
+    // If we were only dumping JSON and got here, it means GlobalAST was fine.
+    // Otherwise, success depends on the bytecode path.
+    bool overall_success_status;
+    if (dump_ast_json_flag) {
+        overall_success_status = (GlobalAST && GlobalAST->type == AST_PROGRAM);
+    } else {
+        overall_success_status = (GlobalAST && GlobalAST->type == AST_PROGRAM && compilation_ok_for_vm);
+        // If you had a VM execution status that could indicate failure, factor it in here.
+        // For now, compilation_ok_for_vm after a successful AST build is the main criteria.
+    }
+    return overall_success_status ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+// Ensure the rest of your main.c (the actual main() function, initSymbolSystem, etc.)
+// is included below this, or that this runProgram replaces your existing one.
+// For brevity, I'm only showing the modified runProgram and necessary includes.
+// You would merge this into your existing src/main.c file.
+
+// Example of where main() would be (keep your existing main functions)
+#ifdef DEBUG
+/* Debug mode main */
+// int main(int argc, char *argv[]) { ... your debug main ... }
+#else /* Non-DEBUG build - main function */
+// int main(int argc, char *argv[]) { ... your release main ... }
+#endif
 #ifdef DEBUG
 /* Debug mode main */
 int main(int argc, char *argv[]) {

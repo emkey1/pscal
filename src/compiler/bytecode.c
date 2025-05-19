@@ -102,7 +102,7 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
 // --- Bytecode Disassembler ---
 
 // Helper to print a single instruction and its operands
-static int disassembleInstruction(BytecodeChunk* chunk, int offset) {
+int disassembleInstruction(BytecodeChunk* chunk, int offset) {
     printf("%04d ", offset); // Print the offset (address) of the instruction
     if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
         printf("   | "); // Same line as previous instruction
