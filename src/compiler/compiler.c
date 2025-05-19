@@ -1,314 +1,301 @@
-//
-//  compiler.c
-//  Pscal
-//
-//  Created by Michael Miller on 5/18/25.
-//
-
+// src/compiler/compiler.c
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> // For atoi, atof (careful with error checking)
+#include <string.h> // For strcmp, strdup, atoll
 
 #include "compiler.h"
 #include "bytecode.h"
-#include "core/types.h"   // For Value, VarType, astTypeToString etc.
-#include "frontend/ast.h"   // For AST, ASTNodeType
-#include "symbol/symbol.h"  // For global symbol table interaction (e.g., to get variable indices)
-                           // We'll need a way to map global var names to indices for OP_GET/SET_GLOBAL
+#include "core/utils.h"
+#include "core/types.h"
+#include "frontend/ast.h"
+#include "symbol/symbol.h" // For access to the main global symbol table, if needed,
+                           // though for bytecode compilation, we often build our own tables/mappings.
+
+#define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
 
 // --- Forward Declarations for Recursive Compilation ---
-static void compileNode(AST* node, BytecodeChunk* chunk);
-static void compileExpression(AST* node, BytecodeChunk* chunk);
-static void compileStatement(AST* node, BytecodeChunk* chunk);
-// ... other helpers as needed ...
+static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
+static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx);
+static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx);
 
-// --- Global/Module State for Compiler (if any) ---
-// For now, we'll pass the BytecodeChunk around.
-// We might need access to the global symbol table to resolve variable names to indices.
-// For simplicity, let's assume global variables will be assigned indices 0, 1, 2...
-// A more robust system would involve a mapping from name to index during compilation.
+// --- Global/Module State for Compiler ---
+// For mapping global variable names to an index during this compilation pass.
+// This is a simplified approach for global variables.
+// A more robust compiler might use a symbol table specific to compilation.
+typedef struct {
+    char* name;
+    // Other info if needed, like type, scope depth, etc.
+} CompilerGlobalVarInfo;
 
-// A simple way to manage global variable indices for this initial version
-// This is a placeholder. A proper compiler would build this map from VAR declarations.
-#define MAX_GLOBALS 100
-const char* globalVariableNames[MAX_GLOBALS];
-int globalVariableCount = 0;
+CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS]; // MAX_GLOBALS from an appropriate header or defined here
+int compilerGlobalCount = 0;
 
-int resolveOrAddGlobal(const char* name) {
-    for (int i = 0; i < globalVariableCount; i++) {
-        if (strcmp(globalVariableNames[i], name) == 0) {
-            return i; // Found existing global
-        }
+// Helper to get the source line number from an AST node's token
+// Provides a fallback if token is NULL.
+static int get_line(AST* node) {
+    if (node && node->token && node->token->line > 0) {
+        return node->token->line;
     }
-    if (globalVariableCount < MAX_GLOBALS) {
-        // For this simple version, strdup is okay. A real compiler might intern strings.
-        globalVariableNames[globalVariableCount] = strdup(name);
-        if (!globalVariableNames[globalVariableCount]) {
-            fprintf(stderr, "Compiler error: Failed to strdup global variable name.\n");
-            exit(1); // Or handle error
-        }
-        return globalVariableCount++;
+    // Fallback or try to get from a child if node itself has no token (e.g. some implicit nodes)
+    if (node && node->left && node->left->token && node->left->token->line > 0) {
+        return node->left->token->line;
     }
-    fprintf(stderr, "Compiler error: Too many global variables.\n");
-    exit(1); // Or handle error
-    return -1; // Should not reach
+    return 0; // Default if no line info found
 }
 
+
+// Finds or adds a global variable name and returns its index.
+// For bytecode, this index is what OP_GET_GLOBAL/OP_SET_GLOBAL will use.
+static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, int line) {
+    for (int i = 0; i < compilerGlobalCount; i++) {
+        if (strcmp(compilerGlobals[i].name, name) == 0) {
+            return i;
+        }
+    }
+    if (compilerGlobalCount < MAX_GLOBALS) {
+        compilerGlobals[compilerGlobalCount].name = strdup(name);
+        if (!compilerGlobals[compilerGlobalCount].name) {
+            fprintf(stderr, "L%d: Compiler error: Memory allocation failed for global variable name '%s'.\n", line, name);
+            exit(1);
+        }
+        // The OP_DEFINE_GLOBAL opcode will use the *name string* from the constant pool.
+        // The VM, upon seeing OP_DEFINE_GLOBAL, will internally map this name to its own storage slot.
+        // For OP_GET/SET_GLOBAL, we also need the name.
+        // So, ensure the name is in the constant pool.
+        addConstantToChunk(chunk, makeString(name)); // Store name in constant pool for OP_DEFINE_GLOBAL
+        return compilerGlobalCount++;
+    }
+    fprintf(stderr, "L%d: Compiler error: Too many global variables.\n", line);
+    exit(1);
+    return -1;
+}
 
 // --- Main Compilation Function ---
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) {
+        fprintf(stderr, "Compiler error: Null rootNode or outputChunk passed to compileASTToBytecode.\n");
         return false;
     }
     
-    // Initialize the output chunk (caller should ideally do this, but good to be safe)
-    // initBytecodeChunk(outputChunk); // Assuming chunk is already inited by caller
+    initBytecodeChunk(outputChunk); // Ensure chunk is initialized
+    compilerGlobalCount = 0;      // Reset global variable tracking for this compilation
 
-    globalVariableCount = 0; // Reset for each compilation run (simple approach)
-
-    // Start compilation from the root node
-    // For a PROGRAM node, we'd typically compile its main block.
     if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK) {
         AST* mainBlock = rootNode->right;
-        compileNode(mainBlock, outputChunk);
-    } else {
-        // Handle other root types or error if not a program
-        fprintf(stderr, "Compiler error: Expected AST_PROGRAM node as root.\n");
+        compileNode(mainBlock, outputChunk, get_line(rootNode)); // Pass initial line from PROGRAM token
+    } else if (rootNode->type == AST_BLOCK) { // Allow compiling just a block (e.g. for procedures later)
+        compileNode(rootNode, outputChunk, get_line(rootNode));
+    }
+    else {
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK node as root for compilation.\n");
         return false;
     }
 
-    // End the main program's bytecode with a HALT or RETURN
-    writeBytecodeChunk(outputChunk, OP_HALT, rootNode->token ? rootNode->token->line : 0); // Approximate line
+    writeBytecodeChunk(outputChunk, OP_HALT, get_line(rootNode)); // End program
     return true;
 }
 
 // --- Recursive Compilation Dispatcher ---
-static void compileNode(AST* node, BytecodeChunk* chunk) {
+static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
 
-    // Store current source line for this node (approximate for now)
-    // A proper implementation would track line numbers more accurately through the AST
-    int line = node->token ? node->token->line : 0; // Placeholder for line number
+    // Update current line if node has more specific info
+    int line = node->token ? node->token->line : current_line_approx;
+    if (line <= 0 && node->left && node->left->token) line = node->left->token->line; // Try left child
+    if (line <= 0) line = current_line_approx; // Fallback
 
     switch (node->type) {
         case AST_BLOCK:
-            // Compile declarations first (to register globals)
+            // Compile declarations first
             if (node->child_count > 0 && node->children[0] && node->children[0]->type == AST_COMPOUND) {
                 AST* declarations = node->children[0];
                 for (int i = 0; i < declarations->child_count; i++) {
-                    compileNode(declarations->children[i], chunk);
+                    compileNode(declarations->children[i], chunk, line);
                 }
             }
             // Then compile the body (statements)
             if (node->child_count > 1 && node->children[1]) {
-                compileNode(node->children[1], chunk);
+                compileNode(node->children[1], chunk, line);
             }
             break;
 
         case AST_VAR_DECL:
-            // For each variable in the declaration (a, b, result: Integer)
-            // For globals, we "define" them by adding their name to our mapping
-            // The actual memory allocation will happen in the VM when it sees OP_DEFINE_GLOBAL
-            // or simply by having a fixed-size global array.
-            // For this simple example, we'll assume OP_DEFINE_GLOBAL takes a constant index
-            // which refers to the variable's name string.
-            if (node->children) { // `children` holds the AST_VARIABLE nodes for names
+            // For each variable in the declaration (e.g., a, b, result: Integer)
+            // Ensure its name is registered as a global for access.
+            // The actual OP_DEFINE_GLOBAL might be implicit if the VM pre-allocates globals
+            // based on a list provided by the compiler, or explicit.
+            // For our SimpleMath, they are global.
+            if (node->children) {
                 for (int i = 0; i < node->child_count; i++) {
                     AST* varNameNode = node->children[i];
                     if (varNameNode && varNameNode->token) {
-                        // For global variables, add name to constant pool and emit OP_DEFINE_GLOBAL
-                        int nameConstIndex = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, line);
-                        writeBytecodeChunk(chunk, (uint8_t)nameConstIndex, line); // Operand: index of name string
-                        // For our simple global model:
-                        resolveOrAddGlobal(varNameNode->token->value);
+                        // Add name to constant pool (for VM to identify it if needed, or for OP_DEFINE_GLOBAL)
+                        int nameIndex = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                        // Emit an opcode that tells the VM to "declare" or "allocate space" for this global.
+                        // The operand is the index of the variable's name string in the constant pool.
+                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, get_line(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, get_line(varNameNode));
+                        
+                        // Also, ensure our compiler's internal mapping is updated.
+                        resolveGlobalVariableIndex(chunk, varNameNode->token->value, get_line(varNameNode));
                     }
                 }
             }
             break;
 
-        case AST_COMPOUND: // A sequence of statements
+        case AST_COMPOUND:
             for (int i = 0; i < node->child_count; i++) {
-                compileStatement(node->children[i], chunk);
+                compileStatement(node->children[i], chunk, line);
             }
             break;
 
-        // We need compileStatement and compileExpression helpers
         case AST_ASSIGN:
-        case AST_WRITELN:
-            compileStatement(node, chunk);
+        case AST_WRITELN: // WriteLn is a statement
+            compileStatement(node, chunk, line);
             break;
         
+        // Expressions
         case AST_NUMBER:
-        case AST_STRING: // String literals will also go into constant pool
+        case AST_STRING:
         case AST_VARIABLE:
         case AST_BINARY_OP:
-            compileExpression(node, chunk); // Expressions leave their value on the stack
+        case AST_UNARY_OP: // Assuming unary ops are expressions
+            compileExpression(node, chunk, line);
             break;
             
-        // Add more cases as needed...
         default:
-            fprintf(stderr, "Compiler warning: Unhandled AST node type %s during compilation.\n", astTypeToString(node->type));
+            fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s during compilation.\n", line, astTypeToString(node->type));
             break;
     }
 }
 
-
-// --- Compile Statements ---
-static void compileStatement(AST* node, BytecodeChunk* chunk) {
+static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
-    int line = node->token ? node->token->line : (node->left ? (node->left->token ? node->left->token->line : 0) : 0);
+    int line = get_line(node);
+    if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
         case AST_ASSIGN:
             // Compile the expression on the right-hand side (leaves value on stack)
-            compileExpression(node->right, chunk);
-            // Get the name of the variable on the left-hand side
+            compileExpression(node->right, chunk, line);
+            
             if (node->left && node->left->type == AST_VARIABLE && node->left->token) {
                 const char* varName = node->left->token->value;
-                int globalIndex = resolveOrAddGlobal(varName); // Use our simple global mapping
-
+                // For SET_GLOBAL, the operand will be the index of the variable name string in the constant pool.
+                // The VM will use this to find the actual global variable slot.
+                int nameIndex = addConstantToChunk(chunk, makeString(varName));
                 writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)globalIndex, line); // Operand: index of global var
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             } else {
-                fprintf(stderr, "Compiler error: LHS of assignment is not a simple global variable.\n");
-                // Handle error: In a real compiler, this might be a semantic error.
+                fprintf(stderr, "L%d: Compiler error: LHS of assignment is not a simple global variable ('%s').\n", line, node->left && node->left->token ? node->left->token->value : "unknown");
             }
             break;
 
         case AST_WRITELN: {
-            // Arguments are in node->children, compile them in reverse order for stack
-            // Or, compile them in order and have VM expect them in order.
-            // Let's compile in order, and OP_WRITE_LN will know how many to pop.
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {
-                compileExpression(node->children[i], chunk); // Each arg value pushed to stack
+                compileExpression(node->children[i], chunk, get_line(node->children[i]));
             }
             writeBytecodeChunk(chunk, OP_WRITE_LN, line);
-            writeBytecodeChunk(chunk, (uint8_t)argCount, line); // Operand: number of arguments
+            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
             break;
         }
         
-        // If an expression is used as a statement (e.g. a function call whose result is ignored)
-        // We compile the expression, then pop its result from the stack.
-        case AST_PROCEDURE_CALL: // Assuming function calls are parsed as this
-            compileExpression(node, chunk); // Compile the call, its result is on stack
-            if (node->var_type != TYPE_VOID) { // If it's a function call (not procedure)
-                writeBytecodeChunk(chunk, OP_POP, line); // Pop the unused result
+        case AST_PROCEDURE_CALL: // e.g. a function call whose result is ignored
+            compileExpression(node, chunk, line); // Compile the call
+            if (node->var_type != TYPE_VOID) { // If it was a function, pop its result
+                writeBytecodeChunk(chunk, OP_POP, line);
             }
             break;
 
-        // other statement types (IF, WHILE, etc.) will be added later
         default:
-            // Might be an expression used as a statement; if so, its value should be popped
-            // For now, only handle specific statements or log unknown.
-            fprintf(stderr, "Compiler warning: Unhandled AST node type %s in compileStatement.\n", astTypeToString(node->type));
+            fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileStatement.\n", line, astTypeToString(node->type));
             break;
     }
 }
 
-
-// --- Compile Expressions ---
-// Expressions evaluate and leave their result on top of the stack.
-static void compileExpression(AST* node, BytecodeChunk* chunk) {
+static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
-    int line = node->token ? node->token->line : 0; // Approximate line
+    int line = get_line(node);
+    if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
         case AST_NUMBER: {
-            // Add the number as a constant, then emit OP_CONSTANT
-            // For simplicity, assuming all numbers are integers for now
-            long long val = atoll(node->token->value); // Use atoll for long long
+            long long val = atoll(node->token->value);
             int constIndex = addConstantToChunk(chunk, makeInt(val));
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)constIndex, line); // Operand: index in constant pool
+            writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
         }
-        case AST_STRING: { // String literals
-            int constIndex = addConstantToChunk(chunk, makeString(node->token->value));
+        case AST_STRING: {
+            // Important: makeString strdups, addConstantToChunk copies the Value struct.
+            // freeValue in freeBytecodeChunk will free the strdup'd string.
+            Value strVal = makeString(node->token->value);
+            int constIndex = addConstantToChunk(chunk, strVal);
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
         }
         case AST_VARIABLE: {
             const char* varName = node->token->value;
-            int globalIndex = resolveOrAddGlobal(varName); // Use our simple global mapping
-
+            // For GET_GLOBAL, the operand will be the index of the variable name string in the constant pool.
+            int nameIndex = addConstantToChunk(chunk, makeString(varName));
             writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-            writeBytecodeChunk(chunk, (uint8_t)globalIndex, line); // Operand: index of global var
+            writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             break;
         }
         case AST_BINARY_OP:
-            // Compile left operand (result on stack)
-            compileExpression(node->left, chunk);
-            // Compile right operand (result on stack)
-            compileExpression(node->right, chunk);
+            compileExpression(node->left, chunk, get_line(node->left));
+            compileExpression(node->right, chunk, get_line(node->right));
 
-            // Emit operator
-            // This assumes type checking/conversion for ops like Real division happens in VM
-            // or that specific typed opcodes exist. For now, generic ops.
             if (node->token) {
                 switch (node->token->type) {
                     case TOKEN_PLUS:    writeBytecodeChunk(chunk, OP_ADD, line); break;
                     case TOKEN_MINUS:   writeBytecodeChunk(chunk, OP_SUBTRACT, line); break;
                     case TOKEN_MUL:     writeBytecodeChunk(chunk, OP_MULTIPLY, line); break;
-                    case TOKEN_SLASH:   writeBytecodeChunk(chunk, OP_DIVIDE, line); break; // Real division
-                    // Add TOKEN_INT_DIV (OP_INT_DIVIDE), TOKEN_MOD (OP_MODULO) later
-                    // Add comparison ops later (OP_EQUAL, OP_LESS, OP_GREATER, etc.)
+                    case TOKEN_SLASH:   writeBytecodeChunk(chunk, OP_DIVIDE, line); break;
+                    // TODO: Add other binary ops (DIV, MOD, comparisons)
                     default:
-                        fprintf(stderr, "Compiler error: Unknown binary operator %s\n", tokenTypeToString(node->token->type));
+                        fprintf(stderr, "L%d: Compiler error: Unknown binary operator %s\n", line, tokenTypeToString(node->token->type));
                         break;
                 }
             }
             break;
         
         case AST_UNARY_OP:
-            compileExpression(node->left, chunk); // Operand on stack
+            compileExpression(node->left, chunk, get_line(node->left));
             if (node->token) {
                 switch (node->token->type) {
                     case TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, line); break;
                     case TOKEN_NOT:   writeBytecodeChunk(chunk, OP_NOT, line);    break;
                     default:
-                        fprintf(stderr, "Compiler error: Unknown unary operator %s\n", tokenTypeToString(node->token->type));
+                        fprintf(stderr, "L%d: Compiler error: Unknown unary operator %s\n", line, tokenTypeToString(node->token->type));
                         break;
                 }
             }
             break;
 
-        case AST_PROCEDURE_CALL: // Actually a function call if used in an expression
-            // Handle arguments
-            if (node->children) {
-                for (int i = 0; i < node->child_count; i++) {
-                    compileExpression(node->children[i], chunk); // Arguments pushed onto stack
-                }
-            }
-            // TODO: Need a proper way to map function name to a built-in index or user function index
-            // For now, let's assume a hardcoded index for 'upcase' if we were compiling it.
-            // For SimpleMath, we only have WriteLn which is handled as a statement.
-            // If upcase was here:
-            // int builtinIndex = find_builtin_index("upcase");
-            // writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-            // writeBytecodeChunk(chunk, (uint8_t)builtinIndex, line);
-            // writeBytecodeChunk(chunk, (uint8_t)node->child_count, line); // Arg count
-            fprintf(stderr, "Compiler: Expression function calls not fully implemented yet for %s.\n", node->token ? node->token->value : "unknown_func");
-            // Push a dummy value for now if a result is expected
-            if (node->var_type != TYPE_VOID) {
-                 int dummyIdx = addConstantToChunk(chunk, makeInt(0)); // Dummy result
-                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                 writeBytecodeChunk(chunk, dummyIdx, line);
+        case AST_PROCEDURE_CALL: // Function calls used in expressions
+            // For SimpleMath, this case isn't hit for `upcase` because `WriteLn` takes expressions.
+            // But if you had `x := upcase('a');`, this would be used.
+            // This is a placeholder for now as SimpleMath doesn't use function calls in expressions
+            // directly other than as arguments to WriteLn.
+            fprintf(stderr, "L%d: Compiler: Expression function call for '%s' needs OP_CALL_BUILTIN/OP_CALL logic.\n", line, node->token ? node->token->value : "unknown");
+            // For now, push a dummy value to satisfy expression context.
+            {
+                int dummyIndex = addConstantToChunk(chunk, makeInt(0)); // Or type from node->var_type
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)dummyIndex, line);
             }
             break;
 
-
-        // Parenthesized expressions are handled by AST structure, no specific opcode needed
-        // (e.g., (2*3) just compiles 2, then 3, then MUL)
-
         default:
-            fprintf(stderr, "Compiler warning: Unhandled AST node type %s in compileExpression.\n", astTypeToString(node->type));
-            // Push a dummy value if an expression was expected to leave something on stack
-            int dummyIdx = addConstantToChunk(chunk, makeInt(0)); // Default dummy value
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, dummyIdx, line);
+            fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileExpression.\n", line, astTypeToString(node->type));
+            {
+                int dummyIndex = addConstantToChunk(chunk, makeInt(0)); // Push a dummy 0
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)dummyIndex, line);
+            }
             break;
     }
 }

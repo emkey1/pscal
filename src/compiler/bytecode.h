@@ -57,5 +57,6 @@ void initBytecodeChunk(BytecodeChunk* chunk);
 void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add byte to chunk
 void freeBytecodeChunk(BytecodeChunk* chunk);
 int addConstantToChunk(BytecodeChunk* chunk, Value value); // Add a value to constant pool, return index
+void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name); 
 
 #endif // PSCAL_BYTECODE_H

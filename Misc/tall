@@ -1,5 +1,7 @@
 #!/bin/bash
-BIN="$HOME/.bin"          # all your executables live here
+#BIN="$HOME/.bin"          # all your executables live here
+BIN="$HOME/Dropbox/Psc_build/build/bin"          # all your executables live here
+
 TESTS="$HOME/git/pscal/Tests"  # all your .p / .pas files live here
 
 PSCAL="$BIN/pscal"       # plain interpreter

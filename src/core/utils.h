@@ -57,8 +57,8 @@ Value makeVoid(void);
 Value makeValueForType(VarType type, AST *type_def); // This simplifies the code.  Transitioning to it
 
 // Token
-Token *newToken(TokenType type, const char *value);
-Token *copyToken(const Token *orig);
+Token *newToken(TokenType type, const char *value, int line, int column);
+Token *copyToken(const Token *orig_token);
 void freeToken(Token *token);
 
 // Misc

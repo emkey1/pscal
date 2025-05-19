@@ -94,6 +94,10 @@ Token *number(Lexer *lexer) {
     size_t start = lexer->pos;
     bool is_hex = false;
     bool has_decimal = false;
+    
+    int token_line = lexer->line; // Capture line/col BEFORE advancing further if number() advances
+    int token_column = lexer->column - (lexer->pos - start); // Approximate start column of number
+
 
     // Move these to the top so they're visible to make_number:
     size_t len = 0;
@@ -149,11 +153,11 @@ make_number:
     num_str[len] = '\0';
 
     if (is_hex) {
-        token = newToken(TOKEN_HEX_CONST, num_str);
+        token = newToken(TOKEN_HEX_CONST, num_str, token_line, token_column);
     } else if (has_decimal) {
-        token = newToken(TOKEN_REAL_CONST, num_str);
+        token = newToken(TOKEN_REAL_CONST, num_str, token_line, token_column);
     } else {
-        token = newToken(TOKEN_INTEGER_CONST, num_str);
+        token = newToken(TOKEN_INTEGER_CONST, num_str, token_line, token_column);
     }
 
     free(num_str);
@@ -177,6 +181,7 @@ void advance(Lexer *lexer) {
 
 Token *identifier(Lexer *lexer) {
     size_t start = lexer->pos;
+    
     while (lexer->current_char && (isalnum((unsigned char)lexer->current_char) || lexer->current_char == '_'))
         advance(lexer);
     size_t len = lexer->pos - start;
@@ -226,6 +231,8 @@ Token *identifier(Lexer *lexer) {
 
 Token *stringLiteral(Lexer *lexer) {
     advance(lexer);  // Skip opening '
+    int token_line = lexer->line;
+    int token_column = lexer->column;
     char *buffer = malloc(DEFAULT_STRING_CAPACITY);
     size_t buffer_pos = 0;
     size_t buffer_capacity = DEFAULT_STRING_CAPACITY;
@@ -267,12 +274,14 @@ Token *stringLiteral(Lexer *lexer) {
     }
 
     buffer[buffer_pos] = '\0';
-    Token *token = newToken(TOKEN_STRING_CONST, buffer);
+    Token *token = newToken(TOKEN_STRING_CONST, buffer, token_line, token_column);
     free(buffer);
     return token;
 }
 
 Token *getNextToken(Lexer *lexer) {
+    int start_line = lexer->line;     // Capture at start
+    int start_column = lexer->column; // Capture at start
 #ifdef DEBUG
     fprintf(stderr, "LEXER_DEBUG: getNextToken\n"); fflush(stderr);
 #endif
@@ -358,7 +367,7 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
                   fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 2)\n"); fflush(stderr);
 #endif
-                  return newToken(TOKEN_UNKNOWN, bad_char);
+                  return newToken(TOKEN_UNKNOWN, bad_char, start_line, start_column);
              }
         }
 
@@ -394,7 +403,7 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
             fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_CARET)\n"); fflush(stderr);
 #endif
-            return newToken(TOKEN_CARET, "^");
+            return newToken(TOKEN_CARET, "^", start_line, start_column);
         }
 
         // Colon or Assign
@@ -405,12 +414,12 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
                 fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_ASSIGN)\n"); fflush(stderr);
 #endif
-                return newToken(TOKEN_ASSIGN, ":=");
+                return newToken(TOKEN_ASSIGN, ":=", start_line, start_column);
             } else {
 #ifdef DEBUG
                 fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_COLON)\n"); fflush(stderr);
 #endif
-                return newToken(TOKEN_COLON, ":");
+                return newToken(TOKEN_COLON, ":", start_line, start_column);
             }
         }
 
@@ -420,7 +429,7 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
             fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_SEMICOLON)\n"); fflush(stderr);
 #endif
-            return newToken(TOKEN_SEMICOLON, ";");
+            return newToken(TOKEN_SEMICOLON, ";", start_line, start_column);
         }
 
         // Comma
@@ -429,7 +438,7 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
             fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_COMMA)\n"); fflush(stderr);
 #endif
-            return newToken(TOKEN_COMMA, ",");
+            return newToken(TOKEN_COMMA, ",", start_line, start_column);
         }
 
         // Period or DotDot
@@ -440,12 +449,12 @@ Token *getNextToken(Lexer *lexer) {
 #ifdef DEBUG
                 fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_DOTDOT)\n"); fflush(stderr);
 #endif
-                return newToken(TOKEN_DOTDOT, "..");
+                return newToken(TOKEN_DOTDOT, "..", start_line, start_column);
             } else {
 #ifdef DEBUG
                 fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_PERIOD)\n"); fflush(stderr);
 #endif
-                return newToken(TOKEN_PERIOD, ".");
+                return newToken(TOKEN_PERIOD, ".", start_line, start_column);
             }
         }
 
@@ -453,29 +462,29 @@ Token *getNextToken(Lexer *lexer) {
         fprintf(stderr, "LEXER_DEBUG: getNextToken(Math Section)\n"); fflush(stderr);
 #endif
         // Simple operators: +, -, *, /
-        if (lexer->current_char == '+') { advance(lexer); return newToken(TOKEN_PLUS, "+"); }
-        if (lexer->current_char == '-') { advance(lexer); return newToken(TOKEN_MINUS, "-"); }
-        if (lexer->current_char == '*') { advance(lexer); return newToken(TOKEN_MUL, "*"); }
-        if (lexer->current_char == '/') { advance(lexer); return newToken(TOKEN_SLASH, "/"); }
+        if (lexer->current_char == '+') { advance(lexer); return newToken(TOKEN_PLUS, "+", start_line, start_column); }
+        if (lexer->current_char == '-') { advance(lexer); return newToken(TOKEN_MINUS, "-", start_line, start_column); }
+        if (lexer->current_char == '*') { advance(lexer); return newToken(TOKEN_MUL, "*", start_line, start_column); }
+        if (lexer->current_char == '/') { advance(lexer); return newToken(TOKEN_SLASH, "/", start_line, start_column); }
 
         // Parentheses and Brackets
-        if (lexer->current_char == '(') { advance(lexer); return newToken(TOKEN_LPAREN, "("); }
-        if (lexer->current_char == ')') { advance(lexer); return newToken(TOKEN_RPAREN, ")"); }
-        if (lexer->current_char == '[') { advance(lexer); return newToken(TOKEN_LBRACKET, "["); }
-        if (lexer->current_char == ']') { advance(lexer); return newToken(TOKEN_RBRACKET, "]"); }
+        if (lexer->current_char == '(') { advance(lexer); return newToken(TOKEN_LPAREN, "(", start_line, start_column); }
+        if (lexer->current_char == ')') { advance(lexer); return newToken(TOKEN_RPAREN, ")", start_line, start_column); }
+        if (lexer->current_char == '[') { advance(lexer); return newToken(TOKEN_LBRACKET, "[", start_line, start_column); }
+        if (lexer->current_char == ']') { advance(lexer); return newToken(TOKEN_RBRACKET, "]", start_line, start_column); }
 
         // Relational Operators: =, <, >
-        if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_EQUAL, "="); }
+        if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_EQUAL, "=", start_line, start_column); }
         if (lexer->current_char == '<') {
             advance(lexer);
-            if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_LESS_EQUAL, "<="); }
-            if (lexer->current_char == '>') { advance(lexer); return newToken(TOKEN_NOT_EQUAL, "<>"); }
-            return newToken(TOKEN_LESS, "<");
+            if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_LESS_EQUAL, "<=", start_line, start_column); }
+            if (lexer->current_char == '>') { advance(lexer); return newToken(TOKEN_NOT_EQUAL, "<>", start_line, start_column); }
+            return newToken(TOKEN_LESS, "<", start_line, start_column);
         }
         if (lexer->current_char == '>') {
             advance(lexer);
-            if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_GREATER_EQUAL, ">="); }
-            return newToken(TOKEN_GREATER, ">");
+            if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_GREATER_EQUAL, ">=", start_line, start_column); }
+            return newToken(TOKEN_GREATER, ">", start_line, start_column);
         }
         // Handle Not Equal (!=)
         if (lexer->current_char == '!') {
@@ -483,7 +492,7 @@ Token *getNextToken(Lexer *lexer) {
             if (lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '=') {
                 advance(lexer); // Consume '!'
                 advance(lexer); // Consume '='
-                return newToken(TOKEN_NOT_EQUAL, "!="); // Recognize !=
+                return newToken(TOKEN_NOT_EQUAL, "!=", start_line, start_column); // Recognize !=
             } else {
                 // If '!' is not followed by '=', it's an unrecognized character in Pascal.
                 // Fall through to the generic unknown character handling below.
@@ -495,10 +504,10 @@ Token *getNextToken(Lexer *lexer) {
         fprintf(stderr, "Lexer error at line %d, column %d: Unrecognized character '%s'\n",
                 lexer->line, lexer->column, unknown_char_str);
         advance(lexer); // Consume the unknown character to prevent infinite loop
-        return newToken(TOKEN_UNKNOWN, unknown_char_str); // Return an UNKNOWN token
+        return newToken(TOKEN_UNKNOWN, unknown_char_str, start_line, start_column); // Return an UNKNOWN token
 
     } // End while (lexer->current_char)
 
     // End of input reached
-    return newToken(TOKEN_EOF, "EOF");
+    return newToken(TOKEN_EOF, "EOF", start_line, start_column);
 }

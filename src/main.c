@@ -11,6 +11,10 @@
 #include "interpreter.h"
 #include "builtin.h"
 
+// Bytecode stuff
+#include "compiler/bytecode.h"
+#include "compiler/compiler.h"
+
 // Standard C libraries.
 #include <stdio.h>
 #include <stdlib.h>
@@ -332,6 +336,29 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         // This pass resolves types and performs static type checking.
         // It needs access to global symbols (including builtins) and registered types.
         annotateTypes(GlobalAST, NULL, GlobalAST); // Assumes annotateTypes is defined in ast.h/ast.c
+        
+        if (!dump_ast_json_flag) { // Only compile if not just dumping AST
+            BytecodeChunk chunk;
+            initBytecodeChunk(&chunk);
+            fprintf(stderr, "--- Compiling AST to Bytecode ---\n");
+            if (compileASTToBytecode(GlobalAST, &chunk)) {
+                fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                
+                // <<< ADD THIS CALL TO THE DISASSEMBLER >>>
+                #ifdef DEBUG // Only disassemble in debug builds, or if a flag is set
+                if (dumpExec) { // Or some other flag to control verbosity
+                    disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk");
+                }
+                #endif
+                // <<< END OF ADDED CALL >>>
+
+                // TODO: Eventually, pass 'chunk' to the VM for execution.
+                // vmExecuteChunk(&chunk);
+            } else {
+                fprintf(stderr, "Compilation failed.\n");
+            }
+            freeBytecodeChunk(&chunk);
+        }
 
 #ifdef DEBUG
         // In DEBUG mode, verify the parent/child links in the AST for structural correctness.

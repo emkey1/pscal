@@ -2135,6 +2135,9 @@ AST *enumDeclaration(Parser *parser) {
 // Parses an expression possibly followed by formatting specifiers.
 // Syntax: <expression> [ : <fieldWidth> [ : <decimalPlaces> ] ]
 AST *parseWriteArgument(Parser *parser) {
+    int expr_line = parser->lexer->line;
+    int expr_column = parser->lexer->column;
+    
     AST *exprNode = expression(parser); // <<< Use expression()
     if (!exprNode || exprNode->type == AST_NOOP) { errorParser(parser, "Expected expression in write argument"); return newASTNode(AST_NOOP, NULL); }
 
@@ -2151,7 +2154,7 @@ AST *parseWriteArgument(Parser *parser) {
         AST *fmt = newASTNode(AST_FORMATTED_EXPR,NULL); setLeft(fmt,exprNode);
         int w=atoi(widthTok->value); int p=(precTok)?atoi(precTok->value):-1;
         char fs[32]; snprintf(fs,sizeof(fs),"%d,%d",w,p);
-        fmt->token=newToken(TOKEN_STRING_CONST,fs); // Stores "width,precision"
+        fmt->token=newToken(TOKEN_STRING_CONST,fs, expr_line, expr_column); // Stores "width,precision"
         freeToken(widthTok); if(precTok)freeToken(precTok);
         return fmt;
     } else {

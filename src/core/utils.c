@@ -804,35 +804,39 @@ Value makePointer(void* address, AST* base_type_node) {
 
 // Token
 /* Create a new token */
-Token *newToken(TokenType type, const char *value) {
+Token *newToken(TokenType type, const char *value, int line, int column) { // Added line, column
     Token *token = malloc(sizeof(Token));
     if (!token) {
         fprintf(stderr, "Memory allocation error in newToken\n");
         EXIT_FAILURE_HANDLER();
     }
     token->type = type;
-    token->value = value ? strdup(value) : NULL;  // Deep copy the string!
-    if (value && !token->value) { // Check strdup result
+    token->value = value ? strdup(value) : NULL;
+    if (value && !token->value) {
         fprintf(stderr, "Memory allocation error (strdup value) in newToken\n");
         free(token);
         EXIT_FAILURE_HANDLER();
     }
+    token->line = line;     // <<< SET LINE
+    token->column = column; // <<< SET COLUMN
     return token;
 }
 
 /* Copy a token */
-Token *copyToken(const Token *token) {
-    if (!token) return NULL;
+Token *copyToken(const Token *orig_token) { // Renamed parameter to avoid conflict if any
+    if (!orig_token) return NULL;
     Token *new_token = malloc(sizeof(Token));
     if (!new_token) { fprintf(stderr, "Memory allocation error in copyToken (Token struct)\n"); EXIT_FAILURE_HANDLER(); }
-    *new_token = *token; // Copy basic fields
-    // Deep copy the string value if it exists
-    new_token->value = token->value ? strdup(token->value) : NULL; // Use strdup, check for NULL
-    if (token->value && !new_token->value) { // Check if strdup failed
+    
+    new_token->type = orig_token->type;
+    new_token->value = orig_token->value ? strdup(orig_token->value) : NULL;
+    if (orig_token->value && !new_token->value) {
          fprintf(stderr, "Memory allocation error (strdup value) in copyToken\n");
-         free(new_token); // Free the partially allocated token
+         free(new_token);
          EXIT_FAILURE_HANDLER();
     }
+    new_token->line = orig_token->line;     // <<< COPY LINE
+    new_token->column = orig_token->column; // <<< COPY COLUMN
     return new_token;
 }
 

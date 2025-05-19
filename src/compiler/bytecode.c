@@ -98,3 +98,137 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
 
     return chunk->constants_count++;
 }
+
+// --- Bytecode Disassembler ---
+
+// Helper to print a single instruction and its operands
+static int disassembleInstruction(BytecodeChunk* chunk, int offset) {
+    printf("%04d ", offset); // Print the offset (address) of the instruction
+    if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
+        printf("   | "); // Same line as previous instruction
+    } else {
+        printf("%4d ", chunk->lines[offset]); // Print source line number
+    }
+
+    uint8_t instruction = chunk->code[offset];
+    switch (instruction) {
+        case OP_RETURN:
+            printf("OP_RETURN\n");
+            return offset + 1;
+        case OP_CONSTANT: {
+            uint8_t constant_index = chunk->code[offset + 1];
+            printf("OP_CONSTANT     %4d '", constant_index);
+            // Print the constant value (requires access to Value printing logic)
+            Value constantValue = chunk->constants[constant_index];
+            switch(constantValue.type) {
+                case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
+                case TYPE_REAL:    printf("%f", constantValue.r_val); break;
+                case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL"); break;
+                case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
+                case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
+                default: printf("Value type %s", varTypeToString(constantValue.type)); break;
+            }
+            printf("'\n");
+            return offset + 2; // Opcode + 1-byte operand
+        }
+        case OP_ADD:
+            printf("OP_ADD\n");
+            return offset + 1;
+        case OP_SUBTRACT:
+            printf("OP_SUBTRACT\n");
+            return offset + 1;
+        case OP_MULTIPLY:
+            printf("OP_MULTIPLY\n");
+            return offset + 1;
+        case OP_DIVIDE:
+            printf("OP_DIVIDE\n");
+            return offset + 1;
+        case OP_NEGATE:
+            printf("OP_NEGATE\n");
+            return offset + 1;
+        case OP_NOT:
+            printf("OP_NOT\n");
+            return offset + 1;
+        case OP_DEFINE_GLOBAL: {
+            uint8_t name_index = chunk->code[offset + 1];
+            printf("OP_DEFINE_GLOBAL %4d '", name_index);
+            if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
+                printf("%s", chunk->constants[name_index].s_val);
+            } else {
+                printf("INVALID_NAME_INDEX");
+            }
+            printf("'\n");
+            return offset + 2; // Opcode + 1-byte operand
+        }
+        case OP_GET_GLOBAL: {
+            uint8_t name_index = chunk->code[offset + 1];
+            printf("OP_GET_GLOBAL   %4d '", name_index);
+             if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
+                printf("%s", chunk->constants[name_index].s_val);
+            } else {
+                printf("INVALID_NAME_INDEX");
+            }
+            printf("'\n");
+            return offset + 2; // Opcode + 1-byte operand
+        }
+        case OP_SET_GLOBAL: {
+            uint8_t name_index = chunk->code[offset + 1];
+            printf("OP_SET_GLOBAL   %4d '", name_index);
+            if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
+                printf("%s", chunk->constants[name_index].s_val);
+            } else {
+                printf("INVALID_NAME_INDEX");
+            }
+            printf("'\n");
+            return offset + 2; // Opcode + 1-byte operand
+        }
+        case OP_WRITE_LN: {
+            uint8_t arg_count = chunk->code[offset + 1];
+            printf("OP_WRITE_LN     %4d (arg_count)\n", arg_count);
+            return offset + 2; // Opcode + 1-byte operand
+        }
+        case OP_POP:
+            printf("OP_POP\n");
+            return offset + 1;
+        case OP_HALT:
+            printf("OP_HALT\n");
+            return offset + 1;
+        // Add OP_CALL_BUILTIN case when you implement it fully
+        // case OP_CALL_BUILTIN: {
+        //     uint8_t builtin_index = chunk->code[offset + 1];
+        //     uint8_t num_args = chunk->code[offset + 2];
+        //     printf("OP_CALL_BUILTIN %4d (idx) %3d (args)\n", builtin_index, num_args);
+        //     return offset + 3; // Opcode + 2 operands
+        // }
+        default:
+            printf("Unknown opcode %d\n", instruction);
+            return offset + 1;
+    }
+}
+
+void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name) {
+    printf("== Disassembly: %s ==\n", name);
+    printf("Offset Line Opcode    Operand  Value\n");
+    printf("------ ---- --------- -------- ----------\n");
+    for (int offset = 0; offset < chunk->count; ) {
+        offset = disassembleInstruction(chunk, offset);
+    }
+    printf("== End Disassembly: %s ==\n\n", name);
+
+    if (chunk->constants_count > 0) {
+        printf("Constants (%d):\n", chunk->constants_count);
+        for (int i = 0; i < chunk->constants_count; i++) {
+            printf("  %04d: ", i);
+            Value constantValue = chunk->constants[i];
+            switch(constantValue.type) {
+                case TYPE_INTEGER: printf("INT   %lld\n", constantValue.i_val); break;
+                case TYPE_REAL:    printf("REAL  %f\n", constantValue.r_val); break;
+                case TYPE_STRING:  printf("STR   \"%s\"\n", constantValue.s_val ? constantValue.s_val : "NULL"); break;
+                case TYPE_CHAR:    printf("CHAR  '%c'\n", constantValue.c_val); break;
+                case TYPE_BOOLEAN: printf("BOOL  %s\n", constantValue.i_val ? "true" : "false"); break;
+                default: printf("Value type %s\n", varTypeToString(constantValue.type)); break;
+            }
+        }
+        printf("\n");
+    }
+}

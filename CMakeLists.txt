@@ -78,6 +78,11 @@ set(PSCAL_SOURCES
     src/symbol/symbol.c
     src/backend_ast/interpreter.c src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c src/backend_ast/sdl.c src/backend_ast/audio.c
+
+    # --- Add new files for bytecode compiler and VM here ---
+    src/compiler/bytecode.c src/compiler/compiler.c   
+
+    # src/vm/vm.c             # Add when you create it
 )
 
 # ---- Executable Targets Function ----
@@ -165,7 +170,7 @@ endfunction()
 
 add_pscal_executable(pscal)
 add_pscal_executable(dscal)
-add_pscal_executable(hscal)
+# add_pscal_executable(hscal) // Lets not build this normally
 
 # ---- optional install ----
 include(GNUInstallDirs)
