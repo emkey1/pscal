@@ -24,6 +24,21 @@
 
 #include "types.h"
 
+// Bytecode related stuff
+// Make sure Value and VarType are defined before these.
+#define IS_BOOLEAN(value) ((value).type == TYPE_BOOLEAN)
+#define AS_BOOLEAN(value) ((value).i_val != 0) // Assumes i_val stores 0 for false, 1 for true
+
+// Also useful:
+#define IS_INTEGER(value) ((value).type == TYPE_INTEGER)
+#define AS_INTEGER(value) ((value).i_val)
+#define IS_REAL(value)    ((value).type == TYPE_REAL)
+#define AS_REAL(value)    ((value).r_val)
+#define IS_STRING(value)  ((value).type == TYPE_STRING)
+#define AS_STRING(value)  ((value).s_val)
+#define IS_CHAR(value)    ((value).type == TYPE_CHAR)
+#define AS_CHAR(value)    ((value).c_val) 
+
 const char *varTypeToString(VarType type);
 const char *tokenTypeToString(TokenType type);
 const char *astTypeToString(ASTNodeType type);
@@ -70,6 +85,7 @@ void parseError(Parser *parser, const char *message);
 void debugASTFile(AST *node);
 Value makeEnum(const char *enum_name, int ordinal);
 void freeValue(Value *v);
+void printValueToStream(Value v, FILE *stream);
 
 // Unit Stuff
 char *findUnitFile(const char *unit_name);

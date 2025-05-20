@@ -1697,3 +1697,110 @@ void toLowerString(char *str) {
         str[i] = tolower(str[i]);
     }
 }
+
+void printValueToStream(Value v, FILE *stream) {
+    if (!stream) {
+        stream = stdout;
+    }
+
+    switch (v.type) {
+        case TYPE_INTEGER:
+            fprintf(stream, "%lld", v.i_val);
+            break;
+        case TYPE_REAL:
+            fprintf(stream, "%f", v.r_val);
+            break;
+        case TYPE_BOOLEAN:
+            fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE"); // Boolean still uses i_val
+            break;
+        case TYPE_CHAR:
+            fprintf(stream, "%c", v.c_val); // Assuming c_val is 'char' or int holding char ASCII
+            break;
+        case TYPE_STRING:
+            if (v.s_val) {
+                fprintf(stream, "\"%s\"", v.s_val); // Adding quotes for clarity
+            } else {
+                fprintf(stream, "(null string)");
+            }
+            break;
+        case TYPE_NIL:
+            fprintf(stream, "NIL");
+            break;
+        case TYPE_POINTER:
+            fprintf(stream, "POINTER(@%p -> ", (void*)v.ptr_val);
+            if (v.ptr_val) { // If it's not a nil pointer, try to print what it points to
+                printValueToStream(*(v.ptr_val), stream); // Recursive call
+            } else {
+                fprintf(stream, "NIL_TARGET");
+            }
+            fprintf(stream, ")");
+            break;
+        case TYPE_ARRAY:
+            // Your `v.array_val` is a `Value*` pointing to the first element.
+            // The other array metadata (dimensions, bounds, element_type) is directly in `v`.
+            fprintf(stream, "ARRAY(dims:%d, base_type:%s, elements_at:%p)",
+                    v.dimensions,
+                    varTypeToString(v.element_type), // Using v.element_type directly
+                    (void*)v.array_val); // v.array_val is the pointer to elements
+            // For a more detailed print, you'd iterate based on dimensions and bounds.
+            break;
+        case TYPE_RECORD:
+            fprintf(stream, "RECORD{");
+            FieldValue *field = v.record_val;
+            bool first_field = true;
+            while (field) {
+                if (!first_field) {
+                    fprintf(stream, "; ");
+                }
+                fprintf(stream, "%s: ", field->name ? field->name : "?");
+                printValueToStream(field->value, stream);
+                first_field = false;
+                field = field->next;
+            }
+            fprintf(stream, "}");
+            break;
+        case TYPE_ENUM:
+            fprintf(stream, "ENUM(%s, ord: %d)",
+                v.enum_val.enum_name ? v.enum_val.enum_name : (v.enum_meta ? v.enum_meta->name : "<type_unknown>"),
+                v.enum_val.ordinal);
+            break;
+        case TYPE_SET:
+            // Corrected access to set_val and its members
+            fprintf(stream, "SET(size:%d, values:[", v.set_val.set_size);
+            for(int i = 0; i < v.set_val.set_size; ++i) {
+                fprintf(stream, "%lld%s", v.set_val.set_values[i], (i == v.set_val.set_size - 1) ? "" : ", ");
+            }
+            fprintf(stream, "])");
+            break;
+        case TYPE_FILE:
+            if (v.filename) {
+                fprintf(stream, "FILE(%s, handle: %p)", v.filename, (void*)v.f_val);
+            } else {
+                fprintf(stream, "FILE(UNNAMED, handle: %p)", (void*)v.f_val);
+            }
+            break;
+        case TYPE_MEMORYSTREAM:
+            if (v.mstream) {
+                // Corrected format specifiers for int members of MStream
+                fprintf(stream, "MSTREAM(size:%d, cap:%d, data:%p)",
+                        v.mstream->size,
+                        v.mstream->capacity,
+                        (void*)v.mstream->buffer);
+            } else {
+                fprintf(stream, "MSTREAM(NULL)");
+            }
+            break;
+        case TYPE_BYTE:
+             fprintf(stream, "BYTE(%lld)", v.i_val & 0xFF);
+             break;
+        case TYPE_WORD:
+             fprintf(stream, "WORD(%lld)", v.i_val & 0xFFFF);
+             break;
+        case TYPE_VOID:
+            fprintf(stream, "<VOID_TYPE>");
+            break;
+        default:
+            fprintf(stream, "<UnknownType:%s>", varTypeToString(v.type));
+            break;
+    }
+}

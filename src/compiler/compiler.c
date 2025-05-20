@@ -32,7 +32,7 @@ int compilerGlobalCount = 0;
 
 // Helper to get the source line number from an AST node's token
 // Provides a fallback if token is NULL.
-static int get_line(AST* node) {
+static int getLine(AST* node) {
     if (node && node->token && node->token->line > 0) {
         return node->token->line;
     }
@@ -82,16 +82,16 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
 
     if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK) {
         AST* mainBlock = rootNode->right;
-        compileNode(mainBlock, outputChunk, get_line(rootNode)); // Pass initial line from PROGRAM token
+        compileNode(mainBlock, outputChunk, getLine(rootNode)); // Pass initial line from PROGRAM token
     } else if (rootNode->type == AST_BLOCK) { // Allow compiling just a block (e.g. for procedures later)
-        compileNode(rootNode, outputChunk, get_line(rootNode));
+        compileNode(rootNode, outputChunk, getLine(rootNode));
     }
     else {
         fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK node as root for compilation.\n");
         return false;
     }
 
-    writeBytecodeChunk(outputChunk, OP_HALT, get_line(rootNode)); // End program
+    writeBytecodeChunk(outputChunk, OP_HALT, getLine(rootNode)); // End program
     return true;
 }
 
@@ -131,13 +131,13 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (varNameNode && varNameNode->token) {
                         int nameIndex = addConstantToChunk(chunk, makeString(varNameNode->token->value));
                         
-                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, get_line(varNameNode));
-                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, get_line(varNameNode)); // Operand 1: name string index
-                        writeBytecodeChunk(chunk, (uint8_t)declared_type, get_line(varNameNode)); // Operand 2: VarType enum value
+                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, getLine(varNameNode)); // Operand 1: name string index
+                        writeBytecodeChunk(chunk, (uint8_t)declared_type, getLine(varNameNode)); // Operand 2: VarType enum value
                         
                         // The compiler's internal resolveGlobalVariableIndex ensures it knows about the global.
                         // The VM will use the name and type to set up its storage.
-                        resolveGlobalVariableIndex(chunk, varNameNode->token->value, get_line(varNameNode));
+                        resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                     }
                 }
             }
@@ -171,7 +171,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
-    int line = get_line(node);
+    int line = getLine(node);
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
@@ -194,7 +194,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_WRITELN: {
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {
-                compileExpression(node->children[i], chunk, get_line(node->children[i]));
+                compileExpression(node->children[i], chunk, getLine(node->children[i]));
             }
             writeBytecodeChunk(chunk, OP_WRITE_LN, line);
             writeBytecodeChunk(chunk, (uint8_t)argCount, line);
@@ -207,6 +207,65 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_POP, line);
             }
             break;
+        case AST_IF: {
+            // Structure: node->left is condition, node->right is then_branch, node->extra is else_branch (optional)
+            if (!node->left || !node->right) {
+                fprintf(stderr, "L%d: Compiler error: IF node is missing condition or then-branch.\n", line);
+                return; // Or handle error more gracefully
+            }
+
+            // 1. Compile the condition
+            compileExpression(node->left, chunk, line); // Condition result will be on stack
+
+            // 2. Emit OP_JUMP_IF_FALSE with a placeholder for the offset
+            //    The offset will point to the instruction *after* the THEN branch
+            //    (or to the start of the ELSE branch).
+            int thenBranchJumpPatchOffset = chunk->count; // Position where OP_JUMP_IF_FALSE will be
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            emitShort(chunk, 0xFFFF, line); // Placeholder for 16-bit jump offset
+
+            // 3. Compile the THEN branch
+            compileStatement(node->right, chunk, line); // Then branch
+
+            if (node->extra) { // If there's an ELSE branch
+                // 4a. Emit OP_JUMP to skip the ELSE branch after THEN branch executes
+                int elseBranchJumpOverPatchOffset = chunk->count;
+                writeBytecodeChunk(chunk, OP_JUMP, line);
+                emitShort(chunk, 0xFFFF, line); // Placeholder to jump past ELSE
+
+                // 4b. Backpatch OP_JUMP_IF_FALSE:
+                //      It should jump to the current position (start of ELSE branch)
+                //      The offset is from the instruction *after* the OP_JUMP_IF_FALSE's operand
+                //      to the current end of the chunk.
+                uint16_t offsetToElse = chunk->count - (thenBranchJumpPatchOffset + 1 + 2); // +1 for opcode, +2 for its short operand
+                patchShort(chunk, thenBranchJumpPatchOffset + 1, offsetToElse); // Patch the operand of OP_JUMP_IF_FALSE
+
+                // 4c. Compile the ELSE branch
+                compileStatement(node->extra, chunk, line);
+
+                // 4d. Backpatch OP_JUMP:
+                //      It should jump to the current position (after the ELSE branch)
+                uint16_t offsetToEndOfIf = chunk->count - (elseBranchJumpOverPatchOffset + 1 + 2);
+                patchShort(chunk, elseBranchJumpOverPatchOffset + 1, offsetToEndOfIf);
+
+            } else { // No ELSE branch
+                // 4e. Backpatch OP_JUMP_IF_FALSE directly to the end of the THEN branch
+                uint16_t offsetToEndOfThen = chunk->count - (thenBranchJumpPatchOffset + 1 + 2);
+                patchShort(chunk, thenBranchJumpPatchOffset + 1, offsetToEndOfThen);
+            }
+            break;
+        }
+            
+        case AST_COMPOUND: { // <<< ADD THIS CASE
+            for (int i = 0; i < node->child_count; i++) {
+                if (node->children[i]) {
+                    // Recursively call compileStatement for each statement in the block
+                    // Or compileNode if that's your main dispatcher that then calls compileStatement/Expression
+                    compileStatement(node->children[i], chunk, getLine(node->children[i]));
+                }
+            }
+            break;
+        }
 
         default:
             fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileStatement.\n", line, astTypeToString(node->type));
@@ -216,7 +275,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
 static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
-    int line = get_line(node);
+    int line = getLine(node);
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
@@ -250,8 +309,8 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             break;
         }
         case AST_BINARY_OP:
-            compileExpression(node->left, chunk, get_line(node->left));
-            compileExpression(node->right, chunk, get_line(node->right));
+            compileExpression(node->left, chunk, getLine(node->left));
+            compileExpression(node->right, chunk, getLine(node->right));
 
             if (node->token) {
                 switch (node->token->type) {
@@ -259,6 +318,12 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                     case TOKEN_MINUS:   writeBytecodeChunk(chunk, OP_SUBTRACT, line); break;
                     case TOKEN_MUL:     writeBytecodeChunk(chunk, OP_MULTIPLY, line); break;
                     case TOKEN_SLASH:   writeBytecodeChunk(chunk, OP_DIVIDE, line); break;
+                    case TOKEN_EQUAL:         writeBytecodeChunk(chunk, OP_EQUAL, line); break;
+                    case TOKEN_NOT_EQUAL:     writeBytecodeChunk(chunk, OP_NOT_EQUAL, line); break; // Or OP_EQUAL then OP_NOT
+                    case TOKEN_LESS:          writeBytecodeChunk(chunk, OP_LESS, line); break;
+                    case TOKEN_LESS_EQUAL:    writeBytecodeChunk(chunk, OP_LESS_EQUAL, line); break;
+                    case TOKEN_GREATER:       writeBytecodeChunk(chunk, OP_GREATER, line); break;
+                    case TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line); break;
                     // TODO: Add other binary ops (DIV, MOD, comparisons)
                     default:
                         fprintf(stderr, "L%d: Compiler error: Unknown binary operator %s\n", line, tokenTypeToString(node->token->type));
@@ -267,7 +332,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             }
             break;
         case AST_UNARY_OP:
-            compileExpression(node->left, chunk, get_line(node->left));
+            compileExpression(node->left, chunk, getLine(node->left));
             if (node->token) {
                 switch (node->token->type) {
                     case TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, line); break;

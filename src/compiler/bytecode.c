@@ -191,6 +191,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset) {
         case OP_POP:
             printf("OP_POP\n");
             return offset + 1;
+        case OP_JUMP_IF_FALSE: {
+            // The 'offset' variable here refers to the parameter of disassembleInstruction
+            uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
+            printf("OP_JUMP_IF_FALSE %4d (to %d)\n", jump_operand, offset + 3 + jump_operand);
+            return offset + 3; // Opcode + 2 bytes for operand
+        }
+        case OP_JUMP: {
+            // The 'offset' variable here refers to the parameter of disassembleInstruction
+            uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
+            printf("OP_JUMP          %4d (to %d)\n", jump_operand, offset + 3 + jump_operand);
+            return offset + 3; // Opcode + 2 bytes for operand
+        }
         case OP_HALT:
             printf("OP_HALT\n");
             return offset + 1;
@@ -232,4 +244,42 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name) {
         }
         printf("\n");
     }
+}
+
+/**
+ * @brief Writes a 16-bit value (short) to the bytecode chunk.
+ * The value is written as two bytes in big-endian order (most significant byte first).
+ * Also records the line number for both bytes, using the same line for both.
+ *
+ * @param chunk The bytecode chunk.
+ * @param value The 16-bit value to write.
+ * @param line The line number for these bytecode bytes.
+ */
+void emitShort(BytecodeChunk* chunk, uint16_t value, int line) {
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 8) & 0xFF), line); // MSB
+    writeBytecodeChunk(chunk, (uint8_t)(value & 0xFF), line);        // LSB
+}
+
+/**
+ * @brief Patches a 16-bit value at a given offset in the bytecode's code array.
+ * The value is written as two bytes in big-endian order.
+ * This is used for backpatching jump offsets.
+ * Assumes the offset_in_code points to where the MSB of the short should be written.
+ *
+ * @param chunk The bytecode chunk.
+ * @param offset_in_code The byte offset within chunk->code where the 2-byte value starts.
+ * @param value The 16-bit value to write.
+ */
+void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value) {
+    // Ensure the offset is valid and there's space for two bytes
+    if (offset_in_code < 0 || (offset_in_code + 1) >= chunk->count) {
+        fprintf(stderr, "Error: patchShort out of bounds. Offset: %d, Chunk count: %d. Cannot patch short.\n",
+                offset_in_code, chunk->count);
+        // Consider a more robust error handling strategy if this can occur in non-debug situations
+        // For now, we'll print an error and potentially corrupt bytecode if this happens.
+        // In a production compiler, this might be an assertion or a specific error return.
+        return; // Or EXIT_FAILURE_HANDLER(); if it's considered fatal
+    }
+    chunk->code[offset_in_code]     = (uint8_t)((value >> 8) & 0xFF); // MSB
+    chunk->code[offset_in_code + 1] = (uint8_t)(value & 0xFF);        // LSB
 }

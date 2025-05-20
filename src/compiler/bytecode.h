@@ -21,6 +21,15 @@ typedef enum {
     OP_DIVIDE,        // Pop two values, divide, push result (handle integer/real later)
     OP_NEGATE,        // Pop one value, negate it, push result (for unary minus)
     OP_NOT,           // Pop one value (boolean), invert, push result
+    OP_EQUAL,
+    OP_NOT_EQUAL,
+    OP_GREATER,
+    OP_GREATER_EQUAL,
+    OP_LESS,
+    OP_LESS_EQUAL,
+
+    OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
+    OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
 
     OP_DEFINE_GLOBAL, // Define a new global variable (takes constant index for name)
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
@@ -35,6 +44,7 @@ typedef enum {
 
     OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
     OP_HALT           // Stop the VM (though OP_RETURN from main might suffice)
+    
 } OpCode;
 
 // --- Bytecode Chunk Structure ---
@@ -58,6 +68,8 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add by
 void freeBytecodeChunk(BytecodeChunk* chunk);
 int addConstantToChunk(BytecodeChunk* chunk, Value value); // Add a value to constant pool, return index
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name);
-int disassembleInstruction(BytecodeChunk* chunk, int offset); 
+int disassembleInstruction(BytecodeChunk* chunk, int offset);
+void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
+void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
 
 #endif // PSCAL_BYTECODE_H
