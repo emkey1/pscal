@@ -1,7 +1,7 @@
 #ifndef AST_H
 #define AST_H
-#include "types.h"
-#include "symbol.h"
+#include "core/types.h"
+#include "symbol/symbol.h"
 
 struct Symbol_s; // Forward declaration of the struct tag
 typedef struct Symbol_s Symbol; // Typedef

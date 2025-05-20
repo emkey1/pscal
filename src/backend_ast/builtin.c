@@ -1,20 +1,22 @@
-#include "builtin.h"
-#include "parser.h"
-#include "utils.h"
-#include "interpreter.h"
-#include "symbol.h"
-#include "sdl.h"
-#include "audio.h"
-#include "sdl.h"
-#include "audio.h"
-#include "globals.h"
+#include "backend_ast/builtin.h"
+#include "frontend/parser.h"
+#include "core/utils.h"
+#include "backend_ast/interpreter.h"
+#include "symbol/symbol.h"
+#include "backend_ast/sdl.h"
+#include "backend_ast/audio.h"    
+// Duplicates removed
+#include "globals.h"                  // Assuming globals.h is directly in src/
+
+// Standard library includes remain the same
 #include <math.h>
-#include <termios.h>
-#include <unistd.h>     // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
-#include <ctype.h>      // For isdigit
-#include <errno.h>
-#include <sys/ioctl.h> // For ioctl, FIONREAD
-#include <stdint.h>
+#include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
+#include <ctype.h>   // For isdigit
+#include <errno.h>   // For errno
+#include <sys/ioctl.h> // For ioctl, FIONREAD (Terminal I/O)
+#include <stdint.h>  // For fixed-width integer types like uint8_t
+#include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
 
 // Comparison function for bsearch (case-insensitive)
 static int compareBuiltinMappings(const void *key, const void *element) {
@@ -335,7 +337,7 @@ int getCursorPosition(int *row, int *col) {
     // --- Read Response ---
     memset(buf, 0, sizeof(buf));
     i = 0;
-    while (i < sizeof(buf) - 1) {
+    while (i < (int)sizeof(buf) - 1) {
         errno = 0; // Clear errno before read
         ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
         read_errno = errno; // Store errno immediately after read
@@ -2853,7 +2855,7 @@ Value executeBuiltinRealToStr(AST *node) {
     // Standard Pascal often has a default width/precision for reals.
     int chars_written = snprintf(buffer, sizeof(buffer), "%f", arg.r_val); // Or "%g"
 
-    if (chars_written < 0 || chars_written >= sizeof(buffer)) {
+    if (chars_written < 0 || (size_t)chars_written >= sizeof(buffer)) {
         fprintf(stderr, "Runtime error: Failed to convert real to string in RealToStr (snprintf error or buffer too small).\n");
         freeValue(&arg); // Free the evaluated argument
         return makeString("Error:RealToStrConversion");

@@ -1,11 +1,11 @@
-#include "types.h"
-#include "utils.h"
-#include "list.h"
-#include "ast.h"
+#include "core/types.h"
+#include "core/utils.h"
+#include "core/list.h"
+#include "frontend/ast.h"
 #include "globals.h"
-#include "symbol.h"
-#include "parser.h"
-#include "builtin.h"
+#include "symbol/symbol.h"
+#include "frontend/parser.h"
+#include "backend_ast/builtin.h"
 
 bool isNodeInTypeTable(AST* nodeToFind) {
     if (!nodeToFind || !type_table) return false; // No node or no table
@@ -230,6 +230,14 @@ void dumpAST(AST *node, int indent) { // This is your original textual dump
             dumpAST(node->children[i], indent + 3);
         }
     }
+    printf("Node(type=%s", astTypeToString(node->type));
+    if (node->token && node->token->value)
+        printf(", token=\"%s\"", node->token->value);
+    printf(", var_type=%s", varTypeToString(node->var_type));
+    if (node->type == AST_BOOLEAN || node->type == AST_NUMBER || node->type == AST_ENUM_VALUE) { // Add AST_BOOLEAN here
+        printf(", i_val=%d", node->i_val); // Print i_val for these types
+    }
+    printf(")\n");
 }
 
 void setTypeAST(AST *node, VarType type) {

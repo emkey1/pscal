@@ -2366,10 +2366,29 @@ AST *factor(Parser *parser) {
         return node; // <<< RETURN IMMEDIATELY
     } else if (initialTokenType == TOKEN_TRUE || initialTokenType == TOKEN_FALSE) {
         Token* c = copyToken(initialToken);
-        eat(parser, initialTokenType); // Eat TRUE or FALSE
-        node = newASTNode(AST_BOOLEAN, c); freeToken(c);
+        if (!c && initialToken) { /* Malloc error */ EXIT_FAILURE_HANDLER(); } // Check copyToken result
+        eat(parser, initialTokenType);
+        node = newASTNode(AST_BOOLEAN, c);
+        if (!node && c) { /* Malloc error */ freeToken(c); EXIT_FAILURE_HANDLER(); } // Check newASTNode result
+        
+        // newASTNode might have made its own copy of c for node->token,
+        // so c itself can be freed after newASTNode uses it.
+        if (c) freeToken(c);
+
         setTypeAST(node, TYPE_BOOLEAN);
-        return node; // <<< RETURN IMMEDIATELY
+        
+        // >>> ADD THIS LINE BACK <<<
+        node->i_val = (initialTokenType == TOKEN_TRUE) ? 1 : 0;
+
+        #ifdef DEBUG
+        if(dumpExec && node && node->token) { // Added NULL checks for node and node->token
+            fprintf(stderr, "PARSER factor() AST_BOOLEAN: token=%s, node->i_val SET TO %d\n",
+                    node->token->value, node->i_val);
+        } else if (dumpExec && node) {
+             fprintf(stderr, "PARSER factor() AST_BOOLEAN: token=NULL_TOKEN_IN_NODE, node->i_val SET TO %d\n", node->i_val);
+        }
+        #endif
+        return node;
 
     } else if (initialTokenType == TOKEN_NOT) {
         Token* c = copyToken(initialToken);

@@ -1,5 +1,5 @@
-#include "lexer.h"
-#include "utils.h"
+#include "frontend/lexer.h"
+#include "core/utils.h"
 #include "globals.h"
 #include <string.h>
 #include <ctype.h>
@@ -204,7 +204,7 @@ Token *identifier(Lexer *lexer) {
 
     Token *token = malloc(sizeof(Token));
     token->type = TOKEN_IDENTIFIER; // Default to IDENTIFIER
-    for (int i = 0; i < NUM_KEYWORDS; i++) {
+    for (int i = 0; i < (int)NUM_KEYWORDS; i++) {
         // ADD DEBUG PRINT 3: See the comparison being made
         // DEBUG_PRINT("identifier: Comparing \"_%s_\" with keyword \"_%s_\"\n", id_str, keywords[i].keyword);
         if (strcmp(id_str, keywords[i].keyword) == 0) {

@@ -8,7 +8,7 @@
 #define PSCAL_COMPILER_H
 
 #include "frontend/ast.h"   // For AST* type
-#include "bytecode.h"     // For BytecodeChunk struct
+#include "compiler/bytecode.h"     // For BytecodeChunk struct
 
 // Main function to compile an AST into a bytecode chunk.
 // Returns true on success, false on failure.

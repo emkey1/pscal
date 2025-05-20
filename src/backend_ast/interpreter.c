@@ -1,7 +1,7 @@
-#include "interpreter.h"
-#include "builtin.h"
-#include "symbol.h"
-#include "utils.h"
+#include "backend_ast/interpreter.h"
+#include "backend_ast/builtin.h"
+#include "symbol/symbol.h"
+#include "core/utils.h"
 #include "globals.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,12 +27,13 @@ static bool getOrdinalValue(Value val, long long *out_ord) {
         case TYPE_ENUM:
             *out_ord = (long long)val.enum_val.ordinal;
             return true;
-        case TYPE_STRING: // Allow single-char strings
+        case TYPE_STRING:
             if (val.s_val && strlen(val.s_val) == 1) {
-                *out_ord = (long long)val.s_val[0];
-                return true;
+                return (long long)val.s_val[0]; // Return if it's a single char
             }
-            // Fall through if not single-char string
+            // If not a single char string, it's an error for ordinal context
+            fprintf(stderr, "Runtime Error: Cannot get ordinal value of multi-character string.\n");
+            return 0; // Or some error indicator / exit
         default:
             return false; // Not a recognized ordinal type or valid single-char string
     }
@@ -1602,7 +1603,7 @@ unsupported_operands_label: // Target label for goto from other blocks if needed
             // Assume the parser links the enum value node (node)
             // to its type definition node via node->right.
 
-            AST* type_def_node = node->right; // Get potential link to type def
+            AST* type_def_node = node->right; // Get potential link to type def.  Not currently used
             const char* type_name_str = NULL;
 
             // Handle potential type references

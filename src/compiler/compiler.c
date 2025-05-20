@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
 
-#include "compiler.h"
-#include "bytecode.h"
+#include "compiler/compiler.h"
+#include "compiler/bytecode.h"
 #include "core/utils.h"
 #include "core/types.h"
 #include "frontend/ast.h"
@@ -119,30 +119,30 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             }
             break;
 
-        case AST_VAR_DECL:
-            // For each variable in the declaration (e.g., a, b, result: Integer)
-            // Ensure its name is registered as a global for access.
-            // The actual OP_DEFINE_GLOBAL might be implicit if the VM pre-allocates globals
-            // based on a list provided by the compiler, or explicit.
-            // For our SimpleMath, they are global.
-            if (node->children) {
+        case AST_VAR_DECL: {
+            // node->var_type should hold the type of the variables being declared (e.g., TYPE_INTEGER)
+            // node->right usually points to the type specifier AST node (e.g., AST_VARIABLE "integer")
+            // The actual VarType should be on the AST_VAR_DECL node itself after annotateTypes.
+            VarType declared_type = node->var_type;
+
+            if (node->children) { // `children` holds the AST_VARIABLE nodes for the names (a, b, result)
                 for (int i = 0; i < node->child_count; i++) {
                     AST* varNameNode = node->children[i];
                     if (varNameNode && varNameNode->token) {
-                        // Add name to constant pool (for VM to identify it if needed, or for OP_DEFINE_GLOBAL)
                         int nameIndex = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                        // Emit an opcode that tells the VM to "declare" or "allocate space" for this global.
-                        // The operand is the index of the variable's name string in the constant pool.
-                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, get_line(varNameNode));
-                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, get_line(varNameNode));
                         
-                        // Also, ensure our compiler's internal mapping is updated.
+                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, get_line(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, get_line(varNameNode)); // Operand 1: name string index
+                        writeBytecodeChunk(chunk, (uint8_t)declared_type, get_line(varNameNode)); // Operand 2: VarType enum value
+                        
+                        // The compiler's internal resolveGlobalVariableIndex ensures it knows about the global.
+                        // The VM will use the name and type to set up its storage.
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, get_line(varNameNode));
                     }
                 }
             }
             break;
-
+        }
         case AST_COMPOUND:
             for (int i = 0; i < node->child_count; i++) {
                 compileStatement(node->children[i], chunk, line);
@@ -221,8 +221,13 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
 
     switch (node->type) {
         case AST_NUMBER: {
-            long long val = atoll(node->token->value);
-            int constIndex = addConstantToChunk(chunk, makeInt(val));
+            Value numVal;
+            if (node->token->type == TOKEN_REAL_CONST) {
+                numVal = makeReal(atof(node->token->value));
+            } else { // INTEGER_CONST or HEX_CONST
+                numVal = makeInt(atoll(node->token->value));
+            }
+            int constIndex = addConstantToChunk(chunk, numVal);
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
@@ -261,7 +266,6 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                 }
             }
             break;
-        
         case AST_UNARY_OP:
             compileExpression(node->left, chunk, get_line(node->left));
             if (node->token) {
@@ -274,7 +278,17 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                 }
             }
             break;
-
+        case AST_BOOLEAN: {
+             #ifdef DEBUG
+             if(dumpExec) fprintf(stderr, "COMPILER: AST_BOOLEAN, token value '%s', node->i_val = %d, node->var_type = %s\n",
+                    node->token ? node->token->value : "NULL", node->i_val, varTypeToString(node->var_type));
+             #endif
+             Value boolConst = makeBoolean(node->i_val);
+             int constIndex = addConstantToChunk(chunk, boolConst);
+             writeBytecodeChunk(chunk, OP_CONSTANT, line);
+             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+             break;
+        }
         case AST_PROCEDURE_CALL: // Function calls used in expressions
             // For SimpleMath, this case isn't hit for `upcase` because `WriteLn` takes expressions.
             // But if you had `x := upcase('a');`, this would be used.

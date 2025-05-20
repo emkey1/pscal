@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h> // For memcpy
 
-#include "bytecode.h" // Our new header
+#include "compiler/bytecode.h"
 #include "core/types.h"   // For Value struct
 #include "core/utils.h"   // For freeValue, etc. (might be needed by Value)
 // #include "memory.h" // If you had a separate memory manager for realloc etc.
@@ -151,14 +151,15 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset) {
             return offset + 1;
         case OP_DEFINE_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
+            uint8_t type_val = chunk->code[offset + 2]; // New second operand
             printf("OP_DEFINE_GLOBAL %4d '", name_index);
             if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
                 printf("%s", chunk->constants[name_index].s_val);
             } else {
-                printf("INVALID_NAME_INDEX");
+                printf("INVALID_NAME_IDX");
             }
-            printf("'\n");
-            return offset + 2; // Opcode + 1-byte operand
+            printf("' Type: %s (%d)\n", varTypeToString((VarType)type_val), type_val);
+            return offset + 3; // Opcode + 2 bytes of operands
         }
         case OP_GET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];

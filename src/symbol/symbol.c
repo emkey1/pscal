@@ -6,17 +6,17 @@
 //
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
-#include "lexer.h"
-#include "utils.h"
+#include "frontend/lexer.h"
+#include "core/utils.h"
 #include "globals.h"
-#include "interpreter.h"
+#include "backend_ast/interpreter.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
-#include "symbol.h"
+#include "symbol/symbol.h"
 #include <assert.h>
-#include "list.h"
-#include "ast.h"
+#include "core/list.h"
+#include "frontend/ast.h"
 
 // SDL Globals
 SDL_Window* gSdlWindow = NULL;

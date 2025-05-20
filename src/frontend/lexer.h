@@ -1,7 +1,7 @@
 #ifndef LEXER_H
 #define LEXER_H
 
-#include "types.h"
+#include "core/types.h"
 
 typedef struct {
     const char *text;

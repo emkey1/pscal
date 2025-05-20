@@ -1,15 +1,15 @@
-#include "lexer.h"
-#include "parser.h"
-#include "ast.h"
-#include "types.h"
-#include "utils.h"
-#include "list.h"
+#include "frontend/lexer.h"
+#include "frontend/parser.h"
+#include "frontend/ast.h"
+#include "core/types.h"
+#include "core/utils.h"
+#include "core/list.h"
 // Include globals.h first, which includes necessary headers and forward declarations.
 #include "globals.h" // This should include symbol.h and define HashTable
 
 // Interpreter builtins and execution functions.
-#include "interpreter.h"
-#include "builtin.h"
+#include "backend_ast/interpreter.h"
+#include "backend_ast/builtin.h"
 
 // Bytecode stuff
 #include "compiler/bytecode.h"
@@ -139,7 +139,7 @@ void executeWithASTDump(AST *program_ast, const char *program_name) {
     int chars_written = snprintf(filename, sizeof(filename), "/tmp/pscal/%s.%d.ast", base, (int)pid);
 
     // Check if snprintf resulted in truncation or an error.
-    if (chars_written < 0 || chars_written >= sizeof(filename)) {
+    if (chars_written < 0 || (size_t)chars_written >= sizeof(filename)) {
          fprintf(stderr, "Warning: AST dump filename is too long or invalid. AST dump skipped.\n");
          // Execute the program even if dump filename creation failed.
          executeWithScope(program_ast, true); // Assumes executeWithScope is defined.

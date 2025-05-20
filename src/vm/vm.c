@@ -15,8 +15,6 @@
 #include "backend_ast/interpreter.h" // <<< ADDED for makeCopyOfValue
 
 // --- Forward Declarations for VM-specific Symbol Table Helpers (stubs) ---
-static Symbol* insertSymbolIntoHashTable(HashTable* table, const char* name, VarType type, AST* type_def, bool is_var_decl_for_local_scope_pop);
-static bool updateSymbolInHashTable(HashTable* table, const char* name, Value newValue);
 #ifdef DEBUG // Only if dumpSymbolValue is used by debug prints in this file
 static void dumpSymbolValue(Value* v); // Assuming this is in utils.c or here for debug
 #endif
@@ -102,6 +100,8 @@ void freeVM(VM* vm) {
     }
 }
 
+// Forward declaration if this function is defined after its first use in OP_DEFINE_GLOBAL
+static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init);
 
 // --- Main Interpretation Loop ---
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
@@ -199,70 +199,97 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
                 freeValue(&val_popped);
                 break;
             }
-
             case OP_DEFINE_GLOBAL: {
-                Value varNameVal = READ_CONSTANT();
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-                    runtimeError(vm, "Runtime Error: Global variable name not a string for OP_DEFINE_GLOBAL.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                if (sym == NULL) {
-                    // For Pscal, type is known at compile time. VM should allocate with correct type.
-                    // This requires compiler to pass type info for OP_DEFINE_GLOBAL.
-                    // For now, default-initialize to integer 0, assignment will set type.
-                    // The type_def AST node is not easily available here unless passed somehow.
-                    sym = insertSymbolIntoHashTable(vm->vmGlobalSymbols, varNameVal.s_val, TYPE_INTEGER, NULL, false);
-                    if (sym && sym->value) {
-                         *(sym->value) = makeInt(0);
-                    } else if (!sym) {
-                        runtimeError(vm, "Runtime Error: Could not define global '%s' in VM.", varNameVal.s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                }
-                // No value is pushed or popped by OP_DEFINE_GLOBAL itself.
-                // freeValue(&varNameVal); // No, varNameVal is from constant pool, not a heap copy
-                break;
-            }
+                 Value varNameVal = READ_CONSTANT(); // Operand 1: name string index
+                 VarType declaredType = (VarType)READ_BYTE(); // Operand 2: VarType enum value
+                 
+                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                     runtimeError(vm, "Runtime Error: Global variable name not a string for OP_DEFINE_GLOBAL.");
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+
+                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                 if (sym == NULL) {
+                     // Create the symbol. The type_def AST node isn't directly available from bytecode for basic types.
+                     // We pass NULL for type_def_for_value_init if only basic types are handled by makeValueForType without it.
+                     // If makeValueForType needs an AST for structured types, the bytecode/compiler would need to provide that info.
+                     sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL);
+                                         // For simple types from SimpleMath.p, NULL for type_def_for_value_init is fine.
+                                         // When you have records/arrays, OP_DEFINE_GLOBAL might need to carry
+                                         // an index to a serialized type definition that the VM can use.
+
+                     if (!sym) {
+                         // createSymbolForVM would have printed an error
+                         runtimeError(vm, "Runtime Error: Could not create symbol structure for global '%s' in VM.", varNameVal.s_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     hashTableInsert(vm->vmGlobalSymbols, sym);
+                     #ifdef DEBUG
+                         if(dumpExec) fprintf(stderr, "VM: Defined global '%s' type %s\n", varNameVal.s_val, varTypeToString(declaredType));
+                     #endif
+                 } else {
+                     // Symbol already defined. Check type consistency or warn.
+                     if (sym->type != declaredType) {
+                          runtimeError(vm, "VM Runtime Warning: Global '%s' re-defined or already exists with different type (%s vs %s).",
+                                       varNameVal.s_val, varTypeToString(sym->type), varTypeToString(declaredType));
+                     }
+                 }
+                 break;
+             }
             case OP_GET_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-                    runtimeError(vm, "Runtime Error: Global variable name not a string for OP_GET_GLOBAL.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error handling */ return INTERPRET_RUNTIME_ERROR; }
                 
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", varNameVal.s_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(sym->value));
-                // freeValue(&varNameVal); // No, from constant pool
+                push(vm, makeCopyOfValue(sym->value)); // Push a deep copy of the global's value
                 break;
             }
             case OP_SET_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-                    runtimeError(vm, "Runtime Error: Global variable name not a string for OP_SET_GLOBAL.");
-                     return INTERPRET_RUNTIME_ERROR;
-                }
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error handling */ return INTERPRET_RUNTIME_ERROR; }
                 
-                // Value to be set is on top of the stack.
-                // Peek it first, because updateSymbolInHashTable might free the old value in the symbol.
-                Value value_to_set_on_stack = peek(vm, 0);
-                
-                if (!updateSymbolInHashTable(vm->vmGlobalSymbols, varNameVal.s_val, value_to_set_on_stack)) {
-                    // updateSymbolInHashTable calls runtimeError if needed
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", varNameVal.s_val);
+                    // Value on stack still needs to be popped and freed.
+                    Value temp_popped_val = pop(vm); freeValue(&temp_popped_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                // The value on stack was deep copied by updateSymbolInHashTable into the symbol.
-                // Now pop the original from stack and free its contents if it was complex.
-                Value popped_val = pop(vm);
-                freeValue(&popped_val);
-                // freeValue(&varNameVal); // No, from constant pool
+                if (sym->is_const) {
+                    runtimeError(vm, "Runtime Error: Cannot assign to constant global '%s'.", varNameVal.s_val);
+                    Value temp_popped_val = pop(vm); freeValue(&temp_popped_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) { // Should have been initialized by OP_DEFINE_GLOBAL
+                     sym->value = (Value*)malloc(sizeof(Value));
+                     if(!sym->value) { /* Malloc error */ Value temp_popped_val = pop(vm); freeValue(&temp_popped_val); return INTERPRET_RUNTIME_ERROR; }
+                     // Initialize if it was somehow NULL
+                     *(sym->value) = makeValueForType(sym->type, sym->type_def);
+                }
+                
+                Value value_to_set_from_stack = peek(vm, 0);
+                
+                // TODO: Type checking for Pscal assignment (e.g., int to real promotion, error on string to int)
+                // if (!typesAreAssignmentCompatible(sym->type, value_to_set_from_stack.type)) {
+                //    runtimeError(vm, "Type mismatch assigning to global '%s'", varNameVal.s_val);
+                //    return INTERPRET_RUNTIME_ERROR;
+                // }
+
+                freeValue(sym->value); // Free the old contents of the symbol's value
+                *(sym->value) = makeCopyOfValue(&value_to_set_from_stack); // Store a deep copy
+                // After copy, the symbol's type should ideally remain its declared type,
+                // and the value assigned should be compatible or coerced.
+                // For now, if makeCopyOfValue sets the type (it does by struct copy), let it be.
+                // sym->type = sym->value->type; // Or ensure this reflects declared type and value is compatible
+                
+                Value popped_val = pop(vm); // Pop the value that was on stack
+                freeValue(&popped_val);    // And free its (now redundant) contents
                 break;
             }
-
             case OP_WRITE_LN: {
                 #define MAX_WRITELN_ARGS 32 // Define a reasonable max
                 // ...
@@ -322,101 +349,49 @@ void dumpSymbolValue(Value* v) { // Made static as it's a local helper for vm.c'
         case TYPE_BOOLEAN: printf("BOOL:%s", v->i_val ? "T" : "F"); break;
         case TYPE_NIL:     printf("NIL"); break;
         case TYPE_MEMORYSTREAM: printf("MSTREAM:%p", (void*)v->mstream); break;
-        // Add other types as needed
         default: printf("%s", varTypeToString(v->type)); break;
     }
 }
 #endif
+    
+    static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init) {
+        if (!name || name[0] == '\0') {
+            // runtimeError(vm, "VM Internal Error: Invalid name for createSymbolForVM."); // vm not available here
+            fprintf(stderr, "VM Internal Error: Invalid name for createSymbolForVM.\n");
+            return NULL;
+        }
 
-// --- VM-specific Symbol Table Helper Stubs ---
-// These need to be robustly implemented, likely by calling your existing
-// symbol.c functions but passing vm->vmGlobalSymbols.
-// For now, basic stubs.
+        Symbol *sym = (Symbol*)malloc(sizeof(Symbol));
+        if (!sym) {
+            fprintf(stderr, "VM Internal Error: Malloc failed for Symbol in createSymbolForVM for '%s'.\n", name);
+            return NULL;
+        }
 
-static Symbol* insertSymbolIntoHashTable(HashTable* table, const char* name, VarType type, AST* type_def, bool is_var_decl_for_local_scope_pop) {
-    (void)is_var_decl_for_local_scope_pop; // Unused for global VM table for now
-    if (!table || !name) {
-        fprintf(stderr, "VM Internal Error: Null table or name for insertSymbolIntoHashTable.\n");
-        return NULL;
-    }
+        sym->name = strdup(name);
+        if (!sym->name) {
+            fprintf(stderr, "VM Internal Error: Malloc failed for Symbol name in createSymbolForVM for '%s'.\n", name);
+            free(sym);
+            return NULL;
+        }
 
-    Symbol* sym = hashTableLookup(table, name);
-    if (sym) {
-        // Symbol already exists. For OP_DEFINE_GLOBAL, this might mean it's already defined.
-        // Depending on Pscal rules (allow re-declaration at same level?), this could be an error or no-op.
-        // For now, let's assume it's okay and the VM might just ensure its value area is ready.
-        // But a proper DEFINE should only happen once for a given scope.
-        // If this is just ensuring it exists for GET/SET, that's different.
-        // The compiler's OP_DEFINE_GLOBAL ensures it is called for each var in `var` section.
+        sym->type = type;
+        sym->type_def = type_def_for_value_init; // Store the AST type definition if provided (for complex types)
+                                                 // For simple types from bytecode, this might be NULL.
+        sym->value = (Value*)malloc(sizeof(Value));
+        if (!sym->value) {
+            fprintf(stderr, "VM Internal Error: Malloc failed for Value in createSymbolForVM for '%s'.\n", name);
+            free(sym->name);
+            free(sym);
+            return NULL;
+        }
+
+        // Initialize the Value struct using makeValueForType
+        *(sym->value) = makeValueForType(type, type_def_for_value_init);
+
+        sym->is_alias = false;
+        sym->is_const = false; // Globals defined by VAR are not const
+        sym->is_local_var = false; // These are VM globals
+        sym->next = NULL; // Will be handled by hashTableInsert
+
         return sym;
     }
-
-    sym = (Symbol*)malloc(sizeof(Symbol));
-    if (!sym) {
-        fprintf(stderr, "VM Internal Error: Malloc failed for Symbol in insertSymbolIntoHashTable.\n");
-        return NULL;
-    }
-    sym->name = strdup(name);
-    if (!sym->name) {
-        fprintf(stderr, "VM Internal Error: Malloc failed for Symbol name in insertSymbolIntoHashTable.\n");
-        free(sym);
-        return NULL; /* Corrected: was missing a semicolon and not returning */
-    } // <<< CORRECTED: Added semicolon and return NULL
-
-    sym->type = type; // Initial type (might be generic like INTEGER if not fully known)
-    sym->type_def = type_def;
-    sym->value = (Value*)malloc(sizeof(Value));
-    if (!sym->value) {
-        fprintf(stderr, "VM Internal Error: Malloc failed for Value in insertSymbolIntoHashTable.\n");
-        free(sym->name);
-        free(sym);
-        return NULL;
-    }
-    
-    *(sym->value) = makeValueForType(type, type_def); // Initialize with default for type
-
-    sym->is_alias = false;
-    sym->is_const = false;
-    sym->is_local_var = false;
-    sym->next = NULL;
-
-    hashTableInsert(table, sym); // Assumes hashTableInsert is from your symbol.c
-    return sym;
-}
-
-static bool updateSymbolInHashTable(HashTable* table, const char* name, Value newValue) {
-    if (!table || !name) {
-        fprintf(stderr, "VM Internal Error: Null table or name for updateSymbolInHashTable.\n");
-        return false;
-    }
-    Symbol* sym = hashTableLookup(table, name);
-    if (!sym) {
-        runtimeError(NULL, "VM Runtime Error: Global variable '%s' not defined before assignment.", name); // VM* is null for global error here
-        return false;
-    }
-    if (sym->is_const) {
-        runtimeError(NULL, "VM Runtime Error: Cannot assign to constant global '%s'.", name);
-        return false;
-    }
-    if (!sym->value) {
-        // This should ideally not happen if insertSymbolIntoHashTable initializes it
-        sym->value = (Value*)malloc(sizeof(Value));
-        if(!sym->value) {
-            fprintf(stderr, "VM Internal Error: Malloc failed for Value in updateSymbolInHashTable for '%s'.\n", name);
-            return false;
-        }
-        memset(sym->value, 0, sizeof(Value));
-        // Type will be set by makeCopyOfValue
-    }
-
-    // TODO: VM-side type checking for assignment: sym->type vs newValue.type
-    // For now, assume types are compatible or promote (e.g. int to real)
-    // Example: if (sym->type == TYPE_REAL && newValue.type == TYPE_INTEGER) { newValue = makeReal(newValue.i_val); }
-
-    freeValue(sym->value); // Free old contents of the symbol's Value
-    *(sym->value) = makeCopyOfValue(&newValue); // Deep copy the new value
-    sym->type = sym->value->type; // Ensure symbol's declared type matches the new value's type after copy
-                                  // Or, sym->type should remain its declared type, and we check compatibility.
-                                  // Let's keep sym->type as declared, assignment check needed.
-    return true;
-}

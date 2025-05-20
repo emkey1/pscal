@@ -17,7 +17,7 @@
 // --- END INCLUDE ---
 
 // Include types.h which should NOT include SDL headers (confirmed by your content)
-#include "types.h"
+#include "core/types.h"
 
 #define MAX_SDL_TEXTURES 32 // Define a maximum number of textures
 

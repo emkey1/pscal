@@ -1,11 +1,9 @@
 #ifndef BUILTIN_H
 #define BUILTIN_H
 
-
-
-#include "types.h"
-#include "ast.h"
-#include "globals.h"
+#include "core/types.h"
+#include "frontend/ast.h"
+#include "globals.h" 
 
 // Math Functions
 Value executeBuiltinCos(AST *node);
