@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <curl/curl.h>
-#include "builtin.h"
-#include "interpreter.h"
+#include "backend_ast/builtin.h"
+#include "backend_ast/interpreter.h"
 #include "globals.h"
-#include "utils.h"
+#include "core/utils.h"
 
 /* Callback for libcurl: writes received data into a MStream */
 static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *userp) {

@@ -5,6 +5,7 @@
 
 #include "compiler/compiler.h"
 #include "compiler/bytecode.h"
+#include "backend_ast/builtin.h"
 #include "core/utils.h"
 #include "core/types.h"
 #include "frontend/ast.h"
@@ -201,12 +202,46 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         
-        case AST_PROCEDURE_CALL: // e.g. a function call whose result is ignored
-            compileExpression(node, chunk, line); // Compile the call
-            if (node->var_type != TYPE_VOID) { // If it was a function, pop its result
-                writeBytecodeChunk(chunk, OP_POP, line);
+        case AST_PROCEDURE_CALL: {
+            // This is a procedure call as a statement, or a function call whose result is ignored.
+            if (isBuiltin(node->token->value)) { // isBuiltin() is from src/backend_ast/builtin.c
+                // Compile arguments first, they are pushed onto the stack
+                for (int i = 0; i < node->child_count; i++) {
+                    if (node->children[i]) {
+                        compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                    } else {
+                         fprintf(stderr, "L%d: Compiler error: NULL argument AST node in procedure call '%s'.\n", line, node->token->value);
+                         // Handle error, perhaps push a nil or default value, or exit
+                         // For now, let's push a nil constant if an argument is missing
+                         int nilConstIdx = addConstantToChunk(chunk, makeNil());
+                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                         writeBytecodeChunk(chunk, (uint8_t)nilConstIdx, line);
+                    }
+                }
+                // Add built-in name to constant pool
+                int nameIndex = addConstantToChunk(chunk, makeString(node->token->value)); // makeString duplicates
+
+                // Emit OP_CALL_BUILTIN
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);    // Operand 1: Built-in name index
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line); // Operand 2: Arg count
+
+                // If it was a function call (var_type is annotated with function's return type),
+                // its result is on the stack but unused. Pop it.
+                // node->var_type is set by annotateTypes if it's a function.
+                // For procedures, var_type will be TYPE_VOID.
+                if (node->var_type != TYPE_VOID) {
+                    writeBytecodeChunk(chunk, OP_POP, line);
+                }
+            } else {
+                // Handle user-defined procedure calls (future feature)
+                fprintf(stderr, "L%d: Compiler: User-defined procedure call statement '%s' not yet implemented for bytecode.\n", line, node->token->value);
+                // If it might have been a function call whose result is ignored, and if user-defined functions could leave things on stack
+                // you might need a generic way to pop if the type system indicates a return value.
+                // For now, we just print an error for user-defined.
             }
             break;
+        }
         case AST_IF: {
             // Structure: node->left is condition, node->right is then_branch, node->extra is else_branch (optional)
             if (!node->left || !node->right) {
@@ -354,19 +389,44 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
              writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
              break;
         }
-        case AST_PROCEDURE_CALL: // Function calls used in expressions
-            // For SimpleMath, this case isn't hit for `upcase` because `WriteLn` takes expressions.
-            // But if you had `x := upcase('a');`, this would be used.
-            // This is a placeholder for now as SimpleMath doesn't use function calls in expressions
-            // directly other than as arguments to WriteLn.
-            fprintf(stderr, "L%d: Compiler: Expression function call for '%s' needs OP_CALL_BUILTIN/OP_CALL logic.\n", line, node->token ? node->token->value : "unknown");
-            // For now, push a dummy value to satisfy expression context.
-            {
-                int dummyIndex = addConstantToChunk(chunk, makeInt(0)); // Or type from node->var_type
+        case AST_PROCEDURE_CALL: { // This is a function call within an expression
+            if (isBuiltin(node->token->value)) {
+                // Compile arguments first
+                for (int i = 0; i < node->child_count; i++) {
+                     if (node->children[i]) {
+                        compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                    } else {
+                         fprintf(stderr, "L%d: Compiler error: NULL argument AST node in function call '%s'.\n", line, node->token->value);
+                         int nilConstIdx = addConstantToChunk(chunk, makeNil());
+                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                         writeBytecodeChunk(chunk, (uint8_t)nilConstIdx, line);
+                    }
+                }
+                // Add built-in name to constant pool
+                int nameIndex = addConstantToChunk(chunk, makeString(node->token->value));
+
+                // Emit OP_CALL_BUILTIN
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                // The result of the function call is now on the stack, as expected for an expression.
+            } else {
+                // Handle user-defined function calls (future feature)
+                fprintf(stderr, "L%d: Compiler: User-defined function call '%s' in expression not yet implemented for bytecode.\n", line, node->token->value);
+                // Push a dummy value of the function's expected return type (if known) or just an integer 0.
+                // node->var_type should be annotated with the function's return type.
+                Value dummyVal;
+                if (node->var_type != TYPE_VOID) { // Should be a function
+                    dummyVal = makeValueForType(node->var_type, node->right); // node->right for function return type AST
+                } else {
+                    dummyVal = makeInt(0); // Fallback
+                }
+                int dummyIndex = addConstantToChunk(chunk, dummyVal);
                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
                 writeBytecodeChunk(chunk, (uint8_t)dummyIndex, line);
             }
             break;
+        }
 
         default:
             fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileExpression.\n", line, astTypeToString(node->type));

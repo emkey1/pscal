@@ -167,40 +167,96 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
         Value b_val_popped = pop(vm); \
         Value a_val_popped = pop(vm); \
         Value result_val; \
-        if ((IS_INTEGER(a_val_popped) || IS_REAL(a_val_popped)) && (IS_INTEGER(b_val_popped) || IS_REAL(b_val_popped))) { \
-            if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
-                double fa = IS_REAL(a_val_popped) ? AS_REAL(a_val_popped) : (double)AS_INTEGER(a_val_popped); \
-                double fb = IS_REAL(b_val_popped) ? AS_REAL(b_val_popped) : (double)AS_INTEGER(b_val_popped); \
-                if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
-                    runtimeError(vm, "Runtime Error: Division by zero."); \
+        bool op_is_handled = false; \
+        \
+        /* Special handling for OP_ADD if operands are strings or char */ \
+        if (current_instruction_code == OP_ADD) { \
+            if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
+                (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
+                \
+                char a_buffer[2] = {0}; /* For char to string conversion */ \
+                char b_buffer[2] = {0}; \
+                const char* s_a = NULL; \
+                const char* s_b = NULL; \
+                \
+                if (IS_STRING(a_val_popped)) { \
+                    s_a = AS_STRING(a_val_popped) ? AS_STRING(a_val_popped) : ""; \
+                } else { /* IS_CHAR */ \
+                    a_buffer[0] = AS_CHAR(a_val_popped); \
+                    s_a = a_buffer; \
+                } \
+                \
+                if (IS_STRING(b_val_popped)) { \
+                    s_b = AS_STRING(b_val_popped) ? AS_STRING(b_val_popped) : ""; \
+                } else { /* IS_CHAR */ \
+                    b_buffer[0] = AS_CHAR(b_val_popped); \
+                    s_b = b_buffer; \
+                } \
+                \
+                size_t len_a = strlen(s_a); \
+                size_t len_b = strlen(s_b); \
+                char* concat_buffer = (char*)malloc(len_a + len_b + 1); \
+                if (!concat_buffer) { \
+                    runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
                     return INTERPRET_RUNTIME_ERROR; \
                 } \
-                switch(current_instruction_code) { \
-                    case OP_ADD: result_val = makeReal(fa + fb); break; \
-                    case OP_SUBTRACT: result_val = makeReal(fa - fb); break; \
-                    case OP_MULTIPLY: result_val = makeReal(fa * fb); break; \
-                    case OP_DIVIDE: result_val = makeReal(fa / fb); break; \
-                    default: result_val = makeNil(); break; \
-                } \
-            } else { /* Both are integers */ \
-                long long ia = AS_INTEGER(a_val_popped); \
-                long long ib = AS_INTEGER(b_val_popped); \
-                if (current_instruction_code == OP_DIVIDE && ib == 0) { \
-                    runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-                } \
-                switch(current_instruction_code) { \
-                    case OP_ADD: result_val = makeInt(ia + ib); break; \
-                    case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
-                    case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
-                    case OP_DIVIDE: result_val = makeReal((double)ia / (double)ib); break; \
-                    default: result_val = makeNil(); break; \
-                } \
+                strcpy(concat_buffer, s_a); \
+                strcat(concat_buffer, s_b); \
+                result_val = makeString(concat_buffer); /* makeString duplicates concat_buffer */ \
+                free(concat_buffer); \
+                op_is_handled = true; \
             } \
-        } else { \
-            runtimeError(vm, "Runtime Error: Operands must be numbers for arithmetic operation '%s'.", op_char_for_error_msg); \
+        } \
+        \
+        /* If not handled by string concatenation (or not OP_ADD), try numeric */ \
+        if (!op_is_handled) { \
+            if ((IS_INTEGER(a_val_popped) || IS_REAL(a_val_popped)) && \
+                (IS_INTEGER(b_val_popped) || IS_REAL(b_val_popped))) { \
+                \
+                if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { /* Numeric promotion to Real */ \
+                    double fa = IS_REAL(a_val_popped) ? AS_REAL(a_val_popped) : (double)AS_INTEGER(a_val_popped); \
+                    double fb = IS_REAL(b_val_popped) ? AS_REAL(b_val_popped) : (double)AS_INTEGER(b_val_popped); \
+                    if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
+                        runtimeError(vm, "Runtime Error: Division by zero."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    switch(current_instruction_code) { \
+                        case OP_ADD:      result_val = makeReal(fa + fb); break; \
+                        case OP_SUBTRACT: result_val = makeReal(fa - fb); break; \
+                        case OP_MULTIPLY: result_val = makeReal(fa * fb); break; \
+                        case OP_DIVIDE:   result_val = makeReal(fa / fb); break; \
+                        default: \
+                            runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for real numbers.", current_instruction_code); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                } else { /* Both are integers */ \
+                    long long ia = AS_INTEGER(a_val_popped); \
+                    long long ib = AS_INTEGER(b_val_popped); \
+                    if (current_instruction_code == OP_DIVIDE && ib == 0) { /* Note: OP_DIVIDE with ints produces REAL */ \
+                        runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    switch(current_instruction_code) { \
+                        case OP_ADD:      result_val = makeInt(ia + ib); break; \
+                        case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
+                        case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
+                        case OP_DIVIDE:   result_val = makeReal((double)ia / (double)ib); break; /* Integer division result is Real */ \
+                        default: \
+                            runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                } \
+                op_is_handled = true; \
+            } \
+        } \
+        \
+        if (!op_is_handled) { \
+            runtimeError(vm, "Runtime Error: Operands must be numbers for arithmetic operation '%s' (or strings/chars for '+'). Got %s and %s", op_char_for_error_msg, varTypeToString(a_val_popped.type), varTypeToString(b_val_popped.type)); \
             freeValue(&a_val_popped); freeValue(&b_val_popped); \
             return INTERPRET_RUNTIME_ERROR; \
         } \
@@ -391,7 +447,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
                     comparison_succeeded = true;
                 }
 
-
                 if (comparison_succeeded) {
                     push(vm, result_val);
                 } else {
@@ -431,26 +486,83 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
             }
             case OP_SET_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error */ return INTERPRET_RUNTIME_ERROR; }
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for SET_GLOBAL.");
+                    // Value is peeked, so no pop needed before error return
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (!sym) {
                     runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", varNameVal.s_val);
-                    Value temp_popped_val = pop(vm); freeValue(&temp_popped_val);
+                    // Value is peeked, so no pop needed before error return
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (!sym->value) {
+                if (!sym->value) { // Should have been initialized by OP_DEFINE_GLOBAL
                     sym->value = (Value*)malloc(sizeof(Value));
-                    if(!sym->value) { /* Malloc error */ Value temp_popped_val = pop(vm); freeValue(&temp_popped_val); return INTERPRET_RUNTIME_ERROR; }
-                    *(sym->value) = makeValueForType(sym->type, sym->type_def);
+                    if (!sym->value) {
+                        runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def); // type_def might be NULL
                 }
-                Value value_to_set_from_stack = peek(vm, 0);
-                freeValue(sym->value);
-                *(sym->value) = makeCopyOfValue(&value_to_set_from_stack);
-                Value popped_val = pop(vm);
-                freeValue(&popped_val);
+
+                Value value_from_stack = peek(vm, 0); // Value to be assigned is on top of stack
+                Value value_to_assign; // This will hold the (potentially coerced) value to store
+
+                // Perform type coercion
+                if (sym->type == TYPE_CHAR && value_from_stack.type == TYPE_STRING) {
+                    if (value_from_stack.s_val && strlen(value_from_stack.s_val) == 1) {
+                        value_to_assign = makeChar(value_from_stack.s_val[0]);
+                        // No need to free value_from_stack.s_val here, it's owned by the constant pool or another Value
+                    } else {
+                        runtimeError(vm, "Runtime Error: Cannot assign multi-character string or null string to CHAR variable '%s'.", sym->name);
+                        // Don't pop yet, the error will stop execution.
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (sym->type == TYPE_REAL && value_from_stack.type == TYPE_INTEGER) {
+                    value_to_assign = makeReal((double)value_from_stack.i_val);
+                } else if (sym->type == TYPE_INTEGER && value_from_stack.type == TYPE_REAL) {
+                    // Standard Pascal usually requires explicit Trunc/Round for Real->Integer.
+                    // For now, let's allow direct assignment with truncation for VM simplicity, or error.
+                    // runtimeError(vm, "Runtime Error: Cannot implicitly assign REAL to INTEGER for '%s'. Use Trunc() or Round().", sym->name);
+                    // return INTERPRET_RUNTIME_ERROR;
+                    value_to_assign = makeInt((long long)value_from_stack.r_val); // Implicit truncation
+                }
+                // Add other coercions like Integer to Byte/Word with range checks if desired
+                else {
+                    // No coercion needed, or types are incompatible (makeCopyOfValue will handle copy)
+                    // If types are truly incompatible and not handled by makeCopyOfValue implicitly,
+                    // an error should be raised here after checking sym->type vs value_from_stack.type
+                    if (sym->type != value_from_stack.type && typeWarn) { // Basic check
+                         // More sophisticated checks needed for assign-compatibility like array types, record types etc.
+                         // For now, if not char/real/int coercion, rely on direct copy or error later if problematic
+                        // fprintf(stderr, "VM Warning: Potential type mismatch assigning %s to %s for '%s'\n",
+                        //        varTypeToString(value_from_stack.type), varTypeToString(sym->type), sym->name);
+                    }
+                    value_to_assign = value_from_stack; // Use the stack value directly for makeCopyOfValue
+                }
+
+                freeValue(sym->value); // Free existing contents of the symbol's value
+                *(sym->value) = makeCopyOfValue(&value_to_assign); // Assign a deep copy
+
+                // If value_to_assign was a new temporary Value created by makeChar/makeReal,
+                // and if makeCopyOfValue did not consume its *contents*, it would need freeing.
+                // However, makeChar/makeReal for primitives don't allocate contents that makeCopyOfValue wouldn't handle.
+                // If value_to_assign refers to value_from_stack, makeCopyOfValue handles its contents.
+                if (value_to_assign.type != value_from_stack.type && value_to_assign.s_val != value_from_stack.s_val) {
+                    // This condition means value_to_assign is a new temporary (e.g. from makeChar for string->char coercion)
+                    // and makeCopyOfValue would have duplicated its primitive data.
+                    // If makeChar itself allocated something for s_val (it doesn't for char), it'd be freed here.
+                    // Since makeChar just sets c_val, and makeReal sets r_val, freeValue is a no-op for their *contents*.
+                    freeValue(&value_to_assign);
+                }
+
+
+                Value popped_val_after_assign = pop(vm); // Now pop the original value from stack
+                freeValue(&popped_val_after_assign);    // And free its contents
+
                 break;
             }
-
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm); // Use READ_SHORT(vm) to pass vm
                 Value condition_value = pop(vm);
@@ -469,13 +581,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
                 }
                 break;
             }
-
             case OP_JUMP: {
                 uint16_t offset_val = READ_SHORT(vm); // Use READ_SHORT(vm) to pass vm
                 vm->ip += offset_val;
                 break;
             }
-            
             case OP_WRITE_LN: {
                 #define MAX_WRITELN_ARGS_VM 32
                 uint8_t argCount = READ_BYTE();
@@ -503,6 +613,114 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk) {
                 freeValue(&popped_val);
                 break;
             }
+            case OP_CALL_BUILTIN: {
+                 uint8_t name_const_idx = READ_BYTE();
+                 uint8_t arg_count = READ_BYTE();
+
+                 if (name_const_idx >= vm->chunk->constants_count) {
+                     runtimeError(vm, "VM Error: Invalid constant index for built-in name.");
+                     return INTERPRET_RUNTIME_ERROR; // Exit on error
+                 }
+                 Value builtinNameVal = vm->chunk->constants[name_const_idx];
+
+                 if (builtinNameVal.type != TYPE_STRING || !builtinNameVal.s_val) {
+                     runtimeError(vm, "VM Error: Invalid built-in name constant for OP_CALL_BUILTIN (not a string).");
+                     return INTERPRET_RUNTIME_ERROR; // Exit on error
+                 }
+                 const char* builtin_name = builtinNameVal.s_val;
+
+                 Value actual_args[256];
+                 if (vm->stackTop - vm->stack < arg_count) {
+                     runtimeError(vm, "VM Error: Stack underflow preparing arguments for built-in %s. Expected %d, have %ld.",
+                                  builtin_name, arg_count, (long)(vm->stackTop - vm->stack));
+                     return INTERPRET_RUNTIME_ERROR; // Exit on error
+                 }
+
+                 for (int i = 0; i < arg_count; i++) {
+                     actual_args[arg_count - 1 - i] = pop(vm);
+                 }
+
+                 Value result_val = makeNil();
+                 bool is_function_that_succeeded = false;
+
+                 // --- Dispatch to C implementation for the built-in ---
+                 if (strcasecmp(builtin_name, "abs") == 0) {
+                     if (arg_count != 1) { runtimeError(vm, "VM: abs expects 1 arg."); goto op_call_builtin_error_cleanup; }
+                     Value arg = actual_args[0];
+                     if (IS_INTEGER(arg)) result_val = makeInt(llabs(AS_INTEGER(arg)));
+                     else if (IS_REAL(arg)) result_val = makeReal(fabs(AS_REAL(arg)));
+                     else { runtimeError(vm, "VM: abs arg must be number."); goto op_call_builtin_error_cleanup; }
+                     is_function_that_succeeded = true;
+                 } else if (strcasecmp(builtin_name, "length") == 0) {
+                     if (arg_count != 1) { runtimeError(vm, "VM: length expects 1 arg."); goto op_call_builtin_error_cleanup; }
+                     Value arg = actual_args[0];
+                     if (!IS_STRING(arg)) { runtimeError(vm, "VM: length arg must be string."); goto op_call_builtin_error_cleanup; }
+                     result_val = makeInt(AS_STRING(arg) ? strlen(AS_STRING(arg)) : 0);
+                     is_function_that_succeeded = true;
+                 } else if (strcasecmp(builtin_name, "ord") == 0) {
+                     if (arg_count != 1) { runtimeError(vm, "VM: ord expects 1 arg."); goto op_call_builtin_error_cleanup; }
+                     Value arg = actual_args[0];
+                     if (IS_CHAR(arg)) {
+                         result_val = makeInt((long long)AS_CHAR(arg));
+                     } else if (IS_BOOLEAN(arg)) {
+                         result_val = makeInt(AS_BOOLEAN(arg) ? 1 : 0);
+                     } else if (IS_STRING(arg) && AS_STRING(arg) != NULL && strlen(AS_STRING(arg)) == 1) { // <<< ADDED THIS
+                         result_val = makeInt((long long)AS_STRING(arg)[0]);
+                     } else if (IS_INTEGER(arg)) { // Pascal's Ord(Integer) is often the integer itself
+                         result_val = makeInt(AS_INTEGER(arg));
+                     }
+                     // Add TYPE_BYTE, TYPE_WORD if Ord should support them directly
+                     // else if (arg.type == TYPE_ENUM) {
+                     //    result_val = makeInt((long long)arg.enum_val.ordinal);
+                     // }
+                     else {
+                         runtimeError(vm, "VM: ord expects char, boolean, single-char string, or integer. Got %s", varTypeToString(arg.type));
+                         goto op_call_builtin_error_cleanup;
+                     }
+                     is_function_that_succeeded = true;
+                 }  else if (strcasecmp(builtin_name, "chr") == 0) {
+                     if (arg_count != 1) { runtimeError(vm, "VM: chr expects 1 arg."); goto op_call_builtin_error_cleanup; }
+                     Value arg = actual_args[0];
+                     if (!IS_INTEGER(arg)) { runtimeError(vm, "VM: chr expects integer arg."); goto op_call_builtin_error_cleanup; }
+                     result_val = makeChar((char)AS_INTEGER(arg)); // makeChar returns TYPE_CHAR
+                     is_function_that_succeeded = true;
+                 }
+                 // --- Add more built-in handlers here ---
+                 else {
+                     runtimeError(vm, "VM Error: Built-in function/procedure '%s' not yet implemented in VM.", builtin_name);
+                     goto op_call_builtin_error_cleanup;
+                 }
+
+                 // If it was a function and execution was successful, push its result
+                 if (is_function_that_succeeded) {
+                     push(vm, result_val);
+                 } else {
+                     // If it was a procedure (is_function_that_succeeded is false)
+                     // or an error occurred before result_val was properly set for a function.
+                     // The default makeNil() doesn't need freeing for its contents.
+                     // If result_val was modified from makeNil for a procedure that later errored,
+                     // freeValue here would be important. But procedures usually don't set result_val.
+                     freeValue(&result_val); // Safe to call on makeNil()
+                 }
+
+             // Common cleanup for actual_args (always execute this path before successful break)
+             op_call_builtin_success_cleanup:
+                 for (int i = 0; i < arg_count; i++) {
+                     freeValue(&actual_args[i]);
+                 }
+                 break; // Break from OP_CALL_BUILTIN switch case on success
+
+             op_call_builtin_error_cleanup: // Jump here if runtimeError was called within built-in logic
+                 for (int i = 0; i < arg_count; i++) {
+                     freeValue(&actual_args[i]); // Free any popped arguments
+                 }
+                 // Note: result_val might be uninitialized or a default makeNil if error happened early.
+                 // It's not pushed on error. If it was partially formed with heap data, freeValue would be needed.
+                 // For simplicity, assume built-in logic doesn't half-allocate result_val on error.
+                 // freeValue(&result_val); // Free the default makeNil() or partially formed result.
+                 return INTERPRET_RUNTIME_ERROR; // Propagate error to stop VM
+
+             } // End OP_CALL_BUILTIN
             case OP_HALT:
                 return INTERPRET_OK;
 
