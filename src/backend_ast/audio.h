@@ -20,22 +20,22 @@ extern Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
 extern bool gSoundSystemInitialized;
 
 // Helper functions for C-side audio management
-void InitializeSoundArray(void); // Internal helper to initialize the sound array pointers to NULL
+void initializeSoundArray(void); // Internal helper to initialize the sound array pointers to NULL
 
 // Initialize the SDL audio subsystem and SDL_mixer
-void Audio_InitSystem(void);
+void audioInitSystem(void);
 
 // Load a sound file (like a .wav). Returns an integer ID (1-based index) or -1 on error.
-int Audio_LoadSound(const char* filename);
+int audioLoadSound(const char* filename);
 
 // Play a loaded sound effect once. Takes the 1-based sound ID.
-void Audio_PlaySound(int soundID);
+void audioPlaySound(int soundID);
 
 // Free a loaded sound effect from memory. Takes the 1-based sound ID.
-void Audio_FreeSound(int soundID);
+void audioFreeSound(int soundID);
 
 // Shut down SDL_mixer and the SDL audio subsystem
-void Audio_QuitSystem(void);
+void audioQuitSystem(void);
 
 // The builtins
 Value executeBuiltinInitSoundSystem(AST *node);

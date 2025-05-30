@@ -1,3 +1,4 @@
+// src/core/types.h
 #ifndef TYPES_H
 #define TYPES_H
 
@@ -8,7 +9,6 @@
 #include <math.h>
 #include <time.h>
 #include "list.h"
-#include "types.h"
 #include <stdbool.h>
 
 // Forward declaration of AST struct, as TypeEntry will use AST*
@@ -24,6 +24,7 @@ typedef struct TypeEntry_s { // Use a named tag for robustness
 typedef struct FieldValue FieldValue;
 
 typedef enum {
+    TYPE_UNKNOWN = 0,
     TYPE_VOID,
     TYPE_INTEGER,
     TYPE_REAL,
@@ -60,7 +61,7 @@ typedef struct AST AST;
 
 typedef struct ValueStruct {
     VarType type;
-    Type *enum_meta; 
+    Type *enum_meta;
     union {
         long long i_val;
         double r_val;
@@ -164,6 +165,7 @@ typedef enum {
     AST_BOOLEAN,
     AST_FORMATTED_EXPR,
     AST_TYPE_REFERENCE,
+    AST_TYPE_IDENTIFIER, // Added: Represents a simple type identifier like "integer" or "MyCustomType"
     AST_SUBRANGE,
     AST_USES_CLAUSE,
     AST_UNIT,
@@ -176,9 +178,9 @@ typedef enum {
     AST_SET,
     AST_ARRAY_LITERAL,
     AST_BREAK,
-    AST_POINTER_TYPE, // <<< Represents a pointer type definition (^TypeName)
-    AST_DEREFERENCE,  // <<< Represents dereferencing a pointer (ptr^)
-    AST_NIL           // <<< Represents the 'nil' literal
+    AST_POINTER_TYPE,
+    AST_DEREFERENCE,
+    AST_NIL
 } ASTNodeType;
 
 // Define the function pointer type for built-in handlers

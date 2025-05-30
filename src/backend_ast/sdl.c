@@ -1357,10 +1357,10 @@ void OSdlCleanupAtExit(void) {
     // Halt any currently playing sound effects and music (good practice before cleanup)
     // Only do this if the sound system was initialized by pscal at some point.
     // However, SDL_Init(SDL_INIT_AUDIO) might have been called by SDL_Init(SDL_INIT_EVERYTHING)
-    // even if Audio_InitSystem wasn't. For safety, check if SDL_mixer was actually used.
+    // even if audioInitSystem wasn't. For safety, check if SDL_mixer was actually used.
     // A simple check: if gSoundSystemInitialized was ever true, or if SDL_WasInit(SDL_INIT_AUDIO) is true.
 
-    // If Audio_QuitSystem might have already freed sounds, this loop is safe as it checks for NULL.
+    // If audioQuitSystem might have already freed sounds, this loop is safe as it checks for NULL.
     for (int i = 0; i < MAX_SOUNDS; ++i) {
         if (gLoadedSounds[i] != NULL) {
             Mix_FreeChunk(gLoadedSounds[i]);
@@ -1380,18 +1380,18 @@ void OSdlCleanupAtExit(void) {
         #endif
     } else {
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by Audio_QuitSystem).\n");
+        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
         #endif
     }
 
     // Quit SDL_mixer subsystems. This should be safe to call even if already called,
     // but ideally, it's called only once.
-    // If Audio_QuitSystem is changed to NOT call Mix_Quit(), this is the sole place.
+    // If audioQuitSystem is changed to NOT call Mix_Quit(), this is the sole place.
     Mix_Quit(); // This cleans up all initialized formats (OGG, MP3, etc.)
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_Quit successful.\n");
     #endif
-    // Reset our flag if Audio_QuitSystem didn't
+    // Reset our flag if audioQuitSystem didn't
     gSoundSystemInitialized = false;
 
 
@@ -1966,7 +1966,7 @@ void SdlCleanupAtExit(void) {
         #endif
     } else {
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by Audio_QuitSystem).\n");
+        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
         #endif
     }
     Mix_Quit();

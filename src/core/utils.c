@@ -162,6 +162,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_UNIT:           return "UNIT";
         case AST_INTERFACE:      return "INTERFACE";
         case AST_IMPLEMENTATION: return "IMPLEMENTATION";
+        case AST_INITIALIZATION: return "INITIALIZATION";
         case AST_LIST:           return "LIST";
         case AST_ENUM_TYPE:      return "TYPE_ENUM";
         case AST_ENUM_VALUE:     return "ENUM_VALUE";

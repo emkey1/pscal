@@ -88,6 +88,9 @@ Value executeBuiltinNew(AST *node);
 Value executeBuiltinDispose(AST *node);
 void nullifyPointerAliasesByAddrValue(HashTable* table, uintptr_t disposedAddrValue);
 
+// Audio
+Value executeBuiltinFreeSound(AST *node);
+
 typedef enum {
     BUILTIN_TYPE_NONE,      // Not a built-in routine
     BUILTIN_TYPE_PROCEDURE, // Built-in, does not return a value usable in expressions

@@ -51,6 +51,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"exp",       executeBuiltinExp},
     {"fillcircle", executeBuiltinFillCircle},
     {"fillrect", executeBuiltinFillRect},
+    {"freesound", executeBuiltinFreeSound},
     {"getmaxx",   executeBuiltinGetMaxX},
     {"getmaxy",   executeBuiltinGetMaxY},
     {"getmousestate", executeBuiltinGetMouseState},
@@ -2865,4 +2866,23 @@ Value executeBuiltinRealToStr(AST *node) {
     freeValue(&arg);                   // Free the evaluated argument
 
     return result;
+}
+
+Value executeBuiltinFreeSound(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: FreeSound (or audioFreeSound) expects 1 argument (SoundID: Integer).\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    // Evaluate the SoundID argument from the AST
+    Value soundIDVal = eval(node->children[0]);
+    if (soundIDVal.type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: FreeSound (or audioFreeSound) argument must be an Integer SoundID. Got %s.\n", varTypeToString(soundIDVal.type));
+        freeValue(&soundIDVal);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    audioFreeSound((int)AS_INTEGER(soundIDVal)); // Call your renamed core C function
+
+    freeValue(&soundIDVal); // Free the evaluated Value
+    return makeVoid();      // Procedures return a void Value
 }

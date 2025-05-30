@@ -19,7 +19,7 @@ Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
 bool gSoundSystemInitialized = false;
 
 // Internal helper to set all entries in the loaded sounds array to NULL
-void InitializeSoundArray(void) {
+void initializeSoundArray(void) {
     for (int i = 0; i < MAX_SOUNDS; ++i) {
         gLoadedSounds[i] = NULL;
     }
@@ -27,7 +27,7 @@ void InitializeSoundArray(void) {
 }
 
 // Initialize the SDL audio subsystem and SDL_mixer
-void Audio_InitSystem(void) {
+void audioInitSystem(void) {
     if (gSoundSystemInitialized) {
         DEBUG_PRINT("[DEBUG AUDIO] Sound system is already initialized.\n");
         return; // Avoid double initialization
@@ -81,14 +81,14 @@ void Audio_InitSystem(void) {
     // Optionally reserve some channels for specific sound types
     // Mix_ReserveChannels(num_channels);
 
-    InitializeSoundArray(); // Initialize the global sound array
+    initializeSoundArray(); // Initialize the global sound array
 
     gSoundSystemInitialized = true;
     DEBUG_PRINT("[DEBUG AUDIO] Sound system initialization complete.\n");
 }
 
 // Load a sound file (like a .wav). Returns an integer ID (1-based index) or -1 on error.
-int Audio_LoadSound(const char* filename) {
+int audioLoadSound(const char* filename) {
     if (!gSoundSystemInitialized) {
         fprintf(stderr, "Runtime error: Sound system not initialized. Call InitSoundSystem before LoadSound.\n");
         return -1; // Indicate error by returning -1
@@ -131,7 +131,7 @@ int Audio_LoadSound(const char* filename) {
 }
 
 // Play a loaded sound effect once. Takes the 1-based sound ID.
-void Audio_PlaySound(int soundID) {
+void audioPlaySound(int soundID) {
     if (!gSoundSystemInitialized) {
         DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping PlaySound(ID: %d).\n", soundID);
         return; // Don't crash, just don't play sound
@@ -161,7 +161,7 @@ void Audio_PlaySound(int soundID) {
 }
 
 // Free a loaded sound effect from memory. Takes the 1-based sound ID.
-void Audio_FreeSound(int soundID) {
+void audioFreeSound(int soundID) {
     if (!gSoundSystemInitialized) {
         DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping FreeSound(ID: %d).\n", soundID);
         return;
@@ -186,9 +186,9 @@ void Audio_FreeSound(int soundID) {
 }
 
 // Shut down SDL_mixer and the SDL audio subsystem
-void Audio_QuitSystem(void) {
+void audioQuitSystem(void) {
     if (!gSoundSystemInitialized) {
-        DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping Audio_QuitSystem.\n");
+        DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping audioQuitSystem.\n");
         return;
     }
     DEBUG_PRINT("[DEBUG AUDIO] Shutting down sound system (called by Pscal's QuitSoundSystem)...\n");
@@ -200,10 +200,10 @@ void Audio_QuitSystem(void) {
         if (gLoadedSounds[i] != NULL) {
             Mix_FreeChunk(gLoadedSounds[i]);
             gLoadedSounds[i] = NULL;
-            DEBUG_PRINT("[DEBUG AUDIO] Freed sound chunk at index %d during Audio_QuitSystem.\n", i);
+            DEBUG_PRINT("[DEBUG AUDIO] Freed sound chunk at index %d during audioQuitSystem.\n", i);
         }
     }
-    DEBUG_PRINT("[DEBUG AUDIO] All user-loaded sound chunks freed by Audio_QuitSystem.\n");
+    DEBUG_PRINT("[DEBUG AUDIO] All user-loaded sound chunks freed by audioQuitSystem.\n");
 
     // Close the audio device. This makes sense here as the sound system is being "quit" from Pscal's perspective.
     // SdlCleanupAtExit will also call it, but Mix_CloseAudio can be called multiple times, though only first has effect.
@@ -214,9 +214,9 @@ void Audio_QuitSystem(void) {
     Uint16 open_format;
     if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) { // Returns 1 if audio is open
         Mix_CloseAudio();
-        DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio called from Audio_QuitSystem.\n");
+        DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio called from audioQuitSystem.\n");
     } else {
-        DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio skipped in Audio_QuitSystem (audio not open or already closed).\n");
+        DEBUG_PRINT("[DEBUG AUDIO] Mix_CloseAudio skipped in audioQuitSystem (audio not open or already closed).\n");
     }
 
 
@@ -235,7 +235,7 @@ Value executeBuiltinInitSoundSystem(AST *node) {
         fprintf(stderr, "Runtime error: InitSoundSystem expects 0 arguments.\n");
         EXIT_FAILURE_HANDLER(); // Treat as fatal error for incorrect usage
     }
-    Audio_InitSystem(); // Call the C-side initialization helper
+    audioInitSystem(); // Call the C-side initialization helper
     return makeVoid(); // Procedures return a void value
 }
 
@@ -290,17 +290,17 @@ Value executeBuiltinLoadSound(AST *node) {
 
 
     // Call the C-side sound loading helper with the determined path.
-    // Audio_LoadSound still contains the Mix_LoadWAV call and its error handling (which prints the error message).
-    //printf("[DEBUG BUILTIN LoadSound] Calling Audio_LoadSound with resolved path: '%s'\n", filename_to_pass);
-    int soundID = Audio_LoadSound(filename_to_pass);
+    // audioLoadSound still contains the Mix_LoadWAV call and its error handling (which prints the error message).
+    //printf("[DEBUG BUILTIN LoadSound] Calling audioLoadSound with resolved path: '%s'\n", filename_to_pass);
+    int soundID = audioLoadSound(filename_to_pass);
 
-    //printf("[DEBUG BUILTIN LoadSound] Audio_LoadSound returned ID: %d\n", soundID);
+    //printf("[DEBUG BUILTIN LoadSound] audioLoadSound returned ID: %d\n", soundID);
 
     // Free the evaluated filename Value struct's content (the original string from eval)
     freeValue(&fileNameVal);
 
     // Return the sound ID as a Pascal Integer Value
-    // The Mix_LoadWAV error message (if any) will be printed by Audio_LoadSound.
+    // The Mix_LoadWAV error message (if any) will be printed by audioLoadSound.
     return makeInt(soundID); // Returns 1-based ID or -1 on error
 }
 
@@ -321,7 +321,7 @@ Value executeBuiltinPlaySound(AST *node) {
     }
 
     // Call the C-side sound playing helper with the Pascal 1-based ID
-    Audio_PlaySound((int)soundIDVal.i_val);
+    audioPlaySound((int)soundIDVal.i_val);
 
     freeValue(&soundIDVal); // Free the evaluated integer value
 
@@ -335,7 +335,7 @@ Value executeBuiltinQuitSoundSystem(AST *node) {
         fprintf(stderr, "Runtime error: QuitSoundSystem expects 0 arguments.\n");
         EXIT_FAILURE_HANDLER();
     }
-    Audio_QuitSystem(); // Call the C-side cleanup helper
+    audioQuitSystem(); // Call the C-side cleanup helper
     return makeVoid(); // Procedures return a void value
 }
 

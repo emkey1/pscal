@@ -26,6 +26,13 @@ struct Symbol_s {
     bool is_const;
     struct AST *type_def;      // Use forward-declared struct AST
     struct Symbol_s *next;     // Self-referential pointer using the tag
+    // --- New fields for compiled procedures/functions ---
+    bool is_defined;              // Flag to indicate if the body has been compiled (useful for forward declarations)
+    int bytecode_address;         // Starting address (offset) in the bytecode chunk
+    uint8_t arity;                // Number of parameters
+    uint8_t locals_count;         // Number of local variables (excluding parameters)
+    // bool is_host_function;    // Could add later if OP_CALL_HOST uses this table too
+    // HostFunctionID host_id;   // Corresponding host function ID
 };
 typedef struct Symbol_s Symbol;
 

@@ -299,6 +299,10 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     new_symbol->is_local_var = false; // Globals aren't local vars
     new_symbol->next = NULL; // Will be linked by hashTableInsert
     new_symbol->type_def = type_def; // Store type definition link
+    new_symbol->is_defined = false; // Flag to indicate if the body has been compiled (useful for forward declarations)
+    new_symbol->bytecode_address = 0; // Starting address (offset) in the bytecode chunk
+    new_symbol->arity = 0; // Number of parameters
+    new_symbol->locals_count = 0; // Number of local variables (excluding parameters)
 
     // Allocate the Value struct itself
     new_symbol->value = malloc(sizeof(Value));

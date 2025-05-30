@@ -9,6 +9,7 @@
 #define PSCAL_BYTECODE_H
 
 #include "core/types.h" // For Value struct, as constants will be Values
+#include "symbol/symbol.h" // For HashTable definition
 
 // --- Opcode Definitions ---
 // We'll start with a very basic set for SimpleMath.p
@@ -27,6 +28,9 @@ typedef enum {
     OP_GREATER_EQUAL,
     OP_LESS,
     OP_LESS_EQUAL,
+    OP_INT_DIV,
+    OP_AND,         
+    OP_OR,
 
     OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
     OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
@@ -41,8 +45,10 @@ typedef enum {
 
     OP_WRITE_LN,      // Specific opcode for WriteLn for now (simpler than generic call)
                       // Operand: number of arguments to pop from stack for writeln
+    OP_CALL_HOST, 
 
     OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
+    OP_CALL,          // For user-defined procedure/function calls, Operands: 2-byte address, 1-byte arg count
     OP_HALT           // Stop the VM (though OP_RETURN from main might suffice)
     
 } OpCode;
@@ -67,8 +73,8 @@ void initBytecodeChunk(BytecodeChunk* chunk);
 void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add byte to chunk
 void freeBytecodeChunk(BytecodeChunk* chunk);
 int addConstantToChunk(BytecodeChunk* chunk, Value value); // Add a value to constant pool, return index
-void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name);
-int disassembleInstruction(BytecodeChunk* chunk, int offset);
+void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable);
+int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
 

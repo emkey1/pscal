@@ -14,7 +14,23 @@
 // --- VM Configuration ---
 #define VM_STACK_MAX 256       // Maximum number of Values on the operand stack
 #define VM_GLOBALS_MAX 256     // Maximum number of global variables (for simple array storage)
-// #define VM_CALL_STACK_MAX 64 // For function calls later
+
+#define MAX_HOST_FUNCTIONS 128
+
+#define VM_CALL_STACK_MAX 256
+
+// Forward declaration
+struct VM_s;
+
+// Host function pointer type
+typedef Value (*HostFn)(struct VM_s* vm);
+
+// Enum to identify specific host functions
+typedef enum {
+    HOST_FN_QUIT_REQUESTED,
+    // ... add other host function IDs here ...
+    HOST_FN_COUNT
+} HostFunctionID;
 
 // --- Interpret Result ---
 typedef enum {
@@ -23,8 +39,17 @@ typedef enum {
     INTERPRET_RUNTIME_ERROR
 } InterpretResult;
 
-// --- Virtual Machine Structure ---
 typedef struct {
+    uint8_t* return_address;    // IP in the caller to return to
+    Value* slots;               // Pointer to this frame's window on the VM value stack
+    Symbol* function_symbol;    // Pointer to the Symbol of the function being called (for arity/locals_count)
+                                // Note: Storing Symbol* is one way; alternatively, OP_CALL could carry locals_count,
+                                // or OP_RETURN could be generic if stack is always reset to frame->slots.
+    uint8_t locals_count;       // Number of local variables (excluding params)
+} CallFrame;
+
+// --- Virtual Machine Structure ---
+typedef struct VM_s { 
     BytecodeChunk* chunk;     // The chunk of bytecode to execute
     uint8_t* ip;              // Instruction Pointer: points to the *next* byte to be read
 
@@ -32,16 +57,13 @@ typedef struct {
     Value* stackTop;          // Pointer to the element just above the top of the stack
                               // (i.e., where the next pushed item will go)
 
-    // Global variable storage:
-    // Option 1: Simple array if globals are mapped to indices 0..N by compiler
-    // Value globals[VM_GLOBALS_MAX];
-
-    // Option 2: Use your existing HashTable for globals (more flexible, handles names)
     HashTable* vmGlobalSymbols; // VM's own symbol table for runtime global variable storage
-
-    // Future: Call frames for function calls
-    // CallFrame frames[VM_CALL_STACK_MAX];
-    // int frameCount;
+    HashTable* procedureTable; // store procedure table for disassembly
+    
+    HostFn host_functions[MAX_HOST_FUNCTIONS];
+    
+    CallFrame frames[VM_CALL_STACK_MAX];
+    int frameCount;
 
 } VM;
 
@@ -51,7 +73,7 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk);
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures);
 
 // Stack operations (can be static helpers in vm.c or part of public API if needed elsewhere)
 // void push(VM* vm, Value value);

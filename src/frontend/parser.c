@@ -2509,6 +2509,26 @@ AST *factor(Parser *parser) {
         errorParser(parser, "Internal error: factor resulted in NULL node");
         return newASTNode(AST_NOOP, NULL);
     }
+    
+#ifdef DEBUG
+if (dumpExec && node && node->token) { // Ensure node and node->token are not NULL
+    fprintf(stderr, "[DEBUG_FACTOR_EXIT] Returning from factor(): initialTokenType=%s, node->type=%s, node->token->value='%s', node->token->type=%s\n",
+            tokenTypeToString(initialTokenType),
+            astTypeToString(node->type),
+            node->token->value ? node->token->value : "NULL_VAL",
+            tokenTypeToString(node->token->type));
+    fflush(stderr);
+} else if (dumpExec && node) {
+    fprintf(stderr, "[DEBUG_FACTOR_EXIT] Returning from factor(): initialTokenType=%s, node->type=%s, node->token=NULL\n",
+            tokenTypeToString(initialTokenType),
+            astTypeToString(node->type));
+    fflush(stderr);
+} else if (dumpExec) {
+    fprintf(stderr, "[DEBUG_FACTOR_EXIT] Returning from factor(): initialTokenType=%s, node is NULL\n",
+            tokenTypeToString(initialTokenType));
+    fflush(stderr);
+}
+#endif
 
     return node; // Return the created node
 }
