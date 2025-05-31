@@ -184,6 +184,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 initVM(&vm);
                 InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table); 
                 freeVM(&vm);
+                globalSymbols = NULL; // Prevent subsequent freeHashTable(globalSymbols) in main's cleanup.
                 
                 if (result_vm == INTERPRET_OK) {
                     fprintf(stderr, "--- VM Execution Finished Successfully ---\n");

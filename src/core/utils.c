@@ -912,6 +912,7 @@ void freeValue(Value *v) {
 #ifdef DEBUG
     fprintf(stderr, "[DEBUG] freeValue called for Value* at %p, type=%s\n",
             (void*)v, varTypeToString(v->type));
+    fflush(stderr); // Ensure debug message is printed immediately
 #endif
     switch (v->type) {
         case TYPE_VOID:
@@ -921,53 +922,58 @@ void freeValue(Value *v) {
         case TYPE_CHAR:
         case TYPE_BYTE:
         case TYPE_WORD:
-            // No heap data associated with the Value struct itself for these
+        case TYPE_NIL: // <<<< ADDED TYPE_NIL HERE
+            // No heap data associated with the Value struct itself for these simple types.
+            // For TYPE_POINTER, ptr_val itself is an address, not heap data owned by this Value.
+            // The memory pointed *to* by a TYPE_POINTER is managed by new/dispose.
 #ifdef DEBUG
-            fprintf(stderr, "[DEBUG]   No heap data to free for type %s\n", varTypeToString(v->type));
+            fprintf(stderr, "[DEBUG]   No heap data to free for type %s directly within Value struct.\n", varTypeToString(v->type));
+            fflush(stderr);
 #endif
             break;
         case TYPE_ENUM:
             if (v->enum_val.enum_name) {
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Attempting to free enum name '%s' at %p\n",
-                        v->enum_val.enum_name, (void*)v->enum_val.enum_name);
+                fprintf(stderr, "[DEBUG]   Attempting to free enum name '%s' at %p for Value* %p\n",
+                        v->enum_val.enum_name, (void*)v->enum_val.enum_name, (void*)v);
+                fflush(stderr);
 #endif
                 free(v->enum_val.enum_name);
                 v->enum_val.enum_name = NULL;
             } else {
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Enum name pointer is NULL, nothing to free.\n");
+                fprintf(stderr, "[DEBUG]   Enum name pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
+                fflush(stderr);
 #endif
             }
             break;
         case TYPE_POINTER:
-            // freeValue for a pointer variable's Value struct should ONLY reset the
-            // address it holds (ptr_val), NOT the base_type_node.
-            // The base_type_node represents the declared type and persists even if ptr_val is nil.
-            // Freeing the memory *pointed to* is the job of dispose/FreeMem.
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG]   Resetting ptr_val for POINTER Value* at %p. Base type node (%p) is preserved.\n",
+            // For a Value struct of TYPE_POINTER, freeValue should NOT free the memory
+            // that v->ptr_val points to. That's the job of dispose/FreeMem.
+            // We only nullify the pointer here to indicate this Value struct no longer points.
+            // The base_type_node is also part of the type definition, not data to be freed here.
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG]   Resetting ptr_val for POINTER Value* at %p. Base type node (%p) is preserved. Pointed-to memory NOT freed by this call.\n",
                     (void*)v, (void*)v->base_type_node);
-            #endif
+            fflush(stderr);
+#endif
             v->ptr_val = NULL;
-            // DO NOT NULLIFY v->base_type_node HERE.
+            // v->base_type_node = NULL; // Generally, base_type_node should persist as it defines the pointer's *type*
             break;
 
         case TYPE_STRING:
             if (v->s_val) {
 #ifdef DEBUG
-                // Check if pointer seems valid before attempting to print content
-                // This is primarily to avoid crashing *in the debug print itself*
-                // if v->s_val points to garbage or already freed memory.
-                fprintf(stderr, "[DEBUG]   Attempting to free string content at %p (value was '%s')\n",
-                        (void*)v->s_val, v->s_val ? v->s_val : "<INVALID_PTR_OR_FREED>");
+                fprintf(stderr, "[DEBUG]   Attempting to free string content at %p (value was '%s') for Value* %p\n",
+                        (void*)v->s_val, v->s_val ? v->s_val : "<INVALID_OR_FREED>", (void*)v);
+                fflush(stderr);
 #endif
-                // Original free logic
                 free(v->s_val);
                 v->s_val = NULL;
             } else {
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   String content pointer is NULL, nothing to free.\n");
+                fprintf(stderr, "[DEBUG]   String content pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
+                fflush(stderr);
 #endif
             }
             break;
@@ -976,12 +982,14 @@ void freeValue(Value *v) {
             FieldValue *f = v->record_val;
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG]   Processing record fields for Value* at %p (record_val=%p)\n", (void*)v, (void*)f);
+            fflush(stderr);
 #endif
             while (f) {
                 FieldValue *next = f->next;
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG]     Freeing FieldValue* at %p (name='%s' @ %p)\n",
-                        (void*)f, f->name ? f->name : "NULL", (void*)f->name);
+                fprintf(stderr, "[DEBUG]     Freeing FieldValue* at %p (name='%s' @ %p) within Value* %p\n",
+                        (void*)f, f->name ? f->name : "NULL", (void*)f->name, (void*)v);
+                fflush(stderr);
 #endif
                 if (f->name) free(f->name);
                 freeValue(&f->value); // Recursive call
@@ -994,64 +1002,89 @@ void freeValue(Value *v) {
         case TYPE_ARRAY: {
 #ifdef DEBUG
              fprintf(stderr, "[DEBUG]   Processing array for Value* at %p (array_val=%p)\n", (void*)v, (void*)v->array_val);
+             fflush(stderr);
 #endif
              if (v->array_val) {
                  int total = 1;
-                 if(v->dimensions > 0 && v->lower_bounds && v->upper_bounds) { // Add null checks
+                 if(v->dimensions > 0 && v->lower_bounds && v->upper_bounds) {
                    for (int i = 0; i < v->dimensions; i++)
                        total *= (v->upper_bounds[i] - v->lower_bounds[i] + 1);
                  } else {
-                   total = 0; // Prevent calculation if bounds are missing
+                   total = 0;
 #ifdef DEBUG
-                   fprintf(stderr, "[DEBUG]   Warning: Array bounds missing or zero dimensions.\n");
+                   fprintf(stderr, "[DEBUG]     Warning: Array bounds missing or zero dimensions for Value* %p.\n", (void*)v);
+                   fflush(stderr);
 #endif
                  }
 
                  for (int i = 0; i < total; i++) {
 #ifdef DEBUG
-                    fprintf(stderr, "[DEBUG]     Freeing array element %d\n", i); // Added print
+                    fprintf(stderr, "[DEBUG]     Freeing array element %d for Value* %p\n", i, (void*)v);
+                    fflush(stderr);
 #endif
-                    freeValue(&v->array_val[i]); // Frees contents of each element
+                    freeValue(&v->array_val[i]);
                  }
 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG]   Freeing array data buffer at %p\n", (void*)v->array_val); // Added print
+                 fprintf(stderr, "[DEBUG]   Freeing array data buffer at %p for Value* %p\n", (void*)v->array_val, (void*)v);
+                 fflush(stderr);
 #endif
-                 free(v->array_val); // Frees the array of Value structs itself
+                 free(v->array_val);
              }
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG]   Freeing array bounds at %p and %p\n", (void*)v->lower_bounds, (void*)v->upper_bounds); // Added print
+             fprintf(stderr, "[DEBUG]   Freeing array bounds at %p and %p for Value* %p\n", (void*)v->lower_bounds, (void*)v->upper_bounds, (void*)v);
+             fflush(stderr);
 #endif
              free(v->lower_bounds);
              free(v->upper_bounds);
              v->array_val = NULL;
              v->lower_bounds = NULL;
              v->upper_bounds = NULL;
+             v->dimensions = 0; // Reset dimensions
              break;
         }
         case TYPE_MEMORYSTREAM:
-              // When a Value struct of TYPE_MEMORYSTREAM is freed,
-              // we DO NOT free the MStream* it points to, nor its buffer.
-              // The actual MStream object is managed explicitly by built-ins like MStreamCreate/MStreamFree.
-              // This Value struct is just a container for the pointer (handle).
-              // Its only responsibility is to ensure that if the Value struct itself
-              // had allocated anything for its *own members* (which it doesn't for mstream directly),
-              // that would be freed. The mstream pointer is just a shallow copy.
-              #ifdef DEBUG
-              fprintf(stderr, "[DEBUG freeValue] TYPE_MEMORYSTREAM for Value* %p. The mstream handle %p and its buffer are NOT freed by this freeValue call.\n", (void*)v, (void*)v->mstream);
-              #endif
-              // No action needed here to free v->mstream or v->mstream->buffer.
-              // We can set v->mstream to NULL in this *copy* of the Value to be safe,
-              // although if the Value struct itself is about to be popped from stack or go out of scope, it's minor.
-              v->mstream = NULL;
+              if (v->mstream) {
+#ifdef DEBUG
+                  fprintf(stderr, "[DEBUG freeValue] Freeing MStream structure and its buffer for Value* %p. MStream* %p, Buffer* %p\n",
+                          (void*)v, (void*)v->mstream, (void*)(v->mstream ? v->mstream->buffer : NULL));
+                  fflush(stderr);
+#endif
+                  if (v->mstream->buffer) {
+                      free(v->mstream->buffer);
+                      v->mstream->buffer = NULL;
+                  }
+                  free(v->mstream);
+                  v->mstream = NULL;
+              } else {
+#ifdef DEBUG
+                  fprintf(stderr, "[DEBUG freeValue] MStream pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
+                  fflush(stderr);
+#endif
+              }
               break;
+        case TYPE_SET: // Added case for freeing set values
+            if (v->set_val.set_values) {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG]   Freeing set_val.set_values at %p for Value* %p\n", (void*)v->set_val.set_values, (void*)v);
+                fflush(stderr);
+#endif
+                free(v->set_val.set_values);
+                v->set_val.set_values = NULL;
+            }
+            v->set_val.set_size = 0;
+            // v.max_length for sets was used for capacity tracking by addOrdinalToResultSet,
+            // not a dynamically allocated string, so no free needed for max_length itself.
+            break;
         // Add other types if they allocate memory pointed to by Value struct members
         default:
 #ifdef DEBUG
-             fprintf(stderr, "[DEBUG]   Unhandled type %s in freeValue\n", varTypeToString(v->type));
+             fprintf(stderr, "[DEBUG]   Unhandled type %s in freeValue for Value* %p\n", varTypeToString(v->type), (void*)v);
+             fflush(stderr);
 #endif
-             break; // Or handle error
+             break;
     }
-    // Optionally mark type as VOID after freeing contents?
+    // Optionally mark type as VOID after freeing contents, but this might mask issues
+    // if the Value struct is reused without proper reinitialization.
     // v->type = TYPE_VOID;
 }
 

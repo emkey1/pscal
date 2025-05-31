@@ -126,21 +126,21 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
 // --- Recursive Compilation Dispatcher ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
-    int line = getLine(node); // Use the updated getLine which uses current_line_approx
+    int line = getLine(node);
     if (line <= 0) line = current_line_approx;
-
 
     switch (node->type) {
         case AST_BLOCK: {
             // First pass for procedure/function declarations to define them (get their start address)
+            // This pass ensures forward jumps to procedures/functions can be resolved.
             for (int i = 0; i < node->child_count; i++) {
                 AST* child = node->children[i];
                 if (!child) continue;
                 if (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) {
-                    // This call should lead to compileDefinedFunction, which sets bytecode_address and is_defined
                     compileNode(child, chunk, getLine(child) > 0 ? getLine(child) : line);
                 } else if (child->type == AST_COMPOUND) {
-                    // Check if this compound ONLY contains procedure/function declarations (e.g. from a unit's implementation block)
+                    // Handle case where declarations (including procedures) might be grouped in a compound node
+                    // (e.g., if that's how the parser structures unit implementation declarations)
                     bool only_procs_or_funcs = child->child_count > 0;
                     for(int k=0; k < child->child_count; ++k) {
                         if (!child->children[k] ||
@@ -157,122 +157,220 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 }
             }
 
-            // Second pass for VAR_DECLs and the main body / other statements
+            // Second pass for VAR_DECLs (to define globals), CONST/TYPE (informational), and the main body compound statement
             AST* main_body_compound = NULL;
             for (int i = 0; i < node->child_count; i++) {
                 AST* child = node->children[i];
                 if (!child) continue;
                 int child_line = getLine(child) > 0 ? getLine(child) : line;
-
+                
                 switch(child->type) {
                     case AST_VAR_DECL:
-                    case AST_CONST_DECL: // Assuming consts might be needed before main body
-                    case AST_TYPE_DECL:  // Assuming types might be needed before main body
-                        compileNode(child, chunk, child_line);
+                    case AST_CONST_DECL:
+                    case AST_TYPE_DECL:
+                    case AST_USES_CLAUSE: // Add USES_CLAUSE here to be handled by the outer compileNode
+                        compileNode(child, chunk, child_line); // Let the main compileNode dispatcher handle these
                         break;
                     case AST_COMPOUND: {
-                        // Determine if this is the main program body or a compound of var_decls
-                        bool is_main_body_candidate = true; // Assume it's main body unless it's clearly just decls
+                        // This logic tries to identify if the AST_COMPOUND is the main executable body
+                        // or just a list of declarations (which should have been handled if they were individual nodes)
+                        bool is_executable_body = false;
                         if (child->child_count > 0) {
                             for(int k=0; k < child->child_count; ++k) {
-                                 // If it contains anything other than var/const/type decls, it's not purely a decl block.
-                                if (child->children[k] &&
-                                    (child->children[k]->type == AST_PROCEDURE_DECL || child->children[k]->type == AST_FUNCTION_DECL)) {
-                                    // This was handled in the first pass.
-                                    is_main_body_candidate = false; // This specific compound was for procs.
-                                    break;
+                                if (child->children[k]) {
+                                    ASTNodeType type = child->children[k]->type;
+                                    // If it contains anything that's not a declaration, it's likely executable
+                                    if (type != AST_VAR_DECL && type != AST_CONST_DECL &&
+                                        type != AST_TYPE_DECL && type != AST_PROCEDURE_DECL &&
+                                        type != AST_FUNCTION_DECL && type != AST_USES_CLAUSE) {
+                                        is_executable_body = true;
+                                        break;
+                                    }
                                 }
-                                if (child->children[k] &&
-                                    !(child->children[k]->type == AST_VAR_DECL || child->children[k]->type == AST_CONST_DECL || child->children[k]->type == AST_TYPE_DECL)) {
-                                    // Contains actual statements, so it could be the main body
-                                    break;
-                                }
-                                // If all children are var/const/type decls, it's not the main exec body
-                                if (k == child->child_count - 1) is_main_body_candidate = false;
                             }
-                        } else { // Empty compound statement could be a (noop) main body
-                            is_main_body_candidate = true;
+                        } else { // Empty BEGIN..END is an executable body (a no-op one)
+                            is_executable_body = true;
                         }
 
-                        if (is_main_body_candidate && !main_body_compound) {
-                            main_body_compound = child; // Likely the main executable part of the block
-                        } else if (!is_main_body_candidate) {
-                            // This is a compound of VAR_DECLs etc., compile them now
-                             for(int k=0; k < child->child_count; ++k) {
-                                if(child->children[k] && (child->children[k]->type == AST_VAR_DECL || child->children[k]->type == AST_CONST_DECL || child->children[k]->type == AST_TYPE_DECL))
-                                    compileNode(child->children[k], chunk, getLine(child->children[k]) > 0 ? getLine(child->children[k]) : child_line);
+                        if (is_executable_body) {
+                            if (!main_body_compound) {
+                                main_body_compound = child;
+                            } else {
+                                // This implies multiple executable compound blocks at the same level within an AST_BLOCK,
+                                // which is unusual for standard Pascal program/procedure structure.
+                                fprintf(stderr, "L%d: Compiler Warning: Multiple executable AST_COMPOUND statements found directly in AST_BLOCK. Compiling all.\n", child_line);
+                                compileNode(child, chunk, child_line); // Compile it as a compound statement sequence
                             }
-                        } else if (is_main_body_candidate && main_body_compound) {
-                            // This means a second executable compound statement was found in the block.
-                            // This could be an error or part of an IF/WHILE etc. if not at the top level of procedure block.
-                            // For now, let's assume the parser structure means only one such main compound at block level.
-                            // If it's not the main_body_compound, it's an inner structure, let compileStatement handle it.
-                            fprintf(stderr, "L%d: Warning: Additional compound statement found in block, compiling as statements.\n", child_line);
-                            compileNode(child, chunk, child_line);
+                        } else {
+                            // This compound contains only declarations; they should have been individual children
+                            // or handled by their specific cases if compileNode was called on them.
+                            // This path might indicate a parser structure that groups declarations in an extra compound.
+                            #ifdef DEBUG
+                            if(dumpExec) fprintf(stderr, "L%d: Compiler Info: AST_COMPOUND child of AST_BLOCK contains only declarations. Individual declarations should be processed.\n", child_line);
+                            #endif
+                            for(int k=0; k < child->child_count; ++k) { // Process them individually
+                                compileNode(child->children[k], chunk, getLine(child->children[k]));
+                            }
                         }
                         break;
                     }
-                    case AST_PROCEDURE_DECL: // Already handled
-                    case AST_FUNCTION_DECL:  // Already handled
+                    case AST_PROCEDURE_DECL: // Already handled in the first pass
+                    case AST_FUNCTION_DECL:
                         break;
-                    default: // Other statements
+                    default: // Any other type of node here is assumed to be a statement
                         compileStatement(child, chunk, child_line);
                         break;
                 }
             }
-
+            
             if (main_body_compound) {
                 compileNode(main_body_compound, chunk, getLine(main_body_compound) > 0 ? getLine(main_body_compound) : line);
-            } else if (node->parent && (node->parent->type == AST_PROGRAM || node->parent->type == AST_PROCEDURE_DECL || node->parent->type == AST_FUNCTION_DECL) ) {
-                // It's okay for a procedure/function to have no executable main body if it only contains declarations.
-                // For a program, it's an error if there's no executable part.
-                if(node->parent->type == AST_PROGRAM) {
-                     fprintf(stderr, "L%d: Compiler Error: No main compound statement (BEGIN...END block) found in program.\n", line);
+            } else if (node->parent && (node->parent->type == AST_PROGRAM)) {
+                 // Only error for missing main body if this block is the direct child of AST_PROGRAM
+                 bool has_executable_statements = false;
+                 for(int i=0; i < node->child_count; ++i) {
+                     if(node->children[i] && node->children[i]->type == AST_COMPOUND) { // Heuristic
+                        has_executable_statements = true; break;
+                     }
+                 }
+                 if (!has_executable_statements) {
+                    fprintf(stderr, "L%d: Compiler Error: No main compound statement (BEGIN...END block) found in program block.\n", line);
+                 }
+            } // For procedures/functions, an empty executable part is fine.
+            break;
+        }
+        
+        case AST_VAR_DECL: { // Moved from AST_BLOCK's second loop default path
+            // An AST_VAR_DECL node contains one or more variable names (as AST_VARIABLE children)
+            // and a type specifier (in node->right). node->var_type should also hold the VarType enum.
+            if (node->child_count > 0 && node->children && node->var_type != TYPE_UNKNOWN) {
+                for (int i = 0; i < node->child_count; ++i) {
+                    AST* var_name_node = node->children[i]; // This child is an AST_VARIABLE
+                    if (var_name_node && var_name_node->type == AST_VARIABLE && var_name_node->token) {
+                        const char* varName = var_name_node->token->value;
+                        // For global variables, we emit OP_DEFINE_GLOBAL.
+                        // The VM will use this to allocate space or register the global.
+                        // The operand to OP_DEFINE_GLOBAL is an index to the variable's name in the constant pool.
+                        // A second operand indicates the type.
+                        #ifdef DEBUG
+                        if(dumpExec) fprintf(stderr, "L%d: Compiler: Defining global variable '%s' of type %s.\n",
+                                line, varName, varTypeToString(node->var_type));
+                        #endif
+                        int nameIndex = addConstantToChunk(chunk, makeString(varName));
+                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                        writeBytecodeChunk(chunk, (uint8_t)node->var_type, line);
+                    } else {
+                        fprintf(stderr, "L%d: Compiler error: Malformed variable name node within AST_VAR_DECL.\n", line);
+                    }
                 }
+            } else {
+                fprintf(stderr, "L%d: Compiler error: Malformed AST_VAR_DECL node (no children or unknown type).\n", line);
             }
             break;
         }
-        // ... (cases for AST_VAR_DECL, AST_PROCEDURE_DECL/FUNCTION_DECL, AST_COMPOUND from previous response) ...
-        // Ensure AST_COMPOUND_STATEMENT is changed to AST_COMPOUND in those cases too.
+
+        case AST_CONST_DECL: { // Moved from AST_BLOCK's second loop default path
+            if (node->token && node->token->value && node->left) {
+                #ifdef DEBUG
+                if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Processing CONST_DECL for '%s'. Value will be inlined or loaded when used.\n",
+                        line, node->token->value);
+                #endif
+                // Actual constant value handling happens when the constant is *used* in compileExpression.
+                // No bytecode is typically emitted for the declaration itself for simple constants.
+            } else {
+                fprintf(stderr, "L%d: Compiler Warning: Ill-formed AST_CONST_DECL node.\n", line);
+            }
+            break;
+        }
+
+        case AST_TYPE_DECL: { // Moved from AST_BLOCK's second loop default path
+            if (node->token && node->token->value) {
+                #ifdef DEBUG
+                if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Processed TYPE_DECL for '%s'. (No bytecode emitted).\n",
+                        line, node->token->value);
+                #endif
+            } else {
+                fprintf(stderr, "L%d: Compiler Warning: Ill-formed AST_TYPE_DECL node.\n", line);
+            }
+            break;
+        }
+        
+        case AST_USES_CLAUSE: { // Added case
+            #ifdef DEBUG
+            if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Encountered AST_USES_CLAUSE. (Handled by parser/linker, no direct bytecode).\n", line);
+            #endif
+            // No bytecode needed for the USES clause itself at this stage.
+            break;
+        }
+
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
-            if (!node->token || !node->token->value) { /* error */ break; }
+            if (!node->token || !node->token->value) {
+                fprintf(stderr, "L%d: Compiler Error: Procedure/Function declaration node missing name token.\n", line);
+                break;
+            }
             #ifdef DEBUG
-            if(dumpExec) fprintf(stderr, "L%d: Compiler: Encountered %s '%s'. Jumping over body, then compiling body.\n",
+            if(dumpExec) fprintf(stderr, "L%d: Compiler: Processing definition of %s '%s'. Emitting jump over body.\n",
                     line, astTypeToString(node->type), node->token->value);
             #endif
 
+            // Emit a jump to skip over the body of the function/procedure.
+            // The actual calls will jump to func_bytecode_start_address.
             writeBytecodeChunk(chunk, OP_JUMP, line);
-            int jump_over_body_operand_offset = chunk->count;
-            emitShort(chunk, 0xFFFF, line);
+            int jump_over_body_operand_offset = chunk->count; // Store offset of the placeholder
+            emitShort(chunk, 0xFFFF, line); // Placeholder for jump offset
 
-            compileDefinedFunction(node, chunk, line);
+            // Compile the function/procedure body itself.
+            compileDefinedFunction(node, chunk, line); // This sets proc_symbol->bytecode_address and is_defined
 
-            uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2));
+            // Backpatch the jump: calculate offset to jump from after placeholder to current end of chunk.
+            uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2)); // +2 for the short itself
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
+            
+            #ifdef DEBUG
+            if(dumpExec) fprintf(stderr, "L%d: Compiler: Patched jump over body for '%s'. Jump offset: %u. Current chunk count: %d\n",
+                    line, node->token->value, offset_to_skip_body, chunk->count);
+            #endif
             break;
         }
 
-        case AST_COMPOUND: // Body of loops, if/then/else, procedures
+        case AST_COMPOUND: // This is for executable blocks of statements (e.g., main program body, loop body, if branch body)
             for (int i = 0; i < node->child_count; i++) {
-                compileStatement(node->children[i], chunk, getLine(node->children[i]) > 0 ? getLine(node->children[i]) : line);
+                if (node->children[i]) { // Added NULL check
+                    compileStatement(node->children[i], chunk, getLine(node->children[i]) > 0 ? getLine(node->children[i]) : line);
+                }
             }
             break;
-        // ... (other cases from your compileNode) ...
-        default: // Fallback to statement or expression compilation
-            if (node->type >= AST_ASSIGN && node->type <= AST_FOR_DOWNTO) { // Heuristic for statements
+        
+        default:
+            // Check if it's a statement type node that should be handled by compileStatement
+            if (node->type >= AST_ASSIGN && node->type <= AST_USES_CLAUSE) { // Adjusted range, USES_CLAUSE now handled explicitly
                  compileStatement(node, chunk, line);
-            } else if (node->type >= AST_NUMBER && node->type <= AST_NIL) { // Heuristic for expressions
+            }
+            // Check if it's an expression type node that should be handled by compileExpression
+            // This path is usually hit if an expression is on its own line (e.g. function call for side effect, deprecated)
+            // or if compileNode is called directly on an expression subtree.
+            else if ((node->type >= AST_BINARY_OP && node->type <= AST_VARIABLE) ||
+                     node->type == AST_NIL || node->type == AST_BOOLEAN || node->type == AST_ARRAY_LITERAL || // expand this for all expression types
+                     node->type == AST_FIELD_ACCESS || node->type == AST_ARRAY_ACCESS || node->type == AST_DEREFERENCE ||
+                     node->type == AST_FORMATTED_EXPR) {
                  compileExpression(node, chunk, line);
-                 // Expressions compiled via compileNode directly might leave value on stack; decide if it needs OP_POP
+                 // If an expression is compiled at the "node" level (not as part of a larger statement/expression),
+                 // its result will be on the stack. It usually needs to be popped if not used.
+                 // This depends on context; compileStatement for AST_PROCEDURE_CALL already handles popping results of functions called as procedures.
+                 // For now, let's assume if compileNode hits an expression directly, its value isn't immediately used by an outer construct.
+                 // However, this path in compileNode's default is tricky. It's better to ensure all statement/expression
+                 // types are routed through compileStatement/compileExpression from their containing structures.
+                 #ifdef DEBUG
+                 if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Expression node %s compiled directly by compileNode. Consider if its value needs OP_POP.\n", line, astTypeToString(node->type));
+                 #endif
             } else {
-                 fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileNode.\n", line, astTypeToString(node->type));
+                 fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in main compileNode dispatcher.\n", line, astTypeToString(node->type));
             }
             break;
     }
 }
-
-
 // --- Compile Defined Function/Procedure Body ---
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
     const char* func_name = func_decl_node->token->value;
@@ -483,33 +581,67 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
 
-        // AST_PROCEDURE_CALL from your original compiler.c might be redundant if AST_PROCEDURE_CALL handles all calls.
-        // If AST_PROCEDURE_CALL is specifically for procedures identified by the parser *differently* from functions in expressions:
-        case AST_PROCEDURE_CALL: { // From all.txt [cite: 2275]
-            bool isQualifiedCall = false; // DECLARE and initialize
-            const char* functionName = NULL;
-            // AST* calleeNode = node->left; // This was from an older thought, parser uses node->token and node->left for qualifier
+        case AST_PROCEDURE_CALL: {
+            int line = getLine(node);
+            if(line <=0) line = current_line_approx;
 
-            if (node->token && node->token->value) {
-                functionName = node->token->value; // This is the procedure/function name itself
-                // Check if there's a qualifier (e.g., unit name) in node->left
-                if (node->left && node->left->type == AST_VARIABLE && node->left->token) {
-                    isQualifiedCall = true; // <--- CORRECTLY SET HERE if qualified
-                }
+            const char* functionName = NULL;
+            bool isCallQualified = false;
+
+            if (node->left &&
+                node->left->type == AST_VARIABLE &&
+                node->left->token && node->left->token->value &&
+                node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
+                functionName = node->token->value;
+                isCallQualified = true;
+            } else if (node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
+                functionName = node->token->value;
+                isCallQualified = false;
             } else {
-                 // This case implies an AST_PROCEDURE_CALL node without a primary token,
-                 // which would be unusual for how the parser likely builds it.
-                 // The parser, even for qualified calls unit.func, should put "func" in node->token.
-                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (missing token).\n", line);
-                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                 writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk,makeNil()), line);
-                 break;
+                // <<<< ENSURE DETAILED DEBUGGING IS HERE AND ACTIVE >>>>
+                fprintf(stderr, "L%d: COMPILER_DEBUG_ERROR: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line); // Changed message slightly for tracking
+                fprintf(stderr, "    Node Type: %s\n", astTypeToString(node->type));
+                if (node->token) {
+                    fprintf(stderr, "    Node Token Value: '%s'\n", node->token->value ? node->token->value : "NULL_VALUE_FIELD");
+                    fprintf(stderr, "    Node Token Type: %s (%d)\n", tokenTypeToString(node->token->type), node->token->type);
+                    fprintf(stderr, "    Node Token Line: %d, Col: %d\n", node->token->line, node->token->column);
+                } else {
+                    fprintf(stderr, "    Node Token: NULL\n");
+                }
+                if (node->left) {
+                    fprintf(stderr, "    Node Left Type: %s\n", astTypeToString(node->left->type));
+                     if (node->left->token) {
+                        fprintf(stderr, "    Node Left Token Value: '%s'\n", node->left->token->value ? node->left->token->value : "NULL_VALUE_FIELD");
+                        fprintf(stderr, "    Node Left Token Type: %s (%d)\n", tokenTypeToString(node->left->token->type), node->left->token->type);
+                    } else {
+                        fprintf(stderr, "    Node Left Token: NULL\n");
+                    }
+                } else {
+                     fprintf(stderr, "    Node Left: NULL\n");
+                }
+                fflush(stderr); // Ensure these prints appear
+                // <<<< END OF DETAILED DEBUGGING >>>>
+
+                // Original fallback logic:
+                for(uint8_t i = 0; i < node->child_count; ++i) {
+                    if(node->children && i < node->child_count && node->children[i]) {
+                         writeBytecodeChunk(chunk, OP_POP, getLine(node->children[i]));
+                    }
+                }
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                break; // Exit this case
             }
             
+            // ... (rest of the logic: argument compilation, then dispatch based on functionName) ...
+            // Ensure the rest of this case (dispatch for builtins, user-defined) is present
+            // from my earlier complete suggestion for this case block.
+            // The code block you pasted in the previous message was truncated after the "else" for Invalid Callee.
+
+            // This part MUST be present after functionName is determined:
             uint8_t arg_count = 0;
-            // Arguments for AST_PROCEDURE_CALL are direct children
             if (node->child_count > 0 && node->children) {
-                 for (int i = 0; i < node->child_count; i++) {
+                for (int i = 0; i < node->child_count; i++) {
                     if (node->children[i]) {
                         compileExpression(node->children[i], chunk, getLine(node->children[i]));
                         arg_count++;
@@ -517,50 +649,98 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            if (strcasecmp(functionName, "quitrequested") == 0 && !isQualifiedCall) { // quitrequested is not qualified
-                if (arg_count > 0) { fprintf(stderr, "L%d: Compiler error: QuitRequested() expects no arguments.\n", line); }
-                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
-                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
-            } else if (isBuiltin(functionName) && !isQualifiedCall) { // built-ins are typically not qualified in user code
-                int nameIndex = addConstantToChunk(chunk, makeString(functionName));
-                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                writeBytecodeChunk(chunk, arg_count, line);
-            } else { // User-defined function call (can be qualified or unqualified)
-                char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2]; // Buffer for "unit.proc" or "proc"
-                if (isQualifiedCall) {
-                    // node->left is AST_VARIABLE "unit", node->token->value is "proc"
-                    snprintf(lookup_name, sizeof(lookup_name), "%s.%s", node->left->token->value, functionName);
+            if (strcasecmp(functionName, "quitrequested") == 0 && !isCallQualified) {
+                // ... (logic as per previous correct version) ...
+                 if (arg_count > 0) {
+                    fprintf(stderr, "L%d: Compiler error: QuitRequested() expects no arguments when used as a function.\n", line);
+                    for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
                 } else {
-                    strncpy(lookup_name, functionName, sizeof(lookup_name) -1);
-                    lookup_name[sizeof(lookup_name)-1] = '\0';
+                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
                 }
-                toLowerString(lookup_name); // Normalize for lookup
+            } else if (isBuiltin(functionName) && !isCallQualified) {
+                // ... (logic as per previous correct version, including BuiltinRoutineType check and OP_CALL_BUILTIN) ...
+                 BuiltinRoutineType type = getBuiltinType(functionName);
+                if (type == BUILTIN_TYPE_PROCEDURE) {
+                    fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
+                    for(uint8_t i = 0; i < arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                } else if (type == BUILTIN_TYPE_FUNCTION) {
+                    char normalized_name[MAX_SYMBOL_LENGTH];
+                    strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
+                    normalized_name[sizeof(normalized_name) - 1] = '\0';
+                    toLowerString(normalized_name);
+                    int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
+                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    writeBytecodeChunk(chunk, arg_count, line);
+                } else {
+                     fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context (getBuiltinType returned NONE).\n", line, functionName);
+                     for(uint8_t i = 0; i < arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                     writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                }
+            } else { // User-defined function call
+                // ... (your existing logic for user-defined calls, ensuring correct arity and type checks) ...
+                char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
+                char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
 
+                if (isCallQualified) {
+                    // ... (construct lookup_name and original_display_name for qualified) ...
+                    snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
+                    char unit_name_lower[MAX_SYMBOL_LENGTH];
+                    char func_name_lower[MAX_SYMBOL_LENGTH];
+                    strncpy(unit_name_lower, node->left->token->value, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
+                    strncpy(func_name_lower, functionName, sizeof(func_name_lower)-1); func_name_lower[sizeof(func_name_lower)-1] = '\0';
+                    toLowerString(unit_name_lower);
+                    toLowerString(func_name_lower);
+                    snprintf(lookup_name, sizeof(lookup_name), "%s.%s", unit_name_lower, func_name_lower);
+                } else {
+                    // ... (construct for unqualified) ...
+                    strncpy(original_display_name, functionName, sizeof(original_display_name) - 1);
+                    original_display_name[sizeof(original_display_name) - 1] = '\0';
+                    strncpy(lookup_name, functionName, sizeof(lookup_name) - 1);
+                    lookup_name[sizeof(lookup_name) - 1] = '\0';
+                    toLowerString(lookup_name);
+                }
+                                    
                 Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
                 
                 if (func_symbol && func_symbol->is_defined) {
-                    if (func_symbol->type == TYPE_VOID && !isQualifiedCall) { // Procedure used as function (error if unqualified, units might have procs returning implicit results sometimes)
-                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
+                    if (func_symbol->type == TYPE_VOID) {
+                        // ... (error handling) ...
+                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression.\n", line, original_display_name);
+                        for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                    } else if (func_symbol->arity != arg_count) {
+                        // ... (error handling) ...
+                         fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, but %d were given.\n", line, original_display_name, func_symbol->arity, arg_count);
                         for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
                         writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
                     } else {
-                        // If OP_CALL is not yet defined in bytecode.h, this will error later.
-                        // Assuming OP_CALL has been added to OpCode enum as per previous discussion.
                         writeBytecodeChunk(chunk, OP_CALL, line);
                         emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
-                        writeBytecodeChunk(chunk, func_symbol->arity, line); // Send declared arity
+                        writeBytecodeChunk(chunk, arg_count, line);
                     }
-                } else {
-                    fprintf(stderr, "L%d: Compiler Error: Undefined function '%s' (lookup: '%s') called in expression.\n", line, functionName, lookup_name);
+                } else { // Symbol not found or not defined
+                    // ... (error handling) ...
+                     if (func_symbol && !func_symbol->is_defined) {
+                         fprintf(stderr, "L%d: Compiler Error: Function '%s' (lookup: '%s') is forward declared or not defined for use in expression.\n", line, original_display_name, lookup_name);
+                    } else {
+                         fprintf(stderr, "L%d: Compiler Error: Undefined function '%s' (lookup: '%s') called in expression.\n", line, original_display_name, lookup_name);
+                    }
                     for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
                 }
-            }
-            break;
-        }
+            } // end of user-defined
+            break; // End of case AST_PROCEDURE_CALL
+        } // end case AST_PROCEDURE_CALL
         
         default:
             // Fallback for unhandled statement types. Could try compiling as expression and popping.
@@ -682,44 +862,156 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             break;
         }
         
-        case AST_PROCEDURE_CALL: { // AST_PROCEDURE_CALL  is in your types.h
-            AST* calleeNode = node->left;
-            const char* functionName = NULL;
+        case AST_PROCEDURE_CALL: { // AST_PROCEDURE_CALL is in your types.h
+            int line = getLine(node);
+            if (line <= 0) line = current_line_approx;
 
-            if (calleeNode && calleeNode->type == AST_VARIABLE && calleeNode->token) {
-                functionName = calleeNode->token->value;
+            const char* functionName = NULL;
+            bool isCallQualified = false;
+
+            // --- CORRECTED LOGIC for functionName and isCallQualified ---
+            if (node->left &&
+                node->left->type == AST_VARIABLE &&
+                node->left->token && node->left->token->value && /* Ensure qualifier token and value exist */
+                node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
+                // This pattern matches: unit_identifier.function_identifier(...)
+                // unit_identifier is node->left->token->value
+                // function_identifier is node->token->value
+                functionName = node->token->value; // The actual function name
+                isCallQualified = true;
+            } else if (node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
+                // This pattern matches simple calls: function_identifier(...) or BuiltinFunction(...)
+                // where node->left is not a unit qualifier (or is NULL)
+                functionName = node->token->value;
+                isCallQualified = false;
             } else {
-                fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL.\n", line);
-                writeBytecodeChunk(chunk, OP_CONSTANT, line); writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk,makeNil()), line);
-                break;
+                // If functionName could not be determined (e.g., AST node is malformed)
+                fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression). Callee token ('%s', type %s) is not a valid identifier or structure is unexpected.\n",
+                        line,
+                        node->token ? (node->token->value ? node->token->value : "NULL_VAL") : "NO_TOKEN",
+                        node->token ? tokenTypeToString(node->token->type) : "NO_TOKEN_TYPE");
+                
+                // Fallback: Pop any arguments that might have been compiled IF arg compilation was before this check
+                // (currently it's after, which is better).
+                // Push a nil value onto the stack as this expression failed.
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line); // From utils.h
+                break; // Exit this case
             }
+            // --- END OF CORRECTED LOGIC for functionName and isCallQualified ---
             
             uint8_t arg_count = 0;
-            AST* arg_list_node = node->right; // AST_COMPOUND node
-            if (arg_list_node && arg_list_node->type == AST_COMPOUND) { // AST_COMPOUND is in your types.h
-                 for (int i = 0; i < arg_list_node->child_count; i++) {
-                    compileExpression(arg_list_node->children[i], chunk, getLine(arg_list_node->children[i]));
-                    arg_count++;
+            // Arguments for AST_PROCEDURE_CALL are direct children,
+            // as seen in your parser's output for WriteLn(..., Abs(i), ...).
+            if (node->child_count > 0 && node->children) {
+                for (int i = 0; i < node->child_count; i++) {
+                    if (node->children[i]) {
+                        compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                        arg_count++;
+                    }
                 }
-            } else if (arg_list_node != NULL) {
-                 fprintf(stderr, "L%d: Compiler warning: Expected AST_COMPOUND for call to '%s', got %s.\n", line, functionName, astTypeToString(arg_list_node->type));
             }
+            // Note: Your original code had 'AST* arg_list_node = node->right;' which is different from
+            // how the parser seems to structure calls like Abs(i) where args are direct children.
+            // The loop above assumes arguments are in node->children. If your parser *sometimes*
+            // puts arguments in node->right (e.g. as an AST_COMPOUND), you'll need to unify how
+            // your parser creates AST_PROCEDURE_CALL nodes or add logic here to check both.
+            // For now, this matches the observed AST for builtins in WriteLn.
 
-            if (strcasecmp(functionName, "quitrequested") == 0) {
-                if (arg_count > 0) { fprintf(stderr, "L%d: Compiler error: QuitRequested() expects no arguments.\n", line); }
-                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
-                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
-            } else if (isBuiltin(functionName)) {
-                int nameIndex = addConstantToChunk(chunk, makeString(functionName));
-                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                writeBytecodeChunk(chunk, arg_count, line);
-            } else {
-                fprintf(stderr, "L%d: Compiler: User-defined call to function '%s' (args: %d) - OP_CALL emission placeholder.\n", line, functionName, arg_count);
-                // Push a NIL placeholder for the function's return value.
-                // This is essential for expressions expecting a value.
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+
+            // Dispatch based on function type
+            if (strcasecmp(functionName, "quitrequested") == 0 && !isCallQualified) {
+                if (arg_count > 0) {
+                    fprintf(stderr, "L%d: Compiler error: QuitRequested() expects no arguments when used as a function.\n", line);
+                    for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line); // Pop compiled arguments
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                } else {
+                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
+                    // This host function is expected to push its boolean result.
+                }
+            } else if (isBuiltin(functionName) && !isCallQualified) {
+                BuiltinRoutineType type = getBuiltinType(functionName); // From builtin.h
+
+                if (type == BUILTIN_TYPE_PROCEDURE) {
+                    fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
+                    for(uint8_t i = 0; i < arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                } else if (type == BUILTIN_TYPE_FUNCTION) {
+                    // TODO: Implement arity check for built-in functions using a mechanism
+                    // like `getBuiltinExpectedArity(functionName)` if you want stricter compile-time checks.
+                    // int expected_builtin_arity = getBuiltinExpectedArity(functionName);
+                    // if (expected_builtin_arity >= 0 && expected_builtin_arity != arg_count) { ... error ... }
+
+                    char normalized_name[MAX_SYMBOL_LENGTH]; // MAX_SYMBOL_LENGTH from globals.h or symbol.h
+                    strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
+                    normalized_name[sizeof(normalized_name) - 1] = '\0';
+                    toLowerString(normalized_name); // VM likely uses normalized names for built-in lookup
+
+                    int nameIndex = addConstantToChunk(chunk, makeString(normalized_name)); // Use corrected makeString
+                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    writeBytecodeChunk(chunk, arg_count, line); // Pass actual number of arguments compiled
+                } else { // BUILTIN_TYPE_NONE or other issue
+                     fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context (getBuiltinType failed or unknown).\n", line, functionName);
+                     for(uint8_t i = 0; i < arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                     writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                }
+            } else { // User-defined function call
+                char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
+                char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
+
+                if (isCallQualified) {
+                    snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
+                    // For lookup, ensure consistent casing as per your symbol table insertion
+                    char unit_name_lower[MAX_SYMBOL_LENGTH];
+                    char func_name_lower[MAX_SYMBOL_LENGTH];
+                    strncpy(unit_name_lower, node->left->token->value, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
+                    strncpy(func_name_lower, functionName, sizeof(func_name_lower)-1); func_name_lower[sizeof(func_name_lower)-1] = '\0';
+                    toLowerString(unit_name_lower);
+                    toLowerString(func_name_lower);
+                    snprintf(lookup_name, sizeof(lookup_name), "%s.%s", unit_name_lower, func_name_lower);
+                } else {
+                    strncpy(original_display_name, functionName, sizeof(original_display_name) - 1);
+                    original_display_name[sizeof(original_display_name) - 1] = '\0';
+
+                    strncpy(lookup_name, functionName, sizeof(lookup_name) - 1);
+                    lookup_name[sizeof(lookup_name) - 1] = '\0';
+                    toLowerString(lookup_name);
+                }
+                                    
+                Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
+                
+                if (func_symbol && func_symbol->is_defined) {
+                    // Assuming func_symbol->type (VarType) == TYPE_VOID means it's a procedure in Pascal terms.
+                    if (func_symbol->type == TYPE_VOID) {
+                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression.\n", line, original_display_name);
+                        for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                    } else if (func_symbol->arity != arg_count) {
+                        fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, but %d were given.\n", line, original_display_name, func_symbol->arity, arg_count);
+                        for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                    } else {
+                        writeBytecodeChunk(chunk, OP_CALL, line);
+                        emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
+                        writeBytecodeChunk(chunk, arg_count, line); // Pass actual arg_count
+                    }
+                } else {
+                     if (func_symbol && !func_symbol->is_defined) {
+                         fprintf(stderr, "L%d: Compiler Error: Function '%s' (lookup: '%s') is forward declared or not defined for use in expression.\n", line, original_display_name, lookup_name);
+                    } else {
+                         fprintf(stderr, "L%d: Compiler Error: Undefined function '%s' (lookup: '%s') called in expression.\n", line, original_display_name, lookup_name);
+                    }
+                    for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                }
             }
             break;
         }
