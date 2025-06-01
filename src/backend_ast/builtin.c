@@ -2553,12 +2553,14 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "paramcount", "paramstr", "length", "pos", "ord", "chr",
         "abs", "sqrt", "cos", "sin", "tan", "ln", "exp", "trunc",
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
-        "upcase", "low", "high", "succ", "pred", "round", // Added Pred assuming it might exist
+        "upcase", "low", "high", "succ", "pred", "round",
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
         "keypressed", "mstreamcreate", "quitrequested", "loadsound",
-        "real"
-        
-         // Add others like TryStrToInt, TryStrToFloat if implemented
+        "real", "getticks", "createtargettexture", "rendertexttotexture", // Added GetTicks and texture funcs
+        "getpixelcolor" // Technically a proc, but returns via VAR. For type system, treat as needing POP if used in expression context.
+                      // Better: Make it BUILTIN_TYPE_PROCEDURE and handle VAR params differently.
+                      // For now, if compiler treats it as func, it needs to be here.
+                      // However, GetPixelColor is a procedure.
     };
     int num_functions = sizeof(functions) / sizeof(functions[0]);
     for (int i = 0; i < num_functions; i++) {
@@ -2573,7 +2575,15 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "close", "assign", "halt", "inc", "dec", "delay",
         "randomize", "mstreamfree", "textcolore", "textbackgrounde",
         "initsoundsystem", "playsound", "quitsoundsystem",
-        "issoundplaying", "rendercopyex"
+        "issoundplaying", "rendercopyex", "graphloop", // <<< ADD "graphloop" HERE
+        "initgraph", "closegraph", "updatescreen", "waitkeyevent",
+        "cleardevice", "setcolor", "setrgbcolor", "putpixel", "drawline",
+        "drawrect", "fillrect", "drawcircle", "fillcircle", "inittextsystem",
+        "outtextxy", "quittextsystem", "getmousestate", "destroytexture",
+        "updatetexture", "rendercopy", "rendercopyrect", "setrendertarget",
+        "drawpolygon", "setalphablend", "freesound", // Added FreeSound
+        "gettextsize" // Added GetTextSize as it's a procedure with VAR params
+        // GetPixelColor should be here as it's a procedure
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
     for (int i = 0; i < num_procedures; i++) {

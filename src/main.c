@@ -206,6 +206,15 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 // }
 #endif
             }
+            
+            if (compilation_ok_for_vm) {
+                fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                // ... proceed to VM ...
+            } else {
+                fprintf(stderr, "Compilation failed with errors.\n"); // Changed message
+                overall_success_status = false;
+            }
+            
             freeBytecodeChunk(&chunk); // Free chunk resources after use
         }
     } else if (!dump_ast_json_flag) {
