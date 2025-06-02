@@ -146,34 +146,23 @@ static inline uint16_t READ_SHORT(VM* vm_param) { // Pass vm explicitly here
 
 // --- Symbol Management (VM specific) ---
 static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init) {
-    if (!name || name[0] == '\0') {
-        fprintf(stderr, "VM Internal Error: Invalid name for createSymbolForVM.\n");
-        return NULL;
-    }
+    if (!name || name[0] == '\0') { /* ... */ return NULL; }
     Symbol *sym = (Symbol*)malloc(sizeof(Symbol));
-    if (!sym) {
-        fprintf(stderr, "VM Internal Error: Malloc failed for Symbol in createSymbolForVM for '%s'.\n", name);
-        return NULL;
-    }
+    if (!sym) { /* ... */ return NULL; }
     sym->name = strdup(name);
-    if (!sym->name) {
-        fprintf(stderr, "VM Internal Error: Malloc failed for Symbol name in createSymbolForVM for '%s'.\n", name);
-        free(sym);
-        return NULL;
-    }
+    if (!sym->name) { /* ... */ free(sym); return NULL; }
+    
     sym->type = type;
-    sym->type_def = type_def_for_value_init; // Store the type definition AST node
+    sym->type_def = type_def_for_value_init; // Store the provided type definition AST
     sym->value = (Value*)malloc(sizeof(Value));
-    if (!sym->value) {
-        fprintf(stderr, "VM Internal Error: Malloc failed for Value in createSymbolForVM for '%s'.\n", name);
-        free(sym->name);
-        free(sym);
-        return NULL;
-    }
-    // Call makeValueForType with the provided type_def_for_value_init
+    if (!sym->value) { /* ... */ free(sym->name); free(sym); return NULL; }
+
+    // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
     *(sym->value) = makeValueForType(type, type_def_for_value_init);
+    
     sym->is_alias = false;
-    sym->is_const = false;
+    sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
+                           // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
     sym->next = NULL;
     return sym;
@@ -644,40 +633,31 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_DEFINE_GLOBAL: {
-                Value varNameVal = READ_CONSTANT();       // Operand 1: Index for variable name string
-                uint8_t typeNameConstIdx = READ_BYTE();   // Operand 2: Index for type name string (or 0)
-                VarType declaredType = (VarType)READ_BYTE(); // Operand 3: VarType enum for the variable
+                Value varNameVal = READ_CONSTANT();        // Operand 1: Variable Name Index
+                uint8_t typeNameConstIdx = READ_BYTE();    // Operand 2: Type Name Index (or 0)
+                VarType declaredType = (VarType)READ_BYTE(); // Operand 3: VarType enum
 
-                AST* type_def_ast = NULL; // Will hold the AST node for type definition if found
+                AST* type_def_ast = NULL;
 
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
                     runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // If typeNameConstIdx is non-zero, it's an index to a type name (e.g., "TBrickArray")
-                if (typeNameConstIdx > 0) {
-                    // Check if the index is valid and points to a string constant
-                    if (typeNameConstIdx < (uint8_t)vm->chunk->constants_count &&
-                        vm->chunk->constants[typeNameConstIdx].type == TYPE_STRING) {
-                        
-                        const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
-                        // lookupType requires type_table to be initialized and accessible
-                        // This is a dependency: VM needs access to parser's type table.
-                        type_def_ast = lookupType(typeNameStr);
-                        if (!type_def_ast) {
-                            // This warning will now correctly use typeNameStr
-                            fprintf(stderr, "VM Warning: Type name '%s' (from const pool idx %d) not found in type_table for global '%s'. Array/Record init might fail or use defaults.\n",
-                                    typeNameStr, typeNameConstIdx, varNameVal.s_val);
-                        }
-                    } else {
-                         fprintf(stderr, "VM Warning: Invalid type_name_const_idx %d (out of bounds or not a string) for OP_DEFINE_GLOBAL of var '%s'.\n",
-                                 typeNameConstIdx, varNameVal.s_val);
+                // If typeNameConstIdx is non-zero, look up the type definition AST node
+                if (typeNameConstIdx > 0 && typeNameConstIdx < (uint8_t)vm->chunk->constants_count &&
+                    vm->chunk->constants[typeNameConstIdx].type == TYPE_STRING) {
+                    
+                    const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
+                    // This requires that `type_table` (from globals.h) is initialized and accessible to the VM.
+                    type_def_ast = lookupType(typeNameStr);
+                    if (!type_def_ast) {
+                        fprintf(stderr, "VM Warning: Type name '%s' (from const idx %d) for global '%s' not found in type_table. Complex type init may use defaults or fail.\n",
+                                typeNameStr, typeNameConstIdx, varNameVal.s_val);
                     }
                 }
-                // If type_def_ast is still NULL (e.g., for simple types like Integer, or if lookup failed),
-                // createSymbolForVM will pass NULL to makeValueForType, which should handle it for simple types
-                // but will warn for complex types like unresolvable arrays/records.
+                // If type_def_ast is NULL (e.g. simple type, anonymous, or lookup failed),
+                // createSymbolForVM will pass NULL to makeValueForType.
 
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (sym == NULL) {
@@ -688,10 +668,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     hashTableInsert(vm->vmGlobalSymbols, sym);
                     #ifdef DEBUG
-                        if(dumpExec) fprintf(stderr, "VM: Defined global '%s' (type %s, type_def AST: %p)\n",
-                                             varNameVal.s_val,
-                                             varTypeToString(declaredType),
-                                             (void*)type_def_ast);
+                        if(dumpExec) fprintf(stderr, "VM: Defined global '%s' (type %s, type_def_ast %p from const_idx %d)\n",
+                                             varNameVal.s_val, varTypeToString(declaredType), (void*)type_def_ast, typeNameConstIdx);
                     #endif
                 } else {
                     runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);

@@ -12,6 +12,7 @@
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID
+#include "backend_ast/interpreter.h" // For makeCopyOfValue()
 
 static bool compiler_had_error = false;
 
@@ -32,11 +33,63 @@ typedef struct {
     char* name;
 } CompilerGlobalVarInfo;
 
-CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS];
 int compilerGlobalCount = 0;
 
-
 CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS]; // MAX_GLOBALS from an appropriate header or defined here
+
+typedef struct {
+    char* name;
+    Value value;
+    // bool is_evaluated; // Could add if constants can be expressions that need one-time eval by compiler
+} CompilerConstant;
+
+#define MAX_COMPILER_CONSTANTS 128 // Adjust as needed
+CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
+int compilerConstantCount = 0;
+
+// Helper to add a constant during compilation
+static void addCompilerConstant(const char* name, Value value, int line) {
+    if (compilerConstantCount >= MAX_COMPILER_CONSTANTS) {
+        fprintf(stderr, "L%d: Compiler error: Too many compile-time constants.\n", line);
+        // Consider not exiting directly but setting an error flag for compileASTToBytecode to return false
+        exit(1);
+    }
+    for (int i = 0; i < compilerConstantCount; i++) {
+        if (strcmp(compilerConstants[i].name, name) == 0) {
+            fprintf(stderr, "L%d: Compiler warning: Constant '%s' redefined. Using new value.\n", line, name);
+            // Free old value if it was heap-allocated (e.g., string)
+            freeValue(&compilerConstants[i].value);
+            compilerConstants[i].value = makeCopyOfValue(&value); // Store a copy
+            return;
+        }
+    }
+    compilerConstants[compilerConstantCount].name = strdup(name);
+    if (!compilerConstants[compilerConstantCount].name) { /* Malloc error */ exit(1); }
+    compilerConstants[compilerConstantCount].value = makeCopyOfValue(&value); // Store a copy
+    compilerConstantCount++;
+}
+
+// Helper to find a compile-time constant
+static Value* findCompilerConstant(const char* name) {
+    for (int i = 0; i < compilerConstantCount; i++) {
+        if (strcmp(compilerConstants[i].name, name) == 0) {
+            return &compilerConstants[i].value;
+        }
+    }
+    return NULL;
+}
+
+// Reset for each compilation
+static void resetCompilerConstants() {
+    for (int i = 0; i < compilerConstantCount; i++) {
+        if (compilerConstants[i].name) {
+            free(compilerConstants[i].name);
+            compilerConstants[i].name = NULL;
+        }
+        freeValue(&compilerConstants[i].value); // Free any heap-allocated data within the Value
+    }
+    compilerConstantCount = 0;
+}
 
 // Helper to get the source line number from an AST node's token
 // Provides a fallback if token is NULL.
@@ -102,6 +155,9 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     
     initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;
+    
+    resetCompilerConstants(); // Initialize/clear constants for this compilation run
+    
     for(int i=0; i < MAX_GLOBALS; ++i) {
         if (compilerGlobals[i].name) {
             free(compilerGlobals[i].name);
@@ -279,16 +335,55 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
              break;
          }
 
-        case AST_CONST_DECL: { // Moved from AST_BLOCK's second loop default path
-            if (node->token && node->token->value && node->left) {
-                #ifdef DEBUG
-                if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Processing CONST_DECL for '%s'. Value will be inlined or loaded when used.\n",
-                        line, node->token->value);
-                #endif
-                // Actual constant value handling happens when the constant is *used* in compileExpression.
-                // No bytecode is typically emitted for the declaration itself for simple constants.
-            } else {
-                fprintf(stderr, "L%d: Compiler Warning: Ill-formed AST_CONST_DECL node.\n", line);
+        case AST_CONST_DECL: {
+            // This is called by the pre-pass in compileASTToBytecode for global constants
+            // And could be called for local constants if a similar pre-pass is done for procedures.
+            if (node->token && node->left) { // Const name and value node
+                // The parser should have evaluated constant expressions already.
+                // node->left should be an AST_NUMBER, AST_STRING, AST_BOOLEAN, or AST_NIL
+                // For this example, we assume simple literal constants.
+                // A more robust solution would use eval_constant_expression from the parser if needed.
+                Value constantVal;
+                bool val_set = false;
+                if (node->left->type == AST_NUMBER) {
+                    if (node->left->var_type == TYPE_REAL || (node->left->token && strchr(node->left->token->value, '.'))) {
+                        constantVal = makeReal(atof(node->left->token->value));
+                    } else {
+                        constantVal = makeInt(atoll(node->left->token->value));
+                    }
+                    val_set = true;
+                } else if (node->left->type == AST_STRING) {
+                    constantVal = makeString(node->left->token->value); // makeString copies
+                    val_set = true;
+                } else if (node->left->type == AST_BOOLEAN) {
+                    constantVal = makeBoolean(node->left->i_val);
+                    val_set = true;
+                } else if (node->left->type == AST_NIL) {
+                    constantVal = makeNil();
+                    val_set = true;
+                }
+                 else if (node->left->type == AST_VARIABLE && node->left->token && (node->left->token->value[0] == '\'' || node->left->token->value[0] == '#')) {
+                    // Handle char constants like '#65' or 'A' (which parser might make AST_VARIABLE with string value)
+                    if (node->left->token->value[0] == '#') { // e.g. #65
+                        long long char_ord = atoll(node->left->token->value + 1);
+                        constantVal = makeChar((char)char_ord);
+                    } else { // e.g. 'A'
+                         constantVal = makeChar(node->left->token->value[1]);
+                    }
+                    val_set = true;
+                }
+                // TODO: Handle constant expressions if parser doesn't fully resolve them to literals in AST_CONST_DECL's value node
+                // For now, we assume node->left is a literal or already evaluated by parser.
+
+                if (val_set) {
+                    addCompilerConstant(node->token->value, constantVal, getLine(node));
+                    // No bytecode for CONST declaration itself, values are inlined/pushed when used.
+                    // Crucially, do not free constantVal here if it's a string, as makeCopyOfValue was used.
+                    if(constantVal.type == TYPE_STRING) freeValue(&constantVal); // Free the temporary string if makeString was used directly
+                } else {
+                     fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' has non-literal value (Type: %s). Complex const eval TBD.\n",
+                             getLine(node), node->token->value, astTypeToString(node->left->type));
+                }
             }
             break;
         }
