@@ -314,7 +314,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
             if (!node->token || !node->token->value) {
-                fprintf(stderr, "L%d: Compiler Error: Procedure/Function declaration node missing name token.\n", line);
+                fprintf(stderr, "L%d: Compiler Error: Procedure/Function declaration node missing name token(compileNode).\n", line);
                 compiler_had_error = true;
                 break;
             }
@@ -727,7 +727,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (func_symbol && func_symbol->is_defined) {
                     if (func_symbol->type == TYPE_VOID) {
                         // ... (error handling) ...
-                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression.\n", line, original_display_name);
+                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression(compileStatement).\n", line, original_display_name);
                         compiler_had_error = true;
                         for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
@@ -1091,7 +1091,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                 if (func_symbol && func_symbol->is_defined) {
                     // Assuming func_symbol->type (VarType) == TYPE_VOID means it's a procedure in Pascal terms.
                     if (func_symbol->type == TYPE_VOID) {
-                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression.\n", line, original_display_name);
+                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression(compileExpression).\n", line, original_display_name);
                         compiler_had_error = true;
                         for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
