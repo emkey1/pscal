@@ -591,12 +591,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
+            fprintf(stderr, ">>>> DEBUG: compileStatement: HIT case AST_PROCEDURE_CALL for node->token->value: '%s' <<<<\n", node && node->token ? node->token->value : "NULL_TOKEN"); // NEW DEBUG LINE
+            fflush(stderr); // Ensure it prints immediately
             int line = getLine(node);
             if(line <=0) line = current_line_approx;
 
             const char* functionName = NULL;
             bool isCallQualified = false;
 
+            fprintf(stderr, ">>>> DEBUG: compileStatement: PROC_CALL - Before name extraction. Node: '%s' <<<<\n", node && node->token ? node->token->value : "NULL_TOKEN"); fflush(stderr);
             if (node->left &&
                 node->left->type == AST_VARIABLE &&
                 node->left->token && node->left->token->value &&
@@ -607,7 +610,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 functionName = node->token->value;
                 isCallQualified = false;
             } else {
-                // <<<< ENSURE DETAILED DEBUGGING IS HERE AND ACTIVE >>>>
+                fprintf(stderr, "L%d: COMPILER_DEBUG_ERROR: Invalid callee in AST_PROCEDURE_CALL.\n", line);
+                        compiler_had_error = true;
                 fprintf(stderr, "L%d: COMPILER_DEBUG_ERROR: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line); // Changed message slightly for tracking
                 fprintf(stderr, "    Node Type: %s\n", astTypeToString(node->type));
                 if (node->token) {
@@ -629,7 +633,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                      fprintf(stderr, "    Node Left: NULL\n");
                 }
                 fflush(stderr); // Ensure these prints appear
-                // <<<< END OF DETAILED DEBUGGING >>>>
 
                 // Original fallback logic:
                 for(uint8_t i = 0; i < node->child_count; ++i) {
@@ -759,18 +762,22 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         } // end case AST_PROCEDURE_CALL
         
         default: {
+            bool was_handled_in_default = false;
             // This default case should ideally only be reached for node types
             // that are not explicitly handled by other cases and might be
             // expressions used as statements, or truly unhandled statement types.
 
+            // First, specifically check if an AST_PROCEDURE_CALL reached default.
             if (node->type == AST_PROCEDURE_CALL) {
                 // An AST_PROCEDURE_CALL should have been handled by its specific 'case AST_PROCEDURE_CALL:'.
-                // If it reaches here, it indicates a problem with the switch structure (e.g., missing break before its case).
+                // If it reaches here, it strongly indicates a problem with the switch structure itself,
+                // like a missing 'break;' in a case BEFORE 'case AST_PROCEDURE_CALL:', causing a fallthrough.
                 if (node->token && node->token->value) {
                     char lookup_name_default[MAX_SYMBOL_LENGTH * 2 + 2];
                     char original_display_name_default[MAX_SYMBOL_LENGTH*2 + 2];
                     bool is_call_qualified_default = false;
 
+                    // Determine functionName and qualified names for lookup
                     if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
                         snprintf(original_display_name_default, sizeof(original_display_name_default), "%s.%s", node->left->token->value, node->token->value);
                         char unit_name_lower[MAX_SYMBOL_LENGTH], func_name_lower[MAX_SYMBOL_LENGTH];
@@ -786,11 +793,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                     
                     bool is_function = false;
+                    // Check if it's a known function (built-in or user-defined) that returns a value
                     if (isBuiltin(node->token->value) && !is_call_qualified_default && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
                         is_function = true;
-                    } else if (!isBuiltin(node->token->value) || is_call_qualified_default) { // Check user-defined or qualified built-ins
+                    } else if (!isBuiltin(node->token->value) || is_call_qualified_default) {
                         Symbol* sym = lookupSymbolIn(procedure_table, lookup_name_default);
-                        if (sym && sym->type != TYPE_VOID) {
+                        if (sym && sym->type != TYPE_VOID && sym->is_defined) { // Check if it's a defined function
                             is_function = true;
                         }
                     }
@@ -805,15 +813,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         // that incorrectly reached the default case.
                         fprintf(stderr, "L%d: Compiler FATAL ERROR: Procedure call '%s' (type: %s) reached default case in compileStatement. This implies a missing 'break;' in a case before 'case AST_PROCEDURE_CALL:'.\n",
                                 line, original_display_name_default, astTypeToString(node->type));
-                        compiler_had_error = true; // Treat this as a compiler error
+                        compiler_had_error = true;
                     }
                 } else {
-                     fprintf(stderr, "L%d: Compiler WARNING: AST_PROCEDURE_CALL without a token reached default statement handler.\n", line);
+                     fprintf(stderr, "L%d: Compiler WARNING: AST_PROCEDURE_CALL without a callable token reached default statement handler.\n", line);
                      compiler_had_error = true;
                 }
+                was_handled_in_default = true;
             }
             // Handle other specific expression types that might be standalone statements
-            else if ( (node->type >= AST_BINARY_OP && node->type <= AST_VARIABLE && node->type != AST_PROCEDURE_CALL) || // Exclude PROC_CALL again to be safe
+            // This part should NOT include AST_PROCEDURE_CALL, as it's handled above.
+            else if ( (node->type >= AST_BINARY_OP && node->type <= AST_VARIABLE && node->type != AST_PROCEDURE_CALL) ||
                       (node->type == AST_NUMBER) || (node->type == AST_STRING) || (node->type == AST_BOOLEAN) ||
                       (node->type == AST_NIL) || (node->type == AST_FIELD_ACCESS) || (node->type == AST_ARRAY_ACCESS) ||
                       (node->type == AST_DEREFERENCE) || (node->type == AST_FORMATTED_EXPR)
@@ -823,11 +833,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 #endif
                 compileExpression(node, chunk, line);
                 writeBytecodeChunk(chunk, OP_POP, line);
+                was_handled_in_default = true;
             } else if (node->type == AST_NOOP) {
                 // Do nothing for NOOP
-            } else {
+                was_handled_in_default = true;
+            }
+
+            if (!was_handled_in_default) {
                  fprintf(stderr, "L%d: Compiler WARNING: Unhandled AST node type %s in compileStatement's default case.\n", line, astTypeToString(node->type));
-                 // compiler_had_error = true; // Decide if unhandled types here are errors
+                 // compiler_had_error = true; // Optionally make this an error
             }
             break;
         } // End default case
@@ -835,6 +849,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 }
 
 static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx) {
+    fprintf(stderr, ">>>> DEBUG: compileExpression: ENTERED for Node Type: %s, Token: '%s' <<<<\n",
+                node ? astTypeToString(node->type) : "NULL_NODE",
+                node && node->token ? (node->token->value ? node->token->value : "N/A_VAL") : "NO_TOKEN");
+        fflush(stderr);
     if (!node) return;
     int line = getLine(node);
     if (line <= 0) line = current_line_approx;
