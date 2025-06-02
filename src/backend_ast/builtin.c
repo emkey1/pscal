@@ -4,7 +4,7 @@
 #include "backend_ast/interpreter.h"
 #include "symbol/symbol.h"
 #include "backend_ast/sdl.h"
-#include "backend_ast/audio.h"    
+#include "backend_ast/audio.h"
 // Duplicates removed
 #include "globals.h"                  // Assuming globals.h is directly in src/
 
@@ -51,7 +51,6 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"exp",       executeBuiltinExp},
     {"fillcircle", executeBuiltinFillCircle},
     {"fillrect", executeBuiltinFillRect},
-    {"freesound", executeBuiltinFreeSound},
     {"getmaxx",   executeBuiltinGetMaxX},
     {"getmaxy",   executeBuiltinGetMaxY},
     {"getmousestate", executeBuiltinGetMouseState},
@@ -419,7 +418,7 @@ Value executeBuiltinTan(AST *node) {
     Value arg = eval(node->children[0]);
     double x = (arg.type == TYPE_INTEGER ? arg.i_val : arg.r_val);
     return makeReal(tan(x));
-}   
+}
 
 Value executeBuiltinSqrt(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: sqrt expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
@@ -2553,14 +2552,12 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "paramcount", "paramstr", "length", "pos", "ord", "chr",
         "abs", "sqrt", "cos", "sin", "tan", "ln", "exp", "trunc",
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
-        "upcase", "low", "high", "succ", "pred", "round",
+        "upcase", "low", "high", "succ", "pred", "round", // Added Pred assuming it might exist
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
         "keypressed", "mstreamcreate", "quitrequested", "loadsound",
-        "real", "getticks", "createtargettexture", "rendertexttotexture", // Added GetTicks and texture funcs
-        "getpixelcolor" // Technically a proc, but returns via VAR. For type system, treat as needing POP if used in expression context.
-                      // Better: Make it BUILTIN_TYPE_PROCEDURE and handle VAR params differently.
-                      // For now, if compiler treats it as func, it needs to be here.
-                      // However, GetPixelColor is a procedure.
+        "real"
+        
+         // Add others like TryStrToInt, TryStrToFloat if implemented
     };
     int num_functions = sizeof(functions) / sizeof(functions[0]);
     for (int i = 0; i < num_functions; i++) {
@@ -2575,15 +2572,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "close", "assign", "halt", "inc", "dec", "delay",
         "randomize", "mstreamfree", "textcolore", "textbackgrounde",
         "initsoundsystem", "playsound", "quitsoundsystem",
-        "issoundplaying", "rendercopyex", "graphloop", // <<< ADD "graphloop" HERE
-        "initgraph", "closegraph", "updatescreen", "waitkeyevent",
-        "cleardevice", "setcolor", "setrgbcolor", "putpixel", "drawline",
-        "drawrect", "fillrect", "drawcircle", "fillcircle", "inittextsystem",
-        "outtextxy", "quittextsystem", "getmousestate", "destroytexture",
-        "updatetexture", "rendercopy", "rendercopyrect", "setrendertarget",
-        "drawpolygon", "setalphablend", "freesound", // Added FreeSound
-        "gettextsize" // Added GetTextSize as it's a procedure with VAR params
-        // GetPixelColor should be here as it's a procedure
+        "issoundplaying", "rendercopyex"
     };
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
     for (int i = 0; i < num_procedures; i++) {
@@ -2878,21 +2867,15 @@ Value executeBuiltinRealToStr(AST *node) {
     return result;
 }
 
-Value executeBuiltinFreeSound(AST *node) {
-    if (node->child_count != 1) {
-        fprintf(stderr, "Runtime error: FreeSound (or audioFreeSound) expects 1 argument (SoundID: Integer).\n");
-        EXIT_FAILURE_HANDLER();
+// --- ADDED: Definition for getBuiltinIDForCompiler ---
+// Returns the index in builtin_dispatch_table or -1 if not found.
+// This function needs to be declared in builtin.h as well.
+int getBuiltinIDForCompiler(const char *name) {
+    if (!name) return -1;
+    for (size_t i = 0; i < num_builtins; i++) {
+        if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
+            return (int)i; // Found, return index
+        }
     }
-    // Evaluate the SoundID argument from the AST
-    Value soundIDVal = eval(node->children[0]);
-    if (soundIDVal.type != TYPE_INTEGER) {
-        fprintf(stderr, "Runtime error: FreeSound (or audioFreeSound) argument must be an Integer SoundID. Got %s.\n", varTypeToString(soundIDVal.type));
-        freeValue(&soundIDVal);
-        EXIT_FAILURE_HANDLER();
-    }
-
-    audioFreeSound((int)AS_INTEGER(soundIDVal)); // Call your renamed core C function
-
-    freeValue(&soundIDVal); // Free the evaluated Value
-    return makeVoid();      // Procedures return a void Value
+    return -1; // Not found
 }

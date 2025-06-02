@@ -591,175 +591,51 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
-            fprintf(stderr, ">>>> DEBUG: compileStatement: HIT case AST_PROCEDURE_CALL for node->token->value: '%s' <<<<\n", node && node->token ? node->token->value : "NULL_TOKEN"); // NEW DEBUG LINE
-            fflush(stderr); // Ensure it prints immediately
-            int line = getLine(node);
-            if(line <=0) line = current_line_approx;
+            int call_line = getLine(node);
 
-            const char* functionName = NULL;
-            bool isCallQualified = false;
+            // 1. Compile all arguments first and push them onto the stack.
+            for (int i = 0; i < node->child_count; i++) {
+                if (node->children[i]) {
+                    compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                } else {
+                     fprintf(stderr, "L%d: Compiler error: NULL argument node in call to '%s'.\n", call_line, node->token ? node->token->value : "unknown_proc");
+                }
+            }
 
-            fprintf(stderr, ">>>> DEBUG: compileStatement: PROC_CALL - Before name extraction. Node: '%s' <<<<\n", node && node->token ? node->token->value : "NULL_TOKEN"); fflush(stderr);
-            if (node->left &&
-                node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
-                node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
-                functionName = node->token->value;
-                isCallQualified = true;
-            } else if (node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
-                functionName = node->token->value;
-                isCallQualified = false;
+            // 2. Handle the call itself.
+            if (node->var_type == TYPE_VOID) {
+                // It's a true procedure (returns void).
+                if (node->token && isBuiltin(node->token->value)) { // isBuiltin is from builtin.c/h
+                    int builtinId = getBuiltinIDForCompiler(node->token->value); // Use helper
+                    if (builtinId != -1) {
+                        writeBytecodeChunk(chunk, OP_CALL_BUILTIN_PROC, call_line);
+                        writeBytecodeChunk(chunk, (uint8_t)builtinId, call_line);      // Operand 1: builtin_id
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line); // Operand 2: arg_count
+                        fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_BUILTIN_PROC for '%s' (ID: %d, Args: %d).\n", call_line, node->token->value, builtinId, node->child_count);
+                    } else {
+                        // This case should ideally not be hit if isBuiltin is true and get_builtin_id_for_compiler is comprehensive.
+                        fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' is known by isBuiltin() but no ID found by get_builtin_id_for_compiler(). Check mapping.\n", call_line, node->token->value);
+                        // Fallback or error handling
+                    }
+                } else if (node->token) { // User-defined procedure
+                    int nameConstIdx = addConstantToChunk(chunk, makeString(node->token->value));
+                    writeBytecodeChunk(chunk, OP_CALL_USER_PROC, call_line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameConstIdx, call_line);   // Operand 1: name_const_idx
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line); // Operand 2: arg_count
+                    fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_USER_PROC for '%s' (NameIdx: %d, Args: %d).\n", call_line, node->token->value, nameConstIdx, node->child_count);
+                } else {
+                     fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name.\n", call_line);
+                }
             } else {
-                fprintf(stderr, "L%d: COMPILER_DEBUG_ERROR: Invalid callee in AST_PROCEDURE_CALL.\n", line);
-                        compiler_had_error = true;
-                fprintf(stderr, "L%d: COMPILER_DEBUG_ERROR: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line); // Changed message slightly for tracking
-                fprintf(stderr, "    Node Type: %s\n", astTypeToString(node->type));
-                if (node->token) {
-                    fprintf(stderr, "    Node Token Value: '%s'\n", node->token->value ? node->token->value : "NULL_VALUE_FIELD");
-                    fprintf(stderr, "    Node Token Type: %s (%d)\n", tokenTypeToString(node->token->type), node->token->type);
-                    fprintf(stderr, "    Node Token Line: %d, Col: %d\n", node->token->line, node->token->column);
-                } else {
-                    fprintf(stderr, "    Node Token: NULL\n");
-                }
-                if (node->left) {
-                    fprintf(stderr, "    Node Left Type: %s\n", astTypeToString(node->left->type));
-                     if (node->left->token) {
-                        fprintf(stderr, "    Node Left Token Value: '%s'\n", node->left->token->value ? node->left->token->value : "NULL_VALUE_FIELD");
-                        fprintf(stderr, "    Node Left Token Type: %s (%d)\n", tokenTypeToString(node->left->token->type), node->left->token->type);
-                    } else {
-                        fprintf(stderr, "    Node Left Token: NULL\n");
-                    }
-                } else {
-                     fprintf(stderr, "    Node Left: NULL\n");
-                }
-                fflush(stderr); // Ensure these prints appear
-
-                // Original fallback logic:
-                for(uint8_t i = 0; i < node->child_count; ++i) {
-                    if(node->children && i < node->child_count && node->children[i]) {
-                         writeBytecodeChunk(chunk, OP_POP, getLine(node->children[i]));
-                    }
-                }
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                break; // Exit this case
+                // It's a function call used as a statement, result must be popped.
+                // The call to compileExpression here will handle emitting the function call
+                // (assuming compileExpression for AST_PROCEDURE_CALL is correctly implemented for functions).
+                fprintf(stderr, "L%d: Compiler: Function '%s' (type %s) called as a statement. Compiling call and popping result.\n", call_line, node->token ? node->token->value : "unknown_func", varTypeToString(node->var_type));
+                compileExpression(node, chunk, call_line); // This should compile the function call, leaving result on stack.
+                writeBytecodeChunk(chunk, OP_POP, call_line); // Pop the ignored result.
             }
-            
-            // ... (rest of the logic: argument compilation, then dispatch based on functionName) ...
-            // Ensure the rest of this case (dispatch for builtins, user-defined) is present
-            // from my earlier complete suggestion for this case block.
-            // The code block you pasted in the previous message was truncated after the "else" for Invalid Callee.
-
-            // This part MUST be present after functionName is determined:
-            uint8_t arg_count = 0;
-            if (node->child_count > 0 && node->children) {
-                for (int i = 0; i < node->child_count; i++) {
-                    if (node->children[i]) {
-                        compileExpression(node->children[i], chunk, getLine(node->children[i]));
-                        arg_count++;
-                    }
-                }
-            }
-
-            if (strcasecmp(functionName, "quitrequested") == 0 && !isCallQualified) {
-                // ... (logic as per previous correct version) ...
-                 if (arg_count > 0) {
-                     fprintf(stderr, "L%d: Compiler error: QuitRequested() expects no arguments when used as a function.\n", line);
-                     compiler_had_error = true;
-                     for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                     writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                } else {
-                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
-                    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
-                }
-            } else if (isBuiltin(functionName) && !isCallQualified) {
-                // ... (logic as per previous correct version, including BuiltinRoutineType check and OP_CALL_BUILTIN) ...
-                 BuiltinRoutineType type = getBuiltinType(functionName);
-                if (type == BUILTIN_TYPE_PROCEDURE) {
-                    fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
-                    compiler_had_error = true;
-                    for(uint8_t i = 0; i < arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                } else if (type == BUILTIN_TYPE_FUNCTION) {
-                    char normalized_name[MAX_SYMBOL_LENGTH];
-                    strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
-                    normalized_name[sizeof(normalized_name) - 1] = '\0';
-                    toLowerString(normalized_name);
-                    int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
-                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                    writeBytecodeChunk(chunk, arg_count, line);
-                } else {
-                    fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context (getBuiltinType returned NONE).\n", line, functionName);
-                    compiler_had_error = true;
-                    for(uint8_t i = 0; i < arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                }
-            } else { // User-defined function call
-                // ... (your existing logic for user-defined calls, ensuring correct arity and type checks) ...
-                char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
-                char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
-
-                if (isCallQualified) {
-                    // ... (construct lookup_name and original_display_name for qualified) ...
-                    snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
-                    char unit_name_lower[MAX_SYMBOL_LENGTH];
-                    char func_name_lower[MAX_SYMBOL_LENGTH];
-                    strncpy(unit_name_lower, node->left->token->value, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
-                    strncpy(func_name_lower, functionName, sizeof(func_name_lower)-1); func_name_lower[sizeof(func_name_lower)-1] = '\0';
-                    toLowerString(unit_name_lower);
-                    toLowerString(func_name_lower);
-                    snprintf(lookup_name, sizeof(lookup_name), "%s.%s", unit_name_lower, func_name_lower);
-                } else {
-                    // ... (construct for unqualified) ...
-                    strncpy(original_display_name, functionName, sizeof(original_display_name) - 1);
-                    original_display_name[sizeof(original_display_name) - 1] = '\0';
-                    strncpy(lookup_name, functionName, sizeof(lookup_name) - 1);
-                    lookup_name[sizeof(lookup_name) - 1] = '\0';
-                    toLowerString(lookup_name);
-                }
-                                    
-                Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
-                
-                if (func_symbol && func_symbol->is_defined) {
-                    if (func_symbol->type == TYPE_VOID) {
-                        // ... (error handling) ...
-                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression(compileStatement).\n", line, original_display_name);
-                        compiler_had_error = true;
-                        for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                    } else if (func_symbol->arity != arg_count) {
-                        // ... (error handling) ...
-                         fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, but %d were given.\n", line, original_display_name, func_symbol->arity, arg_count);
-                        compiler_had_error = true;
-                        for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                    } else {
-                        writeBytecodeChunk(chunk, OP_CALL, line);
-                        emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
-                        writeBytecodeChunk(chunk, arg_count, line);
-                    }
-                } else { // Symbol not found or not defined
-                    // ... (error handling) ...
-                     if (func_symbol && !func_symbol->is_defined) {
-                         fprintf(stderr, "L%d: Compiler Error: Function '%s' (lookup: '%s') is forward declared or not defined for use in expression.\n", line, original_display_name, lookup_name);
-                         compiler_had_error = true;
-                    } else {
-                         fprintf(stderr, "L%d: Compiler Error: Undefined function '%s' (lookup: '%s') called in expression.\n", line, original_display_name, lookup_name);
-                        compiler_had_error = true;
-                    }
-                    for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                }
-            } // end of user-defined
-            break; // End of case AST_PROCEDURE_CALL
-        } // end case AST_PROCEDURE_CALL
+            break;
+        }
         
         default: {
             bool was_handled_in_default = false;
