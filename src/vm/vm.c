@@ -13,6 +13,9 @@
 #include "globals.h"
 #include "backend_ast/interpreter.h" // For makeCopyOfValue (If still needed, consider moving to utils.c)
 #include "backend_ast/audio.h"
+#include "frontend/parser.h"
+#include "frontend/ast.h"
+
 
 // --- VM Helper Functions ---
 
@@ -42,7 +45,6 @@ static void runtimeError(VM* vm, const char* format, ...) {
     }
     resetStack(vm);
 }
-
 
 static void push(VM* vm, Value value) { // Using your original name 'push'
     if (vm->stackTop - vm->stack >= VM_STACK_MAX) {
@@ -144,7 +146,6 @@ static inline uint16_t READ_SHORT(VM* vm_param) { // Pass vm explicitly here
 
 // --- Symbol Management (VM specific) ---
 static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init) {
-    // ... (your existing implementation is likely fine here) ...
     if (!name || name[0] == '\0') {
         fprintf(stderr, "VM Internal Error: Invalid name for createSymbolForVM.\n");
         return NULL;
@@ -161,7 +162,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
         return NULL;
     }
     sym->type = type;
-    sym->type_def = type_def_for_value_init;
+    sym->type_def = type_def_for_value_init; // Store the type definition AST node
     sym->value = (Value*)malloc(sizeof(Value));
     if (!sym->value) {
         fprintf(stderr, "VM Internal Error: Malloc failed for Value in createSymbolForVM for '%s'.\n", name);
@@ -169,6 +170,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
         free(sym);
         return NULL;
     }
+    // Call makeValueForType with the provided type_def_for_value_init
     *(sym->value) = makeValueForType(type, type_def_for_value_init);
     sym->is_alias = false;
     sym->is_const = false;
@@ -642,18 +644,58 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_DEFINE_GLOBAL: {
-                Value varNameVal = READ_CONSTANT();
-                VarType declaredType = (VarType)READ_BYTE();
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error */ return INTERPRET_RUNTIME_ERROR; }
+                Value varNameVal = READ_CONSTANT();       // Operand 1: Index for variable name string
+                uint8_t typeNameConstIdx = READ_BYTE();   // Operand 2: Index for type name string (or 0)
+                VarType declaredType = (VarType)READ_BYTE(); // Operand 3: VarType enum for the variable
+
+                AST* type_def_ast = NULL; // Will hold the AST node for type definition if found
+
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // If typeNameConstIdx is non-zero, it's an index to a type name (e.g., "TBrickArray")
+                if (typeNameConstIdx > 0) {
+                    // Check if the index is valid and points to a string constant
+                    if (typeNameConstIdx < (uint8_t)vm->chunk->constants_count &&
+                        vm->chunk->constants[typeNameConstIdx].type == TYPE_STRING) {
+                        
+                        const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
+                        // lookupType requires type_table to be initialized and accessible
+                        // This is a dependency: VM needs access to parser's type table.
+                        type_def_ast = lookupType(typeNameStr);
+                        if (!type_def_ast) {
+                            // This warning will now correctly use typeNameStr
+                            fprintf(stderr, "VM Warning: Type name '%s' (from const pool idx %d) not found in type_table for global '%s'. Array/Record init might fail or use defaults.\n",
+                                    typeNameStr, typeNameConstIdx, varNameVal.s_val);
+                        }
+                    } else {
+                         fprintf(stderr, "VM Warning: Invalid type_name_const_idx %d (out of bounds or not a string) for OP_DEFINE_GLOBAL of var '%s'.\n",
+                                 typeNameConstIdx, varNameVal.s_val);
+                    }
+                }
+                // If type_def_ast is still NULL (e.g., for simple types like Integer, or if lookup failed),
+                // createSymbolForVM will pass NULL to makeValueForType, which should handle it for simple types
+                // but will warn for complex types like unresolvable arrays/records.
+
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (sym == NULL) {
-                    sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL);
-                    if (!sym) { /* error */ return INTERPRET_RUNTIME_ERROR; }
+                    sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_ast);
+                    if (!sym) {
+                        runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                     hashTableInsert(vm->vmGlobalSymbols, sym);
                     #ifdef DEBUG
-                        if(dumpExec) fprintf(stderr, "VM: Defined global '%s' type %s\n", varNameVal.s_val, varTypeToString(declaredType));
+                        if(dumpExec) fprintf(stderr, "VM: Defined global '%s' (type %s, type_def AST: %p)\n",
+                                             varNameVal.s_val,
+                                             varTypeToString(declaredType),
+                                             (void*)type_def_ast);
                     #endif
-                } else { /* error or warning for redefinition */ }
+                } else {
+                    runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+                }
                 break;
             }
             case OP_GET_GLOBAL: {
@@ -1258,6 +1300,47 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&result_val);
                             return INTERPRET_RUNTIME_ERROR;
                         } // End OP_CALL_BUILTIN
+            case OP_CALL_BUILTIN_PROC: { // For built-in PROCEDURES (void)
+                uint8_t builtin_id = READ_BYTE();   // Operand 1: ID of the built-in
+                uint8_t arg_count = READ_BYTE();    // Operand 2: Number of arguments
+
+                // TODO: Actual dispatch to built-in C procedure based on builtin_id.
+                // 1. Pop `arg_count` arguments.
+                // 2. Call the C function.
+                // 3. No result is pushed for void procedures.
+                
+                fprintf(stderr, "VM STUB: OP_CALL_BUILTIN_PROC (ID: %d, Args: %d) - No result.\n", builtin_id, arg_count);
+                for(int i=0; i<arg_count; ++i) { Value arg = pop(vm); freeValue(&arg); } // Consume args
+                break;
+            }
+            case OP_CALL_USER_PROC: { // For user-defined PROCEDURES and FUNCTIONS
+                uint8_t name_const_idx = READ_BYTE(); // Operand 1: Index of procedure name in const pool
+                uint8_t arg_count = READ_BYTE();      // Operand 2: Number of arguments
+
+                // TODO: Implement call frame setup, argument passing, and jump for user procedures.
+                // 1. Get procedure name from constants: vm->chunk->constants[name_const_idx].s_val
+                // 2. Find the procedure's entry point (bytecode offset) in a procedure table/list.
+                // 3. Create a new call frame: store return address (current vm->ip), old frame pointer.
+                // 4. Pop `arg_count` arguments from stack and place them into new frame's local slots.
+                // 5. Update vm->ip to the procedure's entry point.
+                // If it's a function, the VM needs to know its return type to handle `result` assignment
+                // and ensure a value is on the stack when it returns.
+                
+                Value procNameVal = vm->chunk->constants[name_const_idx];
+                fprintf(stderr, "VM STUB: OP_CALL_USER_PROC for '%s' (Args: %d) - Call logic TBD.\n",
+                        (procNameVal.type == TYPE_STRING) ? procNameVal.s_val : "INVALID_NAME",
+                        arg_count);
+                for(int i=0; i<arg_count; ++i) { Value arg = pop(vm); freeValue(&arg); } // Consume args
+
+                // If this OP_CALL_USER_PROC is for a function, a dummy result needs to be pushed
+                // until function calls are fully implemented. We need to know if it's a function.
+                // This requires the VM to have type information for user procedures/functions.
+                // For now, we'll assume if it's called via OP_CALL_USER_PROC and isn't handled as
+                // a statement that pops its result, it's a function call needing a result.
+                // This is a simplification; ideally, distinct opcodes or flags differentiate.
+                // push(vm, makeNil()); // Push dummy result for now if it could be a function
+                break;
+            }
             case OP_HALT:
                 return INTERPRET_OK;
             case OP_CALL_HOST: {

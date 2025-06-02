@@ -170,22 +170,25 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case OP_DEFINE_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            // Your OP_DEFINE_GLOBAL in bytecode.c had a second operand 'type_val'
-            // If you removed it, this needs to be offset + 2; otherwise, offset + 3
-            // For now, matching the version from your provided bytecode.c which has type_val:
-            if (offset + 2 >= chunk->count) { // Check bounds for 2 operands
-                 printf("OP_DEFINE_GLOBAL (operands out of bounds)\n");
-                 return offset + 1; // Error case
-            }
-            uint8_t type_val = chunk->code[offset + 2];
-            printf("%-16s %4d '", "OP_DEFINE_GLOBAL", name_index);
+            uint8_t type_name_index = chunk->code[offset + 2]; // Read new operand
+            uint8_t type_val_enum = chunk->code[offset + 3];   // Read new operand
+
+            printf("OP_DEFINE_GLOBAL NameIdx:%-3d ", name_index);
             if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
-                printf("%s", chunk->constants[name_index].s_val);
+                printf("'%s' ", chunk->constants[name_index].s_val);
             } else {
-                printf("INVALID_NAME_IDX");
+                printf("INVALID_NAME_IDX ");
             }
-            printf("' Type: %s (%d)\n", varTypeToString((VarType)type_val), type_val);
-            return offset + 3;
+            printf("TypeStrIdx:%-3d ", type_name_index);
+            if (type_name_index > 0 && type_name_index < chunk->constants_count && chunk->constants[type_name_index].type == TYPE_STRING) {
+                 printf("('%s') ", chunk->constants[type_name_index].s_val);
+            } else if (type_name_index == 0) {
+                 printf("(simple/anon) "); // 0 might mean no specific named type for arrays/records
+            } else {
+                 printf("INVALID_TYPE_NAME_IDX ");
+            }
+            printf("VarType:%s (%d)\n", varTypeToString((VarType)type_val_enum), type_val_enum);
+            return offset + 4; // Opcode + 3 byte operands
         }
         case OP_GET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];

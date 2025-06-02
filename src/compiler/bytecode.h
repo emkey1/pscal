@@ -35,7 +35,8 @@ typedef enum {
     OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
     OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
 
-    OP_DEFINE_GLOBAL, // Define a new global variable (takes constant index for name)
+    // OP_DEFINE_GLOBAL: Operand1: name_const_idx, Operand2: type_name_const_idx (or 0), Operand3: var_type_enum
+    OP_DEFINE_GLOBAL, 
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
 
@@ -43,8 +44,8 @@ typedef enum {
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
                       // Needs: index of builtin, argument count
     
-    OP_CALL_BUILTIN_PROC, // Operand1: builtin_id, Operand2: arg_count
-    OP_CALL_USER_PROC,    // Operand1: name_const_idx, Operand2: arg_count
+    OP_CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
+    OP_CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
 
     OP_WRITE_LN,      // Specific opcode for WriteLn for now (simpler than generic call)
                       // Operand: number of arguments to pop from stack for writeln

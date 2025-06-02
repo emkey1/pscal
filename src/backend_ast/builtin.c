@@ -2872,7 +2872,11 @@ Value executeBuiltinRealToStr(AST *node) {
 // This function needs to be declared in builtin.h as well.
 int getBuiltinIDForCompiler(const char *name) {
     if (!name) return -1;
+    // The builtin_dispatch_table is static const in this file.
+    // num_builtins is also static const.
     for (size_t i = 0; i < num_builtins; i++) {
+        // Assuming BuiltinMapping struct has a 'name' field.
+        // Using strcasecmp for case-insensitive comparison, matching compareBuiltinMappings.
         if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
             return (int)i; // Found, return index
         }

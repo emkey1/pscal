@@ -245,37 +245,39 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         
-        case AST_VAR_DECL: { // Moved from AST_BLOCK's second loop default path
-            // An AST_VAR_DECL node contains one or more variable names (as AST_VARIABLE children)
-            // and a type specifier (in node->right). node->var_type should also hold the VarType enum.
-            if (node->child_count > 0 && node->children && node->var_type != TYPE_UNKNOWN) {
-                for (int i = 0; i < node->child_count; ++i) {
-                    AST* var_name_node = node->children[i]; // This child is an AST_VARIABLE
-                    if (var_name_node && var_name_node->type == AST_VARIABLE && var_name_node->token) {
-                        const char* varName = var_name_node->token->value;
-                        // For global variables, we emit OP_DEFINE_GLOBAL.
-                        // The VM will use this to allocate space or register the global.
-                        // The operand to OP_DEFINE_GLOBAL is an index to the variable's name in the constant pool.
-                        // A second operand indicates the type.
-                        #ifdef DEBUG
-                        if(dumpExec) fprintf(stderr, "L%d: Compiler: Defining global variable '%s' of type %s.\n",
-                                line, varName, varTypeToString(node->var_type));
-                        #endif
-                        int nameIndex = addConstantToChunk(chunk, makeString(varName));
-                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, line);
-                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                        writeBytecodeChunk(chunk, (uint8_t)node->var_type, line);
-                    } else {
-                        fprintf(stderr, "L%d: Compiler error: Malformed variable name node within AST_VAR_DECL.\n", line);
-                        compiler_had_error = true;
-                    }
-                }
-            } else {
-                fprintf(stderr, "L%d: Compiler error: Malformed AST_VAR_DECL node (no children or unknown type).\n", line);
-                compiler_had_error = true;
-            }
-            break;
-        }
+        case AST_VAR_DECL: {
+             VarType declared_type_enum = node->var_type;
+             AST* type_specifier_node = node->right; // This node describes the type, e.g., AST_VARIABLE "TBrickArray" or "integer"
+
+             if (node->children) {
+                 for (int i = 0; i < node->child_count; i++) {
+                     AST* varNameNode = node->children[i];
+                     if (varNameNode && varNameNode->token) {
+                         int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                         uint8_t type_name_idx = 0; // Default for simple types or anonymous complex types
+
+                         // If it's a complex type AND its type_specifier_node has a token (i.e., it's a named type)
+                         if ((declared_type_enum == TYPE_ARRAY || declared_type_enum == TYPE_RECORD) &&
+                             type_specifier_node && type_specifier_node->token &&
+                             (type_specifier_node->type == AST_VARIABLE || type_specifier_node->type == AST_TYPE_REFERENCE)) {
+                             // The token of type_specifier_node holds the type name (e.g., "TBrickArray")
+                             type_name_idx = (uint8_t)addConstantToChunk(chunk, makeString(type_specifier_node->token->value));
+                         }
+                         // For anonymous types like "var x: array[1..2] of integer;", type_specifier_node would be AST_ARRAY_TYPE
+                         // and would not have a .token in the same way. type_name_idx would remain 0.
+                         // The VM would need more complex bytecode to handle defining anonymous structures if this path is taken.
+
+                         writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
+                         writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
+                         writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode)); // Operand for type name string index
+                         writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode)); // Operand for VarType enum
+                         
+                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
+                     }
+                 }
+             }
+             break;
+         }
 
         case AST_CONST_DECL: { // Moved from AST_BLOCK's second loop default path
             if (node->token && node->token->value && node->left) {
@@ -602,36 +604,43 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            // 2. Handle the call itself.
+            // 2. Handle the call itself based on whether it's a void procedure or a function.
+            //    This relies on node->var_type being correctly set by annotateTypes.
             if (node->var_type == TYPE_VOID) {
                 // It's a true procedure (returns void).
-                if (node->token && isBuiltin(node->token->value)) { // isBuiltin is from builtin.c/h
-                    int builtinId = getBuiltinIDForCompiler(node->token->value); // Use helper
+                if (node->token && isBuiltin(node->token->value)) {
+                    int builtinId = getBuiltinIDForCompiler(node->token->value); // From builtin.c/h
                     if (builtinId != -1) {
                         writeBytecodeChunk(chunk, OP_CALL_BUILTIN_PROC, call_line);
                         writeBytecodeChunk(chunk, (uint8_t)builtinId, call_line);      // Operand 1: builtin_id
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line); // Operand 2: arg_count
-                        fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_BUILTIN_PROC for '%s' (ID: %d, Args: %d).\n", call_line, node->token->value, builtinId, node->child_count);
+                        // fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_BUILTIN_PROC for '%s' (ID: %d, Args: %d).\n", call_line, node->token->value, builtinId, node->child_count);
                     } else {
-                        // This case should ideally not be hit if isBuiltin is true and get_builtin_id_for_compiler is comprehensive.
-                        fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' is known by isBuiltin() but no ID found by get_builtin_id_for_compiler(). Check mapping.\n", call_line, node->token->value);
-                        // Fallback or error handling
+                        fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' (marked void) not found by getBuiltinIDForCompiler(). Review builtin table and ID generation.\n", call_line, node->token->value);
+                        // This indicates an inconsistency or missing entry in your builtin ID mapping.
                     }
                 } else if (node->token) { // User-defined procedure
                     int nameConstIdx = addConstantToChunk(chunk, makeString(node->token->value));
                     writeBytecodeChunk(chunk, OP_CALL_USER_PROC, call_line);
                     writeBytecodeChunk(chunk, (uint8_t)nameConstIdx, call_line);   // Operand 1: name_const_idx
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line); // Operand 2: arg_count
-                    fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_USER_PROC for '%s' (NameIdx: %d, Args: %d).\n", call_line, node->token->value, nameConstIdx, node->child_count);
+                    // fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_USER_PROC for '%s' (NameIdx: %d, Args: %d).\n", call_line, node->token->value, nameConstIdx, node->child_count);
                 } else {
-                     fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name.\n", call_line);
+                     fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name (void path).\n", call_line);
                 }
             } else {
-                // It's a function call used as a statement, result must be popped.
-                // The call to compileExpression here will handle emitting the function call
-                // (assuming compileExpression for AST_PROCEDURE_CALL is correctly implemented for functions).
-                fprintf(stderr, "L%d: Compiler: Function '%s' (type %s) called as a statement. Compiling call and popping result.\n", call_line, node->token ? node->token->value : "unknown_func", varTypeToString(node->var_type));
-                compileExpression(node, chunk, call_line); // This should compile the function call, leaving result on stack.
+                // It's a function call used as a statement, so its result must be popped.
+                // compileExpression is responsible for emitting the function call opcodes
+                // and ensuring the result is left on the stack.
+                // fprintf(stderr, "L%d: Compiler: Function '%s' (type %s) called as statement. Compiling call and popping result.\n", call_line, node->token ? node->token->value : "unknown_func", varTypeToString(node->var_type));
+
+                // IMPORTANT: compileExpression for AST_PROCEDURE_CALL needs to be fully implemented
+                // to handle function calls correctly. The current placeholder in your shared code
+                // just pushes a dummy constant.
+                compileExpression(node, chunk, call_line); // This should compile the function call.
+                                                           // Arguments were already compiled above.
+                                                           // compileExpression for AST_PROCEDURE_CALL should ideally just emit the CALL part.
+
                 writeBytecodeChunk(chunk, OP_POP, call_line); // Pop the ignored result.
             }
             break;
@@ -998,9 +1007,6 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             }
             break;
         }
-        // AST_PROCEDURE_CALL is typically a statement. If your parser also uses it for functions in expressions,
-        // its logic would be very similar to AST_PROCEDURE_CALL above.
-        // For now, assuming functions in expressions are AST_PROCEDURE_CALL.
         
         default:
             fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileExpression.\n", line, astTypeToString(node->type));
