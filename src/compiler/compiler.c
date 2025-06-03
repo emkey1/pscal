@@ -69,6 +69,7 @@ static void addCompilerConstant(const char* name, Value value, int line) {
     compilerConstantCount++;
 }
 
+/*
 // Helper to find a compile-time constant
 static Value* findCompilerConstant(const char* name) {
     for (int i = 0; i < compilerConstantCount; i++) {
@@ -77,10 +78,10 @@ static Value* findCompilerConstant(const char* name) {
         }
     }
     return NULL;
-}
+} */
 
 // Reset for each compilation
-static void resetCompilerConstants() {
+static void resetCompilerConstants(void) {
     for (int i = 0; i < compilerConstantCount; i++) {
         if (compilerConstants[i].name) {
             free(compilerConstants[i].name);
@@ -126,6 +127,7 @@ static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, in
 // --- Simple Type Resolution (Placeholder - needs to be robust) ---
 // This is a very basic version. A real one would look up user-defined types.
 
+/*
 static VarType resolveASTTypeToVarType(AST* type_node, int line_for_error) {
     if (!type_node) return TYPE_UNKNOWN;
 
@@ -147,6 +149,7 @@ static VarType resolveASTTypeToVarType(AST* type_node, int line_for_error) {
             type_node->token ? type_node->token->value : "N/A");
     return TYPE_UNKNOWN;
 }
+ */
 
 // --- Main Compilation Function ---
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
