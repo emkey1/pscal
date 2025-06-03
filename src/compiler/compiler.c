@@ -153,38 +153,52 @@ static VarType resolveASTTypeToVarType(AST* type_node, int line_for_error) {
 
 // --- Main Compilation Function ---
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
-    // ... (Your existing implementation, ensure compilerGlobals is cleared) ...
-    if (!rootNode || !outputChunk) { /* error */ return false; }
+    // ... (initial null checks, initBytecodeChunk, reset compilerGlobalCount) ...
+    if (!rootNode || !outputChunk) { /* ... */ return false; }
     
     initBytecodeChunk(outputChunk);
-    compilerGlobalCount = 0;
-    
-    resetCompilerConstants(); // Initialize/clear constants for this compilation run
-    
-    for(int i=0; i < MAX_GLOBALS; ++i) {
-        if (compilerGlobals[i].name) {
-            free(compilerGlobals[i].name);
-            compilerGlobals[i].name = NULL;
+    compilerGlobalCount = 0; // For global variable indexing by compiler
+    // compiler_had_error = false; // If you use a global error flag
+
+    resetCompilerConstants();
+
+    // This ensures constants are known before they are used in other declarations or the main body.
+    // This simplified pre-pass assumes global constants are direct children of the main program block's declaration section.
+    if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK) {
+        AST* mainBlock = rootNode->right;
+        // mainBlock->children[0] is usually the AST_COMPOUND node for all declarations (const, type, var, proc/func)
+        if (mainBlock->child_count > 0 && mainBlock->children[0] && mainBlock->children[0]->type == AST_COMPOUND) {
+            AST* declarations_compound_node = mainBlock->children[0];
+            for (int i = 0; i < declarations_compound_node->child_count; i++) {
+                AST* declNode = declarations_compound_node->children[i];
+                if (declNode && declNode->type == AST_CONST_DECL) {
+                    // Call compileNode specifically for AST_CONST_DECL.
+                    // It won't emit bytecode but will call addCompilerConstant.
+                    // Pass NULL for 'chunk' as we are not emitting to the main chunk in this pre-pass.
+                    // Or, ensure compileNode's AST_CONST_DECL case handles a NULL chunk gracefully.
+                    // For simplicity here, let's make sure the AST_CONST_DECL case in compileNode
+                    // *only* calls addCompilerConstant and doesn't write to the chunk.
+                    compileNode(declNode, NULL /* No bytecode emission during this pre-pass */, getLine(declNode));
+                }
+            }
         }
     }
-    
-    compiler_had_error = false; // Initialize error flag
 
+    // Main compilation pass (unchanged from your structure)
     if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK) {
         AST* mainBlock = rootNode->right;
         compileNode(mainBlock, outputChunk, getLine(rootNode));
     } else if (rootNode->type == AST_BLOCK) {
         compileNode(rootNode, outputChunk, getLine(rootNode));
     } else {
-        fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK node as root.\n");
-        // freeBytecodeChunk(outputChunk); // Clean up partially initialized chunk on error
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK node as root for compilation.\n");
         return false;
     }
-    writeBytecodeChunk(outputChunk, OP_HALT, getLine(rootNode));
-    // Consider returning !compiler.hadError if you add an error flag to the compiler pass
-    return !compiler_had_error;
-}
 
+    writeBytecodeChunk(outputChunk, OP_HALT, getLine(rootNode));
+    // return !compiler_had_error; // If using a global error flag
+    return true;
+}
 
 // --- Recursive Compilation Dispatcher ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx) {
@@ -479,6 +493,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
     }
 }
+
 // --- Compile Defined Function/Procedure Body ---
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
     const char* func_name = func_decl_node->token->value;
