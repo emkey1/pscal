@@ -330,29 +330,33 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
         instruction_val = READ_BYTE(); // Uses the macro which uses vm->ip from runVM
         switch (instruction_val) {
-           case OP_RETURN: {
-                if (vm->frameCount == 0) {
-                    // This indicates we are trying to return from the top-level script.
-                    // It means the main program body has finished.
-                    #ifdef DEBUG
-                    if (dumpExec) printf("--- Returning from top-level script. VM shutting down. ---\n");
-                    #endif
-                    // Pop the final result of the script if any, and then halt.
-                    if (vm->stackTop > vm->stack) pop(vm);
-                    return INTERPRET_OK; // Signal successful program completion
-                }
+            case OP_RETURN: {
+                 if (vm->frameCount == 0) {
+                     // We are returning from the top-level script. This is not an error;
+                     // it means the program has finished executing.
+                     #ifdef DEBUG
+                     if (dumpExec) printf("--- Returning from top-level script. VM shutting down. ---\n");
+                     #endif
+                     
+                     // Pop the final implicit value off the stack if any, then signal successful completion.
+                     if (vm->stackTop > vm->stack) {
+                         pop(vm);
+                     }
+                     return INTERPRET_OK;
+                 }
 
-                Value returnValue = pop(vm); // Pop the function's result (or a dummy value for procedures)
+                 // This is a return from a normal function/procedure call.
+                 Value returnValue = pop(vm); // Pop the function's result (or a dummy value for procedures)
 
-                vm->frameCount--;
-                CallFrame* frame = &vm->frames[vm->frameCount]; // Get the frame we are returning TO (caller)
+                 vm->frameCount--;
+                 CallFrame* frame = &vm->frames[vm->frameCount]; // Get the frame we are returning TO (the caller)
                  
-                vm->stackTop = frame->slots;    // Reset stack top, popping callee's frame
-                push(vm, returnValue);          // Push the function's result back onto the caller's stack.
-                
-                vm->ip = frame->return_address; // Jump back to the caller's next instruction.
-                break;
-            }
+                 vm->stackTop = frame->slots;    // Reset stack top, popping the callee's entire frame (args + locals).
+                 push(vm, returnValue);          // Push the function's actual result value back onto the caller's stack.
+                 
+                 vm->ip = frame->return_address; // Jump back to the caller's next instruction.
+                 break;
+             }
 
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT(); // Uses the macro
@@ -389,6 +393,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool bool_val = IS_BOOLEAN(val_popped) ? AS_BOOLEAN(val_popped) : (AS_INTEGER(val_popped) != 0);
                 push(vm, makeBoolean(!bool_val));
                 freeValue(&val_popped);
+                break;
+            }
+            case OP_SWAP: {
+                if (vm->stackTop - vm->stack < 2) {
+                    runtimeError(vm, "VM Error: Not enough values on stack to swap.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value a = pop(vm);
+                Value b = pop(vm);
+                push(vm, a);
+                push(vm, b);
                 break;
             }
             case OP_AND:
@@ -882,7 +897,127 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&popped_val);
                 break;
             }
-                // In src/vm/vm.c, inside interpretBytecode's switch statement
+            case OP_GET_ELEMENT: {
+                 Value index_val = pop(vm);
+                 Value array_val = pop(vm);
+
+                 if (array_val.type != TYPE_ARRAY) {
+                     runtimeError(vm, "VM Error: Cannot index a non-array type (%s).", varTypeToString(array_val.type));
+                     freeValue(&index_val); freeValue(&array_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+                 if (index_val.type != TYPE_INTEGER) {
+                     runtimeError(vm, "VM Error: Array index must be an integer.");
+                     freeValue(&index_val); freeValue(&array_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+
+                 // Assuming 1D for now. computeFlatOffset handles bounds checking.
+                 int indices[] = { (int)index_val.i_val };
+                 int offset = computeFlatOffset(&array_val, indices);
+
+                 // Push a copy of the element from the array.
+                 push(vm, makeCopyOfValue(&array_val.array_val[offset]));
+
+                 // Free the temporary index and array values that were popped.
+                 freeValue(&index_val);
+                 freeValue(&array_val);
+                 break;
+            }
+            case OP_SET_ELEMENT: {
+                Value value_to_set = pop(vm);
+                Value index_val = pop(vm);
+                Value array_val = pop(vm); // This is a copy of the array.
+
+                if (array_val.type != TYPE_ARRAY) {
+                    runtimeError(vm, "VM Error: Cannot index a non-array type for setting.");
+                    freeValue(&value_to_set); freeValue(&index_val); freeValue(&array_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (index_val.type != TYPE_INTEGER) {
+                    runtimeError(vm, "VM Error: Array index must be an integer for setting.");
+                    freeValue(&value_to_set); freeValue(&index_val); freeValue(&array_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int indices[] = { (int)index_val.i_val };
+                int offset = computeFlatOffset(&array_val, indices);
+
+                // Free the old value at the target location before overwriting.
+                freeValue(&array_val.array_val[offset]);
+                // Place a copy of the new value.
+                array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
+
+                // IMPORTANT: Push the MODIFIED array copy back onto the stack.
+                push(vm, array_val);
+
+                // Free the other temporary values.
+                freeValue(&value_to_set);
+                freeValue(&index_val);
+                break;
+            }
+            case OP_GET_FIELD: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value record_val = pop(vm);
+
+                if (record_val.type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record type.");
+                    freeValue(&record_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_val.record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        push(vm, makeCopyOfValue(&current->value));
+                        freeValue(&record_val);
+                        goto next_instruction; // Exit switch and go to next instruction
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                freeValue(&record_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            case OP_SET_FIELD: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value value_to_set = pop(vm);
+                Value record_val = pop(vm); // This is a copy of the record.
+
+                if (record_val.type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Cannot set field on a non-record type.");
+                    freeValue(&value_to_set); freeValue(&record_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_val.record_val;
+                bool field_found = false;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        freeValue(&current->value); // Free old field value
+                        current->value = makeCopyOfValue(&value_to_set); // Assign new
+                        field_found = true;
+                        break;
+                    }
+                    current = current->next;
+                }
+
+                if (!field_found) {
+                     runtimeError(vm, "VM Error: Field '%s' not found in record for setting.", field_name);
+                     freeValue(&value_to_set); freeValue(&record_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Push the MODIFIED record copy back onto the stack.
+                push(vm, record_val);
+
+                freeValue(&value_to_set);
+                goto next_instruction;
+            }
 
             case OP_CALL_BUILTIN: {
                 uint8_t name_const_idx = READ_BYTE();
@@ -1446,6 +1581,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;
         }
+        next_instruction:; 
     }
     return INTERPRET_OK;
 }

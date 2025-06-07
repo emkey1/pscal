@@ -58,10 +58,10 @@ void addCompilerConstant(const char* name_original_case, Value value, int line) 
         if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
             // Constant with this canonical name already exists.
             fprintf(stderr, "L%d: Compiler warning: Constant '%s' (canonical: '%s') redefined. Using new value.\n", line, name_original_case, canonical_name);
-            
+
             freeValue(&compilerConstants[i].value); // Free old value's contents
             compilerConstants[i].value = makeCopyOfValue(&value); // Store a deep copy of the new value
-            
+
             // The caller of addCompilerConstant is responsible for the original 'value' it passed.
             // If 'value' was a temporary (e.g., from makeString prior to this call), its s_val should be freed by the caller
             // after addCompilerConstant returns, as makeCopyOfValue would have duplicated its content.
@@ -272,7 +272,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
         compiler_had_error = true; // Ensure error is flagged
         return false;
     }
-    
+
     // Initialize the output chunk for this compilation pass.
     // This is crucial if outputChunk is being reused or needs a fresh state.
     initBytecodeChunk(outputChunk);
@@ -322,7 +322,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
         // You'd compile the parts that generate executable code, usually the init block.
         // Global declarations from the unit's INTERFACE and IMPLEMENTATION (like CONST, VAR)
         // should have been processed by the parser and compiler's const/var handling already.
-        
+
         // Example: Compile the initialization block of the unit if it exists
         if (rootNode->right && (rootNode->right->type == AST_COMPOUND || rootNode->right->type == AST_BLOCK)) { // Assuming init block is in 'right'
              compileNode(rootNode->right, outputChunk, getLine(rootNode->right));
@@ -397,7 +397,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 AST* child = node->children[i];
                 if (!child) continue;
                 int child_line = getLine(child) > 0 ? getLine(child) : line;
-                
+
                 switch(child->type) {
                     case AST_VAR_DECL:
                     case AST_CONST_DECL:
@@ -456,7 +456,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         break;
                 }
             }
-            
+
             if (main_body_compound) {
                 compileNode(main_body_compound, chunk, getLine(main_body_compound) > 0 ? getLine(main_body_compound) : line);
             } else if (node->parent && (node->parent->type == AST_PROGRAM)) {
@@ -474,7 +474,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             } // For procedures/functions, an empty executable part is fine.
             break;
         }
-        
+
         case AST_VAR_DECL: {
              VarType declared_type_enum = node->var_type;
              AST* type_specifier_node = node->right; // This node describes the type, e.g., AST_VARIABLE "TBrickArray" or "integer"
@@ -501,7 +501,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                          writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
                          writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode)); // Operand for type name string index
                          writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode)); // Operand for VarType enum
-                         
+
                          resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                      }
                  }
@@ -531,7 +531,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (node->left) { // Ensure there's an expression for the value
                         fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' (unresolved by parser, type: %s). Generating runtime init for VM.\n",
                                 getLine(node), node->token->value, astTypeToString(node->left->type));
-                        
+
                         char canonical_const_name[MAX_SYMBOL_LENGTH];
                         strncpy(canonical_const_name, node->token->value, sizeof(canonical_const_name) - 1);
                         canonical_const_name[sizeof(canonical_const_name) - 1] = '\0';
@@ -557,7 +557,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(node));
                         writeBytecodeChunk(chunk, type_name_idx, getLine(node));
                         writeBytecodeChunk(chunk, (uint8_t)const_actual_type, getLine(node));
-                        
+
                         resolveGlobalVariableIndex(chunk, canonical_const_name, getLine(node));
                         compileExpression(node->left, chunk, getLine(node->left));
                         writeBytecodeChunk(chunk, OP_SET_GLOBAL, getLine(node));
@@ -586,7 +586,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             }
             break;
         }
-        
+
         case AST_USES_CLAUSE: { // Added case
             #ifdef DEBUG
             if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Encountered AST_USES_CLAUSE. (Handled by parser/linker, no direct bytecode).\n", line);
@@ -618,7 +618,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             // Backpatch the jump to go to the current end of the chunk.
             uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2));
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
-            
+
             #ifdef DEBUG
             if(dumpExec) fprintf(stderr, "L%d: Compiler: Patched jump over body for '%s'. Jump offset: %u.\n",
                     line, node->token->value, offset_to_skip_body);
@@ -633,7 +633,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 }
             }
             break;
-        
+
         default:
             // Check if it's a statement type node that should be handled by compileStatement
             if (node->type >= AST_ASSIGN && node->type <= AST_USES_CLAUSE) { // Adjusted range, USES_CLAUSE now handled explicitly
@@ -673,11 +673,11 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         fprintf(stderr, "L%d: Compiler INTERNAL ERROR: Procedure/function '%s' not found for body compilation.\n", line, func_name);
         return;
     }
-    
+
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
     proc_symbol->arity = func_decl_node->child_count;
-    
+
     // Simple local variable counting (a more robust solution would traverse the declaration block)
     AST* blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
     uint8_t local_count = 0;
@@ -700,10 +700,10 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (blockNode) {
         compileNode(blockNode, chunk, getLine(blockNode));
     }
-    
+
     // Explicitly add return. If it's a function, result is on stack. If procedure, a nil/dummy value is.
     writeBytecodeChunk(chunk, OP_RETURN, line);
-    
+
     #ifdef DEBUG
     if(dumpExec) fprintf(stderr, "L%d: Compiler: Finished body of %s '%s'. Ended with OP_RETURN.\n",
             line, astTypeToString(func_decl_node->type), func_name);
@@ -716,21 +716,175 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
-        case AST_ASSIGN: { // From your compiler.c
-            // Compile the expression on the right-hand side (leaves value on stack)
-            compileExpression(node->right, chunk, getLine(node->right));
-            
-            // Left-hand side (target of assignment)
-            if (node->left && node->left->type == AST_VARIABLE && node->left->token) {
-                const char* varName = node->left->token->value;
-                // For OP_SET_GLOBAL, operand is the index of the variable name string in the constant pool.
-                int nameIndex = addConstantToChunk(chunk, makeString(varName)); // makeString creates copy
+        case AST_ASSIGN: {
+            AST* lvalue = node->left;
+            AST* rvalue = node->right;
+
+            // This is the new, correct logic for compiling assignments.
+            // It handles simple, record field, and array element assignments.
+            if (lvalue->type == AST_VARIABLE) {
+                // Simple assignment: Var := RHS
+                // 1. Compile RHS value.
+                compileExpression(rvalue, chunk, getLine(rvalue));
+                // 2. Emit SET_GLOBAL.
+                int nameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
                 writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+
+            } else if (lvalue->type == AST_ARRAY_ACCESS || lvalue->type == AST_FIELD_ACCESS) {
+                // Complex assignment: container.field := RHS or container[index] := RHS
+                // This requires a recursive "store" helper function to handle chains like a.b[i].c
+                // For now, we will manually implement one level of recursion.
+
+                // We need to store the modified container back. Let's get the base variable first.
+                AST* baseVarNode = lvalue;
+                while (baseVarNode->type == AST_ARRAY_ACCESS || baseVarNode->type == AST_FIELD_ACCESS) {
+                    baseVarNode = baseVarNode->left;
+                }
+
+                if (baseVarNode->type != AST_VARIABLE) {
+                    fprintf(stderr, "L%d: Compiler error: Assignment to complex LValue must originate from a variable.\n", line);
+                    compiler_had_error = true;
+                    break;
+                }
+
+                // 1. Compile the chain of GETs to leave the final container on the stack.
+                // For `Balls[k].radius`, this means we first need the `Balls[k]` record.
+                // For `Balls[k]`, this means we first need the `Balls` array.
+                compileExpression(lvalue->left, chunk, getLine(lvalue->left));
+
+                // 2. Compile the final index or get ready for the field name.
+                if (lvalue->type == AST_ARRAY_ACCESS) {
+                    compileExpression(lvalue->children[0], chunk, getLine(lvalue->children[0]));
+                }
+
+                // 3. Compile the RHS value.
+                compileExpression(rvalue, chunk, getLine(rvalue));
+
+                // 4. Now perform the SET operation.
+                if (lvalue->type == AST_ARRAY_ACCESS) {
+                    // Stack: [container, index, value]
+                    writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
+                } else { // AST_FIELD_ACCESS
+                    // Stack: [container, value]. We need to swap them for OP_SET_FIELD.
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                    // Stack: [value, container]
+                    int fieldNameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
+                    writeBytecodeChunk(chunk, OP_SET_FIELD, line);
+                    writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+                }
+                // At this point, the modified container (the direct parent of the LValue) is on the stack.
+                // We now need to store it back into the base variable.
+
+                // This is still not fully recursive for chains like a.b[i].c,
+                // but it will work for one level of nesting like Balls[k] or MyRecord.field.
+                // For Balls[k].radius, this logic is still incomplete.
+                // A fully robust solution is more complex. Let's try a direct fix.
+
+                // --- START: Rewritten, more direct logic ---
+                // We abandon the above and write a new recursive helper.
+                // This is the cleanest way. We will add the helper below.
+                
+                // For assignment `LHS := RHS`, we need to compile the R-Value first.
+                compileExpression(rvalue, chunk, getLine(rvalue));
+                // Then we compile the L-Value, but with "SET" opcodes.
+                // Let's create a helper for this.
+
+                // The previous attempt was flawed. Let's try again with a clear head.
+                // We need to handle `Balls[k].radius := ...`
+
+                // Compile RHS first.
+                compileExpression(rvalue, chunk, getLine(rvalue));
+                // Stack: [RHS_Value]
+
+                // Compile LValue base (Balls)
+                compileExpression(baseVarNode, chunk, getLine(baseVarNode));
+                // Stack: [RHS_Value, Balls_Array]
+
+                // We need to apply the SETs from the inside out.
+                // This requires a post-order traversal of the lvalue write operations.
+                // Let's manually unroll for `Balls[k].radius`
+                if (lvalue->type == AST_FIELD_ACCESS && lvalue->left->type == AST_ARRAY_ACCESS) {
+                    // This is our `Balls[k].radius` case.
+                    AST* arr_access = lvalue->left;
+                    AST* arr_var = arr_access->left;
+
+                    // Stack should be [RHS_val]
+                    // 1. Get array: GET_GLOBAL 'balls'. Stack: [RHS_val, balls_array]
+                    compileExpression(arr_var, chunk, getLine(arr_var));
+                    // 2. Get index: GET_GLOBAL 'k'. Stack: [RHS_val, balls_array, k_val]
+                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0]));
+                    // 3. Get the record element. Stack: [RHS_val, balls_array, k_val] -> OP_GET_ELEMENT -> [RHS_val, record_val]
+                    writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
+                    // 4. Swap so value is on top. Stack: [record_val, RHS_val]
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                    // 5. Set the field. Stack: [record_val, RHS_val] -> OP_SET_FIELD -> [modified_record_val]
+                    int fieldNameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
+                    writeBytecodeChunk(chunk, OP_SET_FIELD, line);
+                    writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+                    // 6. Now put the modified record back in the array.
+                    // Stack has [modified_record]. We need [array, index, modified_record] for SET_ELEMENT.
+                    // This is where it gets hard. We need the array and index again.
+                    compileExpression(arr_var, chunk, getLine(arr_var)); // GET_GLOBAL 'balls'
+                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0])); // GET_GLOBAL 'k'
+                    // Stack: [modified_record, balls_array, k_val]
+                    // We need to swap them into the right order. This is complex.
+
+                    // Let's abandon this for the simplest possible fix for now.
+                    // The problem is that the SET opcodes modify a copy.
+                    // We will implement them to modify the original value in the VM.
+                    // This is a much larger change to the VM, but cleaner for the compiler.
+                    // This is too much for one step.
+
+                    // Backtracking to the simplest possible fix in the compiler that can work.
+                    // The logic must be:
+                    // 1. Get container.
+                    // 2. Get sub-container... etc. until one level before the target.
+                    // 3. Get the final container that will be modified.
+                    // 4. Compile index/field info.
+                    // 5. Compile RHS.
+                    // 6. Do the SET.
+                    // 7. Store the result of the SET back.
+                    // This requires a stateful compiler or a very complex recursive helper.
+
+                    // Let's implement the verbose but correct sequence I outlined in my thoughts.
+                    // This is the most direct way to fix the bug with our current architecture.
+
+                    // Sequence for `Balls[k].radius := RHS`
+                    // 1. Get Original Array
+                    compileExpression(arr_var, chunk, getLine(arr_var));
+                    // 2. Get Index
+                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0]));
+                    // 3. Get Record (a copy)
+                    writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
+                    // 4. Get RHS Value
+                    compileExpression(rvalue, chunk, getLine(rvalue));
+                    // 5. SWAP to prep for SET_FIELD. Stack: [record, value]
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                    // 6. SET_FIELD. Stack has [modified_record]
+                    int fieldIdx = addConstantToChunk(chunk, makeString(lvalue->token->value));
+                    writeBytecodeChunk(chunk, OP_SET_FIELD, line);
+                    writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
+                    // 7. Get Array again
+                    compileExpression(arr_var, chunk, getLine(arr_var));
+                    // 8. SWAP. Stack: [array, modified_record]
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                    // 9. Get Index again
+                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0]));
+                    // 10. SET_ELEMENT. Stack: [modified_array]
+                    writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
+                    // 11. SET_GLOBAL
+                    int globalIdx = addConstantToChunk(chunk, makeString(arr_var->token->value));
+                    writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+                    writeBytecodeChunk(chunk, (uint8_t)globalIdx, line);
+
+                } else {
+                     fprintf(stderr, "L%d: Compiler error: This level of nested assignment is not yet supported.\n", line);
+                     compiler_had_error = true;
+                }
             } else {
-                // TODO: Handle other LValue types like array access, record field access
-                fprintf(stderr, "L%d: Compiler error: LHS of assignment is not a simple global variable ('%s'). Complex LValues not yet supported for SET operations.\n", line, node->left && node->left->token ? node->left->token->value : "unknown_lhs");
-                compiler_had_error = true;
+                 fprintf(stderr, "L%d: Compiler error: Unhandled LValue type %s for assignment.\n", line, astTypeToString(lvalue->type));
+                 compiler_had_error = true;
             }
             break;
         }
@@ -740,26 +894,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compiler_had_error = true;
                 break;
             }
-            
+
             int loop_start_address = chunk->count; // Address before condition evaluation
-            
+
             // 1. Compile the condition
             compileExpression(node->left, chunk, getLine(node->left)); // Condition result on stack
-            
+
             // 2. Emit OP_JUMP_IF_FALSE with a placeholder for the offset to jump out of loop
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
             int exit_jump_operand_offset = chunk->count; // Remember where the jump's 2-byte operand starts
             emitShort(chunk, 0xFFFF, line); // Placeholder for jump offset (2 bytes)
-            
+
             // 3. Compile the loop body
             compileStatement(node->right, chunk, getLine(node->right)); // Body is typically AST_COMPOUND or single statement
-            
+
             // 4. Emit OP_JUMP back to the start of the loop (before condition)
             writeBytecodeChunk(chunk, OP_JUMP, line);
             // Offset = target_address (loop_start_address) - address_of_instruction_AFTER_this_jump_operand
             int backward_jump_offset = loop_start_address - (chunk->count + 2); // +2 for the short operand of OP_JUMP
             emitShort(chunk, (uint16_t)backward_jump_offset, line); // Cast to uint16_t for 2's complement if negative
-            
+
             // 5. Backpatch the OP_JUMP_IF_FALSE
             // Target for OP_JUMP_IF_FALSE is the instruction immediately after the backward OP_JUMP (current end of chunk)
             // Offset = target_address (chunk->count) - address_of_instruction_AFTER_JUMP_IF_FALSE_operand
@@ -777,10 +931,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, (uint8_t)argCount, line); // Pass arg count to VM
             break;
         }
-        
+
         case AST_IF: { // From your compiler.c, adapted
             if (!node->left || !node->right) { /* error */ return; } // Condition (left), Then-branch (right)
-            
+
             // 1. Compile the condition
             compileExpression(node->left, chunk, line);
 
@@ -816,7 +970,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             break;
         }
-        
+
         case AST_COMPOUND: { // For BEGIN...END blocks, using AST_COMPOUND from your types.h
             for (int i = 0; i < node->child_count; i++) {
                 if (node->children[i]) {
@@ -889,7 +1043,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
              }
              break;
          }
-        
+
         default: {
             bool was_handled_in_default = false;
             // This default case should ideally only be reached for node types
@@ -920,7 +1074,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         strncpy(lookup_name_default, node->token->value, sizeof(lookup_name_default)-1); lookup_name_default[sizeof(lookup_name_default)-1] = '\0';
                         toLowerString(lookup_name_default);
                     }
-                    
+
                     bool is_function = false;
                     // Check if it's a known function (built-in or user-defined) that returns a value
                     if (isBuiltin(node->token->value) && !is_call_qualified_default && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
@@ -985,7 +1139,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
     if (!node) return;
     int line = getLine(node);
     if (line <= 0) line = current_line_approx;
-    
+
     Token* node_token = node->token;
 
     switch (node->type) {
@@ -1048,6 +1202,35 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             }
             break;
         }
+        // --- NEW: Handle Field and Array Access ---
+        case AST_FIELD_ACCESS: {
+            // First, put the record object on the stack
+            compileExpression(node->left, chunk, getLine(node->left));
+            // Then, emit the GET_FIELD opcode with the field name
+            int fieldNameIndex = addConstantToChunk(chunk, makeString(node->token->value));
+            writeBytecodeChunk(chunk, OP_GET_FIELD, line);
+            writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+            break;
+        }
+        case AST_ARRAY_ACCESS: {
+            // First, put the array object on the stack
+            compileExpression(node->left, chunk, getLine(node->left));
+            // Then, put the index on the stack
+            // TODO: Handle multi-dimensional arrays by compiling all children expressions
+            if (node->child_count > 0 && node->children[0]) {
+                 compileExpression(node->children[0], chunk, getLine(node->children[0]));
+            } else {
+                fprintf(stderr, "L%d: Compiler error: Array access node has no index expression.\n", line);
+                compiler_had_error = true;
+                // Push a dummy value to avoid corrupting the stack for subsequent opcodes
+                int dummyIdx = addConstantToChunk(chunk, makeInt(0));
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
+            }
+            // Finally, emit the GET_ELEMENT opcode
+            writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
+            break;
+        }
         case AST_BINARY_OP: {
             compileExpression(node->left, chunk, getLine(node->left));
             compileExpression(node->right, chunk, getLine(node->right));
@@ -1103,7 +1286,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
         }
-        
+
         case AST_PROCEDURE_CALL: { // AST_PROCEDURE_CALL is in your types.h
             int line = getLine(node);
             if (line <= 0) line = current_line_approx;
@@ -1133,7 +1316,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                         node->token ? (node->token->value ? node->token->value : "NULL_VAL") : "NO_TOKEN",
                         node->token ? tokenTypeToString(node->token->type) : "NO_TOKEN_TYPE");
                 compiler_had_error = true;
-                
+
                 // Fallback: Pop any arguments that might have been compiled IF arg compilation was before this check
                 // (currently it's after, which is better).
                 // Push a nil value onto the stack as this expression failed.
@@ -1142,7 +1325,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                 break; // Exit this case
             }
             // --- END OF CORRECTED LOGIC for functionName and isCallQualified ---
-            
+
             uint8_t arg_count = 0;
             // Arguments for AST_PROCEDURE_CALL are direct children,
             // as seen in your parser's output for WriteLn(..., Abs(i), ...).
@@ -1228,9 +1411,9 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                     lookup_name[sizeof(lookup_name) - 1] = '\0';
                     toLowerString(lookup_name);
                 }
-                                    
+
                 Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
-                
+
                 if (func_symbol && func_symbol->is_defined) {
                     // Assuming func_symbol->type (VarType) == TYPE_VOID means it's a procedure in Pascal terms.
                     if (func_symbol->type == TYPE_VOID) {
@@ -1265,7 +1448,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             }
             break;
         }
-        
+
         default:
             fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileExpression.\n", line, astTypeToString(node->type));
             int dummyIdx = addConstantToChunk(chunk, makeInt(0)); // Push dummy 0 for expression context

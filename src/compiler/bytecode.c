@@ -210,7 +210,22 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_INT_DIV:  printf("OP_INT_DIV\n"); return offset + 1;
         case OP_AND:      printf("OP_AND\n"); return offset + 1;
         case OP_OR:       printf("OP_OR\n"); return offset + 1;
-
+            
+        case OP_GET_ELEMENT: printf("OP_GET_ELEMENT\n"); return offset + 1;
+        case OP_SET_ELEMENT: printf("OP_SET_ELEMENT\n"); return offset + 1;
+        case OP_GET_FIELD: {
+            uint8_t const_idx = chunk->code[offset + 1];
+            printf("%-16s %4d '%s'\n", "OP_GET_FIELD", const_idx,
+                   AS_STRING(chunk->constants[const_idx]));
+            return offset + 2;
+        }
+        case OP_SET_FIELD: {
+            uint8_t const_idx = chunk->code[offset + 1];
+            printf("%-16s %4d '%s'\n", "OP_SET_FIELD", const_idx,
+                   AS_STRING(chunk->constants[const_idx]));
+            return offset + 2;
+        }
+        case OP_SWAP: printf("OP_SWAP\n"); return offset + 1;
         case OP_JUMP_IF_FALSE: {
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
             printf("%-16s %4d (to %04X)\n", "OP_JUMP_IF_FALSE", jump_operand, offset + 3 + jump_operand);

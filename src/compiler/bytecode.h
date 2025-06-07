@@ -34,11 +34,17 @@ typedef enum {
 
     OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
     OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
+    OP_SWAP,          // OPCODE to swap the top two stack items.
 
     // OP_DEFINE_GLOBAL: Operand1: name_const_idx, Operand2: type_name_const_idx (or 0), Operand3: var_type_enum
     OP_DEFINE_GLOBAL, 
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
+    
+    OP_GET_FIELD,     // Pops a record, pushes the value of a field. Operand: field name const_idx.
+    OP_SET_FIELD,     // Pops a value, then a record. Sets field in record. Operand: field name const_idx.
+    OP_GET_ELEMENT,   // Pops index, then array. Pushes the element value.
+    OP_SET_ELEMENT,   // Pops value, then index, then array. Sets element in array.
 
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
