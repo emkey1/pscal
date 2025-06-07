@@ -8,6 +8,7 @@
 #include "core/utils.h"    // For freeValue, varTypeToString
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in OP_CALL_HOST cast)
+#include "backend_ast/interpreter.h" 
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
 // addConstantToChunk, emitShort, patchShort from your provided file.
@@ -63,20 +64,6 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From 
     chunk->count++;
 }
 
-/*
-int addConstantToChunk(BytecodeChunk* chunk, Value value) { // From all.txt
-    if (chunk->constants_capacity < chunk->constants_count + 1) {
-        int oldCapacity = chunk->constants_capacity;
-        chunk->constants_capacity = oldCapacity < 8 ? 8 : oldCapacity * 2;
-        chunk->constants = (Value*)reallocate(chunk->constants,
-                                             sizeof(Value) * oldCapacity,
-                                             sizeof(Value) * chunk->constants_capacity);
-    }
-    chunk->constants[chunk->constants_count] = value;
-    return chunk->constants_count++;
-}
- */
-
 int addConstantToChunk(BytecodeChunk* chunk, Value value) {
     fprintf(stderr, "[DEBUG addConstantToChunk] ENTER. Adding value type %s. chunk ptr: %p\n", varTypeToString(value.type), (void*)chunk);
     if (value.type == TYPE_STRING) {
@@ -84,7 +71,25 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
     }
     fflush(stderr);
 
-    // Perform reallocation if needed (keep this block as is)
+    // First, check if an identical constant already exists to avoid duplicates.
+    for (int i = 0; i < chunk->constants_count; i++) {
+        Value existing = chunk->constants[i];
+        if (existing.type == value.type) {
+            if (existing.type == TYPE_INTEGER && existing.i_val == value.i_val) {
+                freeValue(&value); // Free the incoming value as we don't need it
+                return i;
+            }
+            if (existing.type == TYPE_REAL && existing.r_val == value.r_val) {
+                freeValue(&value);
+                return i;
+            }
+            if (existing.type == TYPE_STRING && existing.s_val && value.s_val && strcmp(existing.s_val, value.s_val) == 0) {
+                freeValue(&value);
+                return i;
+            }
+        }
+    }
+
     if (chunk->constants_capacity < chunk->constants_count + 1) {
         fprintf(stderr, "[DEBUG addConstantToChunk] Reallocating constants. Old cap: %d, Old count: %d\n", chunk->constants_capacity, chunk->constants_count);
         fflush(stderr);
@@ -100,11 +105,16 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
     fprintf(stderr, "[DEBUG addConstantToChunk] BEFORE assignment: chunk->constants_count = %d. Dest addr: %p. Value.s_val addr: %p\n",
             chunk->constants_count,
             (void*)&(chunk->constants[chunk->constants_count]),
-            (void*)value.s_val);
+            (void*)(value.type == TYPE_STRING ? value.s_val : NULL));
     fflush(stderr);
 
-    // The problematic line:
-    chunk->constants[chunk->constants_count] = value; // bytecode.c:67
+    // <<<< FIX: Perform a deep copy into the constants array >>>>
+    // This ensures the chunk owns its own copy of all data.
+    chunk->constants[chunk->constants_count] = makeCopyOfValue(&value);
+    
+    // <<<< FIX: Free the original temporary value passed to this function >>>>
+    // Since we made a deep copy, we must now free the original.
+    freeValue(&value);
 
     fprintf(stderr, "[DEBUG addConstantToChunk] AFTER assignment. Copied value type %s to index %d.\n",
             varTypeToString(chunk->constants[chunk->constants_count].type), chunk->constants_count);
@@ -116,7 +126,6 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
 
     return chunk->constants_count++;
 }
-
 
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line) { // From all.txt
     writeBytecodeChunk(chunk, (uint8_t)((value >> 8) & 0xFF), line);

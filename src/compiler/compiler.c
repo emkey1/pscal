@@ -598,7 +598,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
             if (!node->token || !node->token->value) {
-                fprintf(stderr, "L%d: Compiler Error: Procedure/Function declaration node missing name token(compileNode).\n", line);
+                fprintf(stderr, "L%d: Compiler Error: Procedure/Function declaration node missing name token.\n", line);
                 compiler_had_error = true;
                 break;
             }
@@ -607,22 +607,21 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     line, astTypeToString(node->type), node->token->value);
             #endif
 
-            // Emit a jump to skip over the body of the function/procedure.
-            // The actual calls will jump to func_bytecode_start_address.
+            // Emit a jump to skip over the body. Main code path doesn't execute function bodies directly.
             writeBytecodeChunk(chunk, OP_JUMP, line);
-            int jump_over_body_operand_offset = chunk->count; // Store offset of the placeholder
+            int jump_over_body_operand_offset = chunk->count;
             emitShort(chunk, 0xFFFF, line); // Placeholder for jump offset
 
             // Compile the function/procedure body itself.
-            compileDefinedFunction(node, chunk, line); // This sets proc_symbol->bytecode_address and is_defined
+            compileDefinedFunction(node, chunk, line);
 
-            // Backpatch the jump: calculate offset to jump from after placeholder to current end of chunk.
-            uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2)); // +2 for the short itself
+            // Backpatch the jump to go to the current end of the chunk.
+            uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2));
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
             
             #ifdef DEBUG
-            if(dumpExec) fprintf(stderr, "L%d: Compiler: Patched jump over body for '%s'. Jump offset: %u. Current chunk count: %d\n",
-                    line, node->token->value, offset_to_skip_body, chunk->count);
+            if(dumpExec) fprintf(stderr, "L%d: Compiler: Patched jump over body for '%s'. Jump offset: %u.\n",
+                    line, node->token->value, offset_to_skip_body);
             #endif
             break;
         }
@@ -668,97 +667,48 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
     const char* func_name = func_decl_node->token->value;
     int func_bytecode_start_address = chunk->count;
-    uint8_t arity = 0;
-    uint8_t locals_in_body_count = 0;
 
     Symbol* proc_symbol = lookupSymbolIn(procedure_table, func_name);
     if (!proc_symbol) {
-        fprintf(stderr, "L%d: Compiler INTERNAL ERROR: Procedure/function '%s' not found in procedure_table for body compilation.\n", line, func_name);
-    } else {
-        proc_symbol->bytecode_address = func_bytecode_start_address;
-        proc_symbol->is_defined = true;
-        
-        AST* params_node = NULL;
-        // Child 0 of AST_PROCEDURE_DECL or AST_FUNCTION_DECL is parameters
-        // Your parser creates AST_LIST for parameter lists.
-        if (func_decl_node->child_count > 0 && func_decl_node->children[0] &&
-            func_decl_node->children[0]->type == AST_LIST) { // Check for AST_LIST for parameters
-            params_node = func_decl_node->children[0];
-            if(params_node) {
-                for (int i = 0; i < params_node->child_count; ++i) {
-                    AST* param_decl_group_node = params_node->children[i]; // This is AST_VAR_DECL
-                    if (param_decl_group_node && param_decl_group_node->type == AST_VAR_DECL) { // AST_VAR_DECL is in types.h
-                        if (param_decl_group_node->child_count > 1) {
-                             arity += (param_decl_group_node->child_count - 1);
-                        }
-                    }
-                }
+        fprintf(stderr, "L%d: Compiler INTERNAL ERROR: Procedure/function '%s' not found for body compilation.\n", line, func_name);
+        return;
+    }
+    
+    proc_symbol->bytecode_address = func_bytecode_start_address;
+    proc_symbol->is_defined = true;
+    proc_symbol->arity = func_decl_node->child_count;
+    
+    // Simple local variable counting (a more robust solution would traverse the declaration block)
+    AST* blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
+    uint8_t local_count = 0;
+    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0 && blockNode->children[0]->type == AST_COMPOUND) {
+        AST* decls = blockNode->children[0];
+        for (int i = 0; i < decls->child_count; i++) {
+            if (decls->children[i] && decls->children[i]->type == AST_VAR_DECL) {
+                local_count += decls->children[i]->child_count;
             }
         }
-        proc_symbol->arity = arity;
-        proc_symbol->locals_count = 0;
     }
+    proc_symbol->locals_count = local_count;
+
     #ifdef DEBUG
-    if(dumpExec) fprintf(stderr, "L%d: Compiler: Compiling body of %s '%s' at address %d, Arity: %d\n",
-            line, astTypeToString(func_decl_node->type), func_name, func_bytecode_start_address, arity);
+    if(dumpExec) fprintf(stderr, "L%d: Compiler: Compiling body of %s '%s' at address %d, Arity: %d, Locals: %d\n",
+            line, astTypeToString(func_decl_node->type), func_name, func_bytecode_start_address, proc_symbol->arity, proc_symbol->locals_count);
     #endif
 
-    AST* body_compound_node = NULL;
-    AST* proc_main_block_node = NULL;
-    int block_child_index = (func_decl_node->type == AST_PROCEDURE_DECL && func_decl_node->child_count > 1) ? 1 :
-                            (func_decl_node->type == AST_FUNCTION_DECL && func_decl_node->child_count > 2) ? 2 : -1;
+    // Compile the actual block of the procedure/function
+    if (blockNode) {
+        compileNode(blockNode, chunk, getLine(blockNode));
+    }
     
-    if (block_child_index != -1 && func_decl_node->children[block_child_index] &&
-        func_decl_node->children[block_child_index]->type == AST_BLOCK) {
-        proc_main_block_node = func_decl_node->children[block_child_index];
-    }
-
-    if (proc_main_block_node) {
-        AST* local_var_decl_compound = NULL; // This is an AST_COMPOUND grouping AST_VAR_DECLs
-        if (proc_main_block_node->child_count > 0 && proc_main_block_node->children[0] &&
-            proc_main_block_node->children[0]->type == AST_COMPOUND) {
-            bool only_vars = proc_main_block_node->children[0]->child_count > 0;
-            for(int k=0; k < proc_main_block_node->children[0]->child_count; ++k) {
-                if(!proc_main_block_node->children[0]->children[k] || proc_main_block_node->children[0]->children[k]->type != AST_VAR_DECL) {
-                    only_vars = false; break;
-                }
-            }
-            if (only_vars) local_var_decl_compound = proc_main_block_node->children[0];
-        }
-        
-        if (local_var_decl_compound) {
-            for (int k=0; k < local_var_decl_compound->child_count; ++k) {
-                 AST* var_decl_node = local_var_decl_compound->children[k];
-                 if (var_decl_node && var_decl_node->type == AST_VAR_DECL && var_decl_node->token) {
-                     locals_in_body_count++;
-                 }
-            }
-            if (proc_symbol) proc_symbol->locals_count = locals_in_body_count;
-            #ifdef DEBUG
-            if(dumpExec) fprintf(stderr, "L%d: Compiler: Found %d local var declarations for '%s' (TODO: compile as locals).\n",
-                    getLine(local_var_decl_compound), locals_in_body_count, func_name);
-            #endif
-        }
-
-        int body_idx_in_block = (local_var_decl_compound != NULL && proc_main_block_node->child_count > 1) ? 1 : 0;
-        if (proc_main_block_node->child_count > body_idx_in_block &&
-            proc_main_block_node->children[body_idx_in_block] &&
-            proc_main_block_node->children[body_idx_in_block]->type == AST_COMPOUND) {
-            body_compound_node = proc_main_block_node->children[body_idx_in_block];
-        }
-    }
-
-    if (body_compound_node) {
-        compileNode(body_compound_node, chunk, getLine(body_compound_node));
-    } else { /* warning */ }
-
+    // Explicitly add return. If it's a function, result is on stack. If procedure, a nil/dummy value is.
     writeBytecodeChunk(chunk, OP_RETURN, line);
+    
     #ifdef DEBUG
     if(dumpExec) fprintf(stderr, "L%d: Compiler: Finished body of %s '%s'. Ended with OP_RETURN.\n",
             line, astTypeToString(func_decl_node->type), func_name);
     #endif
 }
-
 
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
@@ -876,58 +826,69 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
-            int call_line = getLine(node);
+             int call_line = getLine(node);
 
-            // 1. Compile all arguments first and push them onto the stack.
-            for (int i = 0; i < node->child_count; i++) {
-                if (node->children[i]) {
-                    compileExpression(node->children[i], chunk, getLine(node->children[i]));
-                } else {
-                     fprintf(stderr, "L%d: Compiler error: NULL argument node in call to '%s'.\n", call_line, node->token ? node->token->value : "unknown_proc");
-                }
-            }
+             // 1. Compile all arguments first and push them onto the stack.
+             for (int i = 0; i < node->child_count; i++) {
+                 if (node->children[i]) {
+                     compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                 } else {
+                      fprintf(stderr, "L%d: Compiler error: NULL argument node in call to '%s'.\n", call_line, node->token ? node->token->value : "unknown_proc");
+                 }
+             }
 
-            // 2. Handle the call itself based on whether it's a void procedure or a function.
-            //    This relies on node->var_type being correctly set by annotateTypes.
-            if (node->var_type == TYPE_VOID) {
-                // It's a true procedure (returns void).
-                if (node->token && isBuiltin(node->token->value)) {
-                    int builtinId = getBuiltinIDForCompiler(node->token->value); // From builtin.c/h
-                    if (builtinId != -1) {
-                        writeBytecodeChunk(chunk, OP_CALL_BUILTIN_PROC, call_line);
-                        writeBytecodeChunk(chunk, (uint8_t)builtinId, call_line);      // Operand 1: builtin_id
-                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line); // Operand 2: arg_count
-                        // fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_BUILTIN_PROC for '%s' (ID: %d, Args: %d).\n", call_line, node->token->value, builtinId, node->child_count);
-                    } else {
-                        fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' (marked void) not found by getBuiltinIDForCompiler(). Review builtin table and ID generation.\n", call_line, node->token->value);
-                        // This indicates an inconsistency or missing entry in your builtin ID mapping.
-                    }
-                } else if (node->token) { // User-defined procedure
-                    int nameConstIdx = addConstantToChunk(chunk, makeString(node->token->value));
-                    writeBytecodeChunk(chunk, OP_CALL_USER_PROC, call_line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameConstIdx, call_line);   // Operand 1: name_const_idx
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line); // Operand 2: arg_count
-                    // fprintf(stderr, "L%d: Compiler: Emitted OP_CALL_USER_PROC for '%s' (NameIdx: %d, Args: %d).\n", call_line, node->token->value, nameConstIdx, node->child_count);
-                } else {
-                     fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name (void path).\n", call_line);
-                }
-            } else {
-                // It's a function call used as a statement, so its result must be popped.
-                // compileExpression is responsible for emitting the function call opcodes
-                // and ensuring the result is left on the stack.
-                // fprintf(stderr, "L%d: Compiler: Function '%s' (type %s) called as statement. Compiling call and popping result.\n", call_line, node->token ? node->token->value : "unknown_func", varTypeToString(node->var_type));
+             // 2. Handle the call itself
+             if (node->token && isBuiltin(node->token->value)) {
+                 // It's a built-in. All built-ins use OP_CALL_BUILTIN.
+                 // The VM handler will pop the result for procedures.
+                 char normalized_name[MAX_SYMBOL_LENGTH];
+                 strncpy(normalized_name, node->token->value, sizeof(normalized_name) - 1);
+                 normalized_name[sizeof(normalized_name) - 1] = '\0';
+                 toLowerString(normalized_name);
 
-                // IMPORTANT: compileExpression for AST_PROCEDURE_CALL needs to be fully implemented
-                // to handle function calls correctly. The current placeholder in your shared code
-                // just pushes a dummy constant.
-                compileExpression(node, chunk, call_line); // This should compile the function call.
-                                                           // Arguments were already compiled above.
-                                                           // compileExpression for AST_PROCEDURE_CALL should ideally just emit the CALL part.
+                 int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
+                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, call_line);
+                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, call_line);
+                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line);
 
-                writeBytecodeChunk(chunk, OP_POP, call_line); // Pop the ignored result.
-            }
-            break;
-        }
+                 // If it was a function call used as a statement, its result must be popped.
+                 if (node->var_type != TYPE_VOID) {
+                     writeBytecodeChunk(chunk, OP_POP, call_line);
+                 }
+
+             } else if (node->token) {
+                 // It's a user-defined procedure or function call.
+                 // <<<< THIS IS THE KEY CHANGE >>>>
+                 const char* name_to_lookup = node->token->value;
+                 Symbol* proc_symbol = lookupSymbolIn(procedure_table, name_to_lookup);
+
+                 if (proc_symbol && proc_symbol->is_defined) {
+                     // Check if the number of arguments provided matches the procedure's arity.
+                     if (proc_symbol->arity != node->child_count) {
+                         fprintf(stderr, "L%d: Compiler Error: Routine '%s' expects %d arguments, but %d were given.\n", call_line, name_to_lookup, proc_symbol->arity, node->child_count);
+                         compiler_had_error = true;
+                     } else {
+                         // Emit the new OP_CALL instruction with the routine's address and arity.
+                         writeBytecodeChunk(chunk, OP_CALL, call_line);
+                         emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, call_line);
+                         writeBytecodeChunk(chunk, proc_symbol->arity, call_line);
+                     }
+                 } else {
+                     fprintf(stderr, "L%d: Compiler Error: Undefined or forward-declared procedure '%s'.\n", call_line, name_to_lookup);
+                     compiler_had_error = true;
+                 }
+
+                 // If it was a function call used as a statement, its result must also be popped.
+                 if (node->var_type != TYPE_VOID) {
+                     writeBytecodeChunk(chunk, OP_POP, call_line);
+                 }
+
+             } else {
+                  fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name.\n", call_line);
+                  compiler_had_error = true;
+             }
+             break;
+         }
         
         default: {
             bool was_handled_in_default = false;

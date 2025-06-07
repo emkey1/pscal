@@ -15,6 +15,9 @@
 #include "backend_ast/audio.h"
 #include "frontend/parser.h"
 #include "frontend/ast.h"
+#include <termios.h>
+#include <unistd.h>
+#include <sys/ioctl.h> 
 
 
 // --- VM Helper Functions ---
@@ -96,8 +99,6 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     resetStack(vm);
     vm->chunk = NULL;
     vm->ip = NULL;
-    // vm->vmGlobalSymbols = createHashTable(); // createHashTable is in symbol.c, this was in all.txt
-                                             // but interpretBytecode receives globals now.
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
     vm->procedureTable = NULL;
     
@@ -329,30 +330,29 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
         instruction_val = READ_BYTE(); // Uses the macro which uses vm->ip from runVM
         switch (instruction_val) {
-            case OP_RETURN: { // EXECUTION logic for OP_RETURN
-                 if (vm->frameCount == 0) {
-                     runtimeError(vm, "VM Error: Cannot return from top-level script (no call frame).");
-                     return INTERPRET_RUNTIME_ERROR;
-                 }
+           case OP_RETURN: {
+                if (vm->frameCount == 0) {
+                    // This indicates we are trying to return from the top-level script.
+                    // It means the main program body has finished.
+                    #ifdef DEBUG
+                    if (dumpExec) printf("--- Returning from top-level script. VM shutting down. ---\n");
+                    #endif
+                    // Pop the final result of the script if any, and then halt.
+                    if (vm->stackTop > vm->stack) pop(vm);
+                    return INTERPRET_OK; // Signal successful program completion
+                }
 
-                 Value returnValue = pop(vm); // Pop the function's result (or a dummy value for procedures)
+                Value returnValue = pop(vm); // Pop the function's result (or a dummy value for procedures)
 
-                 vm->frameCount--; // Go back to the caller's frame index
+                vm->frameCount--;
+                CallFrame* frame = &vm->frames[vm->frameCount]; // Get the frame we are returning TO (caller)
                  
-                 CallFrame* frame = &vm->frames[vm->frameCount]; // Get the frame we are returning TO (caller)
-                                                                 // Note: frameCount was already decremented.
-                 
-                 vm->stackTop = frame->slots;    // Reset stack top to where the caller's frame started,
-                                                 // effectively popping all of callee's slots (args + locals).
-                 push(vm, returnValue);          // Push the function's actual result back onto the caller's stack.
-
-                 if (vm->frameCount == 0) { // If we just returned from the main script body
-                     return INTERPRET_OK; // Program finished
-                 }
-                 
-                 vm->ip = frame->return_address; // Jump back to the caller's next instruction.
-                 break;
-             }
+                vm->stackTop = frame->slots;    // Reset stack top, popping callee's frame
+                push(vm, returnValue);          // Push the function's result back onto the caller's stack.
+                
+                vm->ip = frame->return_address; // Jump back to the caller's next instruction.
+                break;
+            }
 
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT(); // Uses the macro
@@ -882,442 +882,551 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&popped_val);
                 break;
             }
+                // In src/vm/vm.c, inside interpretBytecode's switch statement
+
             case OP_CALL_BUILTIN: {
-                            uint8_t name_const_idx = READ_BYTE();
-                            uint8_t arg_count = READ_BYTE();
+                uint8_t name_const_idx = READ_BYTE();
+                uint8_t arg_count = READ_BYTE();
 
-                            if (name_const_idx >= vm->chunk->constants_count) {
-                                runtimeError(vm, "VM Error: Invalid constant index for built-in name.");
-                                return INTERPRET_RUNTIME_ERROR;
+                if (name_const_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Invalid constant index for built-in name.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value builtinNameVal = vm->chunk->constants[name_const_idx];
+
+                if (builtinNameVal.type != TYPE_STRING || !builtinNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid built-in name constant for OP_CALL_BUILTIN (not a string).");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                const char* builtin_name = builtinNameVal.s_val;
+
+                // Dynamically allocate actual_args based on arg_count
+                Value* actual_args = NULL; // Initialize to NULL
+                if (arg_count > 0) {
+                    actual_args = (Value*)malloc(sizeof(Value) * arg_count);
+                    if (!actual_args) {
+                        runtimeError(vm, "VM Error: Malloc failed for actual_args in OP_CALL_BUILTIN.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                }
+
+                if (vm->stackTop - vm->stack < arg_count) {
+                    runtimeError(vm, "VM Error: Stack underflow preparing arguments for built-in %s. Expected %d, have %ld.",
+                                 builtin_name, arg_count, (long)(vm->stackTop - vm->stack));
+                    if (actual_args) free(actual_args); // Free if allocated
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < arg_count; i++) {
+                    actual_args[arg_count - 1 - i] = pop(vm);
+                }
+
+                Value result_val = makeNil();
+                bool is_function_that_succeeded = false;
+
+                // --- Dispatch to C implementation for the built-in ---
+                if (strcasecmp(builtin_name, "abs") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Abs expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    if (IS_INTEGER(arg)) result_val = makeInt(llabs(AS_INTEGER(arg)));
+                    else if (IS_REAL(arg)) result_val = makeReal(fabs(AS_REAL(arg)));
+                    else { runtimeError(vm, "VM: Abs expects numeric argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    is_function_that_succeeded = true;
+                }
+                else if (strcasecmp(builtin_name, "getmaxx") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: GetMaxX expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "VM: Graphics mode not initialized for GetMaxX."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    result_val = makeInt(gSdlWidth - 1);
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "getmaxy") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: GetMaxY expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "VM: Graphics mode not initialized for GetMaxY."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    result_val = makeInt(gSdlHeight - 1);
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "keypressed") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: KeyPressed expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    struct termios oldt, newt;
+                    int bytes_available = 0;
+                    if (!isatty(STDIN_FILENO)) { result_val = makeBoolean(false); }
+                    else {
+                        tcgetattr(STDIN_FILENO, &oldt);
+                        newt = oldt;
+                        newt.c_lflag &= ~(ICANON | ECHO);
+                        newt.c_cc[VMIN] = 0; newt.c_cc[VTIME] = 0;
+                        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+                        ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+                        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+                        result_val = makeBoolean(bytes_available > 0);
+                    }
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "readkey") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: ReadKey expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    struct termios oldt, newt;
+                    char ch_read;
+                    if (!isatty(STDIN_FILENO)) { result_val = makeChar('\0'); }
+                    else {
+                        tcgetattr(STDIN_FILENO, &oldt);
+                        newt = oldt;
+                        newt.c_lflag &= ~(ICANON | ECHO);
+                        newt.c_cc[VMIN] = 1; newt.c_cc[VTIME] = 0;
+                        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+                        read(STDIN_FILENO, &ch_read, 1);
+                        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+                        result_val = makeChar(ch_read);
+                    }
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "upcase") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: UpCase expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    if (!IS_CHAR(arg)) { runtimeError(vm, "VM: UpCase expects a CHAR argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    result_val = makeChar(toupper(AS_CHAR(arg)));
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "initgraph") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: InitGraph expects 3 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value w = actual_args[0], h = actual_args[1], t = actual_args[2];
+                    if(!IS_INTEGER(w) || !IS_INTEGER(h) || !IS_STRING(t)) { runtimeError(vm, "VM: InitGraph arg type mismatch."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (!gSdlInitialized) { if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) { runtimeError(vm, "VM: SDL_Init failed."); goto op_call_builtin_error_cleanup_dynamic_args; } gSdlInitialized = true; }
+                    gSdlWindow = SDL_CreateWindow(AS_STRING(t), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)AS_INTEGER(w), (int)AS_INTEGER(h), SDL_WINDOW_SHOWN);
+                    if (!gSdlWindow) { runtimeError(vm, "VM: SDL_CreateWindow failed."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    gSdlWidth = (int)AS_INTEGER(w); gSdlHeight = (int)AS_INTEGER(h);
+                    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+                    if (!gSdlRenderer) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; runtimeError(vm, "VM: SDL_CreateRenderer failed."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255); SDL_RenderClear(gSdlRenderer); SDL_RenderPresent(gSdlRenderer);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "closegraph") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: CloseGraph expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if(gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+                    if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "randomize") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: Randomize expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    srand((unsigned int)time(NULL));
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "cleardevice") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: ClearDevice expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if(!gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+                    SDL_RenderClear(gSdlRenderer);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "updatescreen") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: UpdateScreen expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if(!gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_Event event; while (SDL_PollEvent(&event)) { if (event.type == SDL_QUIT) break_requested = 1; }
+                    SDL_RenderPresent(gSdlRenderer);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "graphloop") == 0) {
+                     if (arg_count != 1) { runtimeError(vm, "VM: GraphLoop expects 1 arg."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                     Value msVal = actual_args[0];
+                     if(!IS_INTEGER(msVal)) { runtimeError(vm, "VM: GraphLoop arg must be integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                     if (gSdlInitialized && gSdlWindow) {
+                         Uint32 startT = SDL_GetTicks(); Uint32 endT = startT + (Uint32)AS_INTEGER(msVal); SDL_Event ev;
+                         while(SDL_GetTicks() < endT && !break_requested) {
+                             while(SDL_PollEvent(&ev)) { if(ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_q) ) { break_requested=1; break; } }
+                             if (break_requested) break;
+                             SDL_Delay(1);
+                         }
+                     }
+                     is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "setrgbcolor") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: SetRGBColor expects 3 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value rVal = actual_args[0], gVal = actual_args[1], bVal = actual_args[2];
+                    if(!IS_INTEGER(rVal) || !IS_INTEGER(gVal) || !IS_INTEGER(bVal)) { runtimeError(vm, "VM: SetRGBColor args must be Integer/Byte."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    gSdlCurrentColor.r = (Uint8)(AS_INTEGER(rVal) & 0xFF); gSdlCurrentColor.g = (Uint8)(AS_INTEGER(gVal) & 0xFF); gSdlCurrentColor.b = (Uint8)(AS_INTEGER(bVal) & 0xFF);
+                    gSdlCurrentColor.a = 255;
+                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "fillcircle") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: FillCircle expects 3 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value cx = actual_args[0], cy = actual_args[1], r = actual_args[2];
+                    if(!IS_INTEGER(cx) || !IS_INTEGER(cy) || !IS_INTEGER(r)) { runtimeError(vm, "VM: FillCircle args must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    int centerX = (int)AS_INTEGER(cx), centerY = (int)AS_INTEGER(cy), radius = (int)AS_INTEGER(r);
+                    if (radius < 0) radius = 0;
+                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+                    for (int dy = -radius; dy <= radius; ++dy) {
+                        int dx = (int)round(sqrt((double)radius * radius - (double)dy * dy));
+                        SDL_RenderDrawLine(gSdlRenderer, centerX - dx, centerY + dy, centerX + dx, centerY + dy);
+                    }
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "random") == 0) {
+                    if (arg_count == 0) { result_val = makeReal((double)rand() / ((double)RAND_MAX + 1.0)); }
+                    else if (arg_count == 1) {
+                        Value arg = actual_args[0];
+                        if (IS_INTEGER(arg)) { long long n = AS_INTEGER(arg); if (n <= 0) { runtimeError(vm, "VM: Random(N) N must be > 0."); goto op_call_builtin_error_cleanup_dynamic_args;} result_val = makeInt(rand() % n); }
+                        else { runtimeError(vm, "VM: Random(N) N must be integer."); goto op_call_builtin_error_cleanup_dynamic_args;}
+                    } else { runtimeError(vm, "VM: Random expects 0 or 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "trunc") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Trunc expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    if (IS_REAL(arg)) { result_val = makeInt((long long)AS_REAL(arg)); }
+                    else if (IS_INTEGER(arg)) { result_val = makeInt(AS_INTEGER(arg)); }
+                    else { runtimeError(vm, "VM: Trunc expects a numeric argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "cos") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Cos expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0]; double x = IS_REAL(arg) ? AS_REAL(arg) : (double)AS_INTEGER(arg);
+                    result_val = makeReal(cos(x));
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "sin") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Sin expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0]; double x = IS_REAL(arg) ? AS_REAL(arg) : (double)AS_INTEGER(arg);
+                    result_val = makeReal(sin(x));
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "sqrt") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Sqrt expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0]; double x = IS_REAL(arg) ? AS_REAL(arg) : (double)AS_INTEGER(arg);
+                    if (x < 0) { runtimeError(vm, "VM: Sqrt of negative number."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    result_val = makeReal(sqrt(x));
+                    is_function_that_succeeded = true;
+                }
+                else if (strcasecmp(builtin_name, "length") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Length expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    if (IS_STRING(arg)) {
+                        result_val = makeInt(AS_STRING(arg) ? strlen(AS_STRING(arg)) : 0);
+                    } else if (IS_CHAR(arg)) {
+                        result_val = makeInt(1);
+                    } else { runtimeError(vm, "VM: Length expects string or char argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    is_function_that_succeeded = true;
+                }
+                else if (strcasecmp(builtin_name, "ord") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Ord expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    if (IS_CHAR(arg)) {
+                        result_val = makeInt((long long)AS_CHAR(arg));
+                    } else if (IS_BOOLEAN(arg)) {
+                        result_val = makeInt(AS_BOOLEAN(arg) ? 1 : 0);
+                    } else if (IS_STRING(arg) && AS_STRING(arg) != NULL && strlen(AS_STRING(arg)) == 1) {
+                        result_val = makeInt((long long)(AS_STRING(arg)[0]));
+                    } else {
+                        runtimeError(vm, "VM: Ord expects char, boolean, or single-character string argument. Got %s.", varTypeToString(arg.type));
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "chr") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: Chr expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    if (!IS_INTEGER(arg)) { runtimeError(vm, "VM: Chr expects integer argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    char temp_char_buf[2];
+                    temp_char_buf[0] = (char)AS_INTEGER(arg);
+                    temp_char_buf[1] = '\0';
+                    result_val = makeString(temp_char_buf);
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "randomize") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: Randomize expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    srand((unsigned int)time(NULL));
+                    is_function_that_succeeded = false; // This is a procedure
+                } else if (strcasecmp(builtin_name, "initsoundsystem") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: InitSoundSystem expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    audioInitSystem();
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "loadsound") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: LoadSound expects 1 arg (FileName: String)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value fileNameVal = actual_args[0];
+                    if (!IS_STRING(fileNameVal) || !AS_STRING(fileNameVal)) {
+                        runtimeError(vm, "VM: LoadSound argument must be a valid String.");
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    const char* original_filename = AS_STRING(fileNameVal);
+                    char full_path[512];
+                    const char* filename_to_pass = original_filename;
+                    if (original_filename && original_filename[0] != '.' && original_filename[0] != '/') {
+                        const char* default_sound_dir = "/usr/local/Pscal/lib/sounds/";
+                        int chars_written = snprintf(full_path, sizeof(full_path), "%s%s", default_sound_dir, original_filename);
+                        if (chars_written < 0 || (size_t)chars_written >= sizeof(full_path)) {
+                            runtimeError(vm, "VM: Constructed sound file path too long for '%s'.", original_filename);
+                            goto op_call_builtin_error_cleanup_dynamic_args;
+                        }
+                        filename_to_pass = full_path;
+                    }
+                    result_val = makeInt(audioLoadSound(filename_to_pass));
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "playsound") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: PlaySound expects 1 arg (SoundID: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value soundIDVal = actual_args[0];
+                    if (!IS_INTEGER(soundIDVal)) {
+                        runtimeError(vm, "VM: PlaySound SoundID must be an integer."); goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    audioPlaySound((int)AS_INTEGER(soundIDVal));
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "audiofreesound") == 0 || strcasecmp(builtin_name, "freesound") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: FreeSound expects 1 arg (SoundID: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value soundIDVal = actual_args[0];
+                    if (!IS_INTEGER(soundIDVal)) {
+                        runtimeError(vm, "VM: FreeSound SoundID must be an integer."); goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    audioFreeSound((int)AS_INTEGER(soundIDVal));
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "quitsoundsystem") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: QuitSoundSystem expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    audioQuitSystem();
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "quitrequested") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: QuitRequested expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    result_val = makeBoolean(break_requested != 0);
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "inttostr") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: IntToStr expects 1 arg."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value arg = actual_args[0];
+                    long long val_to_convert;
+                    if (IS_INTEGER(arg) || arg.type == TYPE_BYTE || arg.type == TYPE_WORD || IS_BOOLEAN(arg)) val_to_convert = AS_INTEGER(arg);
+                    else if (IS_CHAR(arg)) val_to_convert = (long long)AS_CHAR(arg);
+                    else { runtimeError(vm, "VM: IntToStr expects Integer compatible arg. Got %s", varTypeToString(arg.type)); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    char buffer[64];
+                    snprintf(buffer, sizeof(buffer), "%lld", val_to_convert);
+                    result_val = makeString(buffer);
+                    is_function_that_succeeded = true;
+                } else if (strcasecmp(builtin_name, "initgraph") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: InitGraph expects 3 args (Width, Height, Title)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value widthVal = actual_args[0];
+                    Value heightVal = actual_args[1];
+                    Value titleVal = actual_args[2];
+                    if (!IS_INTEGER(widthVal) || !IS_INTEGER(heightVal) || !IS_STRING(titleVal)) {
+                        runtimeError(vm, "VM: InitGraph argument type mismatch. Expected (Int, Int, String).");
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    int w = (int)AS_INTEGER(widthVal);
+                    int h = (int)AS_INTEGER(heightVal);
+                    const char* title = AS_STRING(titleVal) ? AS_STRING(titleVal) : "Pscal VM Graphics";
+                    if (w <= 0 || h <= 0) {
+                        runtimeError(vm, "VM: InitGraph width and height must be positive.");
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    if (!gSdlInitialized) {
+                        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
+                            runtimeError(vm, "VM: SDL_Init failed in InitGraph: %s", SDL_GetError());
+                            goto op_call_builtin_error_cleanup_dynamic_args;
+                        }
+                        gSdlInitialized = true;
+                    }
+                    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+                    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+                    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, SDL_WINDOW_SHOWN);
+                    if (!gSdlWindow) {
+                        runtimeError(vm, "VM: SDL_CreateWindow failed: %s", SDL_GetError());
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    gSdlWidth = w; gSdlHeight = h;
+                    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+                    if (!gSdlRenderer) {
+                        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
+                        runtimeError(vm, "VM: SDL_CreateRenderer failed: %s", SDL_GetError());
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    InitializeTextureSystem();
+                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+                    SDL_RenderClear(gSdlRenderer);
+                    SDL_RenderPresent(gSdlRenderer);
+                    gSdlCurrentColor = (SDL_Color){255, 255, 255, 255};
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "getmousestate") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: GetMouseState expects 3 arguments (X, Y, Buttons)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value xNameVal = actual_args[0];
+                    Value yNameVal = actual_args[1];
+                    Value buttonsNameVal = actual_args[2];
+                    if (!IS_STRING(xNameVal) || !IS_STRING(yNameVal) || !IS_STRING(buttonsNameVal)) {
+                        runtimeError(vm, "VM: GetMouseState expects string variable names for VAR parameters.");
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    int mse_x, mse_y;
+                    Uint32 sdl_buttons_state = SDL_GetMouseState(&mse_x, &mse_y);
+                    int pscal_buttons = 0;
+                    if (sdl_buttons_state & SDL_BUTTON_LMASK) pscal_buttons |= 1;
+                    if (sdl_buttons_state & SDL_BUTTON_MMASK) pscal_buttons |= 2;
+                    if (sdl_buttons_state & SDL_BUTTON_RMASK) pscal_buttons |= 4;
+                    Symbol* symX = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(xNameVal));
+                    Symbol* symY = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(yNameVal));
+                    Symbol* symButtons = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(buttonsNameVal));
+                    if (!symX || !symY || !symButtons) {
+                        runtimeError(vm, "VM: One or more VAR parameters for GetMouseState not found in global symbols.");
+                        goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    freeValue(symX->value); *(symX->value) = makeInt(mse_x);
+                    freeValue(symY->value); *(symY->value) = makeInt(mse_y);
+                    freeValue(symButtons->value); *(symButtons->value) = makeInt(pscal_buttons);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "cleardevice") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: ClearDevice expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized for ClearDevice."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+                    SDL_RenderClear(gSdlRenderer);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "setrgbcolor") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: SetRGBColor expects 3 args (R,G,B: Byte/Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value rVal = actual_args[0], gVal = actual_args[1], bVal = actual_args[2];
+                    if (! ( (IS_INTEGER(rVal) || rVal.type == TYPE_BYTE) &&
+                            (IS_INTEGER(gVal) || gVal.type == TYPE_BYTE) &&
+                            (IS_INTEGER(bVal) || bVal.type == TYPE_BYTE) ) ) {
+                        runtimeError(vm, "VM: SetRGBColor args must be Byte/Integer."); goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    gSdlCurrentColor.r = (Uint8)(AS_INTEGER(rVal) & 0xFF);
+                    gSdlCurrentColor.g = (Uint8)(AS_INTEGER(gVal) & 0xFF);
+                    gSdlCurrentColor.b = (Uint8)(AS_INTEGER(bVal) & 0xFF);
+                    gSdlCurrentColor.a = 255;
+                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "fillrect") == 0) {
+                    if (arg_count != 4) { runtimeError(vm, "VM: FillRect expects 4 args (x1,y1,x2,y2: Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value x1Val = actual_args[0], y1Val = actual_args[1], x2Val = actual_args[2], y2Val = actual_args[3];
+                    if (!IS_INTEGER(x1Val) || !IS_INTEGER(y1Val) || !IS_INTEGER(x2Val) || !IS_INTEGER(y2Val)) {
+                        runtimeError(vm, "VM: FillRect args must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    SDL_Rect rect;
+                    int x1 = (int)AS_INTEGER(x1Val);
+                    int y1 = (int)AS_INTEGER(y1Val);
+                    int x2 = (int)AS_INTEGER(x2Val);
+                    int y2 = (int)AS_INTEGER(y2Val);
+                    rect.x = (x1 < x2) ? x1 : x2;
+                    rect.y = (y1 < y2) ? y1 : y2;
+                    rect.w = abs(x2 - x1) + 1;
+                    rect.h = abs(y2 - y1) + 1;
+                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+                    SDL_RenderFillRect(gSdlRenderer, &rect);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "outtextxy") == 0) {
+                    if (arg_count != 3) { runtimeError(vm, "VM: OutTextXY expects 3 args (X,Y:Int; Text:Str)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value xVal=actual_args[0], yVal=actual_args[1], textVal=actual_args[2];
+                    if (!IS_INTEGER(xVal) || !IS_INTEGER(yVal) || !IS_STRING(textVal)) {
+                        runtimeError(vm, "VM: OutTextXY arg type mismatch."); goto op_call_builtin_error_cleanup_dynamic_args;
+                    }
+                    if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "VM: Text system not ready for OutTextXY."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    const char* text_to_render = AS_STRING(textVal) ? AS_STRING(textVal) : "";
+                    SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
+                    if (!surf) { runtimeError(vm, "VM: TTF_RenderUTF8_Solid failed: %s", TTF_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
+                    if (!tex) { SDL_FreeSurface(surf); runtimeError(vm, "VM: CreateTextureFromSurface failed: %s", SDL_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_Rect dstRect = {(int)AS_INTEGER(xVal), (int)AS_INTEGER(yVal), surf->w, surf->h};
+                    SDL_RenderCopy(gSdlRenderer, tex, NULL, &dstRect);
+                    SDL_DestroyTexture(tex);
+                    SDL_FreeSurface(surf);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "updatescreen") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: UpdateScreen expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized for UpdateScreen."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    SDL_Event event; while (SDL_PollEvent(&event)) { if (event.type == SDL_QUIT) break_requested = 1; }
+                    SDL_RenderPresent(gSdlRenderer);
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "graphloop") == 0) {
+                    if (arg_count != 1) { runtimeError(vm, "VM: GraphLoop expects 1 arg (ms:Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    Value msVal = actual_args[0];
+                    if (!IS_INTEGER(msVal)) { runtimeError(vm, "VM: GraphLoop arg must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    long long ms = AS_INTEGER(msVal);
+                    if (ms < 0) ms = 0;
+                    if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
+                        Uint32 startT = SDL_GetTicks(); Uint32 endT = startT + (Uint32)ms; SDL_Event ev;
+                        while(SDL_GetTicks() < endT && !break_requested) {
+                            while(SDL_PollEvent(&ev)) {
+                                if(ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_q) ) {
+                                    break_requested=1;
+                                    break;
+                                }
                             }
-                            Value builtinNameVal = vm->chunk->constants[name_const_idx];
+                            if (break_requested) break;
+                            SDL_Delay(1);
+                        }
+                    }
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "waitkeyevent") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: WaitKeyEvent expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (!gSdlInitialized || !gSdlWindow) {is_function_that_succeeded = false; break;}
+                    SDL_Event event; int waiting = 1;
+                    while(waiting){
+                        if(SDL_WaitEvent(&event)){
+                            if(event.type == SDL_QUIT || event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN) waiting=0;
+                        } else { waiting=0; }
+                    }
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "quittextsystem") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: QuitTextSystem expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
+                    if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
+                    is_function_that_succeeded = false;
+                } else if (strcasecmp(builtin_name, "closegraph") == 0) {
+                    if (arg_count != 0) { runtimeError(vm, "VM: CloseGraph expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
+                    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+                    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+                    is_function_that_succeeded = false;
+                }
+                else { // Fallback for unhandled builtins
+                    runtimeError(vm, "VM Error: Built-in function/procedure '%s' (dispatch) not yet implemented in VM.", builtin_name);
+                    goto op_call_builtin_error_cleanup_dynamic_args;
+                }
+                // --- End Dispatch ---
 
-                            if (builtinNameVal.type != TYPE_STRING || !builtinNameVal.s_val) {
-                                runtimeError(vm, "VM Error: Invalid built-in name constant for OP_CALL_BUILTIN (not a string).");
-                                return INTERPRET_RUNTIME_ERROR;
-                            }
-                            const char* builtin_name = builtinNameVal.s_val;
+                if (is_function_that_succeeded) {
+                    push(vm, result_val);
+                } else {
+                    freeValue(&result_val);
+                }
 
-                            // Dynamically allocate actual_args based on arg_count
-                            Value* actual_args = NULL; // Initialize to NULL
-                            if (arg_count > 0) {
-                                actual_args = (Value*)malloc(sizeof(Value) * arg_count);
-                                if (!actual_args) {
-                                    runtimeError(vm, "VM Error: Malloc failed for actual_args in OP_CALL_BUILTIN.");
-                                    return INTERPRET_RUNTIME_ERROR;
-                                }
-                                // Initialize an array of Value structs to a default state if necessary,
-                                // though pop should overwrite them.
-                                // For safety, you could loop and memset or assign makeNil() here.
-                            }
-
-                            if (vm->stackTop - vm->stack < arg_count) {
-                                runtimeError(vm, "VM Error: Stack underflow preparing arguments for built-in %s. Expected %d, have %ld.",
-                                             builtin_name, arg_count, (long)(vm->stackTop - vm->stack));
-                                if (actual_args) free(actual_args); // Free if allocated
-                                return INTERPRET_RUNTIME_ERROR;
-                            }
-
-                            for (int i = 0; i < arg_count; i++) {
-                                actual_args[arg_count - 1 - i] = pop(vm);
-                            }
-
-                            Value result_val = makeNil();
-                            bool is_function_that_succeeded = false;
-
-                            // --- Dispatch to C implementation for the built-in ---
-                            if (strcasecmp(builtin_name, "abs") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: Abs expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value arg = actual_args[0];
-                                if (IS_INTEGER(arg)) result_val = makeInt(llabs(AS_INTEGER(arg)));
-                                else if (IS_REAL(arg)) result_val = makeReal(fabs(AS_REAL(arg)));
-                                else { runtimeError(vm, "VM: Abs expects numeric argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "length") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: Length expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value arg = actual_args[0];
-                                if (IS_STRING(arg)) {
-                                    result_val = makeInt(AS_STRING(arg) ? strlen(AS_STRING(arg)) : 0);
-                                } else if (IS_CHAR(arg)) {
-                                    result_val = makeInt(1);
-                                } else { runtimeError(vm, "VM: Length expects string or char argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "ord") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: Ord expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value arg = actual_args[0];
-                                if (IS_CHAR(arg)) { // Argument is TYPE_CHAR
-                                    result_val = makeInt((long long)AS_CHAR(arg));
-                                } else if (IS_BOOLEAN(arg)) { // Argument is TYPE_BOOLEAN
-                                    result_val = makeInt(AS_BOOLEAN(arg) ? 1 : 0);
-                                } else if (IS_STRING(arg) && AS_STRING(arg) != NULL && strlen(AS_STRING(arg)) == 1) { // Argument is single-character TYPE_STRING
-                                    result_val = makeInt((long long)(AS_STRING(arg)[0]));
-                                }
-                                // Add other ordinal types like ENUM if supported by VM directly
-                                // else if (arg.type == TYPE_ENUM) { result_val = makeInt((long long)arg.enum_val.ordinal); }
-                                else {
-                                    runtimeError(vm, "VM: Ord expects char, boolean, or single-character string argument. Got %s.", varTypeToString(arg.type));
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "chr") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: Chr expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value arg = actual_args[0];
-                                if (!IS_INTEGER(arg)) { runtimeError(vm, "VM: Chr expects integer argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                char temp_char_buf[2];
-                                temp_char_buf[0] = (char)AS_INTEGER(arg);
-                                temp_char_buf[1] = '\0';
-                                result_val = makeString(temp_char_buf); // Pascal's Chr returns a Char, often represented as a single-char string
-                                                                       // If you have a makeChar that returns a Value of TYPE_CHAR, that's better.
-                                                                       // For consistency with current makeString, this is okay.
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "randomize") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: Randomize expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                srand((unsigned int)time(NULL));
-                                is_function_that_succeeded = false; // This is a procedure
-                            } else if (strcasecmp(builtin_name, "inittextsystem") == 0) {
-                                if (arg_count != 2) { runtimeError(vm, "VM: InitTextSystem expects 2 args (FontFileName: String, FontSize: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value fontNameVal = actual_args[0];
-                                Value fontSizeVal = actual_args[1];
-                                if (!IS_STRING(fontNameVal) || !AS_STRING(fontNameVal) || !IS_INTEGER(fontSizeVal)) {
-                                    runtimeError(vm, "VM: InitTextSystem argument type mismatch."); goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Core SDL Graphics not initialized before InitTextSystem."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                if (!gSdlTtfInitialized) {
-                                    if (TTF_Init() == -1) { runtimeError(vm, "VM: SDL_ttf system initialization failed: %s", TTF_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                    gSdlTtfInitialized = true;
-                                }
-                                const char* font_path = AS_STRING(fontNameVal);
-                                int font_size = (int)AS_INTEGER(fontSizeVal);
-                                if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
-                                gSdlFont = TTF_OpenFont(font_path, font_size);
-                                if (!gSdlFont) { runtimeError(vm, "VM: Failed to load font '%s': %s", font_path, TTF_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                gSdlFontSize = font_size;
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "initsoundsystem") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: InitSoundSystem expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                audioInitSystem();
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "loadsound") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: LoadSound expects 1 arg (FileName: String)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value fileNameVal = actual_args[0];
-                                if (!IS_STRING(fileNameVal) || !AS_STRING(fileNameVal)) {
-                                    runtimeError(vm, "VM: LoadSound argument must be a valid String.");
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                const char* original_filename = AS_STRING(fileNameVal);
-                                char full_path[512];
-                                const char* filename_to_pass = original_filename;
-                                if (original_filename && original_filename[0] != '.' && original_filename[0] != '/') {
-                                    const char* default_sound_dir = "/usr/local/Pscal/lib/sounds/";
-                                    int chars_written = snprintf(full_path, sizeof(full_path), "%s%s", default_sound_dir, original_filename);
-                                    if (chars_written < 0 || (size_t)chars_written >= sizeof(full_path)) {
-                                        runtimeError(vm, "VM: Constructed sound file path too long for '%s'.", original_filename);
-                                        goto op_call_builtin_error_cleanup_dynamic_args;
-                                    }
-                                    filename_to_pass = full_path;
-                                }
-                                result_val = makeInt(audioLoadSound(filename_to_pass));
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "playsound") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: PlaySound expects 1 arg (SoundID: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value soundIDVal = actual_args[0];
-                                if (!IS_INTEGER(soundIDVal)) {
-                                    runtimeError(vm, "VM: PlaySound SoundID must be an integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                audioPlaySound((int)AS_INTEGER(soundIDVal));
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "audiofreesound") == 0 || strcasecmp(builtin_name, "freesound") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: FreeSound expects 1 arg (SoundID: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value soundIDVal = actual_args[0];
-                                if (!IS_INTEGER(soundIDVal)) {
-                                    runtimeError(vm, "VM: FreeSound SoundID must be an integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                audioFreeSound((int)AS_INTEGER(soundIDVal));
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "quitsoundsystem") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: QuitSoundSystem expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                audioQuitSystem();
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "quitrequested") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: QuitRequested expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                result_val = makeBoolean(break_requested != 0);
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "random") == 0) {
-                                if (arg_count == 0) {
-                                    result_val = makeReal((double)rand() / ((double)RAND_MAX + 1.0));
-                                } else if (arg_count == 1) {
-                                    Value arg = actual_args[0];
-                                    if (IS_INTEGER(arg)) {
-                                        long long n = AS_INTEGER(arg);
-                                        if (n <= 0) { runtimeError(vm, "VM: Random(N) N must be > 0."); goto op_call_builtin_error_cleanup_dynamic_args;}
-                                        result_val = makeInt(rand() % n);
-                                    } else { runtimeError(vm, "VM: Random(N) N must be integer."); goto op_call_builtin_error_cleanup_dynamic_args;}
-                                } else { runtimeError(vm, "VM: Random expects 0 or 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "inttostr") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: IntToStr expects 1 arg."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value arg = actual_args[0];
-                                long long val_to_convert;
-                                if (IS_INTEGER(arg) || arg.type == TYPE_BYTE || arg.type == TYPE_WORD || IS_BOOLEAN(arg)) val_to_convert = AS_INTEGER(arg);
-                                else if (IS_CHAR(arg)) val_to_convert = (long long)AS_CHAR(arg);
-                                else { runtimeError(vm, "VM: IntToStr expects Integer compatible arg. Got %s", varTypeToString(arg.type)); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                char buffer[64];
-                                snprintf(buffer, sizeof(buffer), "%lld", val_to_convert);
-                                result_val = makeString(buffer);
-                                is_function_that_succeeded = true;
-                            } else if (strcasecmp(builtin_name, "initgraph") == 0) {
-                                if (arg_count != 3) { runtimeError(vm, "VM: InitGraph expects 3 args (Width, Height, Title)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value widthVal = actual_args[0];
-                                Value heightVal = actual_args[1];
-                                Value titleVal = actual_args[2];
-                                if (!IS_INTEGER(widthVal) || !IS_INTEGER(heightVal) || !IS_STRING(titleVal)) {
-                                    runtimeError(vm, "VM: InitGraph argument type mismatch. Expected (Int, Int, String).");
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                int w = (int)AS_INTEGER(widthVal);
-                                int h = (int)AS_INTEGER(heightVal);
-                                const char* title = AS_STRING(titleVal) ? AS_STRING(titleVal) : "Pscal VM Graphics";
-                                if (w <= 0 || h <= 0) {
-                                    runtimeError(vm, "VM: InitGraph width and height must be positive.");
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                if (!gSdlInitialized) {
-                                    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
-                                        runtimeError(vm, "VM: SDL_Init failed in InitGraph: %s", SDL_GetError());
-                                        goto op_call_builtin_error_cleanup_dynamic_args;
-                                    }
-                                    gSdlInitialized = true;
-                                }
-                                if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-                                if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-                                gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, SDL_WINDOW_SHOWN);
-                                if (!gSdlWindow) {
-                                    runtimeError(vm, "VM: SDL_CreateWindow failed: %s", SDL_GetError());
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                gSdlWidth = w; gSdlHeight = h;
-                                gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-                                if (!gSdlRenderer) {
-                                    SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
-                                    runtimeError(vm, "VM: SDL_CreateRenderer failed: %s", SDL_GetError());
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                InitializeTextureSystem();
-                                SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-                                SDL_RenderClear(gSdlRenderer);
-                                SDL_RenderPresent(gSdlRenderer);
-                                gSdlCurrentColor = (SDL_Color){255, 255, 255, 255};
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "getmousestate") == 0) {
-                                if (arg_count != 3) { runtimeError(vm, "VM: GetMouseState expects 3 arguments (X, Y, Buttons)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value xNameVal = actual_args[0];
-                                Value yNameVal = actual_args[1];
-                                Value buttonsNameVal = actual_args[2];
-                                if (!IS_STRING(xNameVal) || !IS_STRING(yNameVal) || !IS_STRING(buttonsNameVal)) {
-                                    runtimeError(vm, "VM: GetMouseState expects string variable names for VAR parameters.");
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                int mse_x, mse_y;
-                                Uint32 sdl_buttons_state = SDL_GetMouseState(&mse_x, &mse_y);
-                                int pscal_buttons = 0;
-                                if (sdl_buttons_state & SDL_BUTTON_LMASK) pscal_buttons |= 1;
-                                if (sdl_buttons_state & SDL_BUTTON_MMASK) pscal_buttons |= 2;
-                                if (sdl_buttons_state & SDL_BUTTON_RMASK) pscal_buttons |= 4;
-                                Symbol* symX = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(xNameVal));
-                                Symbol* symY = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(yNameVal));
-                                Symbol* symButtons = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(buttonsNameVal));
-                                if (!symX || !symY || !symButtons) {
-                                    runtimeError(vm, "VM: One or more VAR parameters for GetMouseState not found in global symbols.");
-                                    goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                freeValue(symX->value); *(symX->value) = makeInt(mse_x);
-                                freeValue(symY->value); *(symY->value) = makeInt(mse_y);
-                                freeValue(symButtons->value); *(symButtons->value) = makeInt(pscal_buttons);
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "cleardevice") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: ClearDevice expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized for ClearDevice."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-                                SDL_RenderClear(gSdlRenderer);
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "setrgbcolor") == 0) {
-                                if (arg_count != 3) { runtimeError(vm, "VM: SetRGBColor expects 3 args (R,G,B: Byte/Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value rVal = actual_args[0], gVal = actual_args[1], bVal = actual_args[2];
-                                if (! ( (IS_INTEGER(rVal) || rVal.type == TYPE_BYTE) &&
-                                        (IS_INTEGER(gVal) || gVal.type == TYPE_BYTE) &&
-                                        (IS_INTEGER(bVal) || bVal.type == TYPE_BYTE) ) ) {
-                                    runtimeError(vm, "VM: SetRGBColor args must be Byte/Integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                gSdlCurrentColor.r = (Uint8)(AS_INTEGER(rVal) & 0xFF);
-                                gSdlCurrentColor.g = (Uint8)(AS_INTEGER(gVal) & 0xFF);
-                                gSdlCurrentColor.b = (Uint8)(AS_INTEGER(bVal) & 0xFF);
-                                gSdlCurrentColor.a = 255;
-                                SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "fillrect") == 0) {
-                                if (arg_count != 4) { runtimeError(vm, "VM: FillRect expects 4 args (x1,y1,x2,y2: Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value x1Val = actual_args[0], y1Val = actual_args[1], x2Val = actual_args[2], y2Val = actual_args[3];
-                                if (!IS_INTEGER(x1Val) || !IS_INTEGER(y1Val) || !IS_INTEGER(x2Val) || !IS_INTEGER(y2Val)) {
-                                    runtimeError(vm, "VM: FillRect args must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                SDL_Rect rect;
-                                int x1 = (int)AS_INTEGER(x1Val);
-                                int y1 = (int)AS_INTEGER(y1Val);
-                                int x2 = (int)AS_INTEGER(x2Val);
-                                int y2 = (int)AS_INTEGER(y2Val);
-                                rect.x = (x1 < x2) ? x1 : x2;
-                                rect.y = (y1 < y2) ? y1 : y2;
-                                rect.w = abs(x2 - x1) + 1;
-                                rect.h = abs(y2 - y1) + 1;
-                                SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-                                SDL_RenderFillRect(gSdlRenderer, &rect);
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "outtextxy") == 0) {
-                                if (arg_count != 3) { runtimeError(vm, "VM: OutTextXY expects 3 args (X,Y:Int; Text:Str)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value xVal=actual_args[0], yVal=actual_args[1], textVal=actual_args[2];
-                                if (!IS_INTEGER(xVal) || !IS_INTEGER(yVal) || !IS_STRING(textVal)) {
-                                    runtimeError(vm, "VM: OutTextXY arg type mismatch."); goto op_call_builtin_error_cleanup_dynamic_args;
-                                }
-                                if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "VM: Text system not ready for OutTextXY."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                const char* text_to_render = AS_STRING(textVal) ? AS_STRING(textVal) : "";
-                                SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
-                                if (!surf) { runtimeError(vm, "VM: TTF_RenderUTF8_Solid failed: %s", TTF_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
-                                if (!tex) { SDL_FreeSurface(surf); runtimeError(vm, "VM: CreateTextureFromSurface failed: %s", SDL_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                SDL_Rect dstRect = {(int)AS_INTEGER(xVal), (int)AS_INTEGER(yVal), surf->w, surf->h};
-                                SDL_RenderCopy(gSdlRenderer, tex, NULL, &dstRect);
-                                SDL_DestroyTexture(tex);
-                                SDL_FreeSurface(surf);
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "updatescreen") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: UpdateScreen expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized for UpdateScreen."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                SDL_Event event; while (SDL_PollEvent(&event)) { if (event.type == SDL_QUIT) break_requested = 1; }
-                                SDL_RenderPresent(gSdlRenderer);
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "graphloop") == 0) {
-                                if (arg_count != 1) { runtimeError(vm, "VM: GraphLoop expects 1 arg (ms:Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                Value msVal = actual_args[0];
-                                if (!IS_INTEGER(msVal)) { runtimeError(vm, "VM: GraphLoop arg must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                long long ms = AS_INTEGER(msVal);
-                                if (ms < 0) ms = 0;
-                                if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
-                                    Uint32 startT = SDL_GetTicks(); Uint32 endT = startT + (Uint32)ms; SDL_Event ev;
-                                    while(SDL_GetTicks() < endT && !break_requested) {
-                                        while(SDL_PollEvent(&ev)) {
-                                            if(ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_q) ) {
-                                                break_requested=1;
-                                                break;
-                                            }
-                                        }
-                                        if (break_requested) break;
-                                        SDL_Delay(1);
-                                    }
-                                }
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "waitkeyevent") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: WaitKeyEvent expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                if (!gSdlInitialized || !gSdlWindow) {is_function_that_succeeded = false; break;}
-                                SDL_Event event; int waiting = 1;
-                                while(waiting){
-                                    if(SDL_WaitEvent(&event)){
-                                        if(event.type == SDL_QUIT || event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN) waiting=0;
-                                    } else { waiting=0; }
-                                }
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "quittextsystem") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: QuitTextSystem expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
-                                if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
-                                is_function_that_succeeded = false;
-                            } else if (strcasecmp(builtin_name, "closegraph") == 0) {
-                                if (arg_count != 0) { runtimeError(vm, "VM: CloseGraph expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                                if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-                                if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-                                is_function_that_succeeded = false;
-                            }
-                            // Add other built-ins here...
-                            else { // Fallback for unhandled builtins
-                                runtimeError(vm, "VM Error: Built-in function/procedure '%s' (dispatch) not yet implemented in VM.", builtin_name);
-                                goto op_call_builtin_error_cleanup_dynamic_args;
-                            }
-                            // --- End Dispatch ---
-
-                            if (is_function_that_succeeded) {
-                                push(vm, result_val);
-                            } else {
-                                // For procedures, result_val is typically makeNil() or an uninitialized Value.
-                                // Freeing it ensures any temporary resources (if a procedure somehow made a complex Value) are released.
-                                // If result_val is simple (like makeNil()), freeValue is a no-op for its contents.
-                                freeValue(&result_val);
-                            }
-
-                            // Common cleanup for actual_args (now dynamically allocated)
-                            if (arg_count > 0 && actual_args) {
-                                for (int i = 0; i < arg_count; i++) {
-                                    freeValue(&actual_args[i]);
-                                }
-                                free(actual_args); // Free the dynamically allocated array itself
-                                actual_args = NULL; // Good practice
-                            }
-                            break; // Break from OP_CALL_BUILTIN switch case on success
-
-                        // Define the new error cleanup label
-                        op_call_builtin_error_cleanup_dynamic_args:
-                            // Free actual_args if it was allocated
-                            if (arg_count > 0 && actual_args) {
-                                for (int i = 0; i < arg_count; i++) {
-                                    // It's possible not all args were fully initialized if an error occurred
-                                    // during argument popping, but freeValue should be safe.
-                                    freeValue(&actual_args[i]);
-                                }
-                                free(actual_args);
-                                actual_args = NULL;
-                            }
-                             // Also free result_val if an error occurred mid-processing, as it might hold resources
-                            freeValue(&result_val);
-                            return INTERPRET_RUNTIME_ERROR;
-                        } // End OP_CALL_BUILTIN
-            case OP_CALL_BUILTIN_PROC: { // For built-in PROCEDURES (void)
-                uint8_t builtin_id = READ_BYTE();   // Operand 1: ID of the built-in
-                uint8_t arg_count = READ_BYTE();    // Operand 2: Number of arguments
-
-                // TODO: Actual dispatch to built-in C procedure based on builtin_id.
-                // 1. Pop `arg_count` arguments.
-                // 2. Call the C function.
-                // 3. No result is pushed for void procedures.
-                
-                fprintf(stderr, "VM STUB: OP_CALL_BUILTIN_PROC (ID: %d, Args: %d) - No result.\n", builtin_id, arg_count);
-                for(int i=0; i<arg_count; ++i) { Value arg = pop(vm); freeValue(&arg); } // Consume args
+                if (arg_count > 0 && actual_args) {
+                    for (int i = 0; i < arg_count; i++) {
+                        freeValue(&actual_args[i]);
+                    }
+                    free(actual_args);
+                    actual_args = NULL;
+                }
                 break;
+
+            op_call_builtin_error_cleanup_dynamic_args:
+                if (arg_count > 0 && actual_args) {
+                    for (int i = 0; i < arg_count; i++) {
+                        freeValue(&actual_args[i]);
+                    }
+                    free(actual_args);
+                    actual_args = NULL;
+                }
+                freeValue(&result_val);
+                return INTERPRET_RUNTIME_ERROR;
             }
-            case OP_CALL_USER_PROC: { // For user-defined PROCEDURES and FUNCTIONS
-                uint8_t name_const_idx = READ_BYTE(); // Operand 1: Index of procedure name in const pool
-                uint8_t arg_count = READ_BYTE();      // Operand 2: Number of arguments
 
-                // TODO: Implement call frame setup, argument passing, and jump for user procedures.
-                // 1. Get procedure name from constants: vm->chunk->constants[name_const_idx].s_val
-                // 2. Find the procedure's entry point (bytecode offset) in a procedure table/list.
-                // 3. Create a new call frame: store return address (current vm->ip), old frame pointer.
-                // 4. Pop `arg_count` arguments from stack and place them into new frame's local slots.
-                // 5. Update vm->ip to the procedure's entry point.
-                // If it's a function, the VM needs to know its return type to handle `result` assignment
-                // and ensure a value is on the stack when it returns.
-                
-                Value procNameVal = vm->chunk->constants[name_const_idx];
-                fprintf(stderr, "VM STUB: OP_CALL_USER_PROC for '%s' (Args: %d) - Call logic TBD.\n",
-                        (procNameVal.type == TYPE_STRING) ? procNameVal.s_val : "INVALID_NAME",
-                        arg_count);
-                for(int i=0; i<arg_count; ++i) { Value arg = pop(vm); freeValue(&arg); } // Consume args
+            case OP_CALL: { // EXECUTION logic for OP_CALL
+                  if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                      runtimeError(vm, "VM Error: Call stack overflow.");
+                      return INTERPRET_RUNTIME_ERROR;
+                  }
 
-                // If this OP_CALL_USER_PROC is for a function, a dummy result needs to be pushed
-                // until function calls are fully implemented. We need to know if it's a function.
-                // This requires the VM to have type information for user procedures/functions.
-                // For now, we'll assume if it's called via OP_CALL_USER_PROC and isn't handled as
-                // a statement that pops its result, it's a function call needing a result.
-                // This is a simplification; ideally, distinct opcodes or flags differentiate.
-                // push(vm, makeNil()); // Push dummy result for now if it could be a function
-                break;
+                  uint16_t target_address = READ_SHORT(vm); // Read 2-byte address
+                  uint8_t declared_arity = READ_BYTE();   // Read 1-byte declared arity
+
+                  if (vm->stackTop - vm->stack < declared_arity) {
+                      runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %d, have %ld.",
+                                   declared_arity, (long)(vm->stackTop - vm->stack));
+                      return INTERPRET_RUNTIME_ERROR;
+                  }
+
+                  CallFrame* frame = &vm->frames[vm->frameCount++];
+                  frame->return_address = vm->ip; // Current ip is *after* OP_CALL's operands
+                  frame->slots = vm->stackTop - declared_arity; // New frame starts where args are on stack
+
+                  // Find the procedure's symbol to get locals_count
+                  Symbol* proc_symbol = NULL;
+                  if(vm->procedureTable) {
+                      for (int i = 0; i < HASHTABLE_SIZE; i++) {
+                          for (Symbol* s = vm->procedureTable->buckets[i]; s; s = s->next) {
+                              if (s->is_defined && s->bytecode_address == target_address) {
+                                  proc_symbol = s;
+                                  break;
+                              }
+                          }
+                          if (proc_symbol) break;
+                      }
+                  }
+                  if (!proc_symbol) {
+                      runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
+                      vm->frameCount--; // Revert frame increment
+                      return INTERPRET_RUNTIME_ERROR;
+                  }
+                  frame->function_symbol = proc_symbol;
+                  frame->locals_count = proc_symbol->locals_count;
+
+                  // Reserve space on stack for local variables by pushing nils
+                  for (int i = 0; i < frame->locals_count; i++) {
+                      push(vm, makeNil());
+                  }
+                  
+                  vm->ip = vm->chunk->code + target_address; // Jump to the function/procedure
+                  break;
             }
             case OP_HALT:
                 return INTERPRET_OK;
@@ -1332,69 +1441,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, result);
                 break;
             }
-            case OP_CALL: { // EXECUTION logic for OP_CALL
-                  if (vm->frameCount >= VM_CALL_STACK_MAX) {
-                      runtimeError(vm, "VM Error: Call stack overflow.");
-                      return INTERPRET_RUNTIME_ERROR;
-                  }
-
-                  uint16_t target_address = READ_SHORT(vm); // Read 2-byte address from bytecode stream
-                  uint8_t declared_arity = READ_BYTE();   // Read 1-byte declared arity from bytecode stream
-
-                  #ifdef DEBUG
-                  if (dumpExec) {
-                      // Note: For execution, we don't need to find/print the name here.
-                      // The disassembler trace (called above) would have printed the name.
-                      fprintf(stderr, "VM EXEC: OP_CALL to address %04X (declared_arity: %d), current args on stack: %ld\n",
-                              target_address, declared_arity, (long)(vm->stackTop - vm->stack));
-                  }
-                  #endif
-                  
-                  // Check if enough arguments are actually on the stack (pushed by caller)
-                  if (vm->stackTop - vm->stack < declared_arity) {
-                      runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %d, have %ld.",
-                                   declared_arity, (long)(vm->stackTop - vm->stack));
-                      return INTERPRET_RUNTIME_ERROR;
-                  }
-
-                  CallFrame* frame = &vm->frames[vm->frameCount++];
-                  frame->return_address = vm->ip; // Current vm->ip is *after* OP_CALL's operands
-                  frame->slots = vm->stackTop - declared_arity; // Arguments are already on stack; new frame starts there
-
-                  // Lookup symbol to get locals_count for stack setup
-                  Symbol* proc_symbol = NULL;
-                  if(vm->procedureTable) { // vm->procedureTable was set at the start of interpretBytecode
-                      // This search can be slow. In a more optimized VM, locals_count might be an
-                      // operand to OP_CALL or stored at the function's entry point in bytecode.
-                      for (int i = 0; i < HASHTABLE_SIZE; i++) {
-                          Symbol* s = vm->procedureTable->buckets[i];
-                          while (s) {
-                              if (s->is_defined && s->bytecode_address == target_address) {
-                                  proc_symbol = s;
-                                  break;
-                              }
-                              s = s->next;
-                          }
-                          if (proc_symbol) break;
-                      }
-                  }
-                  if (!proc_symbol) {
-                      runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
-                      vm->frameCount--; // Revert frame increment
-                      return INTERPRET_RUNTIME_ERROR;
-                  }
-                  frame->locals_count = proc_symbol->locals_count;
-
-                  // Reserve space on stack for local variables by pushing nils
-                  for (int i = 0; i < frame->locals_count; i++) {
-                      push(vm, makeNil());
-                  }
-                  
-                  vm->ip = vm->chunk->code + target_address; // Jump to the function/procedure
-                  break;
-              }
-
-
+  
             default:
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;
