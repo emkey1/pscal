@@ -836,8 +836,8 @@ Token *copyToken(const Token *orig_token) { // Renamed parameter to avoid confli
          free(new_token);
          EXIT_FAILURE_HANDLER();
     }
-    new_token->line = orig_token->line;     // <<< COPY LINE
-    new_token->column = orig_token->column; // <<< COPY COLUMN
+    new_token->line = orig_token->line;
+    new_token->column = orig_token->column; 
     return new_token;
 }
 

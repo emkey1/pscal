@@ -1,23 +1,24 @@
 // parser.c
 // The parsing routines for pscal
 
-#include "list.h"
-#include "parser.h"
-#include "utils.h"
-#include "types.h"
+#include "core/list.h"
+#include "compiler/compiler.h"
+#include "frontend/parser.h"
+#include "core/utils.h"
+#include "core/types.h"
 #include "globals.h"
-#include "builtin.h"
-#include "interpreter.h"
-#include "symbol.h"
+#include "backend_ast/builtin.h"
+#include "backend_ast/interpreter.h"
+#include "symbol/symbol.h"
 #include <stdbool.h>
-#include <stdio.h>  
+#include <stdio.h>
 
 // Define the helper function *only* when DEBUG is enabled
 // No 'static inline' needed here as it's defined only once in this file.
 #ifdef DEBUG
-void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const char* func_name) {
+void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const char* func_name) {
     // Test print BEFORE the main fprintf
-    fprintf(stderr, "[DEBUG eat_debug_wrapper] ENTERED from %s. Expecting: %s. Current token type: %s.\n",
+    fprintf(stderr, "[DEBUG eatDebugWrapper] ENTERED from %s. Expecting: %s. Current token type: %s.\n",
             func_name,
             tokenTypeToString(expected_token_type),
             parser_ptr->current_token ? tokenTypeToString(parser_ptr->current_token->type) : "NULL_TOKEN_TYPE");
@@ -40,12 +41,12 @@ void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const 
     }
 
     // Test print AFTER the main fprintf
-    fprintf(stderr, "[DEBUG eat_debug_wrapper] Calling eatInternal.\n");
+    fprintf(stderr, "[DEBUG eatDebugWrapper] Calling eatInternal.\n");
     fflush(stderr);
 
     eatInternal(parser_ptr, expected_token_type);
 
-    fprintf(stderr, "[DEBUG eat_debug_wrapper] RETURNED from eatInternal.\n");
+    fprintf(stderr, "[DEBUG eatDebugWrapper] RETURNED from eatInternal.\n");
     fflush(stderr);
 }
 #endif // DEBUG
@@ -332,29 +333,162 @@ AST *lvalue(Parser *parser) {
 }
 // parseArrayType: Calls expression for bounds
 AST *parseArrayType(Parser *parser) {
-    eat(parser, TOKEN_ARRAY); if(!parser->current_token || parser->current_token->type != TOKEN_LBRACKET){errorParser(parser,"Exp ["); return NULL;} eat(parser, TOKEN_LBRACKET);
-    AST *indexList = newASTNode(AST_COMPOUND, NULL);
-    while (1) {
-        AST *lower = expression(parser); // <<< Use expression()
-        if (!lower || lower->type == AST_NOOP) { errorParser(parser, "Bad lower bound"); freeAST(indexList); return NULL; }
-        if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) { errorParser(parser, "Expected .."); freeAST(lower); freeAST(indexList); return NULL; } eat(parser, TOKEN_DOTDOT);
-        AST *upper = expression(parser); // <<< Use expression()
-        if (!upper || upper->type == AST_NOOP) { errorParser(parser, "Bad upper bound"); freeAST(lower); freeAST(indexList); return NULL; }
-        AST *range = newASTNode(AST_SUBRANGE, NULL); setLeft(range, lower); setRight(range, upper); addChild(indexList, range);
-        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA);
-        else break;
+    eat(parser, TOKEN_ARRAY);
+    if (!parser->current_token || parser->current_token->type != TOKEN_LBRACKET) {
+        errorParser(parser, "Expected '[' after ARRAY"); // Corrected error message
+        return NULL;
     }
-    if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) { errorParser(parser,"Exp ]"); freeAST(indexList); return NULL; } eat(parser, TOKEN_RBRACKET);
-    if (!parser->current_token || parser->current_token->type != TOKEN_OF) { errorParser(parser,"Exp OF"); freeAST(indexList); return NULL; } eat(parser, TOKEN_OF);
-    AST *elemType = typeSpecifier(parser, 1); if (!elemType || elemType->type == AST_NOOP) { errorParser(parser, "Bad element type"); freeAST(indexList); return NULL; }
-    AST *node = newASTNode(AST_ARRAY_TYPE, NULL); setTypeAST(node, TYPE_ARRAY);
-    // Transfer children safely (keep existing logic)
-    if (indexList->child_count > 0) { node->children=indexList->children; node->child_count=indexList->child_count; node->child_capacity=indexList->child_capacity; for(int i=0;i<node->child_count;++i)if(node->children[i])node->children[i]->parent=node; indexList->children=NULL; indexList->child_count=0; indexList->child_capacity=0; } else { node->children=NULL; node->child_count=0; node->child_capacity=0; }
-    free(indexList); // Free temp compound struct
-    setRight(node, elemType);
+    eat(parser, TOKEN_LBRACKET);
+
+    AST *indexList = newASTNode(AST_COMPOUND, NULL); // To hold AST_SUBRANGE nodes
+
+    while (1) {
+        AST *lower_expr_node = expression(parser); // Parse the lower bound expression
+        if (!lower_expr_node || lower_expr_node->type == AST_NOOP) {
+            errorParser(parser, "Invalid lower bound expression for array");
+            freeAST(indexList);
+            return NULL;
+        }
+
+        Value lower_eval = evaluateCompileTimeValue(lower_expr_node);
+        AST *resolved_lower_ast_node = NULL;
+
+        if (lower_eval.type == TYPE_INTEGER) {
+            // Create an AST_NUMBER node for the resolved integer value
+            Token temp_token_lower; // Create a temporary token for newASTNode
+            char val_str_lower[32];
+            snprintf(val_str_lower, sizeof(val_str_lower), "%lld", lower_eval.i_val);
+            temp_token_lower.type = TOKEN_INTEGER_CONST;
+            temp_token_lower.value = val_str_lower; // Points to stack, but newASTNode copies
+            temp_token_lower.line = lower_expr_node->token ? lower_expr_node->token->line : parser->lexer->line;
+            temp_token_lower.column = lower_expr_node->token ? lower_expr_node->token->column : parser->lexer->column;
+            
+            resolved_lower_ast_node = newASTNode(AST_NUMBER, &temp_token_lower);
+            setTypeAST(resolved_lower_ast_node, TYPE_INTEGER); // Set type for the new AST_NUMBER node
+            resolved_lower_ast_node->i_val = (int)lower_eval.i_val; // Store the integer value directly if AST_NUMBER supports it
+        }
+        // Add similar handling for TYPE_CHAR, TYPE_BOOLEAN, or other ordinals if evaluateCompileTimeValue supports them
+        // and if your AST_SUBRANGE expects specific AST node types for resolved bounds.
+        // For now, we'll primarily focus on TYPE_INTEGER.
+        else {
+            char err_msg[128];
+            snprintf(err_msg, sizeof(err_msg), "Array lower bound is not a constant integer expression (got type %s)", varTypeToString(lower_eval.type));
+            errorParser(parser, err_msg);
+            freeValue(&lower_eval);
+            freeAST(lower_expr_node);
+            freeAST(indexList);
+            return NULL;
+        }
+        freeValue(&lower_eval);    // Free contents of lower_eval if any (none for TYPE_INTEGER)
+        freeAST(lower_expr_node); // Free the original expression AST node
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) {
+            errorParser(parser, "Expected '..' in array range");
+            freeAST(resolved_lower_ast_node);
+            freeAST(indexList);
+            return NULL;
+        }
+        eat(parser, TOKEN_DOTDOT);
+
+        AST *upper_expr_node = expression(parser); // Parse the upper bound expression
+        if (!upper_expr_node || upper_expr_node->type == AST_NOOP) {
+            errorParser(parser, "Invalid upper bound expression for array");
+            freeAST(resolved_lower_ast_node);
+            freeAST(indexList);
+            return NULL;
+        }
+
+        Value upper_eval = evaluateCompileTimeValue(upper_expr_node);
+        AST *resolved_upper_ast_node = NULL;
+
+        if (upper_eval.type == TYPE_INTEGER) {
+            Token temp_token_upper;
+            char val_str_upper[32];
+            snprintf(val_str_upper, sizeof(val_str_upper), "%lld", upper_eval.i_val);
+            temp_token_upper.type = TOKEN_INTEGER_CONST;
+            temp_token_upper.value = val_str_upper;
+            temp_token_upper.line = upper_expr_node->token ? upper_expr_node->token->line : parser->lexer->line;
+            temp_token_upper.column = upper_expr_node->token ? upper_expr_node->token->column : parser->lexer->column;
+
+            resolved_upper_ast_node = newASTNode(AST_NUMBER, &temp_token_upper);
+            setTypeAST(resolved_upper_ast_node, TYPE_INTEGER);
+            resolved_upper_ast_node->i_val = (int)upper_eval.i_val;
+        } else {
+            char err_msg[128];
+            snprintf(err_msg, sizeof(err_msg), "Array upper bound is not a constant integer expression (got type %s)", varTypeToString(upper_eval.type));
+            errorParser(parser, err_msg);
+            freeValue(&upper_eval);
+            freeAST(upper_expr_node);
+            freeAST(resolved_lower_ast_node);
+            freeAST(indexList);
+            return NULL;
+        }
+        freeValue(&upper_eval);
+        freeAST(upper_expr_node);
+
+        AST *range = newASTNode(AST_SUBRANGE, NULL);
+        setLeft(range, resolved_lower_ast_node);  // Set left to the resolved AST_NUMBER node
+        setRight(range, resolved_upper_ast_node); // Set right to the resolved AST_NUMBER node
+        // You might also want to set range->var_type here if subranges have a type, e.g., TYPE_INTEGER if bounds are int.
+        setTypeAST(range, TYPE_INTEGER); // Assuming subrange of integers for now
+
+        addChild(indexList, range);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) {
+        errorParser(parser, "Expected ']' to close array dimension(s)");
+        freeAST(indexList); // indexList contains AST_SUBRANGE nodes whose children (AST_NUMBER) will be freed
+        return NULL;
+    }
+    eat(parser, TOKEN_RBRACKET);
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_OF) {
+        errorParser(parser, "Expected 'OF' after array dimensions");
+        freeAST(indexList);
+        return NULL;
+    }
+    eat(parser, TOKEN_OF);
+
+    AST *elemType = typeSpecifier(parser, 1); // allowAnonymous = true for element type
+    if (!elemType || elemType->type == AST_NOOP) {
+        errorParser(parser, "Invalid element type for array");
+        freeAST(indexList);
+        return NULL;
+    }
+
+    AST *node = newASTNode(AST_ARRAY_TYPE, NULL);
+    setTypeAST(node, TYPE_ARRAY); // The node itself is of TYPE_ARRAY
+
+    // Transfer children (the AST_SUBRANGE nodes with resolved AST_NUMBER bounds)
+    if (indexList->child_count > 0) {
+        node->children = indexList->children;
+        node->child_count = indexList->child_count;
+        node->child_capacity = indexList->child_capacity;
+        for (int i = 0; i < node->child_count; ++i) {
+            if (node->children[i]) {
+                node->children[i]->parent = node;
+            }
+        }
+        indexList->children = NULL; // Nullify to prevent double free
+        indexList->child_count = 0;
+        indexList->child_capacity = 0;
+    } else {
+        node->children = NULL;
+        node->child_count = 0;
+        node->child_capacity = 0;
+    }
+    freeAST(indexList); // Free the temporary AST_COMPOUND wrapper struct (not its children)
+
+    setRight(node, elemType); // Link to the element type AST
+
     return node;
 }
-
 AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* unit_name_being_parsed) {
     if (recursion_depth > MAX_RECURSION_DEPTH) { /* error */ EXIT_FAILURE_HANDLER(); }
 
@@ -586,6 +720,10 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     sym->is_alias = false;
     sym->is_local_var = false;
     sym->next = NULL;
+    sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
+    sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
+    sym->arity = 0;             // Will be updated later for user functions if needed.
+    sym->locals_count = 0;      // Will be updated later.
 
     if (procedure_table) {
         hashTableInsert(procedure_table, sym);
@@ -989,25 +1127,110 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 }
 
 // constDeclaration: Calls expression or parseArrayInitializer
+// In src/frontend/parser.c
+
+// src/frontend/parser.c
+
 AST *constDeclaration(Parser *parser) {
-    Token* cn = copyToken(parser->current_token); if(!cn||cn->type!=TOKEN_IDENTIFIER){errorParser(parser,"Exp const name"); return NULL;} eat(parser,TOKEN_IDENTIFIER);
-    AST* type_node=NULL, *val_node=NULL;
-    if(parser->current_token && parser->current_token->type == TOKEN_COLON){eat(parser,TOKEN_COLON); type_node=typeSpecifier(parser,1); if(!type_node){errorParser(parser,"Invalid type"); freeToken(cn); return NULL;} /*...array check...*/ }
-    if(!parser->current_token || parser->current_token->type!=TOKEN_EQUAL){errorParser(parser,"Exp ="); freeToken(cn); if(type_node)freeAST(type_node); return NULL;} eat(parser,TOKEN_EQUAL);
-    if(type_node){ // Typed constant (array)
-        if(!parser->current_token || parser->current_token->type!=TOKEN_LPAREN){errorParser(parser,"Exp ("); freeToken(cn); freeAST(type_node); return NULL;}
-        val_node = parseArrayInitializer(parser); // <<< Uses expression internally
-        if(!val_node){errorParser(parser,"Bad array init"); freeToken(cn); freeAST(type_node); return NULL;}
-        if(type_node)setRight(val_node,type_node); // Link type info
-    } else { // Simple constant
-        val_node = expression(parser); // <<< Use expression()
-        if(!val_node || val_node->type == AST_NOOP){errorParser(parser,"Exp const value"); freeToken(cn); return NULL;}
+#ifdef DEBUG
+    if (parser && parser->current_token) {
+        fprintf(stderr, "[DEBUG %s] ENTER. Current token: %s ('%s') at L%d C%d\n", __func__,
+                tokenTypeToString(parser->current_token->type),
+                parser->current_token->value ? parser->current_token->value : "NULL_VAL",
+                parser->current_token->line, parser->current_token->column);
+    } else {
+        fprintf(stderr, "[DEBUG %s] ENTER. Parser or current_token is NULL.\n", __func__);
     }
-    if(!parser->current_token || parser->current_token->type!=TOKEN_SEMICOLON){errorParser(parser,"Exp ;"); freeToken(cn); if(type_node)freeAST(type_node); freeAST(val_node); return NULL;} eat(parser,TOKEN_SEMICOLON);
-    AST* node = newASTNode(AST_CONST_DECL, cn); freeToken(cn); setLeft(node,val_node);
-    if(type_node){setRight(node,type_node); setTypeAST(node,TYPE_ARRAY);} else {setTypeAST(node,TYPE_VOID);} // Type inferred later for simple const
+#endif
+
+    if (!parser || !parser->current_token) {
+        return NULL;
+    }
+
+    Token *cn = copyToken(parser->current_token); // Keep this copy of the const name token
+    if (!cn) {
+        errorParser(parser, "Failed to copy constant name token");
+        return NULL;
+    }
+    eat(parser, TOKEN_IDENTIFIER); // Use the MACRO 'eat'
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_EQUAL) {
+        errorParser(parser, "Expected '=' after constant name");
+        freeToken(cn); // Free 'cn' before returning on error
+        return NULL;
+    }
+    eat(parser, TOKEN_EQUAL); // Use the MACRO 'eat'
+
+    AST *val_node = expression(parser);
+    if (!val_node || val_node->type == AST_NOOP) {
+        errorParser(parser, "Invalid constant value expression");
+        freeToken(cn);
+        if (val_node) freeAST(val_node);
+        return NULL;
+    }
+
+    Value const_eval_result = evaluateCompileTimeValue(val_node);
+
+    // BUG WAS HERE: Do NOT freeToken(cn) here. It is used below.
+
+    AST *node = newASTNode(AST_CONST_DECL, cn); // newASTNode makes its own deep copy of 'cn' for node->token
+    if (!node) {
+        errorParser(parser, "Failed to create AST node for constant declaration");
+        freeValue(&const_eval_result);
+        freeAST(val_node);
+        freeToken(cn); // Free 'cn' before returning on error
+        return NULL;
+    }
+    setLeft(node, val_node);
+
+    if (const_eval_result.type != TYPE_VOID && const_eval_result.type != TYPE_UNKNOWN) {
+        // Use cn->value and cn->line, as 'cn' is still valid.
+        addCompilerConstant(cn->value, const_eval_result, cn->line);
+        Value* check_val = findCompilerConstant(cn->value);
+        if (check_val) {
+            fprintf(stderr, "[DEBUG PARSER constDecl] VERIFY ADD: Found '%s' immediately. Type: %s\n", cn->value, varTypeToString(check_val->type));
+        } else {
+            fprintf(stderr, "[DEBUG PARSER constDecl] VERIFY ADD: FAILED to find '%s' immediately after add!\n", cn->value);
+        }
+        setTypeAST(node, const_eval_result.type);
+    } else {
+#ifdef DEBUG
+        // Use cn->value and cn->line, as 'cn' is still valid.
+        fprintf(stderr, "[DEBUG %s] Parser Info: Constant '%s' value is non-literal or could not be folded by parser at line %d.\n",
+                __func__, cn->value, cn->line);
+#endif
+        if (val_node->var_type != TYPE_UNKNOWN && val_node->var_type != TYPE_VOID) {
+            setTypeAST(node, val_node->var_type);
+        }
+    }
+    
+    freeValue(&const_eval_result);
+
+    // <<<< FIX: Move freeToken(cn) here, to the end of the function >>>>
+    // Now that newASTNode has made its copy for node->token, and addCompilerConstant/logging
+    // have used the original 'cn' and its members, we can free the 'cn' copy.
+    freeToken(cn);
+    cn = NULL; // Defensive: prevent accidental use of dangling cn later in this function
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+        errorParser(parser, "Expected ';' after constant declaration");
+        freeAST(node); // This will free node->token (the copy of cn) and node->left (val_node)
+        // 'cn' was already freed or nulled out.
+        return NULL;
+    }
+    eat(parser, TOKEN_SEMICOLON);
+
+#ifdef DEBUG
+    if (node && node->token) {
+        fprintf(stderr, "[DEBUG %s] EXIT. Created AST_CONST_DECL for '%s'\n", __func__,
+                node->token->value ? node->token->value : "NULL_VAL");
+    } else {
+        fprintf(stderr, "[DEBUG %s] EXIT. Node or node->token is NULL for AST_CONST_DECL.\n", __func__);
+    }
+#endif
     return node;
 }
+
 // typeSpecifier: Calls expression for string length
 // Replace the existing typeSpecifier function with this one
 
@@ -2454,27 +2677,54 @@ AST *factor(Parser *parser) {
         }
         // Check if lvalue returned a simple variable that might be a parameter-less function
         else if (node->type == AST_VARIABLE) {
-            Symbol *procSym = node->token ? lookupProcedure(node->token->value) : NULL; // NEW: Use Symbol*
+                // <<<< MODIFICATION START >>>>
+                // Check for built-in functions FIRST, as they are a special case.
+                if (node->token && isBuiltin(node->token->value) && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
+                    
+                    #ifdef DEBUG
+                    fprintf(stderr, "[DEBUG factor] IDENTIFIER '%s' is a built-in FUNCTION. Converting to AST_PROCEDURE_CALL.\n", node->token->value);
+                    #endif
 
-             // if (proc && proc->proc_decl && proc->proc_decl->type == AST_FUNCTION_DECL) { // OLD
-             if (procSym && procSym->type_def && procSym->type_def->type == AST_FUNCTION_DECL) { // NEW: Check procSym and its type_def
-                 node->type = AST_PROCEDURE_CALL; // Change type to parameter-less call
-                 node->children = NULL; node->child_count = 0; node->child_capacity = 0;
-                 // Set return type early if possible
-                 // if (proc->proc_decl->right) setTypeAST(node, proc->proc_decl->right->var_type); // OLD
-                 if (procSym->type_def->right) setTypeAST(node, procSym->type_def->right->var_type); // NEW
-                 // else setTypeAST(node, TYPE_VOID); // OLD: This was an error, should use procSym->type
-                 else setTypeAST(node, procSym->type); // NEW: Use the Symbol's stored type
-             // } else if (proc) { // Procedure used as value error // OLD
-             } else if (procSym) { // NEW: Check procSym
-                  char error_msg[128];
-                  // snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", node->token->value); // OLD
-                  snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", procSym->name); // NEW
-                  errorParser(parser, error_msg);
-                  freeAST(node); return newASTNode(AST_NOOP, NULL);
-             }
-             // Otherwise, it's just a variable/constant reference handled by lvalue
-        }
+                    node->type = AST_PROCEDURE_CALL;
+                    node->children = NULL;
+                    node->child_count = 0;
+                    node->child_capacity = 0;
+                    // Set return type from our known built-in return types.
+                    // This avoids relying on the dummy AST from the procedure_table.
+                    setTypeAST(node, getBuiltinReturnType(node->token->value));
+                
+                } else {
+                    // If not a built-in, check the user-defined procedure table.
+                    Symbol *procSym = node->token ? lookupProcedure(node->token->value) : NULL;
+
+                    if (procSym && procSym->type_def && procSym->type_def->type == AST_FUNCTION_DECL) {
+                        
+                        #ifdef DEBUG
+                        fprintf(stderr, "[DEBUG factor] IDENTIFIER '%s' is a user-defined FUNCTION. Converting to AST_PROCEDURE_CALL.\n", node->token->value);
+                        #endif
+
+                        node->type = AST_PROCEDURE_CALL; // Change type to parameter-less call
+                        node->children = NULL;
+                        node->child_count = 0;
+                        node->child_capacity = 0;
+                        
+                        if (procSym->type_def->right) {
+                            setTypeAST(node, procSym->type_def->right->var_type);
+                        } else {
+                            setTypeAST(node, procSym->type);
+                        }
+
+                    } else if (procSym) { // It's a procedure (not a function) used as a value
+                        char error_msg[128];
+                        snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", procSym->name);
+                        errorParser(parser, error_msg);
+                        freeAST(node);
+                        return newASTNode(AST_NOOP, NULL);
+                    }
+                    // Otherwise, it's just a variable/constant reference.
+                }
+                // <<<< MODIFICATION END >>>>
+            }
         // If lvalue returned DEREFERENCE, FIELD_ACCESS, ARRAY_ACCESS, it's used as is.
         // No immediate return needed here as lvalue consumed the relevant tokens.
         // Flow continues to end.

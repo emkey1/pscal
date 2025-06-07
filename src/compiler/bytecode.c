@@ -20,6 +20,7 @@ void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     chunk->constants_count = 0;
     chunk->constants_capacity = 0;
     chunk->constants = NULL;
+    chunk->lines = 0;
 }
 
 void freeBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
@@ -62,6 +63,7 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From 
     chunk->count++;
 }
 
+/*
 int addConstantToChunk(BytecodeChunk* chunk, Value value) { // From all.txt
     if (chunk->constants_capacity < chunk->constants_count + 1) {
         int oldCapacity = chunk->constants_capacity;
@@ -73,6 +75,48 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) { // From all.txt
     chunk->constants[chunk->constants_count] = value;
     return chunk->constants_count++;
 }
+ */
+
+int addConstantToChunk(BytecodeChunk* chunk, Value value) {
+    fprintf(stderr, "[DEBUG addConstantToChunk] ENTER. Adding value type %s. chunk ptr: %p\n", varTypeToString(value.type), (void*)chunk);
+    if (value.type == TYPE_STRING) {
+        fprintf(stderr, "[DEBUG addConstantToChunk] String value to add: '%s'\n", value.s_val ? value.s_val : "NULL_SVAL");
+    }
+    fflush(stderr);
+
+    // Perform reallocation if needed (keep this block as is)
+    if (chunk->constants_capacity < chunk->constants_count + 1) {
+        fprintf(stderr, "[DEBUG addConstantToChunk] Reallocating constants. Old cap: %d, Old count: %d\n", chunk->constants_capacity, chunk->constants_count);
+        fflush(stderr);
+        int oldCapacity = chunk->constants_capacity;
+        chunk->constants_capacity = oldCapacity < 8 ? 8 : oldCapacity * 2;
+        chunk->constants = (Value*)reallocate(chunk->constants,
+                                             sizeof(Value) * oldCapacity,
+                                             sizeof(Value) * chunk->constants_capacity);
+        fprintf(stderr, "[DEBUG addConstantToChunk] Reallocated. New cap: %d. chunk->constants ptr: %p\n", chunk->constants_capacity, (void*)chunk->constants);
+        fflush(stderr);
+    }
+
+    fprintf(stderr, "[DEBUG addConstantToChunk] BEFORE assignment: chunk->constants_count = %d. Dest addr: %p. Value.s_val addr: %p\n",
+            chunk->constants_count,
+            (void*)&(chunk->constants[chunk->constants_count]),
+            (void*)value.s_val);
+    fflush(stderr);
+
+    // The problematic line:
+    chunk->constants[chunk->constants_count] = value; // bytecode.c:67
+
+    fprintf(stderr, "[DEBUG addConstantToChunk] AFTER assignment. Copied value type %s to index %d.\n",
+            varTypeToString(chunk->constants[chunk->constants_count].type), chunk->constants_count);
+    if (chunk->constants[chunk->constants_count].type == TYPE_STRING) {
+         fprintf(stderr, "[DEBUG addConstantToChunk] Copied string: '%s'\n",
+                 chunk->constants[chunk->constants_count].s_val ? chunk->constants[chunk->constants_count].s_val : "NULL_SVAL_COPIED");
+    }
+    fflush(stderr);
+
+    return chunk->constants_count++;
+}
+
 
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line) { // From all.txt
     writeBytecodeChunk(chunk, (uint8_t)((value >> 8) & 0xFF), line);

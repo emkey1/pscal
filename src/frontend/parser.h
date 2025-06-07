@@ -70,10 +70,10 @@ AST *parseWriteArguments(Parser *parser);
 
 // Declaration for the debug wrapper (defined in parser.c)
 // Not strictly needed here if only called via macro below, but good practice
-void eat_debug_wrapper(Parser *parser_ptr, TokenType expected_token_type, const char* func_name);
+void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const char* func_name);
 
 // Redefine 'eat' macro to call the debug wrapper
-#define eat(parser_ptr, expected_token_type) eat_debug_wrapper(parser_ptr, expected_token_type, __func__)
+#define eat(parser_ptr, expected_token_type) eatDebugWrapper(parser_ptr, expected_token_type, __func__)
 
 #else // If DEBUG is NOT defined
 

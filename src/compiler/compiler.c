@@ -4,7 +4,6 @@
 #include <string.h> // For strcmp, strdup, atoll
 
 #include "compiler/compiler.h"
-#include "compiler/bytecode.h"
 #include "backend_ast/builtin.h" // For isBuiltin
 #include "core/utils.h"
 #include "core/types.h"
@@ -13,6 +12,7 @@
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID
 #include "backend_ast/interpreter.h" // For makeCopyOfValue()
+#include "compiler/bytecode.h"
 
 static bool compiler_had_error = false;
 
@@ -37,57 +37,162 @@ int compilerGlobalCount = 0;
 
 CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS]; // MAX_GLOBALS from an appropriate header or defined here
 
-typedef struct {
-    char* name;
-    Value value;
-    // bool is_evaluated; // Could add if constants can be expressions that need one-time eval by compiler
-} CompilerConstant;
-
-#define MAX_COMPILER_CONSTANTS 128 // Adjust as needed
 CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
 int compilerConstantCount = 0;
 
 // Helper to add a constant during compilation
-static void addCompilerConstant(const char* name, Value value, int line) {
+void addCompilerConstant(const char* name_original_case, Value value, int line) {
     if (compilerConstantCount >= MAX_COMPILER_CONSTANTS) {
         fprintf(stderr, "L%d: Compiler error: Too many compile-time constants.\n", line);
-        // Consider not exiting directly but setting an error flag for compileASTToBytecode to return false
-        exit(1);
+        freeValue(&value); // Free incoming value's data if it's heap allocated
+        compiler_had_error = true;
+        return;
     }
+
+    char canonical_name[MAX_SYMBOL_LENGTH]; // Assuming MAX_SYMBOL_LENGTH from globals.h
+    strncpy(canonical_name, name_original_case, sizeof(canonical_name) - 1);
+    canonical_name[sizeof(canonical_name) - 1] = '\0';
+    toLowerString(canonical_name); // Convert to lowercase
+
     for (int i = 0; i < compilerConstantCount; i++) {
-        if (strcmp(compilerConstants[i].name, name) == 0) {
-            fprintf(stderr, "L%d: Compiler warning: Constant '%s' redefined. Using new value.\n", line, name);
-            // Free old value if it was heap-allocated (e.g., string)
-            freeValue(&compilerConstants[i].value);
-            compilerConstants[i].value = makeCopyOfValue(&value); // Store a copy
+        if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
+            // Constant with this canonical name already exists.
+            fprintf(stderr, "L%d: Compiler warning: Constant '%s' (canonical: '%s') redefined. Using new value.\n", line, name_original_case, canonical_name);
+            
+            freeValue(&compilerConstants[i].value); // Free old value's contents
+            compilerConstants[i].value = makeCopyOfValue(&value); // Store a deep copy of the new value
+            
+            // The caller of addCompilerConstant is responsible for the original 'value' it passed.
+            // If 'value' was a temporary (e.g., from makeString prior to this call), its s_val should be freed by the caller
+            // after addCompilerConstant returns, as makeCopyOfValue would have duplicated its content.
             return;
         }
     }
-    compilerConstants[compilerConstantCount].name = strdup(name);
-    if (!compilerConstants[compilerConstantCount].name) { /* Malloc error */ exit(1); }
-    compilerConstants[compilerConstantCount].value = makeCopyOfValue(&value); // Store a copy
+
+    // Add new constant
+    compilerConstants[compilerConstantCount].name = strdup(canonical_name);
+    if (!compilerConstants[compilerConstantCount].name) {
+        fprintf(stderr, "L%d: Malloc error for canonical constant name '%s'\n", line, canonical_name);
+        freeValue(&value); // Free incoming value's data
+        compiler_had_error = true;
+        return;
+    }
+    compilerConstants[compilerConstantCount].value = makeCopyOfValue(&value);
     compilerConstantCount++;
+    // Caller of addCompilerConstant is responsible for the original 'value' passed.
 }
 
-/*
 // Helper to find a compile-time constant
-static Value* findCompilerConstant(const char* name) {
-    for (int i = 0; i < compilerConstantCount; i++) {
-        if (strcmp(compilerConstants[i].name, name) == 0) {
+Value* findCompilerConstant(const char* name_original_case) {
+    char canonical_name[MAX_SYMBOL_LENGTH];
+    // ... (strncpy, toLowerString as before) ...
+    strncpy(canonical_name, name_original_case, MAX_SYMBOL_LENGTH - 1);
+    canonical_name[MAX_SYMBOL_LENGTH - 1] = '\0';
+    toLowerString(canonical_name);
+
+    fprintf(stderr, "[DEBUG findCompilerConstant] Searching for '%s' (canonical: '%s'). Current compilerConstantCount = %d\n",
+            name_original_case, canonical_name, compilerConstantCount);
+    fflush(stderr);
+
+    for (int i = 0; i < compilerConstantCount; ++i) {
+        fprintf(stderr, "[DEBUG findCompilerConstant] Checking against stored: '%s'\n", compilerConstants[i].name);
+        fflush(stderr);
+        if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
+            fprintf(stderr, "[DEBUG findCompilerConstant] Found '%s' at index %d.\n", canonical_name, i);
+            fflush(stderr);
             return &compilerConstants[i].value;
         }
     }
+    fprintf(stderr, "[DEBUG findCompilerConstant] '%s' (canonical: '%s') NOT FOUND.\n", name_original_case, canonical_name);
+    fflush(stderr);
     return NULL;
-} */
+}
+
+// New function for parser/compiler to evaluate simple constant expressions
+Value evaluateCompileTimeValue(AST* node) {
+    if (!node) return makeVoid(); // Or some error indicator
+
+    switch (node->type) {
+        case AST_NUMBER:
+            if (node->token) {
+                if (node->var_type == TYPE_REAL || (node->token->type == TOKEN_REAL_CONST)) {
+                    return makeReal(atof(node->token->value));
+                } else {
+                    return makeInt(atoll(node->token->value));
+                }
+            }
+            break;
+        case AST_STRING:
+            if (node->token) return makeString(node->token->value);
+            break;
+        case AST_BOOLEAN:
+            return makeBoolean(node->i_val);
+        case AST_NIL:
+            return makeNil();
+        case AST_VARIABLE: // Reference to another constant
+            if (node->token && node->token->value) {
+                Value* const_val_ptr = findCompilerConstant(node->token->value);
+                if (const_val_ptr) {
+                    fprintf(stderr, "[DEBUG evaluateCTV] Found '%s'. Type: %s\n", node->token->value, varTypeToString(const_val_ptr->type));
+                    return makeCopyOfValue(const_val_ptr); // Return a copy
+                } else {
+                    // Constant not found, cannot evaluate at this time
+                    fprintf(stderr, "[DEBUG evaluateCTV] FAILED to find const_var: '%s'\n", node->token->value);
+                    // Return a special error Value or TYPE_VOID
+                    return makeVoid();
+                }
+            }
+            break;
+        case AST_BINARY_OP:
+            if (node->left && node->right && node->token) {
+                Value left_val = evaluateCompileTimeValue(node->left);
+                Value right_val = evaluateCompileTimeValue(node->right);
+                Value result = makeVoid(); // Default
+
+                // Only proceed if both operands evaluated successfully to known types
+                if (left_val.type != TYPE_VOID && left_val.type != TYPE_UNKNOWN &&
+                    right_val.type != TYPE_VOID && right_val.type != TYPE_UNKNOWN) {
+
+                    // Handle simple integer arithmetic for now (e.g., DIV)
+                    if (left_val.type == TYPE_INTEGER && right_val.type == TYPE_INTEGER) {
+                        if (node->token->type == TOKEN_INT_DIV) {
+                            if (right_val.i_val == 0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeInt(left_val.i_val / right_val.i_val);
+                            }
+                        } else if (node->token->type == TOKEN_PLUS) {
+                            result = makeInt(left_val.i_val + right_val.i_val);
+                        } // Add other ops: MINUS, MUL
+                        // TODO: Add other operations and type combinations (Real, String concat)
+                    } else {
+                        // Did not evaluate to two integers, or op not supported yet for folding
+                        // fprintf(stderr, "Compile-time Info: Cannot fold binary op (%s) with types %s, %s.\n",
+                        //         tokenTypeToString(node->token->type), varTypeToString(left_val.type), varTypeToString(right_val.type));
+                    }
+                }
+                freeValue(&left_val);
+                freeValue(&right_val);
+                return result; // Returns makeVoid() if folding failed
+            }
+            break;
+        // Add AST_UNARY_OP if needed
+        default:
+            break; // Cannot evaluate this node type to a constant value
+    }
+    return makeVoid(); // Default: cannot evaluate
+}
 
 // Reset for each compilation
-static void resetCompilerConstants(void) {
-    for (int i = 0; i < compilerConstantCount; i++) {
+void resetCompilerConstants(void) {
+    fprintf(stderr, "!!!! RESETTING COMPILER CONSTANTS at %s:%d !!!! (count becomes 0)\n", __FILE__, __LINE__); // Add file and line
+    fflush(stderr);
+    for (int i = 0; i < compilerConstantCount; ++i) {
         if (compilerConstants[i].name) {
             free(compilerConstants[i].name);
             compilerConstants[i].name = NULL;
         }
-        freeValue(&compilerConstants[i].value); // Free any heap-allocated data within the Value
+        freeValue(&compilerConstants[i].value);
     }
     compilerConstantCount = 0;
 }
@@ -153,51 +258,103 @@ static VarType resolveASTTypeToVarType(AST* type_node, int line_for_error) {
 
 // --- Main Compilation Function ---
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
-    // ... (initial null checks, initBytecodeChunk, reset compilerGlobalCount) ...
-    if (!rootNode || !outputChunk) { /* ... */ return false; }
-    
-    initBytecodeChunk(outputChunk);
-    compilerGlobalCount = 0; // For global variable indexing by compiler
-    // compiler_had_error = false; // If you use a global error flag
+    // Debug print for entry and initial state of compilerConstantCount
+    fprintf(stderr, "[DEBUG compileASTToBytecode] ENTER. Initial compilerConstantCount = %d\n", compilerConstantCount);
+    fflush(stderr);
 
-    resetCompilerConstants();
-
-    // This ensures constants are known before they are used in other declarations or the main body.
-    // This simplified pre-pass assumes global constants are direct children of the main program block's declaration section.
-    if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK) {
-        AST* mainBlock = rootNode->right;
-        // mainBlock->children[0] is usually the AST_COMPOUND node for all declarations (const, type, var, proc/func)
-        if (mainBlock->child_count > 0 && mainBlock->children[0] && mainBlock->children[0]->type == AST_COMPOUND) {
-            AST* declarations_compound_node = mainBlock->children[0];
-            for (int i = 0; i < declarations_compound_node->child_count; i++) {
-                AST* declNode = declarations_compound_node->children[i];
-                if (declNode && declNode->type == AST_CONST_DECL) {
-                    // Call compileNode specifically for AST_CONST_DECL.
-                    // It won't emit bytecode but will call addCompilerConstant.
-                    // Pass NULL for 'chunk' as we are not emitting to the main chunk in this pre-pass.
-                    // Or, ensure compileNode's AST_CONST_DECL case handles a NULL chunk gracefully.
-                    // For simplicity here, let's make sure the AST_CONST_DECL case in compileNode
-                    // *only* calls addCompilerConstant and doesn't write to the chunk.
-                    compileNode(declNode, NULL /* No bytecode emission during this pre-pass */, getLine(declNode));
-                }
-            }
-        }
-    }
-
-    // Main compilation pass (unchanged from your structure)
-    if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK) {
-        AST* mainBlock = rootNode->right;
-        compileNode(mainBlock, outputChunk, getLine(rootNode));
-    } else if (rootNode->type == AST_BLOCK) {
-        compileNode(rootNode, outputChunk, getLine(rootNode));
-    } else {
-        fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK node as root for compilation.\n");
+    if (!rootNode) {
+        fprintf(stderr, "Compiler Error: Cannot compile NULL AST rootNode.\n");
+        compiler_had_error = true; // Ensure error is flagged
         return false;
     }
+    if (!outputChunk) {
+        fprintf(stderr, "Compiler Error: outputChunk is NULL in compileASTToBytecode.\n");
+        compiler_had_error = true; // Ensure error is flagged
+        return false;
+    }
+    
+    // Initialize the output chunk for this compilation pass.
+    // This is crucial if outputChunk is being reused or needs a fresh state.
+    initBytecodeChunk(outputChunk);
 
-    writeBytecodeChunk(outputChunk, OP_HALT, getLine(rootNode));
-    // return !compiler_had_error; // If using a global error flag
-    return true;
+    // Reset compiler's global variable counter for THIS compilation pass.
+    // This is for variables defined with VAR, not for compile-time constants.
+    compilerGlobalCount = 0;
+
+    // Reset the global error flag for THIS compilation pass.
+    compiler_had_error = false;
+
+    // DO NOT CALL resetCompilerConstants() here.
+    // The parser has already populated compilerConstants.
+    // The "simplified pre-pass" that was here is now redundant and removed.
+
+    fprintf(stderr, "[DEBUG compileASTToBytecode] Before main compileNode call, compilerConstantCount = %d\n", compilerConstantCount);
+    fflush(stderr);
+
+    // Main compilation pass - determines the top-level node to compile
+    if (rootNode->type == AST_PROGRAM) {
+        // A program node should have a name (left) and a block (right)
+        if (rootNode->right && rootNode->right->type == AST_BLOCK) {
+            AST* mainBlock = rootNode->right;
+            fprintf(stderr, "[DEBUG compileASTToBytecode] Compiling mainBlock of AST_PROGRAM. Current compilerConstantCount = %d\n", compilerConstantCount);
+            fflush(stderr);
+            compileNode(mainBlock, outputChunk, getLine(rootNode)); // Pass a valid line number
+        } else {
+            fprintf(stderr, "Compiler error: AST_PROGRAM node missing main block (rootNode->right is not AST_BLOCK).\n");
+            compiler_had_error = true;
+        }
+    } else if (rootNode->type == AST_BLOCK) {
+        // Allow compiling a block directly (e.g., for unit implementations if handled this way)
+        fprintf(stderr, "[DEBUG compileASTToBytecode] Compiling AST_BLOCK directly. Current compilerConstantCount = %d\n", compilerConstantCount);
+        fflush(stderr);
+        compileNode(rootNode, outputChunk, getLine(rootNode)); // Pass a valid line number
+    } else if (rootNode->type == AST_UNIT) {
+        // If you compile units separately into bytecode, handle AST_UNIT here.
+        // This might involve compiling its interface (if needed for symbol tables)
+        // and its implementation's declaration block and initialization block.
+        // For now, assuming unit's constants are part of global compilerConstants.
+        // The main executable part of a unit is its initialization block.
+        fprintf(stderr, "[DEBUG compileASTToBytecode] Compiling AST_UNIT. Name: '%s'. Current compilerConstantCount = %d\n",
+                rootNode->token ? rootNode->token->value : "N/A", compilerConstantCount);
+        fflush(stderr);
+        // A unit typically has interface declarations (left), implementation declarations (extra),
+        // and an initialization block (right).
+        // You'd compile the parts that generate executable code, usually the init block.
+        // Global declarations from the unit's INTERFACE and IMPLEMENTATION (like CONST, VAR)
+        // should have been processed by the parser and compiler's const/var handling already.
+        
+        // Example: Compile the initialization block of the unit if it exists
+        if (rootNode->right && (rootNode->right->type == AST_COMPOUND || rootNode->right->type == AST_BLOCK)) { // Assuming init block is in 'right'
+             compileNode(rootNode->right, outputChunk, getLine(rootNode->right));
+        }
+        // Or, if the unit structure implies compiling its main "block" which includes its parts:
+        // compileNode(rootNode, outputChunk, getLine(rootNode)); // This would need compileNode to handle AST_UNIT
+        // For now, let's assume the main interest is program or program block.
+        // If compiling a unit directly to bytecode isn't supported yet, this can be an error:
+        // fprintf(stderr, "Compiler warning: Direct bytecode compilation of AST_UNIT not fully implemented.\n");
+        // compiler_had_error = true; // Or false if only init block is compiled or it's a valid path
+    }
+    else {
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK as root for compilation, got %s.\n", astTypeToString(rootNode->type));
+        compiler_had_error = true;
+    }
+
+    // Add OP_HALT only if compilation was successful and produced some code.
+    // If outputChunk->count is 0 and no error, HALT is still fine.
+    // If error, perhaps skip HALT or clear chunk.
+    if (!compiler_had_error) {
+        writeBytecodeChunk(outputChunk, OP_HALT, rootNode ? getLine(rootNode) : 0); // Use a valid line if possible
+    } else {
+        // If errors occurred, the chunk might be incomplete/invalid.
+        // Consider not adding HALT or even clearing the chunk.
+        // For now, it will add HALT even if errors happened before this point but set compiler_had_error.
+    }
+
+    fprintf(stderr, "[DEBUG compileASTToBytecode] EXIT. Final compilerConstantCount = %d. Had Error: %s. Bytecode size: %d\n",
+            compilerConstantCount, compiler_had_error ? "YES" : "NO", outputChunk->count);
+    fflush(stderr);
+
+    return !compiler_had_error;
 }
 
 // --- Recursive Compilation Dispatcher ---
@@ -353,54 +510,67 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
          }
 
         case AST_CONST_DECL: {
-            // This is called by the pre-pass in compileASTToBytecode for global constants
-            // And could be called for local constants if a similar pre-pass is done for procedures.
-            if (node->token && node->left) { // Const name and value node
-                // The parser should have evaluated constant expressions already.
-                // node->left should be an AST_NUMBER, AST_STRING, AST_BOOLEAN, or AST_NIL
-                // For this example, we assume simple literal constants.
-                // A more robust solution would use eval_constant_expression from the parser if needed.
-                Value constantVal;
-                bool val_set = false;
-                if (node->left->type == AST_NUMBER) {
-                    if (node->left->var_type == TYPE_REAL || (node->left->token && strchr(node->left->token->value, '.'))) {
-                        constantVal = makeReal(atof(node->left->token->value));
-                    } else {
-                        constantVal = makeInt(atoll(node->left->token->value));
-                    }
-                    val_set = true;
-                } else if (node->left->type == AST_STRING) {
-                    constantVal = makeString(node->left->token->value); // makeString copies
-                    val_set = true;
-                } else if (node->left->type == AST_BOOLEAN) {
-                    constantVal = makeBoolean(node->left->i_val);
-                    val_set = true;
-                } else if (node->left->type == AST_NIL) {
-                    constantVal = makeNil();
-                    val_set = true;
-                }
-                 else if (node->left->type == AST_VARIABLE && node->left->token && (node->left->token->value[0] == '\'' || node->left->token->value[0] == '#')) {
-                    // Handle char constants like '#65' or 'A' (which parser might make AST_VARIABLE with string value)
-                    if (node->left->token->value[0] == '#') { // e.g. #65
-                        long long char_ord = atoll(node->left->token->value + 1);
-                        constantVal = makeChar((char)char_ord);
-                    } else { // e.g. 'A'
-                         constantVal = makeChar(node->left->token->value[1]);
-                    }
-                    val_set = true;
-                }
-                // TODO: Handle constant expressions if parser doesn't fully resolve them to literals in AST_CONST_DECL's value node
-                // For now, we assume node->left is a literal or already evaluated by parser.
+            if (node->token && node->token->value) {
+                // Check if the parser already evaluated and added this constant
+                Value* existing_const_val = findCompilerConstant(node->token->value);
 
-                if (val_set) {
-                    addCompilerConstant(node->token->value, constantVal, getLine(node));
-                    // No bytecode for CONST declaration itself, values are inlined/pushed when used.
-                    // Crucially, do not free constantVal here if it's a string, as makeCopyOfValue was used.
-                    if(constantVal.type == TYPE_STRING) freeValue(&constantVal); // Free the temporary string if makeString was used directly
+                if (existing_const_val) {
+                    // Constant was already processed by the parser and its value is known.
+                    // No further action needed here for its definition.
+                    // When this constant is USED in an expression, compileExpression for AST_VARIABLE
+                    // will find it via findCompilerConstant and emit OP_CONSTANT with its value.
+                    #ifdef DEBUG
+                    if(dumpExec) fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' already processed by parser. Value inlined on use.\n",
+                            getLine(node), node->token->value);
+                    #endif
                 } else {
-                     fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' has non-literal value (Type: %s). Complex const eval TBD.\n",
-                             getLine(node), node->token->value, astTypeToString(node->left->type));
+                    // This constant was NOT a simple literal resolvable by the parser,
+                    // or parser's evaluateCompileTimeValue couldn't fold it.
+                    // This is the path for BrickWidth = ScreenWidth div BricksPerRow if ScreenWidth wasn't known to parser.
+                    // Use the existing logic to generate runtime initialization code for it.
+                    if (node->left) { // Ensure there's an expression for the value
+                        fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' (unresolved by parser, type: %s). Generating runtime init for VM.\n",
+                                getLine(node), node->token->value, astTypeToString(node->left->type));
+                        
+                        char canonical_const_name[MAX_SYMBOL_LENGTH];
+                        strncpy(canonical_const_name, node->token->value, sizeof(canonical_const_name) - 1);
+                        canonical_const_name[sizeof(canonical_const_name) - 1] = '\0';
+                        toLowerString(canonical_const_name); // Parser should already provide lowercase
+
+                        int var_name_idx = addConstantToChunk(chunk, makeString(canonical_const_name));
+                        // ... (rest of your existing runtime init codegen: OP_DEFINE_GLOBAL, compileExpression(node->left), OP_SET_GLOBAL) ...
+                        // Ensure types are correctly inferred/used for OP_DEFINE_GLOBAL.
+                        VarType const_actual_type = node->var_type;
+                        if (const_actual_type == TYPE_VOID || const_actual_type == TYPE_UNKNOWN) {
+                           if (node->left->type == AST_BINARY_OP && node->left->token && node->left->token->type == TOKEN_INT_DIV) {
+                               const_actual_type = TYPE_INTEGER;
+                           } else {
+                               // Attempt to get type from the expression node if annotated, otherwise default.
+                               const_actual_type = node->left->var_type != TYPE_VOID ? node->left->var_type : TYPE_INTEGER;
+                               if(const_actual_type == TYPE_VOID)
+                                 fprintf(stderr, "L%d: Compiler Warning: Could not infer type for const expression '%s', defaulting to INTEGER for DEFINE_GLOBAL.\n", getLine(node), node->token->value);
+                           }
+                        }
+                        uint8_t type_name_idx = 0;
+
+                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(node));
+                        writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(node));
+                        writeBytecodeChunk(chunk, type_name_idx, getLine(node));
+                        writeBytecodeChunk(chunk, (uint8_t)const_actual_type, getLine(node));
+                        
+                        resolveGlobalVariableIndex(chunk, canonical_const_name, getLine(node));
+                        compileExpression(node->left, chunk, getLine(node->left));
+                        writeBytecodeChunk(chunk, OP_SET_GLOBAL, getLine(node));
+                        writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(node));
+
+                    } else {
+                        fprintf(stderr, "L%d: Compiler Error: CONST_DECL for '%s' missing value expression.\n", getLine(node), node->token->value);
+                        compiler_had_error = true;
+                    }
                 }
+            } else {
+                 fprintf(stderr, "L%d: Compiler Error: Ill-formed AST_CONST_DECL node (missing token).\n", getLine(node));
+                 compiler_had_error = true;
             }
             break;
         }
@@ -893,13 +1063,27 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                 // No arguments are pushed for HOST_FN_QUIT_REQUESTED when used like a variable.
                 // The host function itself doesn't expect arguments from the stack for this ID.
             } else {
-                // Check if it's a known parameterless function first (like QuitRequested, if syntax allows no parens)
-                // This depends on how your parser and type annotator identify such calls.
-                // For now, assume QuitRequested always parsed as AST_PROCEDURE_CALL.
-                
-                int nameIndex = addConstantToChunk(chunk, makeString(varName));
-                writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                // Check if it's a known compile-time constant first
+                Value* const_val_ptr = findCompilerConstant(varName);
+                if (const_val_ptr) {
+                    // It's a compile-time constant, emit OP_CONSTANT with its value
+                    // makeCopyOfValue is important here, especially if the constant is a string,
+                    // to ensure the chunk's constant pool owns its copy of the data.
+                    Value val_to_add_to_chunk = makeCopyOfValue(const_val_ptr);
+                    int constIndex = addConstantToChunk(chunk, val_to_add_to_chunk);
+                    // val_to_add_to_chunk is a temporary on-stack Value struct.
+                    // If makeCopyOfValue allocated memory for val_to_add_to_chunk.s_val (for strings),
+                    // addConstantToChunk just copies the pointer. The chunk now "owns" that s_val.
+                    // So, no freeValue(&val_to_add_to_chunk) is needed here.
+
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+                } else {
+                    // If not a compile-time constant, treat as a variable to be fetched globally
+                    int nameIndex = addConstantToChunk(chunk, makeString(varName)); // makeString creates copy for the constant pool
+                    writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                }
             }
             break;
         }

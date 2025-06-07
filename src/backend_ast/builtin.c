@@ -2552,10 +2552,12 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "paramcount", "paramstr", "length", "pos", "ord", "chr",
         "abs", "sqrt", "cos", "sin", "tan", "ln", "exp", "trunc",
         "random", "wherex", "wherey", "ioresult", "eof", "copy",
-        "upcase", "low", "high", "succ", "pred", "round", // Added Pred assuming it might exist
+        "upcase", "low", "high", "succ", "pred", "round",
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
         "keypressed", "mstreamcreate", "quitrequested", "loadsound",
-        "real"
+        "real", "readkey", "getmaxx", "getmaxy", "getticks", "sqr",
+        "realtostr", "createtexture", "createtargettexture",
+        "loadimagetotexture", "rendertexttotexture"
         
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
@@ -2568,12 +2570,21 @@ BuiltinRoutineType getBuiltinType(const char *name) {
 
     // List known PROCEDURES (no return value) - case-insensitive compare
     const char *procedures[] = {
-        "writeln", "write", "readln", "read", "reset", "rewrite",
-        "close", "assign", "halt", "inc", "dec", "delay",
-        "randomize", "mstreamfree", "textcolore", "textbackgrounde",
-        "initsoundsystem", "playsound", "quitsoundsystem",
-        "issoundplaying", "rendercopyex"
-    };
+         // Existing procedures
+         "writeln", "write", "readln", "read", "reset", "rewrite",
+         "close", "assign", "halt", "inc", "dec", "delay",
+         "randomize", "mstreamfree", "textcolore", "textbackgrounde",
+         "initsoundsystem", "playsound", "quitsoundsystem",
+         "issoundplaying", "rendercopyex", "initgraph", "closegraph",
+         "graphloop", "updatescreen", "waitkeyevent", "cleardevice",
+         "setcolor", "setrgbcolor", "putpixel", "drawline",
+         "drawrect", "fillrect", "drawcircle", "fillcircle",
+         "inittextsystem", "quittextsystem", "outtextxy", "getmousestate",
+         "destroytexture", "updatetexture", "rendercopy",
+         "rendercopyrect", "setrendertarget", "drawpolygon",
+         "getpixelcolor", "setalphablend"
+     };
+    
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
     for (int i = 0; i < num_procedures; i++) {
         if (strcasecmp(name, procedures[i]) == 0) {
