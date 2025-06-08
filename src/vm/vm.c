@@ -26,54 +26,6 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
-static AST* createDummyArrayAst(int lower_bound, int upper_bound, const char* elem_type_name) {
-    // Create element type reference node
-    Token* elem_token = newToken(TOKEN_IDENTIFIER, elem_type_name, 0, 0);
-    AST* elem_type_ref_node = newASTNode(AST_TYPE_REFERENCE, elem_token);
-    freeToken(elem_token);
-    AST* actual_elem_type_def = lookupType(elem_type_name);
-    if (actual_elem_type_def) {
-        elem_type_ref_node->var_type = actual_elem_type_def->var_type;
-        elem_type_ref_node->right = actual_elem_type_def;
-    } else {
-        // Handle built-in types
-        if (strcasecmp(elem_type_name, "integer") == 0) elem_type_ref_node->var_type = TYPE_INTEGER;
-        else if (strcasecmp(elem_type_name, "real") == 0) elem_type_ref_node->var_type = TYPE_REAL;
-        // ... add other built-ins as needed
-        else {
-            fprintf(stderr, "VM Error: Could not resolve array element type '%s'\n", elem_type_name);
-            freeAST(elem_type_ref_node);
-            return NULL;
-        }
-    }
-
-
-    // Create bounds nodes
-    char bound_str[32];
-    snprintf(bound_str, 32, "%d", lower_bound);
-    Token* lower_token = newToken(TOKEN_INTEGER_CONST, bound_str, 0, 0);
-    AST* lower_node = newASTNode(AST_NUMBER, lower_token);
-    freeToken(lower_token);
-
-    snprintf(bound_str, 32, "%d", upper_bound);
-    Token* upper_token = newToken(TOKEN_INTEGER_CONST, bound_str, 0, 0);
-    AST* upper_node = newASTNode(AST_NUMBER, upper_token);
-    freeToken(upper_token);
-
-    // Create subrange node
-    AST* subrange_node = newASTNode(AST_SUBRANGE, NULL);
-    setLeft(subrange_node, lower_node);
-    setRight(subrange_node, upper_node);
-
-    // Create final array type node
-    AST* array_type_node = newASTNode(AST_ARRAY_TYPE, NULL);
-    addChild(array_type_node, subrange_node);
-    setRight(array_type_node, elem_type_ref_node);
-
-    return array_type_node;
-}
-
-
 // runtimeError - Assuming your existing one is fine.
 static void runtimeError(VM* vm, const char* format, ...) {
     va_list args;
@@ -722,64 +674,110 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_DEFINE_GLOBAL: {
-                Value varNameVal = READ_CONSTANT();        // Operand 1: Variable Name
-                VarType declaredType = (VarType)READ_BYTE(); // Operand 2: VarType enum
-
-                AST* type_def_ast = NULL; // This will hold the type definition AST node if needed
-                bool ast_is_dummy = false; // Flag to know if we need to free the dummy AST
+                Value varNameVal = READ_CONSTANT();
+                VarType declaredType = (VarType)READ_BYTE();
 
                 if (declaredType == TYPE_ARRAY) {
-                    // --- NEW: Handle array definitions ---
-                    uint8_t lower_idx = READ_BYTE();
-                    uint8_t upper_idx = READ_BYTE();
-                    uint8_t elem_name_idx = READ_BYTE();
-                    
-                    Value lower_val = vm->chunk->constants[lower_idx];
-                    Value upper_val = vm->chunk->constants[upper_idx];
-                    Value elem_name_val = vm->chunk->constants[elem_name_idx];
-                    
-                    if (lower_val.type == TYPE_INTEGER && upper_val.type == TYPE_INTEGER && elem_name_val.type == TYPE_STRING) {
-                        type_def_ast = createDummyArrayAst((int)lower_val.i_val, (int)upper_val.i_val, elem_name_val.s_val);
-                        ast_is_dummy = true; // Mark that we created a temporary AST
-                    } else {
-                        runtimeError(vm, "VM Error: Invalid constant types for array definition of '%s'.", varNameVal.s_val);
+                    uint8_t dimension_count = READ_BYTE();
+                    if (dimension_count == 0) {
+                        runtimeError(vm, "VM Error: Array defined with zero dimensions for '%s'.", varNameVal.s_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
+                    int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                    int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                    if (!lower_bounds || !upper_bounds) {
+                        runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                        // No need to free if malloc failed
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    for(int i = 0; i < dimension_count; i++) {
+                        uint8_t lower_idx = READ_BYTE();
+                        uint8_t upper_idx = READ_BYTE();
+                        Value lower_val = vm->chunk->constants[lower_idx];
+                        Value upper_val = vm->chunk->constants[upper_idx];
+                        if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+                             runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
+                             free(lower_bounds); free(upper_bounds);
+                             return INTERPRET_RUNTIME_ERROR;
+                        }
+                        lower_bounds[i] = (int)lower_val.i_val;
+                        upper_bounds[i] = (int)upper_val.i_val;
+                    }
+
+                    uint8_t elem_name_idx = READ_BYTE();
+                    Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                    
+                    // --- START MODIFICATION: Directly find element type info ---
+                    AST* elem_type_def = lookupType(elem_name_val.s_val);
+                    VarType elem_var_type = TYPE_VOID;
+
+                    if (elem_type_def) {
+                        elem_var_type = elem_type_def->var_type;
+                    } else { // Handle built-in types if not in type table
+                        if (strcasecmp(elem_name_val.s_val, "integer") == 0) elem_var_type = TYPE_INTEGER;
+                        else if (strcasecmp(elem_name_val.s_val, "real") == 0) elem_var_type = TYPE_REAL;
+                        else if (strcasecmp(elem_name_val.s_val, "char") == 0) elem_var_type = TYPE_CHAR;
+                        else if (strcasecmp(elem_name_val.s_val, "boolean") == 0) elem_var_type = TYPE_BOOLEAN;
+                        else if (strcasecmp(elem_name_val.s_val, "byte") == 0) elem_var_type = TYPE_BYTE;
+                        else if (strcasecmp(elem_name_val.s_val, "word") == 0) elem_var_type = TYPE_WORD;
+                        else {
+                            runtimeError(vm, "VM Error: Could not resolve array element type '%s'.", elem_name_val.s_val);
+                            free(lower_bounds); free(upper_bounds);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                    }
+                    
+                    Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+                    // --- END MODIFICATION ---
+                    
+                    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                    if (sym == NULL) {
+                        sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL); // Pass NULL for type_def_ast
+                        if (!sym) {
+                            runtimeError(vm, "VM Error: Failed to create symbol for global array '%s'.", varNameVal.s_val);
+                            freeValue(&array_val);
+                            free(lower_bounds); free(upper_bounds);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        freeValue(sym->value);
+                        *(sym->value) = array_val;
+                        hashTableInsert(vm->vmGlobalSymbols, sym);
+                    } else {
+                        runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+                        freeValue(sym->value);
+                        *(sym->value) = array_val;
+                    }
+
+                    free(lower_bounds);
+                    free(upper_bounds);
                 } else {
-                    // --- Existing logic for simple/named types ---
+                    AST* type_def_ast = NULL;
                     uint8_t typeNameConstIdx = READ_BYTE();
                     if (typeNameConstIdx > 0) {
                         const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
                         type_def_ast = lookupType(typeNameStr);
                     }
-                }
-
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-                    runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
-                    if(ast_is_dummy) freeAST(type_def_ast);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                if (sym == NULL) {
-                    sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_ast);
-                    if (!sym) {
-                        runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
-                        if(ast_is_dummy) freeAST(type_def_ast);
+                    if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                        runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    hashTableInsert(vm->vmGlobalSymbols, sym);
-                } else {
-                    runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
-                }
-                
-                // If we created a temporary AST, free it now.
-                if (ast_is_dummy) {
-                    freeAST(type_def_ast);
+                    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                    if (sym == NULL) {
+                        sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_ast);
+                        if (!sym) {
+                            runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        hashTableInsert(vm->vmGlobalSymbols, sym);
+                    } else {
+                        runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+                    }
                 }
                 break;
             }
+
             case OP_GET_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error */ return INTERPRET_RUNTIME_ERROR; }
@@ -1047,63 +1045,82 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_GET_ELEMENT: {
-                 Value index_val = pop(vm);
-                 Value array_val = pop(vm);
+                 uint8_t dimension_count = READ_BYTE();
+                 int* indices = malloc(sizeof(int) * dimension_count);
+                 if (!indices) {
+                     runtimeError(vm, "VM Error: Malloc failed for indices buffer.");
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
 
+                 for (int i = 0; i < dimension_count; i++) {
+                     Value index_val = pop(vm);
+                     if (index_val.type != TYPE_INTEGER) {
+                         runtimeError(vm, "VM Error: Array index must be an integer.");
+                         free(indices);
+                         freeValue(&index_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                     freeValue(&index_val);
+                 }
+
+                 Value array_val = pop(vm);
                  if (array_val.type != TYPE_ARRAY) {
                      runtimeError(vm, "VM Error: Cannot index a non-array type (%s).", varTypeToString(array_val.type));
-                     freeValue(&index_val); freeValue(&array_val);
-                     return INTERPRET_RUNTIME_ERROR;
-                 }
-                 if (index_val.type != TYPE_INTEGER) {
-                     runtimeError(vm, "VM Error: Array index must be an integer.");
-                     freeValue(&index_val); freeValue(&array_val);
+                     free(indices);
+                     freeValue(&array_val);
                      return INTERPRET_RUNTIME_ERROR;
                  }
 
-                 // Assuming 1D for now. computeFlatOffset handles bounds checking.
-                 int indices[] = { (int)index_val.i_val };
                  int offset = computeFlatOffset(&array_val, indices);
+                 free(indices);
 
-                 // Push a copy of the element from the array.
                  push(vm, makeCopyOfValue(&array_val.array_val[offset]));
-
-                 // Free the temporary index and array values that were popped.
-                 freeValue(&index_val);
                  freeValue(&array_val);
                  break;
             }
             case OP_SET_ELEMENT: {
-                Value value_to_set = pop(vm);
-                Value index_val = pop(vm);
-                Value array_val = pop(vm); // This is a copy of the array.
+                 uint8_t dimension_count = READ_BYTE();
+                 Value value_to_set = pop(vm);
+                 
+                 int* indices = malloc(sizeof(int) * dimension_count);
+                 if (!indices) {
+                     runtimeError(vm, "VM Error: Malloc failed for indices buffer.");
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+                 
+                 for (int i = 0; i < dimension_count; i++) {
+                     Value index_val = pop(vm);
+                     if (index_val.type != TYPE_INTEGER) {
+                         runtimeError(vm, "VM Error: Array index must be an integer for setting.");
+                         free(indices);
+                         freeValue(&index_val);
+                         // Clean up other values
+                         freeValue(&value_to_set);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                     freeValue(&index_val);
+                 }
 
-                if (array_val.type != TYPE_ARRAY) {
+                 Value array_val = pop(vm);
+                 if (array_val.type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Cannot index a non-array type for setting.");
-                    freeValue(&value_to_set); freeValue(&index_val); freeValue(&array_val);
+                    free(indices);
+                    freeValue(&value_to_set);
+                    freeValue(&array_val);
                     return INTERPRET_RUNTIME_ERROR;
-                }
-                if (index_val.type != TYPE_INTEGER) {
-                    runtimeError(vm, "VM Error: Array index must be an integer for setting.");
-                    freeValue(&value_to_set); freeValue(&index_val); freeValue(&array_val);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                 }
 
-                int indices[] = { (int)index_val.i_val };
-                int offset = computeFlatOffset(&array_val, indices);
+                 int offset = computeFlatOffset(&array_val, indices);
+                 free(indices);
 
-                // Free the old value at the target location before overwriting.
-                freeValue(&array_val.array_val[offset]);
-                // Place a copy of the new value.
-                array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
+                 freeValue(&array_val.array_val[offset]);
+                 array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
 
-                // IMPORTANT: Push the MODIFIED array copy back onto the stack.
-                push(vm, array_val);
-
-                // Free the other temporary values.
-                freeValue(&value_to_set);
-                freeValue(&index_val);
-                break;
+                 push(vm, array_val);
+                 freeValue(&value_to_set);
+                 goto next_instruction;
             }
             case OP_GET_FIELD: {
                 uint8_t field_name_idx = READ_BYTE();

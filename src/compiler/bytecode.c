@@ -252,28 +252,47 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             return offset + 3;
         }
         case OP_DEFINE_GLOBAL: {
-            // --- MODIFICATION START ---
             uint8_t name_idx = chunk->code[offset + 1];
-            uint8_t type_name_idx = chunk->code[offset + 2]; // New operand
-            uint8_t var_type_enum = chunk->code[offset + 3]; // New operand
-
-            printf("OP_DEFINE_GLOBAL NameIdx:%-3d ", name_idx);
+            VarType declaredType = (VarType)chunk->code[offset + 2];
+            
+            printf("%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL", name_idx);
             if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
                 printf("'%s' ", chunk->constants[name_idx].s_val);
             } else {
                 printf("INVALID_NAME_IDX ");
             }
-            printf("TypeNameIdx:%-3d ", type_name_idx);
-            if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
-                 printf("('%s') ", chunk->constants[type_name_idx].s_val);
-            } else if (type_name_idx == 0) {
-                 printf("(simple/anon) ");
+            printf("Type:%s ", varTypeToString(declaredType));
+            
+            int current_offset = offset + 3;
+            if (declaredType == TYPE_ARRAY) {
+                if (current_offset < chunk->count) {
+                    uint8_t dimension_count = chunk->code[current_offset++];
+                    printf("Dims:%d [", dimension_count);
+                    for (int i=0; i < dimension_count; i++) {
+                        if (current_offset + 1 < chunk->count) {
+                            uint8_t lower_idx = chunk->code[current_offset++];
+                            uint8_t upper_idx = chunk->code[current_offset++];
+                            printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val, (i == dimension_count - 1) ? "" : ", ");
+                        }
+                    }
+                    if (current_offset < chunk->count) {
+                        uint8_t elem_name_idx = chunk->code[current_offset++];
+                        printf("] of %s", chunk->constants[elem_name_idx].s_val);
+                    }
+                }
             } else {
-                 printf("INVALID_TYPE_NAME_IDX ");
+                if (current_offset < chunk->count) {
+                    uint8_t type_name_idx = chunk->code[current_offset++];
+                     if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
+                         printf("('%s')", chunk->constants[type_name_idx].s_val);
+                    } else if (type_name_idx == 0) {
+                        // This is expected for simple types like INTEGER, REAL, etc.
+                        // No extra output needed.
+                    }
+                }
             }
-            printf("VarType:%s (%d)\n", varTypeToString((VarType)var_type_enum), var_type_enum);
-            return offset + 4; // Opcode + 3 bytes for operands
-            // --- MODIFICATION END ---
+            printf("\n");
+            return current_offset;
         }
         case OP_GET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];

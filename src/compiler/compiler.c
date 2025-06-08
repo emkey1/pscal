@@ -195,6 +195,30 @@ Value evaluateCompileTimeValue(AST* node) {
                 return result;
             }
             break;
+        case AST_UNARY_OP:
+            if (node->left && node->token) {
+                Value operand_val = evaluateCompileTimeValue(node->left);
+                if (operand_val.type == TYPE_VOID || operand_val.type == TYPE_UNKNOWN) {
+                    freeValue(&operand_val);
+                    return makeVoid();
+                }
+
+                if (node->token->type == TOKEN_MINUS) {
+                    if (operand_val.type == TYPE_INTEGER) {
+                        operand_val.i_val = -operand_val.i_val;
+                        return operand_val; // Return the modified value
+                    } else if (operand_val.type == TYPE_REAL) {
+                        operand_val.r_val = -operand_val.r_val;
+                        return operand_val; // Return the modified value
+                    }
+                } else if (node->token->type == TOKEN_PLUS) {
+                    // Unary plus is a no-op, just return the operand's value.
+                    return operand_val;
+                }
+                // Free the value if the operator was not handled for its type
+                freeValue(&operand_val);
+            }
+            break;
         default:
             break;
     }
@@ -300,6 +324,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             if (current_function_compiler == NULL) {
                  VarType declared_type_enum = node->var_type;
                  AST* type_specifier_node = node->right;
+                
+                 AST* actual_type_def_node = type_specifier_node;
+                 if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                     actual_type_def_node = lookupType(actual_type_def_node->token->value);
+                 }
+                
                  if (node->children) {
                      for (int i = 0; i < node->child_count; i++) {
                          AST* varNameNode = node->children[i];
@@ -314,37 +344,40 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                              // Now, emit type information based on the type
                              writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
 
-                             if (declared_type_enum == TYPE_ARRAY && type_specifier_node && type_specifier_node->type == AST_ARRAY_TYPE) {
-                                 // --- LOGIC FOR ARRAYS ---
-                                 // This is an anonymous array, we need to emit its definition.
-                                 // For now, we handle a single dimension.
-                                 if (type_specifier_node->child_count == 1 && type_specifier_node->children[0]->type == AST_SUBRANGE) {
-                                     AST* subrange = type_specifier_node->children[0];
-                                     AST* elem_type = type_specifier_node->right;
-
-                                     // Evaluate bounds and add to constant pool
-                                     Value lower_b = evaluateCompileTimeValue(subrange->left);
-                                     Value upper_b = evaluateCompileTimeValue(subrange->right);
-                                     uint8_t lower_idx = addConstantToChunk(chunk, lower_b);
-                                     uint8_t upper_idx = addConstantToChunk(chunk, upper_b);
-
-                                     // Add element type name to constant pool
-                                     const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                                     uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
-
-                                     // Emit the indices as extra operands
-                                     writeBytecodeChunk(chunk, lower_idx, getLine(varNameNode));
-                                     writeBytecodeChunk(chunk, upper_idx, getLine(varNameNode));
-                                     writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
-
-                                 } else {
-                                     // Handle multi-dimensional or other errors if necessary
-                                     fprintf(stderr, "L%d: Compiler error: Unsupported array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
-                                     // Emit dummy operands
-                                     writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                     writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                     writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                             if (declared_type_enum == TYPE_ARRAY && actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
+                                                         int dimension_count = actual_type_def_node->child_count;
+                                 if (dimension_count > 255) {
+                                     fprintf(stderr, "L%d: Compiler error: Maximum number of array dimensions (255) exceeded.\n", getLine(varNameNode));
+                                     compiler_had_error = true;
+                                     break; // Exit the loop for this var decl group
                                  }
+                                 // Emit the number of dimensions as an operand
+                                 writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
+
+                                 // Loop through each dimension to emit its bounds
+                                 for (int dim = 0; dim < dimension_count; dim++) {
+                                     AST* subrange = type_specifier_node->children[dim];
+                                     if (subrange && subrange->type == AST_SUBRANGE) {
+                                         Value lower_b = evaluateCompileTimeValue(subrange->left);
+                                         Value upper_b = evaluateCompileTimeValue(subrange->right);
+                                         uint8_t lower_idx = addConstantToChunk(chunk, lower_b);
+                                         uint8_t upper_idx = addConstantToChunk(chunk, upper_b);
+                                         writeBytecodeChunk(chunk, lower_idx, getLine(varNameNode));
+                                         writeBytecodeChunk(chunk, upper_idx, getLine(varNameNode));
+                                     } else {
+                                         fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
+                                         compiler_had_error = true;
+                                         // Emit dummy operands to maintain instruction size if needed, or just break
+                                         writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                         writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                     }
+                                 }
+
+                                 // Emit element type name index at the end
+                                 AST* elem_type = type_specifier_node->right;
+                                 const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                                 uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
+                                 writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
                              } else if (declared_type_enum == TYPE_RECORD || (type_specifier_node && type_specifier_node->type == AST_TYPE_REFERENCE)) {
                                 // --- LOGIC FOR NAMED TYPES ---
                                 const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
@@ -791,20 +824,30 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
         case AST_ARRAY_ACCESS: {
             // First, put the array object on the stack
             compileExpression(node->left, chunk, getLine(node->left));
-            // Then, put the index on the stack
-            // TODO: Handle multi-dimensional arrays by compiling all children expressions
-            if (node->child_count > 0 && node->children[0]) {
-                 compileExpression(node->children[0], chunk, getLine(node->children[0]));
-            } else {
-                fprintf(stderr, "L%d: Compiler error: Array access node has no index expression.\n", line);
-                compiler_had_error = true;
-                // Push a dummy value to avoid corrupting the stack for subsequent opcodes
-                int dummyIdx = addConstantToChunk(chunk, makeInt(0));
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
+            
+            int dimension_count = node->child_count;
+            if (dimension_count > 255) {
+                 fprintf(stderr, "L%d: Compiler error: Maximum number of array dimensions (255) exceeded for access.\n", line);
+                 compiler_had_error = true;
+                 dimension_count = 0; // Prevent further processing
             }
-            // Finally, emit the GET_ELEMENT opcode
+
+            for (int i = 0; i < dimension_count; i++) {
+                if (node->children[i]) {
+                    compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                } else {
+                    fprintf(stderr, "L%d: Compiler error: Array access node has a NULL index expression at index %d.\n", line, i);
+                    compiler_had_error = true;
+                    // Push a dummy value to avoid corrupting the stack
+                    int dummyIdx = addConstantToChunk(chunk, makeInt(0));
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
+                }
+            }
+            
+            // Finally, emit the GET_ELEMENT opcode followed by the dimension count
             writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
+            writeBytecodeChunk(chunk, (uint8_t)dimension_count, line);
             break;
         }
         case AST_BINARY_OP: {
@@ -1065,7 +1108,7 @@ static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line
         case AST_ARRAY_ACCESS:
             // The modified element is on the stack. Now we store it in the array.
             // Stack: [ModifiedElement]
-            // We need to get it to: [Array, Index, ModifiedElement] for OP_SET_ELEMENT.
+            // We need to get it to: [Array, Index1, Index2, ..., ModifiedElement] for OP_SET_ELEMENT.
 
             // 1. Get the container array.
             compileExpression(container->left, chunk, getLine(container->left));
@@ -1073,18 +1116,30 @@ static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line
             // 2. Swap them.
             writeBytecodeChunk(chunk, OP_SWAP, line);
             // Stack: [Array, ModifiedElement]
-            // 3. Get the index.
-            compileExpression(container->children[0], chunk, getLine(container->children[0]));
-            // Stack: [Array, ModifiedElement, Index]
-            // 4. Swap again.
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            // Stack: [Array, Index, ModifiedElement]
+            
+            // 3. Get all the indices and push them onto the stack.
+            int dimension_count = container->child_count;
+            for (int i = 0; i < dimension_count; i++) {
+                compileExpression(container->children[i], chunk, getLine(container->children[i]));
+                // Stack grows: [Array, ModifiedElement, Index1], [Array, ModifiedElement, Index1, Index2], ...
+            }
+
+            // 4. We now need to get the ModifiedElement to the top of the stack.
+            // This requires a series of swaps. For N indices, we need N swaps.
+            // Stack is: [Array, ModifiedElement, Index1, ..., IndexN]
+            for (int i = 0; i < dimension_count; i++) {
+                 writeBytecodeChunk(chunk, OP_SWAP, line);
+            }
+            // After 1 swap: [Array, Index1, ModifiedElement, Index2, ...]
+            // After N swaps: [Array, Index1, ..., IndexN, ModifiedElement]
+            
+            // 5. Emit the SET_ELEMENT opcode with the dimension count
             writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
+            writeBytecodeChunk(chunk, (uint8_t)dimension_count, line);
 
             // Now the modified array is on the stack. Recursively store IT back.
             compileStoreForLValue(container->left, chunk, line);
             break;
-
         case AST_FIELD_ACCESS:
             // The modified field value is on the stack. Now we store it in the record.
             // Stack: [ModifiedFieldValue]

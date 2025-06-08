@@ -1186,8 +1186,8 @@ AST *constDeclaration(Parser *parser) {
     if (const_eval_result.type != TYPE_VOID && const_eval_result.type != TYPE_UNKNOWN) {
         // Use cn->value and cn->line, as 'cn' is still valid.
         addCompilerConstant(cn->value, const_eval_result, cn->line);
-        Value* check_val = findCompilerConstant(cn->value);
 #ifdef DEBUG
+        Value* check_val = findCompilerConstant(cn->value);
         if (check_val) {
             fprintf(stderr, "[DEBUG PARSER constDecl] VERIFY ADD: Found '%s' immediately. Type: %s\n", cn->value, varTypeToString(check_val->type));
         } else {
