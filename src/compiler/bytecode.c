@@ -275,9 +275,19 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                             printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val, (i == dimension_count - 1) ? "" : ", ");
                         }
                     }
+                    printf("] of "); // End of bounds part
                     if (current_offset < chunk->count) {
-                        uint8_t elem_name_idx = chunk->code[current_offset++];
-                        printf("] of %s", chunk->constants[elem_name_idx].s_val);
+                        // Read and print the element's VarType enum
+                        VarType elem_var_type = (VarType)chunk->code[current_offset++];
+                        printf("%s ", varTypeToString(elem_var_type));
+
+                        if (current_offset < chunk->count) {
+                            // Now read the element type name's constant index
+                            uint8_t elem_name_idx = chunk->code[current_offset++];
+                            if (elem_name_idx < chunk->constants_count && chunk->constants[elem_name_idx].type == TYPE_STRING) {
+                                printf("('%s')", chunk->constants[elem_name_idx].s_val);
+                            }
+                        }
                     }
                 }
             } else {

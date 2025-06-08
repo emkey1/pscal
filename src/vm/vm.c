@@ -688,7 +688,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     int* upper_bounds = malloc(sizeof(int) * dimension_count);
                     if (!lower_bounds || !upper_bounds) {
                         runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
-                        // No need to free if malloc failed
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
@@ -706,35 +705,16 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         upper_bounds[i] = (int)upper_val.i_val;
                     }
 
-                    uint8_t elem_name_idx = READ_BYTE();
-                    Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                    VarType elem_var_type = (VarType)READ_BYTE();
                     
-                    // --- START MODIFICATION: Directly find element type info ---
-                    AST* elem_type_def = lookupType(elem_name_val.s_val);
-                    VarType elem_var_type = TYPE_VOID;
-
-                    if (elem_type_def) {
-                        elem_var_type = elem_type_def->var_type;
-                    } else { // Handle built-in types if not in type table
-                        if (strcasecmp(elem_name_val.s_val, "integer") == 0) elem_var_type = TYPE_INTEGER;
-                        else if (strcasecmp(elem_name_val.s_val, "real") == 0) elem_var_type = TYPE_REAL;
-                        else if (strcasecmp(elem_name_val.s_val, "char") == 0) elem_var_type = TYPE_CHAR;
-                        else if (strcasecmp(elem_name_val.s_val, "boolean") == 0) elem_var_type = TYPE_BOOLEAN;
-                        else if (strcasecmp(elem_name_val.s_val, "byte") == 0) elem_var_type = TYPE_BYTE;
-                        else if (strcasecmp(elem_name_val.s_val, "word") == 0) elem_var_type = TYPE_WORD;
-                        else {
-                            runtimeError(vm, "VM Error: Could not resolve array element type '%s'.", elem_name_val.s_val);
-                            free(lower_bounds); free(upper_bounds);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                    }
+                    // The element type name is for disassembly/debugging, so we consume the byte but don't use it.
+                    (void)READ_BYTE();
                     
-                    Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
-                    // --- END MODIFICATION ---
+                    Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, NULL);
                     
                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                     if (sym == NULL) {
-                        sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL); // Pass NULL for type_def_ast
+                        sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL);
                         if (!sym) {
                             runtimeError(vm, "VM Error: Failed to create symbol for global array '%s'.", varNameVal.s_val);
                             freeValue(&array_val);
@@ -753,31 +733,27 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     free(lower_bounds);
                     free(upper_bounds);
                 } else {
-                    AST* type_def_ast = NULL;
-                    uint8_t typeNameConstIdx = READ_BYTE();
-                    if (typeNameConstIdx > 0) {
-                        const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
-                        type_def_ast = lookupType(typeNameStr);
-                    }
-                    if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-                        runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                    if (sym == NULL) {
-                        sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_ast);
-                        if (!sym) {
-                            runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        hashTableInsert(vm->vmGlobalSymbols, sym);
-                    } else {
-                        runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
-                    }
+                    (void)READ_BYTE(); // Consume the type specifier byte for non-array types
+                    
+                     if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                         runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+
+                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                     if (sym == NULL) {
+                         sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL);
+                         if (!sym) {
+                             runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
+                             return INTERPRET_RUNTIME_ERROR;
+                         }
+                         hashTableInsert(vm->vmGlobalSymbols, sym);
+                     } else {
+                         runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+                     }
                 }
                 break;
             }
-
             case OP_GET_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error */ return INTERPRET_RUNTIME_ERROR; }
@@ -1045,82 +1021,109 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_GET_ELEMENT: {
-                 uint8_t dimension_count = READ_BYTE();
-                 int* indices = malloc(sizeof(int) * dimension_count);
-                 if (!indices) {
-                     runtimeError(vm, "VM Error: Malloc failed for indices buffer.");
-                     return INTERPRET_RUNTIME_ERROR;
-                 }
+                uint8_t dimension_count = READ_BYTE();
+                int* indices = malloc(sizeof(int) * dimension_count);
+                if (!indices) {
+                    runtimeError(vm, "VM Error: Malloc failed for array indices.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                
+                for (int i = 0; i < dimension_count; i++) {
+                    Value index_val = pop(vm);
+                    if (index_val.type != TYPE_INTEGER) {
+                        runtimeError(vm, "VM Error: Array index must be an integer.");
+                        free(indices);
+                        freeValue(&index_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    freeValue(&index_val);
+                }
 
-                 for (int i = 0; i < dimension_count; i++) {
-                     Value index_val = pop(vm);
-                     if (index_val.type != TYPE_INTEGER) {
-                         runtimeError(vm, "VM Error: Array index must be an integer.");
-                         free(indices);
-                         freeValue(&index_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-                     indices[dimension_count - 1 - i] = (int)index_val.i_val;
-                     freeValue(&index_val);
-                 }
-
-                 Value array_val = pop(vm);
-                 if (array_val.type != TYPE_ARRAY) {
-                     runtimeError(vm, "VM Error: Cannot index a non-array type (%s).", varTypeToString(array_val.type));
-                     free(indices);
-                     freeValue(&array_val);
-                     return INTERPRET_RUNTIME_ERROR;
-                 }
-
-                 int offset = computeFlatOffset(&array_val, indices);
-                 free(indices);
-
-                 push(vm, makeCopyOfValue(&array_val.array_val[offset]));
-                 freeValue(&array_val);
-                 break;
-            }
-            case OP_SET_ELEMENT: {
-                 uint8_t dimension_count = READ_BYTE();
-                 Value value_to_set = pop(vm);
-                 
-                 int* indices = malloc(sizeof(int) * dimension_count);
-                 if (!indices) {
-                     runtimeError(vm, "VM Error: Malloc failed for indices buffer.");
-                     return INTERPRET_RUNTIME_ERROR;
-                 }
-                 
-                 for (int i = 0; i < dimension_count; i++) {
-                     Value index_val = pop(vm);
-                     if (index_val.type != TYPE_INTEGER) {
-                         runtimeError(vm, "VM Error: Array index must be an integer for setting.");
-                         free(indices);
-                         freeValue(&index_val);
-                         // Clean up other values
-                         freeValue(&value_to_set);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-                     indices[dimension_count - 1 - i] = (int)index_val.i_val;
-                     freeValue(&index_val);
-                 }
-
-                 Value array_val = pop(vm);
-                 if (array_val.type != TYPE_ARRAY) {
-                    runtimeError(vm, "VM Error: Cannot index a non-array type for setting.");
+                Value array_val = pop(vm);
+                if (array_val.type != TYPE_ARRAY) {
+                    runtimeError(vm, "VM Error: Cannot index non-array type.");
                     free(indices);
-                    freeValue(&value_to_set);
                     freeValue(&array_val);
                     return INTERPRET_RUNTIME_ERROR;
-                 }
+                }
 
-                 int offset = computeFlatOffset(&array_val, indices);
-                 free(indices);
+                int offset = computeFlatOffset(&array_val, indices);
+                free(indices);
 
-                 freeValue(&array_val.array_val[offset]);
-                 array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
+                int total_size = calculateArrayTotalSize(&array_val);
+                if (offset < 0 || offset >= total_size) {
+                     runtimeError(vm, "VM Error: Calculated array offset (%d) is out of bounds (size %d).", offset, total_size);
+                     freeValue(&array_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                }
 
-                 push(vm, array_val);
-                 freeValue(&value_to_set);
-                 goto next_instruction;
+                Value element_copy = makeCopyOfValue(&array_val.array_val[offset]);
+
+                // DO NOT free the temporary 'array_val' copy, as it would free the underlying data buffer.
+                
+                push(vm, element_copy);
+                goto next_instruction;
+            }
+            case OP_SET_ELEMENT: {
+                uint8_t dimension_count = READ_BYTE();
+                Value value_to_set = pop(vm);
+
+                int* indices = malloc(sizeof(int) * dimension_count);
+                if (!indices) {
+                    runtimeError(vm, "VM Error: Malloc failed for array indices.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    Value index_val = pop(vm);
+                    if (index_val.type != TYPE_INTEGER) {
+                        runtimeError(vm, "VM Error: Array index must be an integer.");
+                        free(indices);
+                        freeValue(&index_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    freeValue(&index_val);
+                }
+
+                // Pop the original array struct from the stack.
+                Value array_val_orig = pop(vm);
+                if (array_val_orig.type != TYPE_ARRAY) {
+                    runtimeError(vm, "VM Error: Cannot index non-array type.");
+                    free(indices);
+                    freeValue(&array_val_orig);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Before modifying, make a deep copy. This is the crucial fix.
+                Value array_val_copy = makeCopyOfValue(&array_val_orig);
+
+                // We no longer need the original shallow copy that was on the stack.
+                freeValue(&array_val_orig);
+                
+                int offset = computeFlatOffset(&array_val_copy, indices);
+                free(indices);
+
+                int total_size = calculateArrayTotalSize(&array_val_copy);
+                if (offset < 0 || offset >= total_size) {
+                     runtimeError(vm, "VM Error: Calculated array offset (%d) is out of bounds (size %d).", offset, total_size);
+                     freeValue(&array_val_copy);
+                     return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Free the default value at the target location in our new copy
+                freeValue(&array_val_copy.array_val[offset]);
+
+                // Place a copy of the new value into our new copy of the array
+                array_val_copy.array_val[offset] = makeCopyOfValue(&value_to_set);
+                
+                // We are done with the value-to-set, it has been copied into the array.
+                freeValue(&value_to_set);
+
+                // Push the new, modified, deep-copied array onto the stack for OP_SET_GLOBAL
+                push(vm, array_val_copy);
+                goto next_instruction;
             }
             case OP_GET_FIELD: {
                 uint8_t field_name_idx = READ_BYTE();

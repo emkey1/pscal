@@ -321,82 +321,86 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         }
         case AST_VAR_DECL: {
             // If we are not compiling a function, these are global variables.
-            if (current_function_compiler == NULL) {
-                 VarType declared_type_enum = node->var_type;
-                 AST* type_specifier_node = node->right;
-                
-                 AST* actual_type_def_node = type_specifier_node;
-                 if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
-                     actual_type_def_node = lookupType(actual_type_def_node->token->value);
-                 }
-                
-                 if (node->children) {
-                     for (int i = 0; i < node->child_count; i++) {
-                         AST* varNameNode = node->children[i];
-                         if (varNameNode && varNameNode->token) {
-                             // This part is the same: add the variable name to constants
-                             int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                             
-                             // Emit the define opcode and the name index
-                             writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
-                             writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
-                             
-                             // Now, emit type information based on the type
-                             writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
+             if (current_function_compiler == NULL) {
+                  VarType declared_type_enum = node->var_type;
+                  AST* type_specifier_node = node->right;
+                 
+                  AST* actual_type_def_node = type_specifier_node;
+                  if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                      actual_type_def_node = lookupType(actual_type_def_node->token->value);
+                  }
+                 
+                  if (node->children) {
+                      for (int i = 0; i < node->child_count; i++) {
+                          AST* varNameNode = node->children[i];
+                          if (varNameNode && varNameNode->token) {
+                              // This part is the same: add the variable name to constants
+                              int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                              
+                              // Emit the define opcode and the name index
+                              writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
+                              writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
+                              
+                              // Now, emit type information based on the type
+                              writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
 
-                             if (declared_type_enum == TYPE_ARRAY && actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
-                                                         int dimension_count = actual_type_def_node->child_count;
-                                 if (dimension_count > 255) {
-                                     fprintf(stderr, "L%d: Compiler error: Maximum number of array dimensions (255) exceeded.\n", getLine(varNameNode));
-                                     compiler_had_error = true;
-                                     break; // Exit the loop for this var decl group
-                                 }
-                                 // Emit the number of dimensions as an operand
-                                 writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
+                              if (declared_type_enum == TYPE_ARRAY && actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
+                                                          int dimension_count = actual_type_def_node->child_count;
+                                  if (dimension_count > 255) {
+                                      fprintf(stderr, "L%d: Compiler error: Maximum number of array dimensions (255) exceeded.\n", getLine(varNameNode));
+                                      compiler_had_error = true;
+                                      break; // Exit the loop for this var decl group
+                                  }
+                                  // Emit the number of dimensions as an operand
+                                  writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
 
-                                 // Loop through each dimension to emit its bounds
-                                 for (int dim = 0; dim < dimension_count; dim++) {
-                                     AST* subrange = type_specifier_node->children[dim];
-                                     if (subrange && subrange->type == AST_SUBRANGE) {
-                                         Value lower_b = evaluateCompileTimeValue(subrange->left);
-                                         Value upper_b = evaluateCompileTimeValue(subrange->right);
-                                         uint8_t lower_idx = addConstantToChunk(chunk, lower_b);
-                                         uint8_t upper_idx = addConstantToChunk(chunk, upper_b);
-                                         writeBytecodeChunk(chunk, lower_idx, getLine(varNameNode));
-                                         writeBytecodeChunk(chunk, upper_idx, getLine(varNameNode));
-                                     } else {
-                                         fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
-                                         compiler_had_error = true;
-                                         // Emit dummy operands to maintain instruction size if needed, or just break
-                                         writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                         writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                     }
-                                 }
+                                  // Loop through each dimension to emit its bounds
+                                  for (int dim = 0; dim < dimension_count; dim++) {
+                                      AST* subrange = actual_type_def_node->children[dim];
+                                      if (subrange && subrange->type == AST_SUBRANGE) {
+                                          Value lower_b = evaluateCompileTimeValue(subrange->left);
+                                          Value upper_b = evaluateCompileTimeValue(subrange->right);
+                                          uint8_t lower_idx = addConstantToChunk(chunk, lower_b);
+                                          uint8_t upper_idx = addConstantToChunk(chunk, upper_b);
+                                          writeBytecodeChunk(chunk, lower_idx, getLine(varNameNode));
+                                          writeBytecodeChunk(chunk, upper_idx, getLine(varNameNode));
+                                      } else {
+                                          fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
+                                          compiler_had_error = true;
+                                          // Emit dummy operands to maintain instruction size if needed, or just break
+                                          writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                          writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                      }
+                                  }
 
-                                 // Emit element type name index at the end
-                                 AST* elem_type = type_specifier_node->right;
-                                 const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                                 uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
-                                 writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
-                             } else if (declared_type_enum == TYPE_RECORD || (type_specifier_node && type_specifier_node->type == AST_TYPE_REFERENCE)) {
-                                // --- LOGIC FOR NAMED TYPES ---
-                                const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
-                                uint8_t type_name_idx = addConstantToChunk(chunk, makeString(type_name));
-                                writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode));
-                             } else {
-                                // --- LOGIC FOR SIMPLE TYPES ---
-                                // Simple type, needs a placeholder operand.
-                                writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                             }
-                             
-                             resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
-                         }
-                     }
-                 }
-            }
-            // If current_function_compiler is NOT NULL, we are inside a function.
-            // Do nothing, as compileDefinedFunction has already processed the local vars.
-            break;
+                                  // Emit element type information
+                                  AST* elem_type = actual_type_def_node->right;
+                                  // NEW: Emit the VarType enum of the element type
+                                  writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
+
+                                  // OLD: Just emit the name
+                                  const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                                  uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
+                                  writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
+                              } else if (declared_type_enum == TYPE_RECORD || (type_specifier_node && type_specifier_node->type == AST_TYPE_REFERENCE)) {
+                                 // --- LOGIC FOR NAMED TYPES ---
+                                 const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
+                                 uint8_t type_name_idx = addConstantToChunk(chunk, makeString(type_name));
+                                 writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode));
+                              } else {
+                                 // --- LOGIC FOR SIMPLE TYPES ---
+                                 // Simple type, needs a placeholder operand.
+                                 writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                              }
+                              
+                              resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
+                          }
+                      }
+                  }
+             }
+             // If current_function_compiler is NOT NULL, we are inside a function.
+             // Do nothing, as compileDefinedFunction has already processed the local vars.
+             break;
         }
         case AST_CONST_DECL:
         case AST_TYPE_DECL:
@@ -528,29 +532,53 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_ASSIGN: {
             AST* lvalue = node->left;
             AST* rvalue = node->right;
-            // First, compile the R-Value. Its result will be on top of the stack.
-            compileExpression(rvalue, chunk, getLine(rvalue));
-            // Then, call the recursive helper to generate the chain of GETs and SETs.
-            compileStoreForLValue(lvalue, chunk, line);
-            break;
-        }
-        case AST_WHILE: {
-            if (!node->left || !node->right) {
-                fprintf(stderr, "L%d: Compiler error: WHILE node is missing condition or body.\n", line);
-                compiler_had_error = true;
-                break;
+
+            // Handle complex L-Values by generating specialized opcode sequences
+            if (lvalue->type == AST_ARRAY_ACCESS) {
+                // For an assignment like: MyArray[i, j] := RValue
+                // We want the stack to be [Array, Index_i, Index_j, RValue] before OP_SET_ELEMENT
+
+                // 1. Compile the base array object expression
+                compileExpression(lvalue->left, chunk, getLine(lvalue->left));
+
+                // 2. Compile all the index expressions
+                for (int i = 0; i < lvalue->child_count; i++) {
+                    compileExpression(lvalue->children[i], chunk, getLine(lvalue->children[i]));
+                }
+
+                // 3. Compile the Right-Hand-Side expression
+                compileExpression(rvalue, chunk, getLine(rvalue));
+
+                // 4. Emit the opcode to perform the set. The VM will pop all the above values.
+                writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
+                writeBytecodeChunk(chunk, (uint8_t)lvalue->child_count, line);
+
+                // 5. OP_SET_ELEMENT leaves the *modified array* on the stack. Now we must
+                //    store this modified array back into its original variable.
+                compileStoreForLValue(lvalue->left, chunk, line);
+
+            } else if (lvalue->type == AST_FIELD_ACCESS) {
+                // For an assignment like: MyRec.field := RValue
+                // We want the stack to be [Record, RValue] before OP_SET_FIELD
+
+                // 1. Compile the base record object expression
+                compileExpression(lvalue->left, chunk, getLine(lvalue->left));
+                // 2. Compile the Right-Hand-Side expression
+                compileExpression(rvalue, chunk, getLine(rvalue));
+
+                // 3. Emit the opcode with the field name as an operand
+                int fieldNameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
+                writeBytecodeChunk(chunk, OP_SET_FIELD, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+
+                // 4. OP_SET_FIELD leaves the *modified record* on the stack. Store it back.
+                compileStoreForLValue(lvalue->left, chunk, line);
+
+            } else {
+                // This is for simple assignments like: X := RValue
+                compileExpression(rvalue, chunk, getLine(rvalue));
+                compileStoreForLValue(lvalue, chunk, line);
             }
-            int loop_start_address = chunk->count;
-            compileExpression(node->left, chunk, getLine(node->left));
-            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
-            int exit_jump_operand_offset = chunk->count;
-            emitShort(chunk, 0xFFFF, line);
-            compileStatement(node->right, chunk, getLine(node->right));
-            writeBytecodeChunk(chunk, OP_JUMP, line);
-            int backward_jump_offset = loop_start_address - (chunk->count + 2);
-            emitShort(chunk, (uint16_t)backward_jump_offset, line);
-            uint16_t forward_jump_offset = (uint16_t)(chunk->count - (exit_jump_operand_offset + 2));
-            patchShort(chunk, exit_jump_operand_offset, forward_jump_offset);
             break;
         }
         case AST_FOR_TO:
@@ -1084,84 +1112,49 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
 static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line) {
     if (!container) {
         fprintf(stderr, "L%d: Compiler internal error: compileStoreForLValue called with null container.\n", line);
+        compiler_had_error = true;
         return;
     }
 
     switch (container->type) {
-        case AST_VARIABLE:
+        case AST_VARIABLE: {
+            if (!container->token || !container->token->value) {
+                fprintf(stderr, "L%d: Compiler error: AST_VARIABLE node missing token in compileStoreForLValue.\n", line);
+                compiler_had_error = true;
+                break;
+            }
             int local_slot = -1;
             if (current_function_compiler) {
                 local_slot = resolveLocal(current_function_compiler, container->token->value);
             }
 
             if (local_slot != -1) {
+                // It's a local variable.
                 writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
             } else {
-                // Fallback to global
+                // It's a global variable.
                 int nameIndex = addConstantToChunk(chunk, makeString(container->token->value));
                 writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             }
             break;
-
+        }
         case AST_ARRAY_ACCESS:
-            // The modified element is on the stack. Now we store it in the array.
-            // Stack: [ModifiedElement]
-            // We need to get it to: [Array, Index1, Index2, ..., ModifiedElement] for OP_SET_ELEMENT.
-
-            // 1. Get the container array.
-            compileExpression(container->left, chunk, getLine(container->left));
-            // Stack: [ModifiedElement, Array]
-            // 2. Swap them.
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            // Stack: [Array, ModifiedElement]
-            
-            // 3. Get all the indices and push them onto the stack.
-            int dimension_count = container->child_count;
-            for (int i = 0; i < dimension_count; i++) {
-                compileExpression(container->children[i], chunk, getLine(container->children[i]));
-                // Stack grows: [Array, ModifiedElement, Index1], [Array, ModifiedElement, Index1, Index2], ...
-            }
-
-            // 4. We now need to get the ModifiedElement to the top of the stack.
-            // This requires a series of swaps. For N indices, we need N swaps.
-            // Stack is: [Array, ModifiedElement, Index1, ..., IndexN]
-            for (int i = 0; i < dimension_count; i++) {
-                 writeBytecodeChunk(chunk, OP_SWAP, line);
-            }
-            // After 1 swap: [Array, Index1, ModifiedElement, Index2, ...]
-            // After N swaps: [Array, Index1, ..., IndexN, ModifiedElement]
-            
-            // 5. Emit the SET_ELEMENT opcode with the dimension count
-            writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
-            writeBytecodeChunk(chunk, (uint8_t)dimension_count, line);
-
-            // Now the modified array is on the stack. Recursively store IT back.
-            compileStoreForLValue(container->left, chunk, line);
-            break;
         case AST_FIELD_ACCESS:
-            // The modified field value is on the stack. Now we store it in the record.
-            // Stack: [ModifiedFieldValue]
-            // We need to get it to: [Record, ModifiedFieldValue] for OP_SET_FIELD.
-
-            // 1. Get the container record.
-            compileExpression(container->left, chunk, getLine(container->left));
-            // Stack: [ModifiedFieldValue, Record]
-            // 2. Swap them.
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            // Stack: [Record, ModifiedFieldValue]
-            int fieldNameIndex = addConstantToChunk(chunk, makeString(container->token->value));
-            writeBytecodeChunk(chunk, OP_SET_FIELD, line);
-            writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
-
-            // Now the modified record is on the stack. Recursively store IT back.
-            compileStoreForLValue(container->left, chunk, line);
-            break;
-
-        default:
-            fprintf(stderr, "L%d: Compiler error: Cannot store back into LValue container of type %s.\n", line, astTypeToString(container->type));
+             // This case is now an error, because the recursive call to store the modified
+             // array/record should resolve to its base variable (which is handled above).
+             // If we get here, it means something like a[i][j] where the base is not a simple variable,
+             // which would require further logic not yet implemented.
+            fprintf(stderr, "L%d: Compiler error: Storing into nested complex lvalues (e.g., array of records) is not yet fully supported by this part of the compiler.\n", line);
+            compiler_had_error = true;
             // Pop the value that was meant to be stored to prevent stack corruption.
+            writeBytecodeChunk(chunk, OP_POP, line);
+            break;
+        default:
+            fprintf(stderr, "L%d: Compiler error: Cannot use AST node of type %s as a storage target.\n", line, astTypeToString(container->type));
+            compiler_had_error = true;
+            // Pop the value that was meant to be stored.
             writeBytecodeChunk(chunk, OP_POP, line);
             break;
     }

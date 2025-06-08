@@ -1838,3 +1838,14 @@ void printValueToStream(Value v, FILE *stream) {
             break;
     }
 }
+
+int calculateArrayTotalSize(const Value* array_val) {
+    if (!array_val || array_val->type != TYPE_ARRAY || array_val->dimensions == 0) {
+        return 0;
+    }
+    int total_size = 1;
+    for (int i = 0; i < array_val->dimensions; i++) {
+        total_size *= (array_val->upper_bounds[i] - array_val->lower_bounds[i] + 1);
+    }
+    return total_size;
+}

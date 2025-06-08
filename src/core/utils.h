@@ -86,6 +86,7 @@ void debugASTFile(AST *node);
 Value makeEnum(const char *enum_name, int ordinal);
 void freeValue(Value *v);
 void printValueToStream(Value v, FILE *stream);
+int calculateArrayTotalSize(const Value* array_val);
 
 // Unit Stuff
 char *findUnitFile(const char *unit_name);
