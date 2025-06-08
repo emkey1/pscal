@@ -130,6 +130,24 @@ static const BuiltinMapping builtin_dispatch_table[] = {
 // Calculate the number of entries in the table
 static const size_t num_builtins = sizeof(builtin_dispatch_table) / sizeof(builtin_dispatch_table[0]);
 
+// Looks up a built-in by name and returns its C function handler.
+BuiltinHandler getBuiltinHandler(const char *name) {
+    if (!name) return NULL;
+
+    BuiltinMapping *found = (BuiltinMapping *)bsearch(
+        name,
+        builtin_dispatch_table,
+        num_builtins,
+        sizeof(BuiltinMapping),
+        compareBuiltinMappings
+    );
+
+    if (found) {
+        return found->handler;
+    }
+    return NULL;
+}
+
 void assignValueToLValue(AST *lvalueNode, Value newValue) {
     if (!lvalueNode) {
         fprintf(stderr, "Runtime error: Cannot assign to NULL lvalue node.\n");

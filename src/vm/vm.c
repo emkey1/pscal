@@ -17,14 +17,62 @@
 #include "frontend/ast.h"
 #include <termios.h>
 #include <unistd.h>
-#include <sys/ioctl.h> 
-
+#include <sys/ioctl.h>
+#include "backend_ast/builtin.h"
 
 // --- VM Helper Functions ---
 
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
+
+static AST* createDummyArrayAst(int lower_bound, int upper_bound, const char* elem_type_name) {
+    // Create element type reference node
+    Token* elem_token = newToken(TOKEN_IDENTIFIER, elem_type_name, 0, 0);
+    AST* elem_type_ref_node = newASTNode(AST_TYPE_REFERENCE, elem_token);
+    freeToken(elem_token);
+    AST* actual_elem_type_def = lookupType(elem_type_name);
+    if (actual_elem_type_def) {
+        elem_type_ref_node->var_type = actual_elem_type_def->var_type;
+        elem_type_ref_node->right = actual_elem_type_def;
+    } else {
+        // Handle built-in types
+        if (strcasecmp(elem_type_name, "integer") == 0) elem_type_ref_node->var_type = TYPE_INTEGER;
+        else if (strcasecmp(elem_type_name, "real") == 0) elem_type_ref_node->var_type = TYPE_REAL;
+        // ... add other built-ins as needed
+        else {
+            fprintf(stderr, "VM Error: Could not resolve array element type '%s'\n", elem_type_name);
+            freeAST(elem_type_ref_node);
+            return NULL;
+        }
+    }
+
+
+    // Create bounds nodes
+    char bound_str[32];
+    snprintf(bound_str, 32, "%d", lower_bound);
+    Token* lower_token = newToken(TOKEN_INTEGER_CONST, bound_str, 0, 0);
+    AST* lower_node = newASTNode(AST_NUMBER, lower_token);
+    freeToken(lower_token);
+
+    snprintf(bound_str, 32, "%d", upper_bound);
+    Token* upper_token = newToken(TOKEN_INTEGER_CONST, bound_str, 0, 0);
+    AST* upper_node = newASTNode(AST_NUMBER, upper_token);
+    freeToken(upper_token);
+
+    // Create subrange node
+    AST* subrange_node = newASTNode(AST_SUBRANGE, NULL);
+    setLeft(subrange_node, lower_node);
+    setRight(subrange_node, upper_node);
+
+    // Create final array type node
+    AST* array_type_node = newASTNode(AST_ARRAY_TYPE, NULL);
+    addChild(array_type_node, subrange_node);
+    setRight(array_type_node, elem_type_ref_node);
+
+    return array_type_node;
+}
+
 
 // runtimeError - Assuming your existing one is fine.
 static void runtimeError(VM* vm, const char* format, ...) {
@@ -152,6 +200,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     if (!sym) { /* ... */ return NULL; }
     sym->name = strdup(name);
     if (!sym->name) { /* ... */ free(sym); return NULL; }
+    toLowerString(sym->name);
     
     sym->type = type;
     sym->type_def = type_def_for_value_init; // Store the provided type definition AST
@@ -217,26 +266,25 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         Value result_val; \
         bool op_is_handled = false; \
         \
-        /* Special handling for OP_ADD if operands are strings or char */ \
         if (current_instruction_code == OP_ADD) { \
             if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
                 (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
                 \
-                char a_buffer[2] = {0}; /* For char to string conversion */ \
+                char a_buffer[2] = {0}; \
                 char b_buffer[2] = {0}; \
                 const char* s_a = NULL; \
                 const char* s_b = NULL; \
                 \
                 if (IS_STRING(a_val_popped)) { \
                     s_a = AS_STRING(a_val_popped) ? AS_STRING(a_val_popped) : ""; \
-                } else { /* IS_CHAR */ \
+                } else { \
                     a_buffer[0] = AS_CHAR(a_val_popped); \
                     s_a = a_buffer; \
                 } \
                 \
                 if (IS_STRING(b_val_popped)) { \
                     s_b = AS_STRING(b_val_popped) ? AS_STRING(b_val_popped) : ""; \
-                } else { /* IS_CHAR */ \
+                } else { \
                     b_buffer[0] = AS_CHAR(b_val_popped); \
                     s_b = b_buffer; \
                 } \
@@ -251,18 +299,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } \
                 strcpy(concat_buffer, s_a); \
                 strcat(concat_buffer, s_b); \
-                result_val = makeString(concat_buffer); /* makeString duplicates concat_buffer */ \
+                result_val = makeString(concat_buffer); \
                 free(concat_buffer); \
                 op_is_handled = true; \
             } \
         } \
         \
-        /* If not handled by string concatenation (or not OP_ADD), try numeric */ \
         if (!op_is_handled) { \
             if ((IS_INTEGER(a_val_popped) || IS_REAL(a_val_popped)) && \
                 (IS_INTEGER(b_val_popped) || IS_REAL(b_val_popped))) { \
                 \
-                if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { /* Numeric promotion to Real */ \
+                if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
                     double fa = IS_REAL(a_val_popped) ? AS_REAL(a_val_popped) : (double)AS_INTEGER(a_val_popped); \
                     double fb = IS_REAL(b_val_popped) ? AS_REAL(b_val_popped) : (double)AS_INTEGER(b_val_popped); \
                     if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
@@ -280,10 +327,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
                     } \
-                } else { /* Both are integers */ \
+                } else { \
                     long long ia = AS_INTEGER(a_val_popped); \
                     long long ib = AS_INTEGER(b_val_popped); \
-                    if (current_instruction_code == OP_DIVIDE && ib == 0) { /* Note: OP_DIVIDE with ints produces REAL */ \
+                    if (current_instruction_code == OP_DIVIDE && ib == 0) { \
                         runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
@@ -292,7 +339,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         case OP_ADD:      result_val = makeInt(ia + ib); break; \
                         case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
                         case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
-                        case OP_DIVIDE:   result_val = makeReal((double)ia / (double)ib); break; /* Integer division result is Real */ \
+                        case OP_DIVIDE:   result_val = makeReal((double)ia / (double)ib); break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
@@ -313,7 +360,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         freeValue(&b_val_popped); \
     } while (false)
 
-    uint8_t instruction_val; // Used for the current instruction in the loop
+    uint8_t instruction_val;
     for (;;) {
         #ifdef DEBUG
         if (dumpExec) {
@@ -324,11 +371,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 fprintf(stderr," ]");
             }
             fprintf(stderr,"\n");
-            disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable); 
+            disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
         }
         #endif
 
-        instruction_val = READ_BYTE(); // Uses the macro which uses vm->ip from runVM
+        instruction_val = READ_BYTE();
         switch (instruction_val) {
             case OP_RETURN: {
                  if (vm->frameCount == 0) {
@@ -454,6 +501,33 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     push(vm, makeInt(ia / ib)); // C integer division truncates towards zero
                 } else {
                     runtimeError(vm, "Runtime Error: Operands for 'div' must be integers. Got %s and %s.",
+                                 varTypeToString(a_val.type), varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
+            case OP_SHL:
+            case OP_SHR: {
+                Value b_val = pop(vm); // Shift amount
+                Value a_val = pop(vm); // Value to shift
+                if (IS_INTEGER(a_val) && IS_INTEGER(b_val)) {
+                    long long ia = AS_INTEGER(a_val);
+                    long long ib = AS_INTEGER(b_val);
+                    if (ib < 0) {
+                        runtimeError(vm, "Runtime Error: Shift amount cannot be negative.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (instruction_val == OP_SHL) {
+                        push(vm, makeInt(ia << ib));
+                    } else { // OP_SHR
+                        push(vm, makeInt(ia >> ib));
+                    }
+                } else {
+                    runtimeError(vm, "Runtime Error: Operands for 'shl' and 'shr' must be integers. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -648,46 +722,61 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_DEFINE_GLOBAL: {
-                Value varNameVal = READ_CONSTANT();        // Operand 1: Variable Name Index
-                uint8_t typeNameConstIdx = READ_BYTE();    // Operand 2: Type Name Index (or 0)
-                VarType declaredType = (VarType)READ_BYTE(); // Operand 3: VarType enum
+                Value varNameVal = READ_CONSTANT();        // Operand 1: Variable Name
+                VarType declaredType = (VarType)READ_BYTE(); // Operand 2: VarType enum
 
-                AST* type_def_ast = NULL;
+                AST* type_def_ast = NULL; // This will hold the type definition AST node if needed
+                bool ast_is_dummy = false; // Flag to know if we need to free the dummy AST
+
+                if (declaredType == TYPE_ARRAY) {
+                    // --- NEW: Handle array definitions ---
+                    uint8_t lower_idx = READ_BYTE();
+                    uint8_t upper_idx = READ_BYTE();
+                    uint8_t elem_name_idx = READ_BYTE();
+                    
+                    Value lower_val = vm->chunk->constants[lower_idx];
+                    Value upper_val = vm->chunk->constants[upper_idx];
+                    Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                    
+                    if (lower_val.type == TYPE_INTEGER && upper_val.type == TYPE_INTEGER && elem_name_val.type == TYPE_STRING) {
+                        type_def_ast = createDummyArrayAst((int)lower_val.i_val, (int)upper_val.i_val, elem_name_val.s_val);
+                        ast_is_dummy = true; // Mark that we created a temporary AST
+                    } else {
+                        runtimeError(vm, "VM Error: Invalid constant types for array definition of '%s'.", varNameVal.s_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                } else {
+                    // --- Existing logic for simple/named types ---
+                    uint8_t typeNameConstIdx = READ_BYTE();
+                    if (typeNameConstIdx > 0) {
+                        const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
+                        type_def_ast = lookupType(typeNameStr);
+                    }
+                }
 
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
                     runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
+                    if(ast_is_dummy) freeAST(type_def_ast);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
-                // If typeNameConstIdx is non-zero, look up the type definition AST node
-                if (typeNameConstIdx > 0 && typeNameConstIdx < (uint8_t)vm->chunk->constants_count &&
-                    vm->chunk->constants[typeNameConstIdx].type == TYPE_STRING) {
-                    
-                    const char* typeNameStr = vm->chunk->constants[typeNameConstIdx].s_val;
-                    // This requires that `type_table` (from globals.h) is initialized and accessible to the VM.
-                    type_def_ast = lookupType(typeNameStr);
-                    if (!type_def_ast) {
-                        fprintf(stderr, "VM Warning: Type name '%s' (from const idx %d) for global '%s' not found in type_table. Complex type init may use defaults or fail.\n",
-                                typeNameStr, typeNameConstIdx, varNameVal.s_val);
-                    }
-                }
-                // If type_def_ast is NULL (e.g. simple type, anonymous, or lookup failed),
-                // createSymbolForVM will pass NULL to makeValueForType.
 
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (sym == NULL) {
                     sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_ast);
                     if (!sym) {
                         runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
+                        if(ast_is_dummy) freeAST(type_def_ast);
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     hashTableInsert(vm->vmGlobalSymbols, sym);
-                    #ifdef DEBUG
-                        if(dumpExec) fprintf(stderr, "VM: Defined global '%s' (type %s, type_def_ast %p from const_idx %d)\n",
-                                             varNameVal.s_val, varTypeToString(declaredType), (void*)type_def_ast, typeNameConstIdx);
-                    #endif
                 } else {
                     runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+                }
+                
+                // If we created a temporary AST, free it now.
+                if (ast_is_dummy) {
+                    freeAST(type_def_ast);
                 }
                 break;
             }
@@ -779,6 +868,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 Value popped_val_after_assign = pop(vm); // Now pop the original value from stack
                 freeValue(&popped_val_after_assign);    // And free its contents
 
+                break;
+            }
+            case OP_GET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                push(vm, makeCopyOfValue(&frame->slots[slot]));
+                break;
+            }
+            case OP_SET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                // Free the old value at the slot before overwriting, if it's a complex type
+                freeValue(&frame->slots[slot]);
+                // Peek the value from the top of the stack and make a deep copy into the slot
+                Value value_to_set = peek(vm, 0);
+                frame->slots[slot] = makeCopyOfValue(&value_to_set);
+                // NOTE: Standard assignment semantics often leave the assigned value on the stack.
+                // The compiler should emit an OP_POP if the value is not needed. So we don't pop here.
                 break;
             }
             case OP_JUMP_IF_FALSE: {
@@ -892,6 +999,48 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 fflush(stdout); // Ensure output is flushed
                 break;
             }
+            case OP_WRITE: {
+                uint8_t argCount = READ_BYTE();
+                Value args_for_write[MAX_WRITELN_ARGS_VM];
+
+                if (argCount > MAX_WRITELN_ARGS_VM) {
+                    runtimeError(vm, "VM Error: Too many arguments for OP_WRITE (max %d).", MAX_WRITELN_ARGS_VM);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < argCount; i++) {
+                    if (vm->stackTop == vm->stack) {
+                        runtimeError(vm, "VM Error: Stack underflow preparing arguments for OP_WRITE.");
+                        for (int k = 0; k < i; ++k) {
+                            freeValue(&args_for_write[argCount - 1 - k]);
+                        }
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    args_for_write[argCount - 1 - i] = pop(vm);
+                }
+
+                for (int i = 0; i < argCount; i++) {
+                    Value val = args_for_write[i];
+                    if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
+                        fprintf(stdout, "%lld", val.i_val);
+                    } else if (val.type == TYPE_REAL) {
+                        fprintf(stdout, "%f", val.r_val);
+                    } else if (val.type == TYPE_BOOLEAN) {
+                        fprintf(stdout, "%s", (val.i_val != 0) ? "TRUE" : "FALSE");
+                    } else if (val.type == TYPE_STRING) {
+                        fprintf(stdout, "%s", val.s_val ? val.s_val : "");
+                    } else if (val.type == TYPE_CHAR) {
+                        fputc(val.c_val, stdout);
+                    } else if (val.type == TYPE_ENUM) {
+                        fprintf(stdout, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "?");
+                    } else if (val.type == TYPE_NIL) {
+                        fprintf(stdout, "NIL");
+                    }
+                    freeValue(&val);
+                }
+                fflush(stdout);
+                break;
+            }
             case OP_POP: {
                 Value popped_val = pop(vm);
                 freeValue(&popped_val);
@@ -985,7 +1134,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_SET_FIELD: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value value_to_set = pop(vm);
-                Value record_val = pop(vm); // This is a copy of the record.
+                Value record_val = pop(vm);
 
                 if (record_val.type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Cannot set field on a non-record type.");
@@ -998,8 +1147,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool field_found = false;
                 while (current) {
                     if (strcmp(current->name, field_name) == 0) {
-                        freeValue(&current->value); // Free old field value
-                        current->value = makeCopyOfValue(&value_to_set); // Assign new
+                        freeValue(&current->value);
+                        current->value = makeCopyOfValue(&value_to_set);
                         field_found = true;
                         break;
                     }
@@ -1011,510 +1160,87 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                      freeValue(&value_to_set); freeValue(&record_val);
                      return INTERPRET_RUNTIME_ERROR;
                 }
-
-                // Push the MODIFIED record copy back onto the stack.
                 push(vm, record_val);
-
                 freeValue(&value_to_set);
                 goto next_instruction;
             }
-
             case OP_CALL_BUILTIN: {
                 uint8_t name_const_idx = READ_BYTE();
                 uint8_t arg_count = READ_BYTE();
 
-                if (name_const_idx >= vm->chunk->constants_count) {
-                    runtimeError(vm, "VM Error: Invalid constant index for built-in name.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
                 Value builtinNameVal = vm->chunk->constants[name_const_idx];
+                const char* builtin_name = AS_STRING(builtinNameVal);
 
-                if (builtinNameVal.type != TYPE_STRING || !builtinNameVal.s_val) {
-                    runtimeError(vm, "VM Error: Invalid built-in name constant for OP_CALL_BUILTIN (not a string).");
+                BuiltinHandler handler = getBuiltinHandler(builtin_name);
+                if (!handler) {
+                    runtimeError(vm, "VM Error: Unimplemented built-in '%s' called.", builtin_name);
+                    for (int i = 0; i < arg_count; ++i) pop(vm);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                const char* builtin_name = builtinNameVal.s_val;
 
-                // Dynamically allocate actual_args based on arg_count
-                Value* actual_args = NULL; // Initialize to NULL
+                Token dummyToken;
+                dummyToken.type = TOKEN_IDENTIFIER;
+                dummyToken.value = (char*)builtin_name;
+                dummyToken.line = 0;
+                dummyToken.column = 0;
+                AST* temp_call_node = newASTNode(AST_PROCEDURE_CALL, &dummyToken);
+
                 if (arg_count > 0) {
-                    actual_args = (Value*)malloc(sizeof(Value) * arg_count);
-                    if (!actual_args) {
-                        runtimeError(vm, "VM Error: Malloc failed for actual_args in OP_CALL_BUILTIN.");
+                    if (vm->stackTop - vm->stack < arg_count) {
+                        runtimeError(vm, "VM Stack underflow for built-in '%s' args.", builtin_name);
+                        freeAST(temp_call_node);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                }
+                    Value* args = (Value*)malloc(sizeof(Value) * arg_count);
+                    if (!args) { freeAST(temp_call_node); return INTERPRET_RUNTIME_ERROR; }
+                    for (int i = 0; i < arg_count; i++) {
+                        args[arg_count - 1 - i] = pop(vm);
+                    }
 
-                if (vm->stackTop - vm->stack < arg_count) {
-                    runtimeError(vm, "VM Error: Stack underflow preparing arguments for built-in %s. Expected %d, have %ld.",
-                                 builtin_name, arg_count, (long)(vm->stackTop - vm->stack));
-                    if (actual_args) free(actual_args); // Free if allocated
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                    for (int i = 0; i < arg_count; i++) {
+                        Value arg_val = args[i];
+                        AST* arg_node = NULL;
+                        char buffer[128];
 
-                for (int i = 0; i < arg_count; i++) {
-                    actual_args[arg_count - 1 - i] = pop(vm);
-                }
-
-                Value result_val = makeNil();
-                bool is_function_that_succeeded = false;
-
-                // --- Dispatch to C implementation for the built-in ---
-                if (strcasecmp(builtin_name, "abs") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Abs expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    if (IS_INTEGER(arg)) result_val = makeInt(llabs(AS_INTEGER(arg)));
-                    else if (IS_REAL(arg)) result_val = makeReal(fabs(AS_REAL(arg)));
-                    else { runtimeError(vm, "VM: Abs expects numeric argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    is_function_that_succeeded = true;
-                }
-                else if (strcasecmp(builtin_name, "getmaxx") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: GetMaxX expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "VM: Graphics mode not initialized for GetMaxX."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    result_val = makeInt(gSdlWidth - 1);
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "getmaxy") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: GetMaxY expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "VM: Graphics mode not initialized for GetMaxY."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    result_val = makeInt(gSdlHeight - 1);
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "keypressed") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: KeyPressed expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    struct termios oldt, newt;
-                    int bytes_available = 0;
-                    if (!isatty(STDIN_FILENO)) { result_val = makeBoolean(false); }
-                    else {
-                        tcgetattr(STDIN_FILENO, &oldt);
-                        newt = oldt;
-                        newt.c_lflag &= ~(ICANON | ECHO);
-                        newt.c_cc[VMIN] = 0; newt.c_cc[VTIME] = 0;
-                        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-                        ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
-                        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-                        result_val = makeBoolean(bytes_available > 0);
-                    }
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "readkey") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: ReadKey expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    struct termios oldt, newt;
-                    char ch_read;
-                    if (!isatty(STDIN_FILENO)) { result_val = makeChar('\0'); }
-                    else {
-                        tcgetattr(STDIN_FILENO, &oldt);
-                        newt = oldt;
-                        newt.c_lflag &= ~(ICANON | ECHO);
-                        newt.c_cc[VMIN] = 1; newt.c_cc[VTIME] = 0;
-                        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-                        read(STDIN_FILENO, &ch_read, 1);
-                        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-                        result_val = makeChar(ch_read);
-                    }
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "upcase") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: UpCase expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    if (!IS_CHAR(arg)) { runtimeError(vm, "VM: UpCase expects a CHAR argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    result_val = makeChar(toupper(AS_CHAR(arg)));
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "initgraph") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: InitGraph expects 3 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value w = actual_args[0], h = actual_args[1], t = actual_args[2];
-                    if(!IS_INTEGER(w) || !IS_INTEGER(h) || !IS_STRING(t)) { runtimeError(vm, "VM: InitGraph arg type mismatch."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (!gSdlInitialized) { if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) { runtimeError(vm, "VM: SDL_Init failed."); goto op_call_builtin_error_cleanup_dynamic_args; } gSdlInitialized = true; }
-                    gSdlWindow = SDL_CreateWindow(AS_STRING(t), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)AS_INTEGER(w), (int)AS_INTEGER(h), SDL_WINDOW_SHOWN);
-                    if (!gSdlWindow) { runtimeError(vm, "VM: SDL_CreateWindow failed."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    gSdlWidth = (int)AS_INTEGER(w); gSdlHeight = (int)AS_INTEGER(h);
-                    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-                    if (!gSdlRenderer) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; runtimeError(vm, "VM: SDL_CreateRenderer failed."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255); SDL_RenderClear(gSdlRenderer); SDL_RenderPresent(gSdlRenderer);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "closegraph") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: CloseGraph expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if(gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-                    if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "randomize") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: Randomize expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    srand((unsigned int)time(NULL));
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "cleardevice") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: ClearDevice expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if(!gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-                    SDL_RenderClear(gSdlRenderer);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "updatescreen") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: UpdateScreen expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if(!gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_Event event; while (SDL_PollEvent(&event)) { if (event.type == SDL_QUIT) break_requested = 1; }
-                    SDL_RenderPresent(gSdlRenderer);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "graphloop") == 0) {
-                     if (arg_count != 1) { runtimeError(vm, "VM: GraphLoop expects 1 arg."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                     Value msVal = actual_args[0];
-                     if(!IS_INTEGER(msVal)) { runtimeError(vm, "VM: GraphLoop arg must be integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                     if (gSdlInitialized && gSdlWindow) {
-                         Uint32 startT = SDL_GetTicks(); Uint32 endT = startT + (Uint32)AS_INTEGER(msVal); SDL_Event ev;
-                         while(SDL_GetTicks() < endT && !break_requested) {
-                             while(SDL_PollEvent(&ev)) { if(ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_q) ) { break_requested=1; break; } }
-                             if (break_requested) break;
-                             SDL_Delay(1);
-                         }
-                     }
-                     is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "setrgbcolor") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: SetRGBColor expects 3 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value rVal = actual_args[0], gVal = actual_args[1], bVal = actual_args[2];
-                    if(!IS_INTEGER(rVal) || !IS_INTEGER(gVal) || !IS_INTEGER(bVal)) { runtimeError(vm, "VM: SetRGBColor args must be Integer/Byte."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    gSdlCurrentColor.r = (Uint8)(AS_INTEGER(rVal) & 0xFF); gSdlCurrentColor.g = (Uint8)(AS_INTEGER(gVal) & 0xFF); gSdlCurrentColor.b = (Uint8)(AS_INTEGER(bVal) & 0xFF);
-                    gSdlCurrentColor.a = 255;
-                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "fillcircle") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: FillCircle expects 3 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value cx = actual_args[0], cy = actual_args[1], r = actual_args[2];
-                    if(!IS_INTEGER(cx) || !IS_INTEGER(cy) || !IS_INTEGER(r)) { runtimeError(vm, "VM: FillCircle args must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    int centerX = (int)AS_INTEGER(cx), centerY = (int)AS_INTEGER(cy), radius = (int)AS_INTEGER(r);
-                    if (radius < 0) radius = 0;
-                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-                    for (int dy = -radius; dy <= radius; ++dy) {
-                        int dx = (int)round(sqrt((double)radius * radius - (double)dy * dy));
-                        SDL_RenderDrawLine(gSdlRenderer, centerX - dx, centerY + dy, centerX + dx, centerY + dy);
-                    }
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "random") == 0) {
-                    if (arg_count == 0) { result_val = makeReal((double)rand() / ((double)RAND_MAX + 1.0)); }
-                    else if (arg_count == 1) {
-                        Value arg = actual_args[0];
-                        if (IS_INTEGER(arg)) { long long n = AS_INTEGER(arg); if (n <= 0) { runtimeError(vm, "VM: Random(N) N must be > 0."); goto op_call_builtin_error_cleanup_dynamic_args;} result_val = makeInt(rand() % n); }
-                        else { runtimeError(vm, "VM: Random(N) N must be integer."); goto op_call_builtin_error_cleanup_dynamic_args;}
-                    } else { runtimeError(vm, "VM: Random expects 0 or 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "trunc") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Trunc expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    if (IS_REAL(arg)) { result_val = makeInt((long long)AS_REAL(arg)); }
-                    else if (IS_INTEGER(arg)) { result_val = makeInt(AS_INTEGER(arg)); }
-                    else { runtimeError(vm, "VM: Trunc expects a numeric argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "cos") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Cos expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0]; double x = IS_REAL(arg) ? AS_REAL(arg) : (double)AS_INTEGER(arg);
-                    result_val = makeReal(cos(x));
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "sin") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Sin expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0]; double x = IS_REAL(arg) ? AS_REAL(arg) : (double)AS_INTEGER(arg);
-                    result_val = makeReal(sin(x));
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "sqrt") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Sqrt expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0]; double x = IS_REAL(arg) ? AS_REAL(arg) : (double)AS_INTEGER(arg);
-                    if (x < 0) { runtimeError(vm, "VM: Sqrt of negative number."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    result_val = makeReal(sqrt(x));
-                    is_function_that_succeeded = true;
-                }
-                else if (strcasecmp(builtin_name, "length") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Length expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    if (IS_STRING(arg)) {
-                        result_val = makeInt(AS_STRING(arg) ? strlen(AS_STRING(arg)) : 0);
-                    } else if (IS_CHAR(arg)) {
-                        result_val = makeInt(1);
-                    } else { runtimeError(vm, "VM: Length expects string or char argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    is_function_that_succeeded = true;
-                }
-                else if (strcasecmp(builtin_name, "ord") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Ord expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    if (IS_CHAR(arg)) {
-                        result_val = makeInt((long long)AS_CHAR(arg));
-                    } else if (IS_BOOLEAN(arg)) {
-                        result_val = makeInt(AS_BOOLEAN(arg) ? 1 : 0);
-                    } else if (IS_STRING(arg) && AS_STRING(arg) != NULL && strlen(AS_STRING(arg)) == 1) {
-                        result_val = makeInt((long long)(AS_STRING(arg)[0]));
-                    } else {
-                        runtimeError(vm, "VM: Ord expects char, boolean, or single-character string argument. Got %s.", varTypeToString(arg.type));
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "chr") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: Chr expects 1 argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    if (!IS_INTEGER(arg)) { runtimeError(vm, "VM: Chr expects integer argument."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    char temp_char_buf[2];
-                    temp_char_buf[0] = (char)AS_INTEGER(arg);
-                    temp_char_buf[1] = '\0';
-                    result_val = makeString(temp_char_buf);
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "randomize") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: Randomize expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    srand((unsigned int)time(NULL));
-                    is_function_that_succeeded = false; // This is a procedure
-                } else if (strcasecmp(builtin_name, "initsoundsystem") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: InitSoundSystem expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    audioInitSystem();
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "loadsound") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: LoadSound expects 1 arg (FileName: String)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value fileNameVal = actual_args[0];
-                    if (!IS_STRING(fileNameVal) || !AS_STRING(fileNameVal)) {
-                        runtimeError(vm, "VM: LoadSound argument must be a valid String.");
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    const char* original_filename = AS_STRING(fileNameVal);
-                    char full_path[512];
-                    const char* filename_to_pass = original_filename;
-                    if (original_filename && original_filename[0] != '.' && original_filename[0] != '/') {
-                        const char* default_sound_dir = "/usr/local/Pscal/lib/sounds/";
-                        int chars_written = snprintf(full_path, sizeof(full_path), "%s%s", default_sound_dir, original_filename);
-                        if (chars_written < 0 || (size_t)chars_written >= sizeof(full_path)) {
-                            runtimeError(vm, "VM: Constructed sound file path too long for '%s'.", original_filename);
-                            goto op_call_builtin_error_cleanup_dynamic_args;
+                        switch(arg_val.type) {
+                            case TYPE_INTEGER:
+                            case TYPE_BYTE:
+                            case TYPE_WORD:
+                                snprintf(buffer, sizeof(buffer), "%lld", arg_val.i_val);
+                                arg_node = newASTNode(AST_NUMBER, newToken(TOKEN_INTEGER_CONST, buffer, 0, 0));
+                                break;
+                            case TYPE_REAL:
+                                snprintf(buffer, sizeof(buffer), "%f", arg_val.r_val);
+                                arg_node = newASTNode(AST_NUMBER, newToken(TOKEN_REAL_CONST, buffer, 0, 0));
+                                break;
+                            case TYPE_STRING:
+                                arg_node = newASTNode(AST_STRING, newToken(TOKEN_STRING_CONST, arg_val.s_val, 0, 0));
+                                break;
+                            case TYPE_BOOLEAN:
+                                arg_node = newASTNode(AST_BOOLEAN, newToken(arg_val.i_val ? TOKEN_TRUE : TOKEN_FALSE, "", 0, 0));
+                                arg_node->i_val = arg_val.i_val;
+                                break;
+                            default:
+                                arg_node = newASTNode(AST_NOOP, NULL);
+                                break;
                         }
-                        filename_to_pass = full_path;
+                        addChild(temp_call_node, arg_node);
+                        freeValue(&args[i]);
                     }
-                    result_val = makeInt(audioLoadSound(filename_to_pass));
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "playsound") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: PlaySound expects 1 arg (SoundID: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value soundIDVal = actual_args[0];
-                    if (!IS_INTEGER(soundIDVal)) {
-                        runtimeError(vm, "VM: PlaySound SoundID must be an integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    audioPlaySound((int)AS_INTEGER(soundIDVal));
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "audiofreesound") == 0 || strcasecmp(builtin_name, "freesound") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: FreeSound expects 1 arg (SoundID: Integer)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value soundIDVal = actual_args[0];
-                    if (!IS_INTEGER(soundIDVal)) {
-                        runtimeError(vm, "VM: FreeSound SoundID must be an integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    audioFreeSound((int)AS_INTEGER(soundIDVal));
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "quitsoundsystem") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: QuitSoundSystem expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    audioQuitSystem();
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "quitrequested") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: QuitRequested expects 0 arguments."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    result_val = makeBoolean(break_requested != 0);
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "inttostr") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: IntToStr expects 1 arg."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value arg = actual_args[0];
-                    long long val_to_convert;
-                    if (IS_INTEGER(arg) || arg.type == TYPE_BYTE || arg.type == TYPE_WORD || IS_BOOLEAN(arg)) val_to_convert = AS_INTEGER(arg);
-                    else if (IS_CHAR(arg)) val_to_convert = (long long)AS_CHAR(arg);
-                    else { runtimeError(vm, "VM: IntToStr expects Integer compatible arg. Got %s", varTypeToString(arg.type)); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    char buffer[64];
-                    snprintf(buffer, sizeof(buffer), "%lld", val_to_convert);
-                    result_val = makeString(buffer);
-                    is_function_that_succeeded = true;
-                } else if (strcasecmp(builtin_name, "initgraph") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: InitGraph expects 3 args (Width, Height, Title)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value widthVal = actual_args[0];
-                    Value heightVal = actual_args[1];
-                    Value titleVal = actual_args[2];
-                    if (!IS_INTEGER(widthVal) || !IS_INTEGER(heightVal) || !IS_STRING(titleVal)) {
-                        runtimeError(vm, "VM: InitGraph argument type mismatch. Expected (Int, Int, String).");
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    int w = (int)AS_INTEGER(widthVal);
-                    int h = (int)AS_INTEGER(heightVal);
-                    const char* title = AS_STRING(titleVal) ? AS_STRING(titleVal) : "Pscal VM Graphics";
-                    if (w <= 0 || h <= 0) {
-                        runtimeError(vm, "VM: InitGraph width and height must be positive.");
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    if (!gSdlInitialized) {
-                        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
-                            runtimeError(vm, "VM: SDL_Init failed in InitGraph: %s", SDL_GetError());
-                            goto op_call_builtin_error_cleanup_dynamic_args;
-                        }
-                        gSdlInitialized = true;
-                    }
-                    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-                    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-                    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, SDL_WINDOW_SHOWN);
-                    if (!gSdlWindow) {
-                        runtimeError(vm, "VM: SDL_CreateWindow failed: %s", SDL_GetError());
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    gSdlWidth = w; gSdlHeight = h;
-                    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-                    if (!gSdlRenderer) {
-                        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
-                        runtimeError(vm, "VM: SDL_CreateRenderer failed: %s", SDL_GetError());
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    InitializeTextureSystem();
-                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-                    SDL_RenderClear(gSdlRenderer);
-                    SDL_RenderPresent(gSdlRenderer);
-                    gSdlCurrentColor = (SDL_Color){255, 255, 255, 255};
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "getmousestate") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: GetMouseState expects 3 arguments (X, Y, Buttons)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value xNameVal = actual_args[0];
-                    Value yNameVal = actual_args[1];
-                    Value buttonsNameVal = actual_args[2];
-                    if (!IS_STRING(xNameVal) || !IS_STRING(yNameVal) || !IS_STRING(buttonsNameVal)) {
-                        runtimeError(vm, "VM: GetMouseState expects string variable names for VAR parameters.");
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    int mse_x, mse_y;
-                    Uint32 sdl_buttons_state = SDL_GetMouseState(&mse_x, &mse_y);
-                    int pscal_buttons = 0;
-                    if (sdl_buttons_state & SDL_BUTTON_LMASK) pscal_buttons |= 1;
-                    if (sdl_buttons_state & SDL_BUTTON_MMASK) pscal_buttons |= 2;
-                    if (sdl_buttons_state & SDL_BUTTON_RMASK) pscal_buttons |= 4;
-                    Symbol* symX = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(xNameVal));
-                    Symbol* symY = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(yNameVal));
-                    Symbol* symButtons = hashTableLookup(vm->vmGlobalSymbols, AS_STRING(buttonsNameVal));
-                    if (!symX || !symY || !symButtons) {
-                        runtimeError(vm, "VM: One or more VAR parameters for GetMouseState not found in global symbols.");
-                        goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    freeValue(symX->value); *(symX->value) = makeInt(mse_x);
-                    freeValue(symY->value); *(symY->value) = makeInt(mse_y);
-                    freeValue(symButtons->value); *(symButtons->value) = makeInt(pscal_buttons);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "cleardevice") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: ClearDevice expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized for ClearDevice."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-                    SDL_RenderClear(gSdlRenderer);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "setrgbcolor") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: SetRGBColor expects 3 args (R,G,B: Byte/Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value rVal = actual_args[0], gVal = actual_args[1], bVal = actual_args[2];
-                    if (! ( (IS_INTEGER(rVal) || rVal.type == TYPE_BYTE) &&
-                            (IS_INTEGER(gVal) || gVal.type == TYPE_BYTE) &&
-                            (IS_INTEGER(bVal) || bVal.type == TYPE_BYTE) ) ) {
-                        runtimeError(vm, "VM: SetRGBColor args must be Byte/Integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    gSdlCurrentColor.r = (Uint8)(AS_INTEGER(rVal) & 0xFF);
-                    gSdlCurrentColor.g = (Uint8)(AS_INTEGER(gVal) & 0xFF);
-                    gSdlCurrentColor.b = (Uint8)(AS_INTEGER(bVal) & 0xFF);
-                    gSdlCurrentColor.a = 255;
-                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "fillrect") == 0) {
-                    if (arg_count != 4) { runtimeError(vm, "VM: FillRect expects 4 args (x1,y1,x2,y2: Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value x1Val = actual_args[0], y1Val = actual_args[1], x2Val = actual_args[2], y2Val = actual_args[3];
-                    if (!IS_INTEGER(x1Val) || !IS_INTEGER(y1Val) || !IS_INTEGER(x2Val) || !IS_INTEGER(y2Val)) {
-                        runtimeError(vm, "VM: FillRect args must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    SDL_Rect rect;
-                    int x1 = (int)AS_INTEGER(x1Val);
-                    int y1 = (int)AS_INTEGER(y1Val);
-                    int x2 = (int)AS_INTEGER(x2Val);
-                    int y2 = (int)AS_INTEGER(y2Val);
-                    rect.x = (x1 < x2) ? x1 : x2;
-                    rect.y = (y1 < y2) ? y1 : y2;
-                    rect.w = abs(x2 - x1) + 1;
-                    rect.h = abs(y2 - y1) + 1;
-                    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-                    SDL_RenderFillRect(gSdlRenderer, &rect);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "outtextxy") == 0) {
-                    if (arg_count != 3) { runtimeError(vm, "VM: OutTextXY expects 3 args (X,Y:Int; Text:Str)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value xVal=actual_args[0], yVal=actual_args[1], textVal=actual_args[2];
-                    if (!IS_INTEGER(xVal) || !IS_INTEGER(yVal) || !IS_STRING(textVal)) {
-                        runtimeError(vm, "VM: OutTextXY arg type mismatch."); goto op_call_builtin_error_cleanup_dynamic_args;
-                    }
-                    if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "VM: Text system not ready for OutTextXY."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    const char* text_to_render = AS_STRING(textVal) ? AS_STRING(textVal) : "";
-                    SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
-                    if (!surf) { runtimeError(vm, "VM: TTF_RenderUTF8_Solid failed: %s", TTF_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
-                    if (!tex) { SDL_FreeSurface(surf); runtimeError(vm, "VM: CreateTextureFromSurface failed: %s", SDL_GetError()); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_Rect dstRect = {(int)AS_INTEGER(xVal), (int)AS_INTEGER(yVal), surf->w, surf->h};
-                    SDL_RenderCopy(gSdlRenderer, tex, NULL, &dstRect);
-                    SDL_DestroyTexture(tex);
-                    SDL_FreeSurface(surf);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "updatescreen") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: UpdateScreen expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "VM: Graphics not initialized for UpdateScreen."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    SDL_Event event; while (SDL_PollEvent(&event)) { if (event.type == SDL_QUIT) break_requested = 1; }
-                    SDL_RenderPresent(gSdlRenderer);
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "graphloop") == 0) {
-                    if (arg_count != 1) { runtimeError(vm, "VM: GraphLoop expects 1 arg (ms:Int)."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    Value msVal = actual_args[0];
-                    if (!IS_INTEGER(msVal)) { runtimeError(vm, "VM: GraphLoop arg must be Integer."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    long long ms = AS_INTEGER(msVal);
-                    if (ms < 0) ms = 0;
-                    if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
-                        Uint32 startT = SDL_GetTicks(); Uint32 endT = startT + (Uint32)ms; SDL_Event ev;
-                        while(SDL_GetTicks() < endT && !break_requested) {
-                            while(SDL_PollEvent(&ev)) {
-                                if(ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_q) ) {
-                                    break_requested=1;
-                                    break;
-                                }
-                            }
-                            if (break_requested) break;
-                            SDL_Delay(1);
-                        }
-                    }
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "waitkeyevent") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: WaitKeyEvent expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (!gSdlInitialized || !gSdlWindow) {is_function_that_succeeded = false; break;}
-                    SDL_Event event; int waiting = 1;
-                    while(waiting){
-                        if(SDL_WaitEvent(&event)){
-                            if(event.type == SDL_QUIT || event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN) waiting=0;
-                        } else { waiting=0; }
-                    }
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "quittextsystem") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: QuitTextSystem expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
-                    if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
-                    is_function_that_succeeded = false;
-                } else if (strcasecmp(builtin_name, "closegraph") == 0) {
-                    if (arg_count != 0) { runtimeError(vm, "VM: CloseGraph expects 0 args."); goto op_call_builtin_error_cleanup_dynamic_args; }
-                    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-                    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-                    is_function_that_succeeded = false;
+                    free(args);
                 }
-                else { // Fallback for unhandled builtins
-                    runtimeError(vm, "VM Error: Built-in function/procedure '%s' (dispatch) not yet implemented in VM.", builtin_name);
-                    goto op_call_builtin_error_cleanup_dynamic_args;
-                }
-                // --- End Dispatch ---
 
-                if (is_function_that_succeeded) {
+                Value result_val = handler(temp_call_node);
+
+                if (getBuiltinType(builtin_name) == BUILTIN_TYPE_FUNCTION) {
                     push(vm, result_val);
                 } else {
                     freeValue(&result_val);
                 }
 
-                if (arg_count > 0 && actual_args) {
-                    for (int i = 0; i < arg_count; i++) {
-                        freeValue(&actual_args[i]);
-                    }
-                    free(actual_args);
-                    actual_args = NULL;
-                }
+                freeAST(temp_call_node);
                 break;
-
-            op_call_builtin_error_cleanup_dynamic_args:
-                if (arg_count > 0 && actual_args) {
-                    for (int i = 0; i < arg_count; i++) {
-                        freeValue(&actual_args[i]);
-                    }
-                    free(actual_args);
-                    actual_args = NULL;
-                }
-                freeValue(&result_val);
-                return INTERPRET_RUNTIME_ERROR;
             }
-
             case OP_CALL: { // EXECUTION logic for OP_CALL
                   if (vm->frameCount >= VM_CALL_STACK_MAX) {
                       runtimeError(vm, "VM Error: Call stack overflow.");
@@ -1574,6 +1300,46 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 HostFn func = vm->host_functions[host_id];
                 Value result = func(vm);
                 push(vm, result);
+                break;
+            }
+            case OP_FORMAT_VALUE: {
+                // Read operands from the bytecode stream
+                uint8_t width = READ_BYTE();
+                uint8_t precision_raw = READ_BYTE();
+                int precision = (precision_raw == 0xFF) ? -1 : precision_raw; // Convert 0xFF back to -1
+
+                // Pop the raw value to be formatted
+                Value raw_val = pop(vm);
+
+                char buf[DEFAULT_STRING_CAPACITY]; // From globals.h
+                buf[0] = '\0';
+
+                // This logic is borrowed from the working AST interpreter's eval function
+                if (raw_val.type == TYPE_REAL) {
+                    if (precision >= 0) {
+                        snprintf(buf, sizeof(buf), "%*.*f", width, precision, raw_val.r_val);
+                    } else {
+                        snprintf(buf, sizeof(buf), "%*.*E", width, PASCAL_DEFAULT_FLOAT_PRECISION, raw_val.r_val);
+                    }
+                } else if (raw_val.type == TYPE_INTEGER || raw_val.type == TYPE_BYTE || raw_val.type == TYPE_WORD) {
+                    snprintf(buf, sizeof(buf), "%*lld", width, raw_val.i_val);
+                } else if (raw_val.type == TYPE_STRING) {
+                    const char* source_str = raw_val.s_val ? raw_val.s_val : "";
+                    snprintf(buf, sizeof(buf), "%*.*s", width, (int)strlen(source_str), source_str);
+                } else if (raw_val.type == TYPE_BOOLEAN) {
+                    const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
+                    snprintf(buf, sizeof(buf), "%*s", width, bool_str);
+                } else if (raw_val.type == TYPE_CHAR) {
+                    snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
+                } else {
+                    snprintf(buf, sizeof(buf), "%*s", width, "?");
+                }
+
+                // Free the raw value that was popped
+                freeValue(&raw_val);
+                
+                // Push the newly formatted string value back onto the stack
+                push(vm, makeString(buf));
                 break;
             }
   

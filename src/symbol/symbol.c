@@ -291,6 +291,7 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     // Duplicate name
     new_symbol->name = strdup(name);
     if (!new_symbol->name) { fprintf(stderr, "Memory allocation error (strdup name) in insertGlobalSymbol\n"); free(new_symbol); EXIT_FAILURE_HANDLER(); }
+    toLowerString(new_symbol->name);
 
     // Set basic fields
     new_symbol->type = type;
@@ -382,6 +383,7 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
+    toLowerString(sym->name);
 
     // Assign type information
     sym->type = type;

@@ -5,6 +5,8 @@
 #include "parser.h"
 #include "ast.h"
 
+#define PASCAL_DEFAULT_FLOAT_PRECISION 6
+
 // Execution
 Value eval(AST *node);
 Value executeProcedureCall(AST *node);

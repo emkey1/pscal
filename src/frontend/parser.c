@@ -1187,11 +1187,13 @@ AST *constDeclaration(Parser *parser) {
         // Use cn->value and cn->line, as 'cn' is still valid.
         addCompilerConstant(cn->value, const_eval_result, cn->line);
         Value* check_val = findCompilerConstant(cn->value);
+#ifdef DEBUG
         if (check_val) {
             fprintf(stderr, "[DEBUG PARSER constDecl] VERIFY ADD: Found '%s' immediately. Type: %s\n", cn->value, varTypeToString(check_val->type));
         } else {
             fprintf(stderr, "[DEBUG PARSER constDecl] VERIFY ADD: FAILED to find '%s' immediately after add!\n", cn->value);
         }
+#endif
         setTypeAST(node, const_eval_result.type);
     } else {
 #ifdef DEBUG

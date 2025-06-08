@@ -31,6 +31,8 @@ typedef enum {
     OP_INT_DIV,
     OP_AND,         
     OP_OR,
+    OP_SHL,           // Bit Shift Left
+    OP_SHR,           // Bit Shift Right
 
     OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
     OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
@@ -40,6 +42,9 @@ typedef enum {
     OP_DEFINE_GLOBAL, 
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
+    
+    OP_GET_LOCAL,     // Get local scoped variables
+    OP_SET_LOCAL,     // Set local scoped variables
     
     OP_GET_FIELD,     // Pops a record, pushes the value of a field. Operand: field name const_idx.
     OP_SET_FIELD,     // Pops a value, then a record. Sets field in record. Operand: field name const_idx.
@@ -55,11 +60,13 @@ typedef enum {
 
     OP_WRITE_LN,      // Specific opcode for WriteLn for now (simpler than generic call)
                       // Operand: number of arguments to pop from stack for writeln
-    OP_CALL_HOST, 
+    OP_WRITE,         // Specific opcode for Write
+    OP_CALL_HOST,
 
     OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
     OP_CALL,          // For user-defined procedure/function calls, Operands: 2-byte address, 1-byte arg count
-    OP_HALT           // Stop the VM (though OP_RETURN from main might suffice)
+    OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
+    OP_FORMAT_VALUE   // Format the value on top of the stack. Operands: width (byte), precision (byte)
     
 } OpCode;
 

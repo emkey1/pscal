@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#define PASCAL_DEFAULT_FLOAT_PRECISION 6
-
 // Helper function to get the ordinal value from a Value struct
 // Returns true on success, false if the type is not ordinal. Stores value in out_ord.
 static bool getOrdinalValue(Value val, long long *out_ord) {

@@ -1,4 +1,3 @@
-// src/compiler/compiler.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
@@ -14,16 +13,30 @@
 #include "backend_ast/interpreter.h" // For makeCopyOfValue()
 #include "compiler/bytecode.h"
 
+#define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
+
 static bool compiler_had_error = false;
+
+typedef struct {
+    char* name;
+    int depth; // Scope depth
+} CompilerLocal;
+
+typedef struct {
+    CompilerLocal locals[MAX_GLOBALS]; // Re-use MAX_GLOBALS for max locals per function
+    int local_count;
+    int scope_depth;
+} FunctionCompilerState;
+
+FunctionCompilerState* current_function_compiler = NULL;
 
 
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx);
-static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line); // From previous step
-
-#define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
+static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
+static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -39,6 +52,39 @@ CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS]; // MAX_GLOBALS from an appro
 
 CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
 int compilerConstantCount = 0;
+
+static void initFunctionCompiler(FunctionCompilerState* fc) {
+    fc->local_count = 0;
+    fc->scope_depth = 0;
+    // The first slot (index 0) is reserved for the function itself, for potential recursion.
+    // So we add a dummy local for it.
+    //CompilerLocal* first_local = &fc->locals[fc->local_count++];
+    //first_local->depth = 0;
+    //first_local->name = ""; // No name, just occupies slot 0
+}
+
+// Add this new function
+static void addLocal(FunctionCompilerState* fc, const char* name, int line) {
+    if (fc->local_count == MAX_GLOBALS) {
+        fprintf(stderr, "L%d: Compiler error: Too many local variables in one function.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    CompilerLocal* local = &fc->locals[fc->local_count++];
+    local->name = strdup(name);
+    local->depth = fc->scope_depth;
+}
+
+// Add this new function
+static int resolveLocal(FunctionCompilerState* fc, const char* name) {
+    for (int i = fc->local_count - 1; i >= 0; i--) {
+        CompilerLocal* local = &fc->locals[i];
+        if (strcmp(name, local->name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 // Helper to add a constant during compilation
 void addCompilerConstant(const char* name_original_case, Value value, int line) {
@@ -61,10 +107,6 @@ void addCompilerConstant(const char* name_original_case, Value value, int line) 
 
             freeValue(&compilerConstants[i].value); // Free old value's contents
             compilerConstants[i].value = makeCopyOfValue(&value); // Store a deep copy of the new value
-
-            // The caller of addCompilerConstant is responsible for the original 'value' it passed.
-            // If 'value' was a temporary (e.g., from makeString prior to this call), its s_val should be freed by the caller
-            // after addCompilerConstant returns, as makeCopyOfValue would have duplicated its content.
             return;
         }
     }
@@ -79,32 +121,20 @@ void addCompilerConstant(const char* name_original_case, Value value, int line) 
     }
     compilerConstants[compilerConstantCount].value = makeCopyOfValue(&value);
     compilerConstantCount++;
-    // Caller of addCompilerConstant is responsible for the original 'value' passed.
 }
 
 // Helper to find a compile-time constant
 Value* findCompilerConstant(const char* name_original_case) {
     char canonical_name[MAX_SYMBOL_LENGTH];
-    // ... (strncpy, toLowerString as before) ...
     strncpy(canonical_name, name_original_case, MAX_SYMBOL_LENGTH - 1);
     canonical_name[MAX_SYMBOL_LENGTH - 1] = '\0';
     toLowerString(canonical_name);
 
-    fprintf(stderr, "[DEBUG findCompilerConstant] Searching for '%s' (canonical: '%s'). Current compilerConstantCount = %d\n",
-            name_original_case, canonical_name, compilerConstantCount);
-    fflush(stderr);
-
     for (int i = 0; i < compilerConstantCount; ++i) {
-        fprintf(stderr, "[DEBUG findCompilerConstant] Checking against stored: '%s'\n", compilerConstants[i].name);
-        fflush(stderr);
         if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
-            fprintf(stderr, "[DEBUG findCompilerConstant] Found '%s' at index %d.\n", canonical_name, i);
-            fflush(stderr);
             return &compilerConstants[i].value;
         }
     }
-    fprintf(stderr, "[DEBUG findCompilerConstant] '%s' (canonical: '%s') NOT FOUND.\n", name_original_case, canonical_name);
-    fflush(stderr);
     return NULL;
 }
 
@@ -133,12 +163,8 @@ Value evaluateCompileTimeValue(AST* node) {
             if (node->token && node->token->value) {
                 Value* const_val_ptr = findCompilerConstant(node->token->value);
                 if (const_val_ptr) {
-                    fprintf(stderr, "[DEBUG evaluateCTV] Found '%s'. Type: %s\n", node->token->value, varTypeToString(const_val_ptr->type));
                     return makeCopyOfValue(const_val_ptr); // Return a copy
                 } else {
-                    // Constant not found, cannot evaluate at this time
-                    fprintf(stderr, "[DEBUG evaluateCTV] FAILED to find const_var: '%s'\n", node->token->value);
-                    // Return a special error Value or TYPE_VOID
                     return makeVoid();
                 }
             }
@@ -149,11 +175,9 @@ Value evaluateCompileTimeValue(AST* node) {
                 Value right_val = evaluateCompileTimeValue(node->right);
                 Value result = makeVoid(); // Default
 
-                // Only proceed if both operands evaluated successfully to known types
                 if (left_val.type != TYPE_VOID && left_val.type != TYPE_UNKNOWN &&
                     right_val.type != TYPE_VOID && right_val.type != TYPE_UNKNOWN) {
 
-                    // Handle simple integer arithmetic for now (e.g., DIV)
                     if (left_val.type == TYPE_INTEGER && right_val.type == TYPE_INTEGER) {
                         if (node->token->type == TOKEN_INT_DIV) {
                             if (right_val.i_val == 0) {
@@ -163,30 +187,22 @@ Value evaluateCompileTimeValue(AST* node) {
                             }
                         } else if (node->token->type == TOKEN_PLUS) {
                             result = makeInt(left_val.i_val + right_val.i_val);
-                        } // Add other ops: MINUS, MUL
-                        // TODO: Add other operations and type combinations (Real, String concat)
-                    } else {
-                        // Did not evaluate to two integers, or op not supported yet for folding
-                        // fprintf(stderr, "Compile-time Info: Cannot fold binary op (%s) with types %s, %s.\n",
-                        //         tokenTypeToString(node->token->type), varTypeToString(left_val.type), varTypeToString(right_val.type));
+                        }
                     }
                 }
                 freeValue(&left_val);
                 freeValue(&right_val);
-                return result; // Returns makeVoid() if folding failed
+                return result;
             }
             break;
-        // Add AST_UNARY_OP if needed
         default:
-            break; // Cannot evaluate this node type to a constant value
+            break;
     }
-    return makeVoid(); // Default: cannot evaluate
+    return makeVoid();
 }
 
 // Reset for each compilation
 void resetCompilerConstants(void) {
-    fprintf(stderr, "!!!! RESETTING COMPILER CONSTANTS at %s:%d !!!! (count becomes 0)\n", __FILE__, __LINE__); // Add file and line
-    fflush(stderr);
     for (int i = 0; i < compilerConstantCount; ++i) {
         if (compilerConstants[i].name) {
             free(compilerConstants[i].name);
@@ -197,20 +213,14 @@ void resetCompilerConstants(void) {
     compilerConstantCount = 0;
 }
 
-// Helper to get the source line number from an AST node's token
-// Provides a fallback if token is NULL.
 static int getLine(AST* node) {
-    int current_line_approx = 0;
     if (node && node->token && node->token->line > 0) return node->token->line;
     if (node && node->left && node->left->token && node->left->token->line > 0) return node->left->token->line;
     if (node && node->child_count > 0 && node->children[0] && node->children[0]->token && node->children[0]->token->line > 0) return node->children[0]->token->line;
-    return current_line_approx > 0 ? current_line_approx : 0; // Return current_line_approx if non-zero
+    return 0;
 }
 
-// Finds or adds a global variable name and returns its index.
-// For bytecode, this index is what OP_GET_GLOBAL/OP_SET_GLOBAL will use.
 static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, int line) {
-    // ... (Your existing implementation - seems okay) ...
     for (int i = 0; i < compilerGlobalCount; i++) {
         if (compilerGlobals[i].name && strcmp(compilerGlobals[i].name, name) == 0) {
             return i;
@@ -220,144 +230,48 @@ static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, in
         compilerGlobals[compilerGlobalCount].name = strdup(name);
         if (!compilerGlobals[compilerGlobalCount].name) {
             fprintf(stderr, "L%d: Compiler error: Memory allocation failed for global variable name '%s'.\n", line, name);
-            exit(1); // Consider a less abrupt exit or error flag
+            exit(1);
         }
         return compilerGlobalCount++;
     }
     fprintf(stderr, "L%d: Compiler error: Too many global variables.\n", line);
-    exit(1); // Consider a less abrupt exit
+    exit(1);
     return -1;
 }
 
-// --- Simple Type Resolution (Placeholder - needs to be robust) ---
-// This is a very basic version. A real one would look up user-defined types.
-
-/*
-static VarType resolveASTTypeToVarType(AST* type_node, int line_for_error) {
-    if (!type_node) return TYPE_UNKNOWN;
-
-    if (type_node->var_type != TYPE_UNKNOWN && type_node->var_type != TYPE_VOID) {
-        return type_node->var_type;
-    }
-    // AST_TYPE_IDENTIFIER is defined in your core/types.h
-    if (type_node->type == AST_TYPE_IDENTIFIER && type_node->token && type_node->token->value) {
-        const char* type_name = type_node->token->value;
-        if (strcasecmp(type_name, "integer") == 0) return TYPE_INTEGER;
-        if (strcasecmp(type_name, "real") == 0) return TYPE_REAL;
-        // ... (other built-in types) ...
-        if (strcasecmp(type_name, "boolean") == 0) return TYPE_BOOLEAN; // Ensure BOOLEAN is handled
-        fprintf(stderr, "L%d: Compiler Warning: Unknown type name '%s' in resolveASTTypeToVarType. Defaulting to UNKNOWN.\n", line_for_error, type_name);
-        return TYPE_UNKNOWN;
-    }
-    fprintf(stderr, "L%d: Compiler Warning: Could not resolve AST type node %s (%s) to VarType. Defaulting to UNKNOWN.\n",
-            line_for_error, astTypeToString(type_node->type),
-            type_node->token ? type_node->token->value : "N/A");
-    return TYPE_UNKNOWN;
-}
- */
-
-// --- Main Compilation Function ---
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
-    // Debug print for entry and initial state of compilerConstantCount
-    fprintf(stderr, "[DEBUG compileASTToBytecode] ENTER. Initial compilerConstantCount = %d\n", compilerConstantCount);
-    fflush(stderr);
-
     if (!rootNode) {
         fprintf(stderr, "Compiler Error: Cannot compile NULL AST rootNode.\n");
-        compiler_had_error = true; // Ensure error is flagged
         return false;
     }
     if (!outputChunk) {
         fprintf(stderr, "Compiler Error: outputChunk is NULL in compileASTToBytecode.\n");
-        compiler_had_error = true; // Ensure error is flagged
         return false;
     }
-
-    // Initialize the output chunk for this compilation pass.
-    // This is crucial if outputChunk is being reused or needs a fresh state.
+    
     initBytecodeChunk(outputChunk);
-
-    // Reset compiler's global variable counter for THIS compilation pass.
-    // This is for variables defined with VAR, not for compile-time constants.
     compilerGlobalCount = 0;
-
-    // Reset the global error flag for THIS compilation pass.
     compiler_had_error = false;
 
-    // DO NOT CALL resetCompilerConstants() here.
-    // The parser has already populated compilerConstants.
-    // The "simplified pre-pass" that was here is now redundant and removed.
-
-    fprintf(stderr, "[DEBUG compileASTToBytecode] Before main compileNode call, compilerConstantCount = %d\n", compilerConstantCount);
-    fflush(stderr);
-
-    // Main compilation pass - determines the top-level node to compile
     if (rootNode->type == AST_PROGRAM) {
-        // A program node should have a name (left) and a block (right)
         if (rootNode->right && rootNode->right->type == AST_BLOCK) {
-            AST* mainBlock = rootNode->right;
-            fprintf(stderr, "[DEBUG compileASTToBytecode] Compiling mainBlock of AST_PROGRAM. Current compilerConstantCount = %d\n", compilerConstantCount);
-            fflush(stderr);
-            compileNode(mainBlock, outputChunk, getLine(rootNode)); // Pass a valid line number
+            compileNode(rootNode->right, outputChunk, getLine(rootNode));
         } else {
-            fprintf(stderr, "Compiler error: AST_PROGRAM node missing main block (rootNode->right is not AST_BLOCK).\n");
+            fprintf(stderr, "Compiler error: AST_PROGRAM node missing main block.\n");
             compiler_had_error = true;
         }
-    } else if (rootNode->type == AST_BLOCK) {
-        // Allow compiling a block directly (e.g., for unit implementations if handled this way)
-        fprintf(stderr, "[DEBUG compileASTToBytecode] Compiling AST_BLOCK directly. Current compilerConstantCount = %d\n", compilerConstantCount);
-        fflush(stderr);
-        compileNode(rootNode, outputChunk, getLine(rootNode)); // Pass a valid line number
-    } else if (rootNode->type == AST_UNIT) {
-        // If you compile units separately into bytecode, handle AST_UNIT here.
-        // This might involve compiling its interface (if needed for symbol tables)
-        // and its implementation's declaration block and initialization block.
-        // For now, assuming unit's constants are part of global compilerConstants.
-        // The main executable part of a unit is its initialization block.
-        fprintf(stderr, "[DEBUG compileASTToBytecode] Compiling AST_UNIT. Name: '%s'. Current compilerConstantCount = %d\n",
-                rootNode->token ? rootNode->token->value : "N/A", compilerConstantCount);
-        fflush(stderr);
-        // A unit typically has interface declarations (left), implementation declarations (extra),
-        // and an initialization block (right).
-        // You'd compile the parts that generate executable code, usually the init block.
-        // Global declarations from the unit's INTERFACE and IMPLEMENTATION (like CONST, VAR)
-        // should have been processed by the parser and compiler's const/var handling already.
-
-        // Example: Compile the initialization block of the unit if it exists
-        if (rootNode->right && (rootNode->right->type == AST_COMPOUND || rootNode->right->type == AST_BLOCK)) { // Assuming init block is in 'right'
-             compileNode(rootNode->right, outputChunk, getLine(rootNode->right));
-        }
-        // Or, if the unit structure implies compiling its main "block" which includes its parts:
-        // compileNode(rootNode, outputChunk, getLine(rootNode)); // This would need compileNode to handle AST_UNIT
-        // For now, let's assume the main interest is program or program block.
-        // If compiling a unit directly to bytecode isn't supported yet, this can be an error:
-        // fprintf(stderr, "Compiler warning: Direct bytecode compilation of AST_UNIT not fully implemented.\n");
-        // compiler_had_error = true; // Or false if only init block is compiled or it's a valid path
-    }
-    else {
-        fprintf(stderr, "Compiler error: Expected AST_PROGRAM or AST_BLOCK as root for compilation, got %s.\n", astTypeToString(rootNode->type));
+    } else {
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for compilation, got %s.\n", astTypeToString(rootNode->type));
         compiler_had_error = true;
     }
 
-    // Add OP_HALT only if compilation was successful and produced some code.
-    // If outputChunk->count is 0 and no error, HALT is still fine.
-    // If error, perhaps skip HALT or clear chunk.
     if (!compiler_had_error) {
-        writeBytecodeChunk(outputChunk, OP_HALT, rootNode ? getLine(rootNode) : 0); // Use a valid line if possible
-    } else {
-        // If errors occurred, the chunk might be incomplete/invalid.
-        // Consider not adding HALT or even clearing the chunk.
-        // For now, it will add HALT even if errors happened before this point but set compiler_had_error.
+        writeBytecodeChunk(outputChunk, OP_HALT, rootNode ? getLine(rootNode) : 0);
     }
-
-    fprintf(stderr, "[DEBUG compileASTToBytecode] EXIT. Final compilerConstantCount = %d. Had Error: %s. Bytecode size: %d\n",
-            compilerConstantCount, compiler_had_error ? "YES" : "NO", outputChunk->count);
-    fflush(stderr);
 
     return !compiler_had_error;
 }
 
-// --- Recursive Compilation Dispatcher ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -365,349 +279,186 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
     switch (node->type) {
         case AST_BLOCK: {
-            // First pass for procedure/function declarations to define them (get their start address)
-            // This pass ensures forward jumps to procedures/functions can be resolved.
             for (int i = 0; i < node->child_count; i++) {
                 AST* child = node->children[i];
                 if (!child) continue;
                 if (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) {
                     compileNode(child, chunk, getLine(child) > 0 ? getLine(child) : line);
-                } else if (child->type == AST_COMPOUND) {
-                    // Handle case where declarations (including procedures) might be grouped in a compound node
-                    // (e.g., if that's how the parser structures unit implementation declarations)
-                    bool only_procs_or_funcs = child->child_count > 0;
-                    for(int k=0; k < child->child_count; ++k) {
-                        if (!child->children[k] ||
-                            !(child->children[k]->type == AST_PROCEDURE_DECL || child->children[k]->type == AST_FUNCTION_DECL)) {
-                            only_procs_or_funcs = false;
-                            break;
-                        }
-                    }
-                    if (only_procs_or_funcs) {
-                        for(int k=0; k < child->child_count; ++k) {
-                            compileNode(child->children[k], chunk, getLine(child->children[k]) > 0 ? getLine(child->children[k]) : line);
-                        }
-                    }
                 }
             }
-
-            // Second pass for VAR_DECLs (to define globals), CONST/TYPE (informational), and the main body compound statement
-            AST* main_body_compound = NULL;
             for (int i = 0; i < node->child_count; i++) {
                 AST* child = node->children[i];
                 if (!child) continue;
-                int child_line = getLine(child) > 0 ? getLine(child) : line;
-
-                switch(child->type) {
-                    case AST_VAR_DECL:
-                    case AST_CONST_DECL:
-                    case AST_TYPE_DECL:
-                    case AST_USES_CLAUSE: // Add USES_CLAUSE here to be handled by the outer compileNode
-                        compileNode(child, chunk, child_line); // Let the main compileNode dispatcher handle these
-                        break;
-                    case AST_COMPOUND: {
-                        // This logic tries to identify if the AST_COMPOUND is the main executable body
-                        // or just a list of declarations (which should have been handled if they were individual nodes)
-                        bool is_executable_body = false;
-                        if (child->child_count > 0) {
-                            for(int k=0; k < child->child_count; ++k) {
-                                if (child->children[k]) {
-                                    ASTNodeType type = child->children[k]->type;
-                                    // If it contains anything that's not a declaration, it's likely executable
-                                    if (type != AST_VAR_DECL && type != AST_CONST_DECL &&
-                                        type != AST_TYPE_DECL && type != AST_PROCEDURE_DECL &&
-                                        type != AST_FUNCTION_DECL && type != AST_USES_CLAUSE) {
-                                        is_executable_body = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        } else { // Empty BEGIN..END is an executable body (a no-op one)
-                            is_executable_body = true;
-                        }
-
-                        if (is_executable_body) {
-                            if (!main_body_compound) {
-                                main_body_compound = child;
-                            } else {
-                                // This implies multiple executable compound blocks at the same level within an AST_BLOCK,
-                                // which is unusual for standard Pascal program/procedure structure.
-                                fprintf(stderr, "L%d: Compiler Warning: Multiple executable AST_COMPOUND statements found directly in AST_BLOCK. Compiling all.\n", child_line);
-                                compileNode(child, chunk, child_line); // Compile it as a compound statement sequence
-                            }
-                        } else {
-                            // This compound contains only declarations; they should have been individual children
-                            // or handled by their specific cases if compileNode was called on them.
-                            // This path might indicate a parser structure that groups declarations in an extra compound.
-                            #ifdef DEBUG
-                            if(dumpExec) fprintf(stderr, "L%d: Compiler Info: AST_COMPOUND child of AST_BLOCK contains only declarations. Individual declarations should be processed.\n", child_line);
-                            #endif
-                            for(int k=0; k < child->child_count; ++k) { // Process them individually
-                                compileNode(child->children[k], chunk, getLine(child->children[k]));
-                            }
-                        }
-                        break;
-                    }
-                    case AST_PROCEDURE_DECL: // Already handled in the first pass
-                    case AST_FUNCTION_DECL:
-                        break;
-                    default: // Any other type of node here is assumed to be a statement
-                        compileStatement(child, chunk, child_line);
-                        break;
+                if (child->type != AST_PROCEDURE_DECL && child->type != AST_FUNCTION_DECL) {
+                    compileNode(child, chunk, getLine(child) > 0 ? getLine(child) : line);
                 }
             }
-
-            if (main_body_compound) {
-                compileNode(main_body_compound, chunk, getLine(main_body_compound) > 0 ? getLine(main_body_compound) : line);
-            } else if (node->parent && (node->parent->type == AST_PROGRAM)) {
-                 // Only error for missing main body if this block is the direct child of AST_PROGRAM
-                 bool has_executable_statements = false;
-                 for(int i=0; i < node->child_count; ++i) {
-                     if(node->children[i] && node->children[i]->type == AST_COMPOUND) { // Heuristic
-                        has_executable_statements = true; break;
-                     }
-                 }
-                 if (!has_executable_statements) {
-                     fprintf(stderr, "L%d: Compiler Error: No main compound statement (BEGIN...END block) found in program block.\n", line);
-                     compiler_had_error = true;
-                 }
-            } // For procedures/functions, an empty executable part is fine.
             break;
         }
-
         case AST_VAR_DECL: {
              VarType declared_type_enum = node->var_type;
-             AST* type_specifier_node = node->right; // This node describes the type, e.g., AST_VARIABLE "TBrickArray" or "integer"
-
+             AST* type_specifier_node = node->right;
              if (node->children) {
                  for (int i = 0; i < node->child_count; i++) {
                      AST* varNameNode = node->children[i];
                      if (varNameNode && varNameNode->token) {
+                         // This part is the same: add the variable name to constants
                          int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                         uint8_t type_name_idx = 0; // Default for simple types or anonymous complex types
-
-                         // If it's a complex type AND its type_specifier_node has a token (i.e., it's a named type)
-                         if ((declared_type_enum == TYPE_ARRAY || declared_type_enum == TYPE_RECORD) &&
-                             type_specifier_node && type_specifier_node->token &&
-                             (type_specifier_node->type == AST_VARIABLE || type_specifier_node->type == AST_TYPE_REFERENCE)) {
-                             // The token of type_specifier_node holds the type name (e.g., "TBrickArray")
-                             type_name_idx = (uint8_t)addConstantToChunk(chunk, makeString(type_specifier_node->token->value));
-                         }
-                         // For anonymous types like "var x: array[1..2] of integer;", type_specifier_node would be AST_ARRAY_TYPE
-                         // and would not have a .token in the same way. type_name_idx would remain 0.
-                         // The VM would need more complex bytecode to handle defining anonymous structures if this path is taken.
-
+                         
+                         // Emit the define opcode and the name index
                          writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
                          writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
-                         writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode)); // Operand for type name string index
-                         writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode)); // Operand for VarType enum
+                         
+                         // Now, emit type information based on the type
+                         writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
 
+                         if (declared_type_enum == TYPE_ARRAY && type_specifier_node && type_specifier_node->type == AST_ARRAY_TYPE) {
+                             // --- NEW LOGIC FOR ARRAYS ---
+                             // This is an anonymous array, we need to emit its definition.
+                             // For now, we handle a single dimension.
+                             if (type_specifier_node->child_count == 1 && type_specifier_node->children[0]->type == AST_SUBRANGE) {
+                                 AST* subrange = type_specifier_node->children[0];
+                                 AST* elem_type = type_specifier_node->right;
+
+                                 // Evaluate bounds and add to constant pool
+                                 Value lower_b = evaluateCompileTimeValue(subrange->left);
+                                 Value upper_b = evaluateCompileTimeValue(subrange->right);
+                                 uint8_t lower_idx = addConstantToChunk(chunk, lower_b);
+                                 uint8_t upper_idx = addConstantToChunk(chunk, upper_b);
+
+                                 // Add element type name to constant pool
+                                 const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                                 uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
+
+                                 // Emit the indices as extra operands
+                                 writeBytecodeChunk(chunk, lower_idx, getLine(varNameNode));
+                                 writeBytecodeChunk(chunk, upper_idx, getLine(varNameNode));
+                                 writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
+
+                             } else {
+                                 // Handle multi-dimensional or other errors if necessary
+                                 fprintf(stderr, "L%d: Compiler error: Unsupported array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
+                                 // Emit dummy operands
+                                 writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                 writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                 writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                             }
+                         } else if (declared_type_enum == TYPE_RECORD || (type_specifier_node && type_specifier_node->type == AST_TYPE_REFERENCE)) {
+                            // --- EXISTING-LIKE LOGIC FOR NAMED TYPES ---
+                            const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
+                            uint8_t type_name_idx = addConstantToChunk(chunk, makeString(type_name));
+                            writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode));
+                         } else {
+                            // Simple type, needs a placeholder operand.
+                            writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                         }
+                         
                          resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                      }
                  }
              }
              break;
          }
-
-        case AST_CONST_DECL: {
-            if (node->token && node->token->value) {
-                // Check if the parser already evaluated and added this constant
-                Value* existing_const_val = findCompilerConstant(node->token->value);
-
-                if (existing_const_val) {
-                    // Constant was already processed by the parser and its value is known.
-                    // No further action needed here for its definition.
-                    // When this constant is USED in an expression, compileExpression for AST_VARIABLE
-                    // will find it via findCompilerConstant and emit OP_CONSTANT with its value.
-                    #ifdef DEBUG
-                    if(dumpExec) fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' already processed by parser. Value inlined on use.\n",
-                            getLine(node), node->token->value);
-                    #endif
-                } else {
-                    // This constant was NOT a simple literal resolvable by the parser,
-                    // or parser's evaluateCompileTimeValue couldn't fold it.
-                    // This is the path for BrickWidth = ScreenWidth div BricksPerRow if ScreenWidth wasn't known to parser.
-                    // Use the existing logic to generate runtime initialization code for it.
-                    if (node->left) { // Ensure there's an expression for the value
-                        fprintf(stderr, "L%d: Compiler Info: CONST_DECL for '%s' (unresolved by parser, type: %s). Generating runtime init for VM.\n",
-                                getLine(node), node->token->value, astTypeToString(node->left->type));
-
-                        char canonical_const_name[MAX_SYMBOL_LENGTH];
-                        strncpy(canonical_const_name, node->token->value, sizeof(canonical_const_name) - 1);
-                        canonical_const_name[sizeof(canonical_const_name) - 1] = '\0';
-                        toLowerString(canonical_const_name); // Parser should already provide lowercase
-
-                        int var_name_idx = addConstantToChunk(chunk, makeString(canonical_const_name));
-                        // ... (rest of your existing runtime init codegen: OP_DEFINE_GLOBAL, compileExpression(node->left), OP_SET_GLOBAL) ...
-                        // Ensure types are correctly inferred/used for OP_DEFINE_GLOBAL.
-                        VarType const_actual_type = node->var_type;
-                        if (const_actual_type == TYPE_VOID || const_actual_type == TYPE_UNKNOWN) {
-                           if (node->left->type == AST_BINARY_OP && node->left->token && node->left->token->type == TOKEN_INT_DIV) {
-                               const_actual_type = TYPE_INTEGER;
-                           } else {
-                               // Attempt to get type from the expression node if annotated, otherwise default.
-                               const_actual_type = node->left->var_type != TYPE_VOID ? node->left->var_type : TYPE_INTEGER;
-                               if(const_actual_type == TYPE_VOID)
-                                 fprintf(stderr, "L%d: Compiler Warning: Could not infer type for const expression '%s', defaulting to INTEGER for DEFINE_GLOBAL.\n", getLine(node), node->token->value);
-                           }
-                        }
-                        uint8_t type_name_idx = 0;
-
-                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(node));
-                        writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(node));
-                        writeBytecodeChunk(chunk, type_name_idx, getLine(node));
-                        writeBytecodeChunk(chunk, (uint8_t)const_actual_type, getLine(node));
-
-                        resolveGlobalVariableIndex(chunk, canonical_const_name, getLine(node));
-                        compileExpression(node->left, chunk, getLine(node->left));
-                        writeBytecodeChunk(chunk, OP_SET_GLOBAL, getLine(node));
-                        writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(node));
-
-                    } else {
-                        fprintf(stderr, "L%d: Compiler Error: CONST_DECL for '%s' missing value expression.\n", getLine(node), node->token->value);
-                        compiler_had_error = true;
-                    }
-                }
-            } else {
-                 fprintf(stderr, "L%d: Compiler Error: Ill-formed AST_CONST_DECL node (missing token).\n", getLine(node));
-                 compiler_had_error = true;
-            }
+        case AST_CONST_DECL:
+        case AST_TYPE_DECL:
+        case AST_USES_CLAUSE:
             break;
-        }
-
-        case AST_TYPE_DECL: { // Moved from AST_BLOCK's second loop default path
-            if (node->token && node->token->value) {
-                #ifdef DEBUG
-                if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Processed TYPE_DECL for '%s'. (No bytecode emitted).\n",
-                        line, node->token->value);
-                #endif
-            } else {
-                fprintf(stderr, "L%d: Compiler Warning: Ill-formed AST_TYPE_DECL node.\n", line);
-            }
-            break;
-        }
-
-        case AST_USES_CLAUSE: { // Added case
-            #ifdef DEBUG
-            if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Encountered AST_USES_CLAUSE. (Handled by parser/linker, no direct bytecode).\n", line);
-            #endif
-            // No bytecode needed for the USES clause itself at this stage.
-            break;
-        }
-
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
-            if (!node->token || !node->token->value) {
-                fprintf(stderr, "L%d: Compiler Error: Procedure/Function declaration node missing name token.\n", line);
-                compiler_had_error = true;
-                break;
-            }
-            #ifdef DEBUG
-            if(dumpExec) fprintf(stderr, "L%d: Compiler: Processing definition of %s '%s'. Emitting jump over body.\n",
-                    line, astTypeToString(node->type), node->token->value);
-            #endif
-
-            // Emit a jump to skip over the body. Main code path doesn't execute function bodies directly.
+            if (!node->token || !node->token->value) break;
             writeBytecodeChunk(chunk, OP_JUMP, line);
             int jump_over_body_operand_offset = chunk->count;
-            emitShort(chunk, 0xFFFF, line); // Placeholder for jump offset
-
-            // Compile the function/procedure body itself.
+            emitShort(chunk, 0xFFFF, line);
             compileDefinedFunction(node, chunk, line);
-
-            // Backpatch the jump to go to the current end of the chunk.
             uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2));
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
-
-            #ifdef DEBUG
-            if(dumpExec) fprintf(stderr, "L%d: Compiler: Patched jump over body for '%s'. Jump offset: %u.\n",
-                    line, node->token->value, offset_to_skip_body);
-            #endif
             break;
         }
-
-        case AST_COMPOUND: // This is for executable blocks of statements (e.g., main program body, loop body, if branch body)
+        case AST_COMPOUND:
             for (int i = 0; i < node->child_count; i++) {
-                if (node->children[i]) { // Added NULL check
-                    compileStatement(node->children[i], chunk, getLine(node->children[i]) > 0 ? getLine(node->children[i]) : line);
+                if (node->children[i]) {
+                    compileNode(node->children[i], chunk, getLine(node->children[i]));
                 }
             }
             break;
-
         default:
-            // Check if it's a statement type node that should be handled by compileStatement
-            if (node->type >= AST_ASSIGN && node->type <= AST_USES_CLAUSE) { // Adjusted range, USES_CLAUSE now handled explicitly
-                 compileStatement(node, chunk, line);
-            }
-            // Check if it's an expression type node that should be handled by compileExpression
-            // This path is usually hit if an expression is on its own line (e.g. function call for side effect, deprecated)
-            // or if compileNode is called directly on an expression subtree.
-            else if ((node->type >= AST_BINARY_OP && node->type <= AST_VARIABLE) ||
-                     node->type == AST_NIL || node->type == AST_BOOLEAN || node->type == AST_ARRAY_LITERAL || // expand this for all expression types
-                     node->type == AST_FIELD_ACCESS || node->type == AST_ARRAY_ACCESS || node->type == AST_DEREFERENCE ||
-                     node->type == AST_FORMATTED_EXPR) {
-                 compileExpression(node, chunk, line);
-                 // If an expression is compiled at the "node" level (not as part of a larger statement/expression),
-                 // its result will be on the stack. It usually needs to be popped if not used.
-                 // This depends on context; compileStatement for AST_PROCEDURE_CALL already handles popping results of functions called as procedures.
-                 // For now, let's assume if compileNode hits an expression directly, its value isn't immediately used by an outer construct.
-                 // However, this path in compileNode's default is tricky. It's better to ensure all statement/expression
-                 // types are routed through compileStatement/compileExpression from their containing structures.
-                 #ifdef DEBUG
-                 if(dumpExec) fprintf(stderr, "L%d: Compiler Info: Expression node %s compiled directly by compileNode. Consider if its value needs OP_POP.\n", line, astTypeToString(node->type));
-                 #endif
-            } else {
-                 fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in main compileNode dispatcher.\n", line, astTypeToString(node->type));
-            }
+            compileStatement(node, chunk, line);
             break;
     }
 }
 
-// --- Compile Defined Function/Procedure Body ---
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
+    FunctionCompilerState fc;
+    initFunctionCompiler(&fc);
+    current_function_compiler = &fc;
+    
     const char* func_name = func_decl_node->token->value;
     int func_bytecode_start_address = chunk->count;
 
     Symbol* proc_symbol = lookupSymbolIn(procedure_table, func_name);
     if (!proc_symbol) {
-        fprintf(stderr, "L%d: Compiler INTERNAL ERROR: Procedure/function '%s' not found for body compilation.\n", line, func_name);
+        // This case should ideally not be hit if the parser added the symbol.
+        // Clean up and return.
+        current_function_compiler = NULL;
         return;
     }
-
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
-    proc_symbol->arity = func_decl_node->child_count;
+    
+    // --- Step 1: Add all parameters to the local scope FIRST. ---
+    // Their slot indices (0, 1, 2...) will now match the VM stack frame.
+    if (func_decl_node->children) {
+        for (int i = 0; i < func_decl_node->child_count; i++) {
+            AST* param_group_node = func_decl_node->children[i];
+            if (param_group_node && param_group_node->type == AST_VAR_DECL) {
+                for (int j = 0; j < param_group_node->child_count; j++) {
+                    AST* param_name_node = param_group_node->children[j];
+                    if (param_name_node && param_name_node->token) {
+                        addLocal(&fc, param_name_node->token->value, getLine(param_name_node));
+                    }
+                }
+            }
+        }
+    }
+    // The number of locals added so far is the arity (parameter count).
+    proc_symbol->arity = fc.local_count;
 
-    // Simple local variable counting (a more robust solution would traverse the declaration block)
+    // --- Step 2: Add all local variables to the scope AFTER parameters. ---
     AST* blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
-    uint8_t local_count = 0;
+    uint8_t local_var_count = 0;
     if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0 && blockNode->children[0]->type == AST_COMPOUND) {
         AST* decls = blockNode->children[0];
         for (int i = 0; i < decls->child_count; i++) {
             if (decls->children[i] && decls->children[i]->type == AST_VAR_DECL) {
-                local_count += decls->children[i]->child_count;
+                AST* var_decl_group = decls->children[i];
+                for (int j = 0; j < var_decl_group->child_count; j++) {
+                    AST* var_name_node = var_decl_group->children[j];
+                    if (var_name_node && var_name_node->token) {
+                        addLocal(&fc, var_name_node->token->value, getLine(var_name_node));
+                        local_var_count++;
+                    }
+                }
             }
         }
     }
-    proc_symbol->locals_count = local_count;
-
-    #ifdef DEBUG
-    if(dumpExec) fprintf(stderr, "L%d: Compiler: Compiling body of %s '%s' at address %d, Arity: %d, Locals: %d\n",
-            line, astTypeToString(func_decl_node->type), func_name, func_bytecode_start_address, proc_symbol->arity, proc_symbol->locals_count);
-    #endif
-
-    // Compile the actual block of the procedure/function
+    // The number of true local variables (excluding parameters).
+    proc_symbol->locals_count = local_var_count;
+    
+    // --- Step 3: Compile the function body. ---
     if (blockNode) {
         compileNode(blockNode, chunk, getLine(blockNode));
     }
 
-    // Explicitly add return. If it's a function, result is on stack. If procedure, a nil/dummy value is.
+    // --- Step 4: Emit the return instruction. ---
+    // A function with a return value should have its result on the stack.
+    // A procedure will have this instruction implicitly add a 'nil' return value if needed.
     writeBytecodeChunk(chunk, OP_RETURN, line);
 
-    #ifdef DEBUG
-    if(dumpExec) fprintf(stderr, "L%d: Compiler: Finished body of %s '%s'. Ended with OP_RETURN.\n",
-            line, astTypeToString(func_decl_node->type), func_name);
-    #endif
+    // --- Step 5: Clean up the local compiler state for this function. ---
+    for(int i = 0; i < fc.local_count; i++) {
+        free(fc.locals[i].name);
+    }
+    current_function_compiler = NULL;
 }
 
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
@@ -716,262 +467,148 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
+        case AST_WRITELN: {
+            int argCount = node->child_count;
+            for (int i = 0; i < argCount; i++) {
+                compileExpression(node->children[i], chunk, getLine(node->children[i]));
+            }
+            writeBytecodeChunk(chunk, OP_WRITE_LN, line);
+            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
+            break;
+        }
+
+        case AST_WRITE: {
+            int argCount = node->child_count;
+            for (int i = 0; i < argCount; i++) {
+                compileExpression(node->children[i], chunk, getLine(node->children[i]));
+            }
+            writeBytecodeChunk(chunk, OP_WRITE, line);
+            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
+            break;
+        }
         case AST_ASSIGN: {
             AST* lvalue = node->left;
             AST* rvalue = node->right;
-
-            // This is the new, correct logic for compiling assignments.
-            // It handles simple, record field, and array element assignments.
-            if (lvalue->type == AST_VARIABLE) {
-                // Simple assignment: Var := RHS
-                // 1. Compile RHS value.
-                compileExpression(rvalue, chunk, getLine(rvalue));
-                // 2. Emit SET_GLOBAL.
-                int nameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
-                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-
-            } else if (lvalue->type == AST_ARRAY_ACCESS || lvalue->type == AST_FIELD_ACCESS) {
-                // Complex assignment: container.field := RHS or container[index] := RHS
-                // This requires a recursive "store" helper function to handle chains like a.b[i].c
-                // For now, we will manually implement one level of recursion.
-
-                // We need to store the modified container back. Let's get the base variable first.
-                AST* baseVarNode = lvalue;
-                while (baseVarNode->type == AST_ARRAY_ACCESS || baseVarNode->type == AST_FIELD_ACCESS) {
-                    baseVarNode = baseVarNode->left;
-                }
-
-                if (baseVarNode->type != AST_VARIABLE) {
-                    fprintf(stderr, "L%d: Compiler error: Assignment to complex LValue must originate from a variable.\n", line);
-                    compiler_had_error = true;
-                    break;
-                }
-
-                // 1. Compile the chain of GETs to leave the final container on the stack.
-                // For `Balls[k].radius`, this means we first need the `Balls[k]` record.
-                // For `Balls[k]`, this means we first need the `Balls` array.
-                compileExpression(lvalue->left, chunk, getLine(lvalue->left));
-
-                // 2. Compile the final index or get ready for the field name.
-                if (lvalue->type == AST_ARRAY_ACCESS) {
-                    compileExpression(lvalue->children[0], chunk, getLine(lvalue->children[0]));
-                }
-
-                // 3. Compile the RHS value.
-                compileExpression(rvalue, chunk, getLine(rvalue));
-
-                // 4. Now perform the SET operation.
-                if (lvalue->type == AST_ARRAY_ACCESS) {
-                    // Stack: [container, index, value]
-                    writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
-                } else { // AST_FIELD_ACCESS
-                    // Stack: [container, value]. We need to swap them for OP_SET_FIELD.
-                    writeBytecodeChunk(chunk, OP_SWAP, line);
-                    // Stack: [value, container]
-                    int fieldNameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
-                    writeBytecodeChunk(chunk, OP_SET_FIELD, line);
-                    writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
-                }
-                // At this point, the modified container (the direct parent of the LValue) is on the stack.
-                // We now need to store it back into the base variable.
-
-                // This is still not fully recursive for chains like a.b[i].c,
-                // but it will work for one level of nesting like Balls[k] or MyRecord.field.
-                // For Balls[k].radius, this logic is still incomplete.
-                // A fully robust solution is more complex. Let's try a direct fix.
-
-                // --- START: Rewritten, more direct logic ---
-                // We abandon the above and write a new recursive helper.
-                // This is the cleanest way. We will add the helper below.
-                
-                // For assignment `LHS := RHS`, we need to compile the R-Value first.
-                compileExpression(rvalue, chunk, getLine(rvalue));
-                // Then we compile the L-Value, but with "SET" opcodes.
-                // Let's create a helper for this.
-
-                // The previous attempt was flawed. Let's try again with a clear head.
-                // We need to handle `Balls[k].radius := ...`
-
-                // Compile RHS first.
-                compileExpression(rvalue, chunk, getLine(rvalue));
-                // Stack: [RHS_Value]
-
-                // Compile LValue base (Balls)
-                compileExpression(baseVarNode, chunk, getLine(baseVarNode));
-                // Stack: [RHS_Value, Balls_Array]
-
-                // We need to apply the SETs from the inside out.
-                // This requires a post-order traversal of the lvalue write operations.
-                // Let's manually unroll for `Balls[k].radius`
-                if (lvalue->type == AST_FIELD_ACCESS && lvalue->left->type == AST_ARRAY_ACCESS) {
-                    // This is our `Balls[k].radius` case.
-                    AST* arr_access = lvalue->left;
-                    AST* arr_var = arr_access->left;
-
-                    // Stack should be [RHS_val]
-                    // 1. Get array: GET_GLOBAL 'balls'. Stack: [RHS_val, balls_array]
-                    compileExpression(arr_var, chunk, getLine(arr_var));
-                    // 2. Get index: GET_GLOBAL 'k'. Stack: [RHS_val, balls_array, k_val]
-                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0]));
-                    // 3. Get the record element. Stack: [RHS_val, balls_array, k_val] -> OP_GET_ELEMENT -> [RHS_val, record_val]
-                    writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
-                    // 4. Swap so value is on top. Stack: [record_val, RHS_val]
-                    writeBytecodeChunk(chunk, OP_SWAP, line);
-                    // 5. Set the field. Stack: [record_val, RHS_val] -> OP_SET_FIELD -> [modified_record_val]
-                    int fieldNameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
-                    writeBytecodeChunk(chunk, OP_SET_FIELD, line);
-                    writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
-                    // 6. Now put the modified record back in the array.
-                    // Stack has [modified_record]. We need [array, index, modified_record] for SET_ELEMENT.
-                    // This is where it gets hard. We need the array and index again.
-                    compileExpression(arr_var, chunk, getLine(arr_var)); // GET_GLOBAL 'balls'
-                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0])); // GET_GLOBAL 'k'
-                    // Stack: [modified_record, balls_array, k_val]
-                    // We need to swap them into the right order. This is complex.
-
-                    // Let's abandon this for the simplest possible fix for now.
-                    // The problem is that the SET opcodes modify a copy.
-                    // We will implement them to modify the original value in the VM.
-                    // This is a much larger change to the VM, but cleaner for the compiler.
-                    // This is too much for one step.
-
-                    // Backtracking to the simplest possible fix in the compiler that can work.
-                    // The logic must be:
-                    // 1. Get container.
-                    // 2. Get sub-container... etc. until one level before the target.
-                    // 3. Get the final container that will be modified.
-                    // 4. Compile index/field info.
-                    // 5. Compile RHS.
-                    // 6. Do the SET.
-                    // 7. Store the result of the SET back.
-                    // This requires a stateful compiler or a very complex recursive helper.
-
-                    // Let's implement the verbose but correct sequence I outlined in my thoughts.
-                    // This is the most direct way to fix the bug with our current architecture.
-
-                    // Sequence for `Balls[k].radius := RHS`
-                    // 1. Get Original Array
-                    compileExpression(arr_var, chunk, getLine(arr_var));
-                    // 2. Get Index
-                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0]));
-                    // 3. Get Record (a copy)
-                    writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
-                    // 4. Get RHS Value
-                    compileExpression(rvalue, chunk, getLine(rvalue));
-                    // 5. SWAP to prep for SET_FIELD. Stack: [record, value]
-                    writeBytecodeChunk(chunk, OP_SWAP, line);
-                    // 6. SET_FIELD. Stack has [modified_record]
-                    int fieldIdx = addConstantToChunk(chunk, makeString(lvalue->token->value));
-                    writeBytecodeChunk(chunk, OP_SET_FIELD, line);
-                    writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
-                    // 7. Get Array again
-                    compileExpression(arr_var, chunk, getLine(arr_var));
-                    // 8. SWAP. Stack: [array, modified_record]
-                    writeBytecodeChunk(chunk, OP_SWAP, line);
-                    // 9. Get Index again
-                    compileExpression(arr_access->children[0], chunk, getLine(arr_access->children[0]));
-                    // 10. SET_ELEMENT. Stack: [modified_array]
-                    writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
-                    // 11. SET_GLOBAL
-                    int globalIdx = addConstantToChunk(chunk, makeString(arr_var->token->value));
-                    writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)globalIdx, line);
-
-                } else {
-                     fprintf(stderr, "L%d: Compiler error: This level of nested assignment is not yet supported.\n", line);
-                     compiler_had_error = true;
-                }
-            } else {
-                 fprintf(stderr, "L%d: Compiler error: Unhandled LValue type %s for assignment.\n", line, astTypeToString(lvalue->type));
-                 compiler_had_error = true;
-            }
+            // First, compile the R-Value. Its result will be on top of the stack.
+            compileExpression(rvalue, chunk, getLine(rvalue));
+            // Then, call the recursive helper to generate the chain of GETs and SETs.
+            compileStoreForLValue(lvalue, chunk, line);
             break;
         }
-        case AST_WHILE: { // From your compiler.c, adapted
+        case AST_WHILE: {
             if (!node->left || !node->right) {
                 fprintf(stderr, "L%d: Compiler error: WHILE node is missing condition or body.\n", line);
                 compiler_had_error = true;
                 break;
             }
-
-            int loop_start_address = chunk->count; // Address before condition evaluation
-
-            // 1. Compile the condition
-            compileExpression(node->left, chunk, getLine(node->left)); // Condition result on stack
-
-            // 2. Emit OP_JUMP_IF_FALSE with a placeholder for the offset to jump out of loop
+            int loop_start_address = chunk->count;
+            compileExpression(node->left, chunk, getLine(node->left));
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
-            int exit_jump_operand_offset = chunk->count; // Remember where the jump's 2-byte operand starts
-            emitShort(chunk, 0xFFFF, line); // Placeholder for jump offset (2 bytes)
-
-            // 3. Compile the loop body
-            compileStatement(node->right, chunk, getLine(node->right)); // Body is typically AST_COMPOUND or single statement
-
-            // 4. Emit OP_JUMP back to the start of the loop (before condition)
+            int exit_jump_operand_offset = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
+            compileStatement(node->right, chunk, getLine(node->right));
             writeBytecodeChunk(chunk, OP_JUMP, line);
-            // Offset = target_address (loop_start_address) - address_of_instruction_AFTER_this_jump_operand
-            int backward_jump_offset = loop_start_address - (chunk->count + 2); // +2 for the short operand of OP_JUMP
-            emitShort(chunk, (uint16_t)backward_jump_offset, line); // Cast to uint16_t for 2's complement if negative
-
-            // 5. Backpatch the OP_JUMP_IF_FALSE
-            // Target for OP_JUMP_IF_FALSE is the instruction immediately after the backward OP_JUMP (current end of chunk)
-            // Offset = target_address (chunk->count) - address_of_instruction_AFTER_JUMP_IF_FALSE_operand
+            int backward_jump_offset = loop_start_address - (chunk->count + 2);
+            emitShort(chunk, (uint16_t)backward_jump_offset, line);
             uint16_t forward_jump_offset = (uint16_t)(chunk->count - (exit_jump_operand_offset + 2));
             patchShort(chunk, exit_jump_operand_offset, forward_jump_offset);
             break;
         }
-
-        case AST_WRITELN: { // From your compiler.c
-            int argCount = node->child_count;
-            for (int i = 0; i < argCount; i++) { // Children are expressions to write
-                compileExpression(node->children[i], chunk, getLine(node->children[i]));
+        case AST_FOR_TO:
+        case AST_FOR_DOWNTO: {
+            if (!node->left || !node->right || !node->extra || node->child_count < 1) {
+                fprintf(stderr, "L%d: Compiler error: Malformed FOR loop AST node.\n", line);
+                compiler_had_error = true;
+                break;
             }
-            writeBytecodeChunk(chunk, OP_WRITE_LN, line);
-            writeBytecodeChunk(chunk, (uint8_t)argCount, line); // Pass arg count to VM
+
+            AST* loopVarNode = node->children[0];
+            const char* varName = loopVarNode->token->value;
+            int varNameIndex = addConstantToChunk(chunk, makeString(varName));
+
+            // 1. Compile and assign the start value
+            compileExpression(node->left, chunk, getLine(node->left));
+            writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
+
+            // 2. Mark the loop start address
+            int loop_start_address = chunk->count;
+
+            // 3. Compile the loop condition check
+            //    Stack: [ ... ]
+            compileExpression(node->right, chunk, getLine(node->right)); // End value
+            //    Stack: [ ..., EndValue ]
+            writeBytecodeChunk(chunk, OP_GET_GLOBAL, line); // Loop variable's current value
+            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
+            //    Stack: [ ..., EndValue, CurrentValue ]
+
+            if (node->type == AST_FOR_TO) {
+                writeBytecodeChunk(chunk, OP_GREATER, line); // Check if Current > End
+            } else { // AST_FOR_DOWNTO
+                writeBytecodeChunk(chunk, OP_LESS, line); // Check if Current < End
+            }
+            //    Stack: [ ..., ResultOfComparison (boolean) ]
+            
+            // 4. Jump out of the loop if the condition is met (loop is finished)
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); // Jumps if comparison is FALSE (i.e., continue loop)
+            int exit_jump_operand_offset = chunk->count;
+            emitShort(chunk, 0xFFFF, line); // Placeholder for jump distance
+
+            // 5. Compile the loop body
+            compileStatement(node->extra, chunk, getLine(node->extra));
+
+            // 6. Increment/Decrement the loop variable
+            writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
+            
+            Value one_val = makeInt(1);
+            int one_const_idx = addConstantToChunk(chunk, one_val);
+            writeBytecodeChunk(chunk, OP_CONSTANT, line);
+            writeBytecodeChunk(chunk, (uint8_t)one_const_idx, line);
+
+            if (node->type == AST_FOR_TO) {
+                writeBytecodeChunk(chunk, OP_ADD, line);
+            } else { // AST_FOR_DOWNTO
+                writeBytecodeChunk(chunk, OP_SUBTRACT, line);
+            }
+            
+            writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
+
+            // 7. Jump back to the beginning of the loop
+            writeBytecodeChunk(chunk, OP_JUMP, line);
+            int backward_jump_offset = loop_start_address - (chunk->count + 2); // +2 for the jump's own operands
+            emitShort(chunk, (uint16_t)backward_jump_offset, line);
+
+            // 8. Patch the forward jump to exit the loop
+            uint16_t forward_jump_offset = (uint16_t)(chunk->count - (exit_jump_operand_offset + 2));
+            patchShort(chunk, exit_jump_operand_offset, forward_jump_offset);
+
             break;
         }
-
-        case AST_IF: { // From your compiler.c, adapted
-            if (!node->left || !node->right) { /* error */ return; } // Condition (left), Then-branch (right)
-
-            // 1. Compile the condition
+        case AST_IF: {
+            if (!node->left || !node->right) { return; }
             compileExpression(node->left, chunk, line);
-
-            // 2. Emit OP_JUMP_IF_FALSE to jump over the THEN branch (or to ELSE)
             int jump_to_else_or_end_addr = chunk->count;
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
-            emitShort(chunk, 0xFFFF, line); // Placeholder for offset
-
-            // 3. Compile the THEN branch
+            emitShort(chunk, 0xFFFF, line);
             compileStatement(node->right, chunk, getLine(node->right));
-
-            if (node->extra) { // If there's an ELSE branch (node->extra)
-                // 4a. Emit OP_JUMP to skip the ELSE branch (after THEN branch has executed)
+            if (node->extra) {
                 int jump_over_else_addr = chunk->count;
                 writeBytecodeChunk(chunk, OP_JUMP, line);
-                emitShort(chunk, 0xFFFF, line); // Placeholder
-
-                // 4b. Backpatch OP_JUMP_IF_FALSE: jump to start of ELSE branch
-                // Target is current chunk->count
-                uint16_t offsetToElse = (uint16_t)(chunk->count - (jump_to_else_or_end_addr + 1 + 2)); // +1 for opcode, +2 for its short
+                emitShort(chunk, 0xFFFF, line);
+                uint16_t offsetToElse = (uint16_t)(chunk->count - (jump_to_else_or_end_addr + 3));
                 patchShort(chunk, jump_to_else_or_end_addr + 1, offsetToElse);
-
-                // 4c. Compile the ELSE branch
                 compileStatement(node->extra, chunk, getLine(node->extra));
-
-                // 4d. Backpatch OP_JUMP (that jumps over ELSE): jump to current end
-                uint16_t offsetToEndOfIf = (uint16_t)(chunk->count - (jump_over_else_addr + 1 + 2));
+                uint16_t offsetToEndOfIf = (uint16_t)(chunk->count - (jump_over_else_addr + 3));
                 patchShort(chunk, jump_over_else_addr + 1, offsetToEndOfIf);
-            } else { // No ELSE branch
-                // 4e. Backpatch OP_JUMP_IF_FALSE to jump to end of THEN branch (current end of chunk)
-                uint16_t offsetToEndOfThen = (uint16_t)(chunk->count - (jump_to_else_or_end_addr + 1 + 2));
+            } else {
+                uint16_t offsetToEndOfThen = (uint16_t)(chunk->count - (jump_to_else_or_end_addr + 3));
                 patchShort(chunk, jump_to_else_or_end_addr + 1, offsetToEndOfThen);
             }
             break;
         }
-
-        case AST_COMPOUND: { // For BEGIN...END blocks, using AST_COMPOUND from your types.h
+        case AST_COMPOUND: {
             for (int i = 0; i < node->child_count; i++) {
                 if (node->children[i]) {
                     compileStatement(node->children[i], chunk, getLine(node->children[i]));
@@ -980,162 +617,69 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
-             int call_line = getLine(node);
-
-             // 1. Compile all arguments first and push them onto the stack.
-             for (int i = 0; i < node->child_count; i++) {
-                 if (node->children[i]) {
-                     compileExpression(node->children[i], chunk, getLine(node->children[i]));
-                 } else {
-                      fprintf(stderr, "L%d: Compiler error: NULL argument node in call to '%s'.\n", call_line, node->token ? node->token->value : "unknown_proc");
-                 }
-             }
-
-             // 2. Handle the call itself
-             if (node->token && isBuiltin(node->token->value)) {
-                 // It's a built-in. All built-ins use OP_CALL_BUILTIN.
-                 // The VM handler will pop the result for procedures.
-                 char normalized_name[MAX_SYMBOL_LENGTH];
-                 strncpy(normalized_name, node->token->value, sizeof(normalized_name) - 1);
-                 normalized_name[sizeof(normalized_name) - 1] = '\0';
-                 toLowerString(normalized_name);
-
-                 int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
-                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, call_line);
-                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, call_line);
-                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line);
-
-                 // If it was a function call used as a statement, its result must be popped.
-                 if (node->var_type != TYPE_VOID) {
-                     writeBytecodeChunk(chunk, OP_POP, call_line);
-                 }
-
-             } else if (node->token) {
-                 // It's a user-defined procedure or function call.
-                 // <<<< THIS IS THE KEY CHANGE >>>>
-                 const char* name_to_lookup = node->token->value;
-                 Symbol* proc_symbol = lookupSymbolIn(procedure_table, name_to_lookup);
-
-                 if (proc_symbol && proc_symbol->is_defined) {
-                     // Check if the number of arguments provided matches the procedure's arity.
-                     if (proc_symbol->arity != node->child_count) {
-                         fprintf(stderr, "L%d: Compiler Error: Routine '%s' expects %d arguments, but %d were given.\n", call_line, name_to_lookup, proc_symbol->arity, node->child_count);
-                         compiler_had_error = true;
-                     } else {
-                         // Emit the new OP_CALL instruction with the routine's address and arity.
-                         writeBytecodeChunk(chunk, OP_CALL, call_line);
-                         emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, call_line);
-                         writeBytecodeChunk(chunk, proc_symbol->arity, call_line);
-                     }
-                 } else {
-                     fprintf(stderr, "L%d: Compiler Error: Undefined or forward-declared procedure '%s'.\n", call_line, name_to_lookup);
-                     compiler_had_error = true;
-                 }
-
-                 // If it was a function call used as a statement, its result must also be popped.
-                 if (node->var_type != TYPE_VOID) {
-                     writeBytecodeChunk(chunk, OP_POP, call_line);
-                 }
-
-             } else {
-                  fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name.\n", call_line);
-                  compiler_had_error = true;
-             }
-             break;
-         }
-
-        default: {
-            bool was_handled_in_default = false;
-            // This default case should ideally only be reached for node types
-            // that are not explicitly handled by other cases and might be
-            // expressions used as statements, or truly unhandled statement types.
-
-            // First, specifically check if an AST_PROCEDURE_CALL reached default.
-            if (node->type == AST_PROCEDURE_CALL) {
-                // An AST_PROCEDURE_CALL should have been handled by its specific 'case AST_PROCEDURE_CALL:'.
-                // If it reaches here, it strongly indicates a problem with the switch structure itself,
-                // like a missing 'break;' in a case BEFORE 'case AST_PROCEDURE_CALL:', causing a fallthrough.
-                if (node->token && node->token->value) {
-                    char lookup_name_default[MAX_SYMBOL_LENGTH * 2 + 2];
-                    char original_display_name_default[MAX_SYMBOL_LENGTH*2 + 2];
-                    bool is_call_qualified_default = false;
-
-                    // Determine functionName and qualified names for lookup
-                    if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
-                        snprintf(original_display_name_default, sizeof(original_display_name_default), "%s.%s", node->left->token->value, node->token->value);
-                        char unit_name_lower[MAX_SYMBOL_LENGTH], func_name_lower[MAX_SYMBOL_LENGTH];
-                        strncpy(unit_name_lower, node->left->token->value, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
-                        strncpy(func_name_lower, node->token->value, sizeof(func_name_lower)-1); func_name_lower[sizeof(func_name_lower)-1] = '\0';
-                        toLowerString(unit_name_lower); toLowerString(func_name_lower);
-                        snprintf(lookup_name_default, sizeof(lookup_name_default), "%s.%s", unit_name_lower, func_name_lower);
-                        is_call_qualified_default = true;
-                    } else {
-                        strncpy(original_display_name_default, node->token->value, sizeof(original_display_name_default)-1); original_display_name_default[sizeof(original_display_name_default)-1] = '\0';
-                        strncpy(lookup_name_default, node->token->value, sizeof(lookup_name_default)-1); lookup_name_default[sizeof(lookup_name_default)-1] = '\0';
-                        toLowerString(lookup_name_default);
-                    }
-
-                    bool is_function = false;
-                    // Check if it's a known function (built-in or user-defined) that returns a value
-                    if (isBuiltin(node->token->value) && !is_call_qualified_default && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
-                        is_function = true;
-                    } else if (!isBuiltin(node->token->value) || is_call_qualified_default) {
-                        Symbol* sym = lookupSymbolIn(procedure_table, lookup_name_default);
-                        if (sym && sym->type != TYPE_VOID && sym->is_defined) { // Check if it's a defined function
-                            is_function = true;
-                        }
-                    }
-
-                    if (is_function) {
-                        // This is a function call being used as a statement. Compile it and pop its result.
-                        fprintf(stderr, "L%d: Compiler Info (compileStatement default): Compiling function call '%s' as statement (result will be popped).\n", line, original_display_name_default);
-                        compileExpression(node, chunk, line); // This will call compileExpression's AST_PROCEDURE_CALL case
-                        writeBytecodeChunk(chunk, OP_POP, line);
-                    } else {
-                        // This is an AST_PROCEDURE_CALL for an actual procedure (or undefined)
-                        // that incorrectly reached the default case.
-                        fprintf(stderr, "L%d: Compiler FATAL ERROR: Procedure call '%s' (type: %s) reached default case in compileStatement. This implies a missing 'break;' in a case before 'case AST_PROCEDURE_CALL:'.\n",
-                                line, original_display_name_default, astTypeToString(node->type));
+            int call_line = getLine(node);
+            for (int i = 0; i < node->child_count; i++) {
+                if (node->children[i]) {
+                    compileExpression(node->children[i], chunk, getLine(node->children[i]));
+                }
+            }
+            if (node->token && isBuiltin(node->token->value)) {
+                char normalized_name[MAX_SYMBOL_LENGTH];
+                strncpy(normalized_name, node->token->value, sizeof(normalized_name) - 1);
+                normalized_name[sizeof(normalized_name) - 1] = '\0';
+                toLowerString(normalized_name);
+                int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, call_line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, call_line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line);
+                if (node->var_type != TYPE_VOID) {
+                    writeBytecodeChunk(chunk, OP_POP, call_line);
+                }
+            } else if (node->token) {
+                const char* name_to_lookup = node->token->value;
+                Symbol* proc_symbol = lookupSymbolIn(procedure_table, name_to_lookup);
+                if (proc_symbol && proc_symbol->is_defined) {
+                    int expected_arity = proc_symbol->type_def ? proc_symbol->type_def->child_count : proc_symbol->arity;
+                    if (expected_arity != node->child_count) {
+                        fprintf(stderr, "L%d: Compiler Error: Routine '%s' expects %d arguments, but %d were given.\n", call_line, name_to_lookup, expected_arity, node->child_count);
                         compiler_had_error = true;
+                    } else {
+                        writeBytecodeChunk(chunk, OP_CALL, call_line);
+                        emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, call_line);
+                        writeBytecodeChunk(chunk, (uint8_t)expected_arity, call_line);
                     }
                 } else {
-                     fprintf(stderr, "L%d: Compiler WARNING: AST_PROCEDURE_CALL without a callable token reached default statement handler.\n", line);
-                     compiler_had_error = true;
+                    fprintf(stderr, "L%d: Compiler Error: Undefined or forward-declared procedure '%s'.\n", call_line, name_to_lookup);
+                    compiler_had_error = true;
                 }
-                was_handled_in_default = true;
-            }
-            // Handle other specific expression types that might be standalone statements
-            // This part should NOT include AST_PROCEDURE_CALL, as it's handled above.
-            else if ( (node->type >= AST_BINARY_OP && node->type <= AST_VARIABLE && node->type != AST_PROCEDURE_CALL) ||
-                      (node->type == AST_NUMBER) || (node->type == AST_STRING) || (node->type == AST_BOOLEAN) ||
-                      (node->type == AST_NIL) || (node->type == AST_FIELD_ACCESS) || (node->type == AST_ARRAY_ACCESS) ||
-                      (node->type == AST_DEREFERENCE) || (node->type == AST_FORMATTED_EXPR)
-                    ) {
-                #ifdef DEBUG
-                if(dumpExec) fprintf(stderr, "L%d: Compiler Info: compileStatement default: Treating AST node %s as expression statement (will be popped).\n", line, astTypeToString(node->type));
-                #endif
-                compileExpression(node, chunk, line);
-                writeBytecodeChunk(chunk, OP_POP, line);
-                was_handled_in_default = true;
-            } else if (node->type == AST_NOOP) {
-                // Do nothing for NOOP
-                was_handled_in_default = true;
-            }
-
-            if (!was_handled_in_default) {
-                 fprintf(stderr, "L%d: Compiler WARNING: Unhandled AST node type %s in compileStatement's default case.\n", line, astTypeToString(node->type));
-                 // compiler_had_error = true; // Optionally make this an error
+                if (node->var_type != TYPE_VOID) {
+                    writeBytecodeChunk(chunk, OP_POP, call_line);
+                }
+            } else {
+                fprintf(stderr, "L%d: Compiler Error: AST_PROCEDURE_CALL node missing token for procedure name.\n", call_line);
+                compiler_had_error = true;
             }
             break;
-        } // End default case
+        }
+        default: {
+            if (node->type >= AST_BINARY_OP || node->type == AST_NOOP) {
+                compileExpression(node, chunk, line);
+                writeBytecodeChunk(chunk, OP_POP, line);
+            } else {
+                 fprintf(stderr, "L%d: Compiler WARNING: Unhandled AST node type %s in compileStatement's default case.\n", line, astTypeToString(node->type));
+            }
+            break;
+        }
     }
 }
 
 static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx) {
+#ifdef DEBUG
     fprintf(stderr, ">>>> DEBUG: compileExpression: ENTERED for Node Type: %s, Token: '%s' <<<<\n",
-                node ? astTypeToString(node->type) : "NULL_NODE",
-                node && node->token ? (node->token->value ? node->token->value : "N/A_VAL") : "NO_TOKEN");
+            node ? astTypeToString(node->type) : "NULL_NODE",
+            node && node->token ? (node->token->value ? node->token->value : "N/A_VAL") : "NO_TOKEN");
         fflush(stderr);
+#endif
     if (!node) return;
     int line = getLine(node);
     if (line <= 0) line = current_line_approx;
@@ -1156,6 +700,22 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
         }
+        case AST_FORMATTED_EXPR: {
+            // First, compile the expression to be formatted. Its value will be on the stack.
+            compileExpression(node->left, chunk, getLine(node->left));
+
+            // Now, parse the width and precision from the token
+            int width = 0, decimals = -1; // -1 indicates not specified
+            if (node->token && node->token->value) {
+                sscanf(node->token->value, "%d,%d", &width, &decimals);
+            }
+
+            // Emit the format opcode and its operands
+            writeBytecodeChunk(chunk, OP_FORMAT_VALUE, line);
+            writeBytecodeChunk(chunk, (uint8_t)width, line);
+            writeBytecodeChunk(chunk, (uint8_t)decimals, line); // Using -1 (0xFF) for "not specified"
+            break;
+        }
         case AST_STRING: {
             if (!node_token || !node_token->value) { /* error */ break; }
             Value strVal = makeString(node_token->value);
@@ -1167,7 +727,17 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
         case AST_VARIABLE: {
             if (!node_token || !node_token->value) { /* error */ break; }
             const char* varName = node_token->value;
-            if (strcasecmp(varName, "quitrequested") == 0) {
+
+            int local_slot = -1;
+            if (current_function_compiler) {
+                local_slot = resolveLocal(current_function_compiler, varName);
+            }
+
+            if (local_slot != -1) {
+                // It's a local variable.
+                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
+            } else if (strcasecmp(varName, "quitrequested") == 0) {
                 // Special handling for QuitRequested: compile as a host function call
                 // This mirrors the AST interpreter's special handling for this variable.
                 #ifdef DEBUG
@@ -1243,6 +813,8 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                     case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, OP_INT_DIV, line); break;
                     case TOKEN_AND:           writeBytecodeChunk(chunk, OP_AND, line); break;
                     case TOKEN_OR:            writeBytecodeChunk(chunk, OP_OR, line); break;
+                    case TOKEN_SHL:           writeBytecodeChunk(chunk, OP_SHL, line); break; 
+                    case TOKEN_SHR:           writeBytecodeChunk(chunk, OP_SHR, line); break;
                     case TOKEN_EQUAL:         writeBytecodeChunk(chunk, OP_EQUAL, line); break;
                     case TOKEN_NOT_EQUAL:     writeBytecodeChunk(chunk, OP_NOT_EQUAL, line); break;
                     case TOKEN_LESS:          writeBytecodeChunk(chunk, OP_LESS, line); break;
@@ -1358,7 +930,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                     writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
                     // This host function is expected to push its boolean result.
                 }
-            } else if (isBuiltin(functionName) && !isCallQualified) {
+            } else if (isBuiltin(functionName)) {
                 BuiltinRoutineType type = getBuiltinType(functionName); // From builtin.h
 
                 if (type == BUILTIN_TYPE_PROCEDURE) {
@@ -1415,23 +987,25 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                 Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
 
                 if (func_symbol && func_symbol->is_defined) {
-                    // Assuming func_symbol->type (VarType) == TYPE_VOID means it's a procedure in Pascal terms.
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function in an expression(compileExpression).\n", line, original_display_name);
                         compiler_had_error = true;
                         for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
                         writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
-                    } else if (func_symbol->arity != arg_count) {
-                        fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, but %d were given.\n", line, original_display_name, func_symbol->arity, arg_count);
-                        compiler_had_error = true;
-                        for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
                     } else {
-                        writeBytecodeChunk(chunk, OP_CALL, line);
-                        emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
-                        writeBytecodeChunk(chunk, arg_count, line); // Pass actual arg_count
+                        int expected_arity = func_symbol->type_def ? func_symbol->type_def->child_count : 0;
+                        if (expected_arity != arg_count) {
+                            fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, but %d were given.\n", line, original_display_name, expected_arity, arg_count);
+                            compiler_had_error = true;
+                            for(uint8_t i=0; i<arg_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                            writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                            writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                        } else {
+                            writeBytecodeChunk(chunk, OP_CALL, line);
+                            emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
+                            writeBytecodeChunk(chunk, arg_count, line);
+                        }
                     }
                 } else {
                      if (func_symbol && !func_symbol->is_defined) {
@@ -1457,3 +1031,78 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             break;
     }
 }
+
+static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line) {
+    if (!container) {
+        fprintf(stderr, "L%d: Compiler internal error: compileStoreForLValue called with null container.\n", line);
+        return;
+    }
+
+    switch (container->type) {
+        case AST_VARIABLE:
+            int local_slot = -1;
+            if (current_function_compiler) {
+                local_slot = resolveLocal(current_function_compiler, container->token->value);
+            }
+
+            if (local_slot != -1) {
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
+            } else {
+                // Fallback to global
+                int nameIndex = addConstantToChunk(chunk, makeString(container->token->value));
+                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+            }
+            break;
+
+        case AST_ARRAY_ACCESS:
+            // The modified element is on the stack. Now we store it in the array.
+            // Stack: [ModifiedElement]
+            // We need to get it to: [Array, Index, ModifiedElement] for OP_SET_ELEMENT.
+
+            // 1. Get the container array.
+            compileExpression(container->left, chunk, getLine(container->left));
+            // Stack: [ModifiedElement, Array]
+            // 2. Swap them.
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            // Stack: [Array, ModifiedElement]
+            // 3. Get the index.
+            compileExpression(container->children[0], chunk, getLine(container->children[0]));
+            // Stack: [Array, ModifiedElement, Index]
+            // 4. Swap again.
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            // Stack: [Array, Index, ModifiedElement]
+            writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
+
+            // Now the modified array is on the stack. Recursively store IT back.
+            compileStoreForLValue(container->left, chunk, line);
+            break;
+
+        case AST_FIELD_ACCESS:
+            // The modified field value is on the stack. Now we store it in the record.
+            // Stack: [ModifiedFieldValue]
+            // We need to get it to: [Record, ModifiedFieldValue] for OP_SET_FIELD.
+
+            // 1. Get the container record.
+            compileExpression(container->left, chunk, getLine(container->left));
+            // Stack: [ModifiedFieldValue, Record]
+            // 2. Swap them.
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            // Stack: [Record, ModifiedFieldValue]
+            int fieldNameIndex = addConstantToChunk(chunk, makeString(container->token->value));
+            writeBytecodeChunk(chunk, OP_SET_FIELD, line);
+            writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+
+            // Now the modified record is on the stack. Recursively store IT back.
+            compileStoreForLValue(container->left, chunk, line);
+            break;
+
+        default:
+            fprintf(stderr, "L%d: Compiler error: Cannot store back into LValue container of type %s.\n", line, astTypeToString(container->type));
+            // Pop the value that was meant to be stored to prevent stack corruption.
+            writeBytecodeChunk(chunk, OP_POP, line);
+            break;
+    }
+}
+

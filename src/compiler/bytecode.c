@@ -65,11 +65,13 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From 
 }
 
 int addConstantToChunk(BytecodeChunk* chunk, Value value) {
+#ifdef DEBUG
     fprintf(stderr, "[DEBUG addConstantToChunk] ENTER. Adding value type %s. chunk ptr: %p\n", varTypeToString(value.type), (void*)chunk);
     if (value.type == TYPE_STRING) {
         fprintf(stderr, "[DEBUG addConstantToChunk] String value to add: '%s'\n", value.s_val ? value.s_val : "NULL_SVAL");
     }
     fflush(stderr);
+#endif
 
     // First, check if an identical constant already exists to avoid duplicates.
     for (int i = 0; i < chunk->constants_count; i++) {
@@ -91,22 +93,28 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
     }
 
     if (chunk->constants_capacity < chunk->constants_count + 1) {
+#ifdef DEBUG
         fprintf(stderr, "[DEBUG addConstantToChunk] Reallocating constants. Old cap: %d, Old count: %d\n", chunk->constants_capacity, chunk->constants_count);
         fflush(stderr);
+#endif
         int oldCapacity = chunk->constants_capacity;
         chunk->constants_capacity = oldCapacity < 8 ? 8 : oldCapacity * 2;
         chunk->constants = (Value*)reallocate(chunk->constants,
                                              sizeof(Value) * oldCapacity,
                                              sizeof(Value) * chunk->constants_capacity);
+#ifdef DEBUG
         fprintf(stderr, "[DEBUG addConstantToChunk] Reallocated. New cap: %d. chunk->constants ptr: %p\n", chunk->constants_capacity, (void*)chunk->constants);
         fflush(stderr);
+#endif
     }
 
+#ifdef DEBUG
     fprintf(stderr, "[DEBUG addConstantToChunk] BEFORE assignment: chunk->constants_count = %d. Dest addr: %p. Value.s_val addr: %p\n",
             chunk->constants_count,
             (void*)&(chunk->constants[chunk->constants_count]),
             (void*)(value.type == TYPE_STRING ? value.s_val : NULL));
     fflush(stderr);
+#endif
 
     // <<<< FIX: Perform a deep copy into the constants array >>>>
     // This ensures the chunk owns its own copy of all data.
@@ -116,6 +124,7 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
     // Since we made a deep copy, we must now free the original.
     freeValue(&value);
 
+#ifdef DEBUG
     fprintf(stderr, "[DEBUG addConstantToChunk] AFTER assignment. Copied value type %s to index %d.\n",
             varTypeToString(chunk->constants[chunk->constants_count].type), chunk->constants_count);
     if (chunk->constants[chunk->constants_count].type == TYPE_STRING) {
@@ -123,6 +132,7 @@ int addConstantToChunk(BytecodeChunk* chunk, Value value) {
                  chunk->constants[chunk->constants_count].s_val ? chunk->constants[chunk->constants_count].s_val : "NULL_SVAL_COPIED");
     }
     fflush(stderr);
+#endif
 
     return chunk->constants_count++;
 }
@@ -181,6 +191,8 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_CONSTANT: {
             uint8_t constant_index = chunk->code[offset + 1];
             printf("%-16s %4d '", "OP_CONSTANT", constant_index);
+
+            // This block should only READ and PRINT, not call addConstantToChunk
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
@@ -188,7 +200,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
-                case TYPE_NIL:     printf("nil"); break; // Assuming you might add TYPE_NIL to Value printing
+                case TYPE_NIL:     printf("nil"); break;
                 default: printf("Value type %s", varTypeToString(constantValue.type)); break;
             }
             printf("'\n");
@@ -210,6 +222,8 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_INT_DIV:  printf("OP_INT_DIV\n"); return offset + 1;
         case OP_AND:      printf("OP_AND\n"); return offset + 1;
         case OP_OR:       printf("OP_OR\n"); return offset + 1;
+        case OP_SHL:      printf("OP_SHL\n"); return offset + 1;
+        case OP_SHR:      printf("OP_SHR\n"); return offset + 1;
             
         case OP_GET_ELEMENT: printf("OP_GET_ELEMENT\n"); return offset + 1;
         case OP_SET_ELEMENT: printf("OP_SET_ELEMENT\n"); return offset + 1;
@@ -296,6 +310,11 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_WRITE_LN: {
             uint8_t arg_count = chunk->code[offset + 1];
             printf("%-16s %4d (args)\n", "OP_WRITE_LN", arg_count);
+            return offset + 2;
+        }
+        case OP_WRITE: {
+            uint8_t arg_count = chunk->code[offset + 1];
+            printf("%-16s %4d (args)\n", "OP_WRITE", arg_count);
             return offset + 2;
         }
         case OP_CALL_HOST: {
