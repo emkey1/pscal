@@ -907,8 +907,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_JUMP: {
-                uint16_t offset_val = READ_SHORT(vm); // Use READ_SHORT(vm) to pass vm
-                vm->ip += offset_val;
+                uint16_t offset = READ_SHORT(vm);
+                vm->ip += (int16_t)offset;
                 break;
             }
             case OP_WRITE_LN: {
