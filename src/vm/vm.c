@@ -706,23 +706,44 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
 
                     VarType elem_var_type = (VarType)READ_BYTE();
-                    
+
                     // The element type name is for disassembly/debugging, so we consume the byte but don't use it.
                     (void)READ_BYTE();
-                    
+
                     Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, NULL);
-                    
+
                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                     if (sym == NULL) {
-                        sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL);
+                        // Replace the call to createSymbolForVM with manual symbol creation
+                        // to avoid the unnecessary and problematic call to makeValueForType.
+                        sym = (Symbol*)malloc(sizeof(Symbol));
                         if (!sym) {
-                            runtimeError(vm, "VM Error: Failed to create symbol for global array '%s'.", varNameVal.s_val);
-                            freeValue(&array_val);
-                            free(lower_bounds); free(upper_bounds);
-                            return INTERPRET_RUNTIME_ERROR;
+                            runtimeError(vm, "VM Error: Malloc failed for Symbol struct for global array '%s'.", varNameVal.s_val);
+                            freeValue(&array_val); free(lower_bounds); free(upper_bounds); return INTERPRET_RUNTIME_ERROR;
                         }
-                        freeValue(sym->value);
+                        sym->name = strdup(varNameVal.s_val);
+                        if (!sym->name) {
+                            runtimeError(vm, "VM Error: Malloc failed for symbol name for global array '%s'.", varNameVal.s_val);
+                            free(sym); freeValue(&array_val); free(lower_bounds); free(upper_bounds); return INTERPRET_RUNTIME_ERROR;
+                        }
+                        toLowerString(sym->name);
+                        
+                        sym->type = declaredType; // This is TYPE_ARRAY
+                        sym->type_def = NULL;     // We don't have the AST node in the VM
+                        sym->value = (Value*)malloc(sizeof(Value));
+                        if (!sym->value) {
+                             runtimeError(vm, "VM Error: Malloc failed for Value struct for global array '%s'.", varNameVal.s_val);
+                             free(sym->name); free(sym); freeValue(&array_val); free(lower_bounds); free(upper_bounds); return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        // Directly assign the correctly-created array value, bypassing makeValueForType(TYPE_ARRAY, NULL).
                         *(sym->value) = array_val;
+
+                        sym->is_alias = false;
+                        sym->is_const = false;
+                        sym->is_local_var = false;
+                        sym->next = NULL;
+
                         hashTableInsert(vm->vmGlobalSymbols, sym);
                     } else {
                         runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
@@ -734,7 +755,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     free(upper_bounds);
                 } else {
                     (void)READ_BYTE(); // Consume the type specifier byte for non-array types
-                    
+
                      if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
                          runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
                          return INTERPRET_RUNTIME_ERROR;
@@ -1040,7 +1061,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&index_val);
                 }
 
-                Value array_val = pop(vm);
+                Value array_val = pop(vm); // This is a shallow copy from the stack
                 if (array_val.type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Cannot index non-array type.");
                     free(indices);
@@ -1058,10 +1079,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                      return INTERPRET_RUNTIME_ERROR;
                 }
 
+                // Create a deep copy of the single element we want to push to the stack.
                 Value element_copy = makeCopyOfValue(&array_val.array_val[offset]);
-
-                // DO NOT free the temporary 'array_val' copy, as it would free the underlying data buffer.
                 
+                // The Value struct 'array_val' is a copy from the stack and will go out of scope.
+                // We do not free it, because that would free the data buffer of the original symbol.
                 push(vm, element_copy);
                 goto next_instruction;
             }
@@ -1087,42 +1109,40 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&index_val);
                 }
 
-                // Pop the original array struct from the stack.
-                Value array_val_orig = pop(vm);
-                if (array_val_orig.type != TYPE_ARRAY) {
+                // Pop the original array struct. This is a shallow copy containing
+                // pointers to the actual data buffers we want to modify.
+                Value array_val = pop(vm);
+                if (array_val.type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Cannot index non-array type.");
                     free(indices);
-                    freeValue(&array_val_orig);
+                    freeValue(&array_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Before modifying, make a deep copy. This is the crucial fix.
-                Value array_val_copy = makeCopyOfValue(&array_val_orig);
-
-                // We no longer need the original shallow copy that was on the stack.
-                freeValue(&array_val_orig);
-                
-                int offset = computeFlatOffset(&array_val_copy, indices);
+                // We will modify this array's data directly in place,
+                // rather than creating a deep copy.
+                int offset = computeFlatOffset(&array_val, indices);
                 free(indices);
 
-                int total_size = calculateArrayTotalSize(&array_val_copy);
-                if (offset < 0 || offset >= total_size) {
+                int total_size = calculateArrayTotalSize(&array_val);
+                 if (offset < 0 || offset >= total_size) {
                      runtimeError(vm, "VM Error: Calculated array offset (%d) is out of bounds (size %d).", offset, total_size);
-                     freeValue(&array_val_copy);
+                     freeValue(&array_val); // Free the popped array value
                      return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Free the default value at the target location in our new copy
-                freeValue(&array_val_copy.array_val[offset]);
+                // Free the contents of the *old element* at the target location.
+                freeValue(&array_val.array_val[offset]);
 
-                // Place a copy of the new value into our new copy of the array
-                array_val_copy.array_val[offset] = makeCopyOfValue(&value_to_set);
+                // Place a deep copy of the new value into the element slot.
+                array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
                 
-                // We are done with the value-to-set, it has been copied into the array.
+                // We are done with the value_to_set that was on the stack.
                 freeValue(&value_to_set);
 
-                // Push the new, modified, deep-copied array onto the stack for OP_SET_GLOBAL
-                push(vm, array_val_copy);
+                // Push the MODIFIED array value back onto the stack for the
+                // subsequent OP_SET_GLOBAL instruction.
+                push(vm, array_val);
                 goto next_instruction;
             }
             case OP_GET_FIELD: {

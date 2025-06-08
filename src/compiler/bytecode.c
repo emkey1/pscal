@@ -224,9 +224,32 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_OR:       printf("OP_OR\n"); return offset + 1;
         case OP_SHL:      printf("OP_SHL\n"); return offset + 1;
         case OP_SHR:      printf("OP_SHR\n"); return offset + 1;
-            
-        case OP_GET_ELEMENT: printf("OP_GET_ELEMENT\n"); return offset + 1;
-        case OP_SET_ELEMENT: printf("OP_SET_ELEMENT\n"); return offset + 1;
+
+        // --- START MODIFICATION ---
+
+        case OP_GET_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_GET_LOCAL", slot);
+            return offset + 2;
+        }
+        case OP_SET_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_SET_LOCAL", slot);
+            return offset + 2;
+        }
+        case OP_GET_ELEMENT: {
+            uint8_t dims = chunk->code[offset + 1];
+            printf("%-16s %4d (dims)\n", "OP_GET_ELEMENT", dims);
+            return offset + 2;
+        }
+        case OP_SET_ELEMENT: {
+            uint8_t dims = chunk->code[offset + 1];
+            printf("%-16s %4d (dims)\n", "OP_SET_ELEMENT", dims);
+            return offset + 2;
+        }
+
+        // --- END MODIFICATION ---
+
         case OP_GET_FIELD: {
             uint8_t const_idx = chunk->code[offset + 1];
             printf("%-16s %4d '%s'\n", "OP_GET_FIELD", const_idx,
@@ -254,7 +277,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_DEFINE_GLOBAL: {
             uint8_t name_idx = chunk->code[offset + 1];
             VarType declaredType = (VarType)chunk->code[offset + 2];
-            
+
             printf("%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL", name_idx);
             if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
                 printf("'%s' ", chunk->constants[name_idx].s_val);
@@ -262,7 +285,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 printf("INVALID_NAME_IDX ");
             }
             printf("Type:%s ", varTypeToString(declaredType));
-            
+
             int current_offset = offset + 3;
             if (declaredType == TYPE_ARRAY) {
                 if (current_offset < chunk->count) {
@@ -385,11 +408,25 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_HALT:
             printf("OP_HALT\n");
             return offset + 1;
+        case OP_FORMAT_VALUE: {
+            uint8_t width = chunk->code[offset+1];
+            uint8_t precision = chunk->code[offset+2];
+            printf("%-16s width:%d prec:%d\n", "OP_FORMAT_VALUE", width, (int8_t)precision);
+            return offset + 3;
+        }
+        // These cases were missing but are not in the provided dump. Added for completeness.
+        case OP_CALL_BUILTIN_PROC: // This and USER_PROC might not be used yet
+             printf("%-16s (not fully impl.)\n", "OP_CALL_BUILTIN_PROC");
+             return offset + 3; // Placeholder for name_idx, arg_count
+        case OP_CALL_USER_PROC:
+             printf("%-16s (not fully impl.)\n", "OP_CALL_USER_PROC");
+             return offset + 3; // Placeholder for name_idx, arg_count
         default:
             printf("Unknown opcode %02X\n", instruction);
             return offset + 1;
     }
 }
+
 
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable) {
     printf("== Disassembly: %s ==\n", name);

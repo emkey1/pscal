@@ -319,42 +319,55 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             }
             break;
         }
+
         case AST_VAR_DECL: {
             // If we are not compiling a function, these are global variables.
              if (current_function_compiler == NULL) {
                   VarType declared_type_enum = node->var_type;
                   AST* type_specifier_node = node->right;
-                 
+
+                  // --- START MODIFICATION ---
+
+                  // First, resolve the type alias if one exists.
                   AST* actual_type_def_node = type_specifier_node;
                   if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
-                      actual_type_def_node = lookupType(actual_type_def_node->token->value);
+                      AST* resolved_node = lookupType(actual_type_def_node->token->value);
+                      if(resolved_node) {
+                          actual_type_def_node = resolved_node;
+                      } else {
+                          fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                          compiler_had_error = true;
+                          break; // Stop processing this broken VAR_DECL
+                      }
                   }
-                 
-                  if (node->children) {
-                      for (int i = 0; i < node->child_count; i++) {
-                          AST* varNameNode = node->children[i];
-                          if (varNameNode && varNameNode->token) {
-                              // This part is the same: add the variable name to constants
-                              int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                              
-                              // Emit the define opcode and the name index
-                              writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
-                              writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
-                              
-                              // Now, emit type information based on the type
-                              writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
 
-                              if (declared_type_enum == TYPE_ARRAY && actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
-                                                          int dimension_count = actual_type_def_node->child_count;
+                  // Check if a definition was found
+                  if (!actual_type_def_node) {
+                      fprintf(stderr, "L%d: Compiler error: Could not determine type definition for a variable declaration.\n", getLine(node));
+                      compiler_had_error = true;
+                      break;
+                  }
+
+                  // Now, handle based on the *actual* resolved type
+                  if (actual_type_def_node->type == AST_ARRAY_TYPE) {
+                      // This block now correctly handles both inline arrays and aliased arrays like 'Matrix'.
+                      if (node->children) {
+                          for (int i = 0; i < node->child_count; i++) {
+                              AST* varNameNode = node->children[i];
+                              if (varNameNode && varNameNode->token) {
+                                  int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                                  writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
+                                  writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
+                                  writeBytecodeChunk(chunk, (uint8_t)TYPE_ARRAY, getLine(varNameNode)); // Explicitly TYPE_ARRAY
+
+                                  int dimension_count = actual_type_def_node->child_count;
                                   if (dimension_count > 255) {
-                                      fprintf(stderr, "L%d: Compiler error: Maximum number of array dimensions (255) exceeded.\n", getLine(varNameNode));
+                                      fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", getLine(varNameNode));
                                       compiler_had_error = true;
-                                      break; // Exit the loop for this var decl group
+                                      break;
                                   }
-                                  // Emit the number of dimensions as an operand
                                   writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
 
-                                  // Loop through each dimension to emit its bounds
                                   for (int dim = 0; dim < dimension_count; dim++) {
                                       AST* subrange = actual_type_def_node->children[dim];
                                       if (subrange && subrange->type == AST_SUBRANGE) {
@@ -367,36 +380,40 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                       } else {
                                           fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
                                           compiler_had_error = true;
-                                          // Emit dummy operands to maintain instruction size if needed, or just break
-                                          writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                          writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                          writeBytecodeChunk(chunk, 0, getLine(varNameNode)); writeBytecodeChunk(chunk, 0, getLine(varNameNode));
                                       }
                                   }
 
-                                  // Emit element type information
                                   AST* elem_type = actual_type_def_node->right;
-                                  // NEW: Emit the VarType enum of the element type
                                   writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
-
-                                  // OLD: Just emit the name
                                   const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                                   uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
                                   writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
-                              } else if (declared_type_enum == TYPE_RECORD || (type_specifier_node && type_specifier_node->type == AST_TYPE_REFERENCE)) {
-                                 // --- LOGIC FOR NAMED TYPES ---
-                                 const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
-                                 uint8_t type_name_idx = addConstantToChunk(chunk, makeString(type_name));
-                                 writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode));
-                              } else {
-                                 // --- LOGIC FOR SIMPLE TYPES ---
-                                 // Simple type, needs a placeholder operand.
-                                 writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                  resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                               }
-                              
-                              resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
+                          }
+                      }
+                  } else {
+                      // This block handles simple types, records, and other named types that are not arrays.
+                      if (node->children) {
+                          for (int i = 0; i < node->child_count; i++) {
+                              AST* varNameNode = node->children[i];
+                              if (varNameNode && varNameNode->token) {
+                                  int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                                  writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
+                                  writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
+                                  writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
+
+                                  // For non-arrays, just emit the type name index as before.
+                                  const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
+                                  uint8_t type_name_idx = addConstantToChunk(chunk, makeString(type_name));
+                                  writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode));
+                                  resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
+                              }
                           }
                       }
                   }
+                  // --- END MODIFICATION ---
              }
              // If current_function_compiler is NOT NULL, we are inside a function.
              // Do nothing, as compileDefinedFunction has already processed the local vars.

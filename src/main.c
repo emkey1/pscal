@@ -174,10 +174,10 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             
             if (compilation_ok_for_vm) {
                 fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
-#ifdef DEBUG
-                if (dumpExec) {
+#ifndef DEBUG
+             //   if (dumpExec) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                }
+              //  }
 #endif
                 fprintf(stderr, "\n--- Executing Program with VM ---\n");
                 VM vm;
