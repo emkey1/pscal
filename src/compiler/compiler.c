@@ -905,6 +905,7 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
                     case TOKEN_MUL:           writeBytecodeChunk(chunk, OP_MULTIPLY, line); break;
                     case TOKEN_SLASH:         writeBytecodeChunk(chunk, OP_DIVIDE, line); break;
                     case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, OP_INT_DIV, line); break;
+                    case TOKEN_MOD:           writeBytecodeChunk(chunk, OP_MOD, line); break;
                     case TOKEN_AND:           writeBytecodeChunk(chunk, OP_AND, line); break;
                     case TOKEN_OR:            writeBytecodeChunk(chunk, OP_OR, line); break;
                     case TOKEN_SHL:           writeBytecodeChunk(chunk, OP_SHL, line); break; 

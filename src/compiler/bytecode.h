@@ -29,7 +29,8 @@ typedef enum {
     OP_LESS,
     OP_LESS_EQUAL,
     OP_INT_DIV,
-    OP_AND,         
+    OP_MOD, 
+    OP_AND,
     OP_OR,
     OP_SHL,           // Bit Shift Left
     OP_SHR,           // Bit Shift Right

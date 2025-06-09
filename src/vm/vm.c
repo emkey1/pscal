@@ -461,6 +461,28 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val);
                 break;
             }
+            case OP_MOD: {
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                if (IS_INTEGER(a_val) && IS_INTEGER(b_val)) {
+                    long long ia = AS_INTEGER(a_val);
+                    long long ib = AS_INTEGER(b_val);
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Modulo by zero.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeInt(ia % ib));
+                } else {
+                    runtimeError(vm, "Runtime Error: Operands for 'mod' must be integers. Got %s and %s.",
+                                 varTypeToString(a_val.type), varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
             case OP_SHL:
             case OP_SHR: {
                 Value b_val = pop(vm); // Shift amount

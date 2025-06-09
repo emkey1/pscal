@@ -220,6 +220,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_LESS:          printf("OP_LESS\n"); return offset + 1;
         case OP_LESS_EQUAL:    printf("OP_LESS_EQUAL\n"); return offset + 1;
         case OP_INT_DIV:  printf("OP_INT_DIV\n"); return offset + 1;
+        case OP_MOD:      printf("OP_MOD\n"); return offset + 1; 
         case OP_AND:      printf("OP_AND\n"); return offset + 1;
         case OP_OR:       printf("OP_OR\n"); return offset + 1;
         case OP_SHL:      printf("OP_SHL\n"); return offset + 1;
