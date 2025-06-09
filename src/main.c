@@ -174,24 +174,24 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             
             if (compilation_ok_for_vm) {
                 fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
-#ifndef DEBUG
-             //   if (dumpExec) {
+#ifdef DEBUG
+            if (dumpExec) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-              //  }
+            }
 #endif
-                fprintf(stderr, "\n--- Executing Program with VM ---\n");
-                VM vm;
-                initVM(&vm);
-                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table); 
-                freeVM(&vm);
-                globalSymbols = NULL; // Prevent subsequent freeHashTable(globalSymbols) in main's cleanup.
-                
-                if (result_vm == INTERPRET_OK) {
-                    fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
-                    overall_success_status = true;
-                } else {
-                    fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
-                            result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
+            fprintf(stderr, "\n--- Executing Program with VM ---\n");
+            VM vm;
+            initVM(&vm);
+            InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+            freeVM(&vm);
+            globalSymbols = NULL; // Prevent subsequent freeHashTable(globalSymbols) in main's cleanup.
+            
+            if (result_vm == INTERPRET_OK) {
+                fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
+                overall_success_status = true;
+            } else {
+                fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
+                        result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
                     overall_success_status = false;
                 }
             } else {

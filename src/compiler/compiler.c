@@ -321,103 +321,80 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         }
 
         case AST_VAR_DECL: {
-            // If we are not compiling a function, these are global variables.
-             if (current_function_compiler == NULL) {
-                  VarType declared_type_enum = node->var_type;
-                  AST* type_specifier_node = node->right;
+            if (current_function_compiler == NULL) { // Global variables
+                AST* type_specifier_node = node->right;
 
-                  // --- START MODIFICATION ---
+                // --- START: MODIFIED LOGIC ---
 
-                  // First, resolve the type alias if one exists.
-                  AST* actual_type_def_node = type_specifier_node;
-                  if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
-                      AST* resolved_node = lookupType(actual_type_def_node->token->value);
-                      if(resolved_node) {
-                          actual_type_def_node = resolved_node;
-                      } else {
-                          fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
-                          compiler_had_error = true;
-                          break; // Stop processing this broken VAR_DECL
-                      }
-                  }
+                // First, resolve the type alias if one exists.
+                AST* actual_type_def_node = type_specifier_node;
+                if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                    AST* resolved_node = lookupType(actual_type_def_node->token->value);
+                    if (resolved_node) {
+                        actual_type_def_node = resolved_node; // This now points to the AST_ARRAY_TYPE node
+                    } else {
+                        fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                        compiler_had_error = true;
+                        break;
+                    }
+                }
 
-                  // Check if a definition was found
-                  if (!actual_type_def_node) {
-                      fprintf(stderr, "L%d: Compiler error: Could not determine type definition for a variable declaration.\n", getLine(node));
-                      compiler_had_error = true;
-                      break;
-                  }
+                if (!actual_type_def_node) {
+                    fprintf(stderr, "L%d: Compiler error: Could not determine type definition for a variable declaration.\n", getLine(node));
+                    compiler_had_error = true;
+                    break;
+                }
 
-                  // Now, handle based on the *actual* resolved type
-                  if (actual_type_def_node->type == AST_ARRAY_TYPE) {
-                      // This block now correctly handles both inline arrays and aliased arrays like 'Matrix'.
-                      if (node->children) {
-                          for (int i = 0; i < node->child_count; i++) {
-                              AST* varNameNode = node->children[i];
-                              if (varNameNode && varNameNode->token) {
-                                  int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                                  writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
-                                  writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
-                                  writeBytecodeChunk(chunk, (uint8_t)TYPE_ARRAY, getLine(varNameNode)); // Explicitly TYPE_ARRAY
+                // Now, handle based on the *actual* resolved type definition
+                for (int i = 0; i < node->child_count; i++) {
+                    AST* varNameNode = node->children[i];
+                    if (varNameNode && varNameNode->token) {
+                        int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)node->var_type, getLine(varNameNode)); // The overall type (e.g., TYPE_ARRAY)
 
-                                  int dimension_count = actual_type_def_node->child_count;
-                                  if (dimension_count > 255) {
-                                      fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", getLine(varNameNode));
-                                      compiler_had_error = true;
-                                      break;
-                                  }
-                                  writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
+                        if (actual_type_def_node->type == AST_ARRAY_TYPE) {
+                            // This block now correctly handles both inline and aliased arrays.
+                            int dimension_count = actual_type_def_node->child_count;
+                            if (dimension_count > 255) {
+                                fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", getLine(varNameNode));
+                                compiler_had_error = true;
+                                break;
+                            }
+                            writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
 
-                                  for (int dim = 0; dim < dimension_count; dim++) {
-                                      AST* subrange = actual_type_def_node->children[dim];
-                                      if (subrange && subrange->type == AST_SUBRANGE) {
-                                          Value lower_b = evaluateCompileTimeValue(subrange->left);
-                                          Value upper_b = evaluateCompileTimeValue(subrange->right);
-                                          uint8_t lower_idx = addConstantToChunk(chunk, lower_b);
-                                          uint8_t upper_idx = addConstantToChunk(chunk, upper_b);
-                                          writeBytecodeChunk(chunk, lower_idx, getLine(varNameNode));
-                                          writeBytecodeChunk(chunk, upper_idx, getLine(varNameNode));
-                                      } else {
-                                          fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
-                                          compiler_had_error = true;
-                                          writeBytecodeChunk(chunk, 0, getLine(varNameNode)); writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                      }
-                                  }
+                            for (int dim = 0; dim < dimension_count; dim++) {
+                                AST* subrange = actual_type_def_node->children[dim];
+                                if (subrange && subrange->type == AST_SUBRANGE) {
+                                    Value lower_b = evaluateCompileTimeValue(subrange->left);
+                                    Value upper_b = evaluateCompileTimeValue(subrange->right);
+                                    writeBytecodeChunk(chunk, addConstantToChunk(chunk, lower_b), getLine(varNameNode));
+                                    writeBytecodeChunk(chunk, addConstantToChunk(chunk, upper_b), getLine(varNameNode));
+                                } else {
+                                    fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
+                                    compiler_had_error = true;
+                                    writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                    writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                }
+                            }
 
-                                  AST* elem_type = actual_type_def_node->right;
-                                  writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
-                                  const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                                  uint8_t elem_name_idx = addConstantToChunk(chunk, makeString(elem_type_name));
-                                  writeBytecodeChunk(chunk, elem_name_idx, getLine(varNameNode));
-                                  resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
-                              }
-                          }
-                      }
-                  } else {
-                      // This block handles simple types, records, and other named types that are not arrays.
-                      if (node->children) {
-                          for (int i = 0; i < node->child_count; i++) {
-                              AST* varNameNode = node->children[i];
-                              if (varNameNode && varNameNode->token) {
-                                  int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
-                                  writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
-                                  writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
-                                  writeBytecodeChunk(chunk, (uint8_t)declared_type_enum, getLine(varNameNode));
+                            AST* elem_type = actual_type_def_node->right;
+                            writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
+                            const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                            writeBytecodeChunk(chunk, addConstantToChunk(chunk, makeString(elem_type_name)), getLine(varNameNode));
 
-                                  // For non-arrays, just emit the type name index as before.
-                                  const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
-                                  uint8_t type_name_idx = addConstantToChunk(chunk, makeString(type_name));
-                                  writeBytecodeChunk(chunk, type_name_idx, getLine(varNameNode));
-                                  resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
-                              }
-                          }
-                      }
-                  }
-                  // --- END MODIFICATION ---
-             }
-             // If current_function_compiler is NOT NULL, we are inside a function.
-             // Do nothing, as compileDefinedFunction has already processed the local vars.
-             break;
+                        } else {
+                            // This handles simple types, records, and other non-array aliased types.
+                            const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
+                            writeBytecodeChunk(chunk, addConstantToChunk(chunk, makeString(type_name)), getLine(varNameNode));
+                        }
+                        resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
+                    }
+                }
+                // --- END MODIFICATION ---
+            }
+            break;
         }
         case AST_CONST_DECL:
         case AST_TYPE_DECL:
@@ -536,7 +513,74 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, (uint8_t)argCount, line);
             break;
         }
+        case AST_WHILE: {
+            int loopStart = chunk->count; // Mark address for the top of the loop (for condition re-check)
 
+            // 1. Compile the condition expression
+            compileExpression(node->left, chunk, line);
+
+            // 2. Emit a conditional jump that skips the body if the condition is false
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            int exitJumpOffset = chunk->count; // Remember where the jump operand is
+            emitShort(chunk, 0xFFFF, line);     // Write a placeholder jump distance
+
+            // 3. Compile the loop body
+            compileStatement(node->right, chunk, getLine(node->right));
+
+            // 4. Emit an unconditional jump back to the top of the loop
+            writeBytecodeChunk(chunk, OP_JUMP, line);
+            int backwardJumpOffset = loopStart - (chunk->count + 2); // +2 for this jump's own operands
+            emitShort(chunk, (uint16_t)backwardJumpOffset, line);
+
+            // 5. Patch the original conditional jump to point to the instruction right after the loop
+            uint16_t forwardJumpOffset = (uint16_t)(chunk->count - (exitJumpOffset + 2));
+            patchShort(chunk, exitJumpOffset, forwardJumpOffset);
+
+            break;
+        }
+        case AST_REPEAT: {
+            int loopStart = chunk->count;
+            // The body of the loop is the left child (which is an AST_COMPOUND)
+            if (node->left) {
+                compileStatement(node->left, chunk, getLine(node->left));
+            }
+            // The until condition is the right child
+            if (node->right) {
+                compileExpression(node->right, chunk, getLine(node->right));
+            } else {
+                // An until without a condition is a syntax error, but we'll treat it as `until false` (infinite loop)
+                int falseConstIdx = addConstantToChunk(chunk, makeBoolean(false));
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)falseConstIdx, line);
+            }
+            // Jump back to the start if the condition is false
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            // The offset is negative to jump backwards
+            int backward_jump_offset = loopStart - (chunk->count + 2);
+            emitShort(chunk, (uint16_t)backward_jump_offset, line);
+            break;
+        }
+        case AST_CASE: {
+            // NOTE: Full compilation for CASE statements is complex.
+            // This placeholder prevents the warning but does not implement functionality.
+            // We compile the main expression and pop it to keep the stack balanced.
+            fprintf(stderr, "L%d: Compiler NOTE: CASE statement compilation is not yet implemented. Statement will be ignored.\n", line);
+            if (node->left) {
+                compileExpression(node->left, chunk, line);
+                writeBytecodeChunk(chunk, OP_POP, line);
+            }
+            break;
+        }
+
+        // Add this case as well
+        case AST_READLN: {
+            // NOTE: READLN requires new opcodes and VM logic to handle user input.
+            // This placeholder prevents the warning for now.
+            fprintf(stderr, "L%d: Compiler NOTE: READLN statement is not yet implemented. Statement will be ignored.\n", line);
+            // If READLN had arguments, we would need to pop them if they were evaluated.
+            // Since they are L-Values, we don't compile them here.
+            break;
+        }
         case AST_WRITE: {
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {
