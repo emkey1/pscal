@@ -3,7 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "parser.h"  // so that Procedure and TypeEntry are defined
-#include "interpreter.h"  // so that Procedure and TypeEntry are defined
+#include "backend_ast/interpreter.h"  // so that Procedure and TypeEntry are defined
+#include "compiler/compiler.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include "globals.h"
@@ -284,7 +285,7 @@ FieldValue *createEmptyRecord(AST *recordType) {
             }
 
             // Recursively create the default value for this field's type
-            fv->value = makeValueForType(fieldType, fieldTypeDef); // Relies on makeValueForType checks
+            fv->value = makeValueForType(fieldType, fieldTypeDef, NULL); // Relies on makeValueForType checks
             fv->next = NULL; // Initialize next pointer
 
             // Link this new FieldValue struct into the list
@@ -457,7 +458,7 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     // Initialize each element with its default value
     for (int i = 0; i < total_size; i++) {
         // Pass the element type definition node for complex types like records
-        v.array_val[i] = makeValueForType(element_type, type_def);
+        v.array_val[i] = makeValueForType(element_type, type_def, NULL);
     }
 
     return v;
@@ -481,18 +482,21 @@ Value makeVoid(void) {
     return v;
 }
 
-Value makeValueForType(VarType type, AST *type_def_param) {
+Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = type;
     v.base_type_node = NULL; // Initialize
 
-    // Directly use the passed-in AST node which should be from the
-    // copied structure linked to the VAR_DECL.
+    // --- MODIFICATION: Use context_symbol to find type definition if not passed directly ---
     AST* node_to_inspect = type_def_param;
-    AST* actual_type_def = node_to_inspect; // Use this for type-specific details after resolving reference
+    if (!node_to_inspect && context_symbol) {
+        node_to_inspect = context_symbol->type_def;
+    }
+    // --- END MODIFICATION ---
 
-    // --- Set base_type_node specifically for pointers ---
+    AST* actual_type_def = node_to_inspect;
+
     if (type == TYPE_POINTER) {
         #ifdef DEBUG
         fprintf(stderr, "[DEBUG makeValueForType] Setting base type for POINTER. Processing structure starting at %p (Type: %s)\n",
@@ -500,23 +504,18 @@ Value makeValueForType(VarType type, AST *type_def_param) {
         fflush(stderr);
         #endif
 
-        AST* pointer_type_node = node_to_inspect; // Start with the node from VAR_DECL
+        AST* pointer_type_node = node_to_inspect;
 
-        // If it's a TYPE_REFERENCE, follow its 'right' link ONE level
-        // to get the actual POINTER_TYPE node within the *same copied structure*.
-        // DO NOT call lookupType here.
         if (pointer_type_node && pointer_type_node->type == AST_TYPE_REFERENCE) {
             #ifdef DEBUG
             fprintf(stderr, "[DEBUG makeValueForType] Passed node is TYPE_REFERENCE ('%s'), following its right pointer (%p)\n",
                     pointer_type_node->token ? pointer_type_node->token->value : "?", (void*)pointer_type_node->right);
             fflush(stderr);
             #endif
-            pointer_type_node = pointer_type_node->right; // Get the node linked from the TYPE_REFERENCE
+            pointer_type_node = pointer_type_node->right;
         }
 
-        // Now, check if we correctly landed on a POINTER_TYPE node
         if (pointer_type_node && pointer_type_node->type == AST_POINTER_TYPE) {
-            // Get the base type from the 'right' child of *this* POINTER_TYPE node
             v.base_type_node = pointer_type_node->right;
              #ifdef DEBUG
              fprintf(stderr, "[DEBUG makeValueForType] -> Base type node set to %p (Type: %s, Token: '%s') from node %p\n",
@@ -527,106 +526,81 @@ Value makeValueForType(VarType type, AST *type_def_param) {
              fflush(stderr);
              #endif
         } else {
-            // If pointer_type_node is NULL or not POINTER_TYPE after resolving reference (if any)
              fprintf(stderr, "Warning: Failed to find POINTER_TYPE definition node when initializing pointer Value. Structure trace started from VAR_DECL->right at %p. Final node checked was %p (Type: %s).\n",
-                     (void*)type_def_param, // Log the original param
+                     (void*)type_def_param,
                      (void*)pointer_type_node,
                      pointer_type_node ? astTypeToString(pointer_type_node->type) : "NULL");
-             v.base_type_node = NULL; // Ensure it remains NULL if logic fails
+             v.base_type_node = NULL;
         }
-    } // End if (type == TYPE_POINTER)
-
-    // --- Initialize Value based on Type ---
-    // The rest of the switch uses 'type' and 'type_def_param' (as actual_type_def)
-    // Needs careful check to ensure 'actual_type_def' isn't needed where 'type_def_param' should be used
-    // For consistency let's rename actual_type_def back to type_def_param inside the switch
-    // where it makes sense (e.g., for record, array, fixed string).
+    }
 
     switch(type) {
         case TYPE_INTEGER: v.i_val = 0; break;
         case TYPE_REAL:    v.r_val = 0.0; break;
-        case TYPE_STRING: { // Use braces for local variable scope
+        case TYPE_STRING: {
             v.s_val = NULL;
-            v.max_length = -1; // Default dynamic
-            long long parsed_len = -1; // Flag to check if length was determined
+            v.max_length = -1;
+            long long parsed_len = -1;
 
-            // Check if the type definition is string[N]
-            // Use 'actual_type_def' here as we need the potentially resolved definition
             if (actual_type_def && actual_type_def->type == AST_VARIABLE && actual_type_def->token &&
                 strcasecmp(actual_type_def->token->value, "string") == 0 && actual_type_def->right)
             {
                  AST* lenNode = actual_type_def->right;
 
-                 // --- MODIFICATION START: Handle Constant Integer Literal OR Constant Identifier ---
                  if (lenNode->type == AST_NUMBER && lenNode->token && lenNode->token->type == TOKEN_INTEGER_CONST) {
-                     // Case 1: Length is a literal integer (e.g., string[10])
                      parsed_len = atoll(lenNode->token->value);
                  }
                  else if (lenNode->type == AST_VARIABLE && lenNode->token && lenNode->token->value) {
-                     // Case 2: Length is an identifier (e.g., string[MAX_LEN])
                      const char *const_name = lenNode->token->value;
                      #ifdef DEBUG
                      fprintf(stderr, "[DEBUG makeValueForType] String length specified by identifier '%s'. Looking up constant...\n", const_name);
                      #endif
-                     Symbol *constSym = lookupSymbol(const_name); // Lookup the constant symbol
-                     // NOTE: Assumes constant is already defined globally or locally *before* this type is used.
+                     Symbol *constSym = lookupSymbol(const_name);
 
                      if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INTEGER) {
-                          parsed_len = constSym->value->i_val; // Use the constant's integer value
+                          parsed_len = constSym->value->i_val;
                           #ifdef DEBUG
                           fprintf(stderr, "[DEBUG makeValueForType] Found constant '%s' with value %lld.\n", const_name, parsed_len);
                           #endif
                      } else {
                           fprintf(stderr, "Warning: Identifier '%s' used for string length is not a defined integer constant. Using dynamic.\n", const_name);
-                          // parsed_len remains -1, will default to dynamic
                      }
                  }
                  else {
-                     // Case 3: Length expression is neither an integer literal nor a constant identifier
                      fprintf(stderr, "Warning: Fixed string length not constant integer or identifier. Using dynamic.\n");
-                     // parsed_len remains -1, will default to dynamic
                  }
-                 // --- MODIFICATION END ---
 
-
-                 // --- Process the parsed length (if valid) ---
-                 if (parsed_len != -1) { // Check if a valid length was found
-                      if (parsed_len > 0 && parsed_len <= 255) { // Standard Pascal max length
+                 if (parsed_len != -1) {
+                      if (parsed_len > 0 && parsed_len <= 255) {
                           v.max_length = (int)parsed_len;
-                          v.s_val = calloc(v.max_length + 1, 1); // Allocate and zero-fill
+                          v.s_val = calloc(v.max_length + 1, 1);
                           if (!v.s_val) { fprintf(stderr, "FATAL: calloc failed for fixed string\n"); EXIT_FAILURE_HANDLER(); }
                           #ifdef DEBUG
                           fprintf(stderr, "[DEBUG makeValueForType] Allocated fixed string (max_length=%d).\n", v.max_length);
                           #endif
                       } else {
                           fprintf(stderr, "Warning: Fixed string length %lld invalid or too large. Using dynamic.\n", parsed_len);
-                          // Fall through to dynamic allocation below
-                          v.max_length = -1; // Ensure dynamic if length was invalid
+                          v.max_length = -1;
                       }
                  }
-                 // --- End processing parsed length ---
+            }
 
-            } // End if (actual_type_def is string[...])
-
-            // Allocate if still dynamic (max_length is -1) and s_val hasn't been allocated
             if (v.max_length == -1 && !v.s_val) {
-                 v.s_val = strdup(""); // Initialize dynamic/default string
+                 v.s_val = strdup("");
                  if (!v.s_val) { fprintf(stderr, "FATAL: strdup failed for dynamic string\n"); EXIT_FAILURE_HANDLER(); }
                  #ifdef DEBUG
                  fprintf(stderr, "[DEBUG makeValueForType] Allocated dynamic string.\n");
                  #endif
             }
-            break; // End case TYPE_STRING
-        } // End brace for TYPE_STRING case scope
+            break;
+        }
         case TYPE_CHAR:    v.c_val = '\0'; v.max_length = 1; break;
-        case TYPE_BOOLEAN: v.i_val = 0; break; // False
+        case TYPE_BOOLEAN: v.i_val = 0; break;
         case TYPE_FILE:    v.f_val = NULL; v.filename = NULL; break;
         case TYPE_RECORD:
-             // Pass type_def_param (copied RECORD_TYPE node)
-             v.record_val = createEmptyRecord(type_def_param);
+             v.record_val = createEmptyRecord(node_to_inspect);
              break;
         case TYPE_ARRAY: {
-            // Initialize defaults for the Value struct 'v'
             v.dimensions = 0;
             v.lower_bounds = NULL;
             v.upper_bounds = NULL;
@@ -634,10 +608,8 @@ Value makeValueForType(VarType type, AST *type_def_param) {
             v.element_type = TYPE_VOID;
             v.element_type_def = NULL;
 
-            // This is the AST node passed in, could be AST_TYPE_REFERENCE or AST_ARRAY_TYPE
-            AST* definition_node_for_array = type_def_param;
+            AST* definition_node_for_array = node_to_inspect;
 
-            // If it's a named type (AST_TYPE_REFERENCE), resolve it
             if (definition_node_for_array && definition_node_for_array->type == AST_TYPE_REFERENCE) {
                 #ifdef DEBUG
                 fprintf(stderr, "[DEBUG makeValueForType ARRAY] type_def_param is TYPE_REFERENCE ('%s'). Looking up actual type.\n",
@@ -647,27 +619,23 @@ Value makeValueForType(VarType type, AST *type_def_param) {
                 if (!resolved_type_ast) {
                      fprintf(stderr, "Error: Could not resolve array type reference '%s' in makeValueForType for array initialization.\n",
                              definition_node_for_array->token ? definition_node_for_array->token->value : "?");
-                     // Let definition_node_for_array remain the unresolved reference;
-                     // the next check will likely fail, leading to the warning.
                 } else {
-                    definition_node_for_array = resolved_type_ast; // Use the looked-up definition
+                    definition_node_for_array = resolved_type_ast;
                 }
             }
 
-            // Now, definition_node_for_array should point to the actual AST_ARRAY_TYPE node
             if (definition_node_for_array && definition_node_for_array->type == AST_ARRAY_TYPE) {
                  #ifdef DEBUG
                  fprintf(stderr, "[DEBUG makeValueForType] Initializing ARRAY from (resolved) AST_ARRAY_TYPE node %p.\n", (void*)definition_node_for_array);
                  #endif
 
-                 int dims = definition_node_for_array->child_count; // Number of subrange children in AST_ARRAY_TYPE
-                 AST* elemTypeDefNode = definition_node_for_array->right; // Element type AST from AST_ARRAY_TYPE
+                 int dims = definition_node_for_array->child_count;
+                 AST* elemTypeDefNode = definition_node_for_array->right;
                  VarType elemType = TYPE_VOID;
 
-                 // Determine element VarType
                  if(elemTypeDefNode) {
-                     elemType = elemTypeDefNode->var_type; // Relies on prior type annotation
-                       if (elemType == TYPE_VOID) { // Fallback if not annotated
+                     elemType = elemTypeDefNode->var_type;
+                       if (elemType == TYPE_VOID) {
                              if (elemTypeDefNode->type == AST_VARIABLE && elemTypeDefNode->token) {
                                  const char *tn = elemTypeDefNode->token->value;
                                  if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INTEGER;
@@ -677,15 +645,14 @@ Value makeValueForType(VarType type, AST *type_def_param) {
                                  else if (strcasecmp(tn, "byte") == 0) elemType = TYPE_BYTE;
                                  else if (strcasecmp(tn, "word") == 0) elemType = TYPE_WORD;
                                  else if (strcasecmp(tn, "string") == 0) elemType = TYPE_STRING;
-                                 else { // User-defined type
+                                 else {
                                      AST* userTypeDef = lookupType(tn);
                                      if (userTypeDef) elemType = userTypeDef->var_type;
-                                     // Ensure elemTypeDefNode points to the actual definition for makeArrayND
                                      if (userTypeDef) elemTypeDefNode = userTypeDef;
                                  }
-                             } else if (elemTypeDefNode->type == AST_RECORD_TYPE) { // Array of anonymous records
+                             } else if (elemTypeDefNode->type == AST_RECORD_TYPE) {
                                 elemType = TYPE_RECORD;
-                             } else if (elemTypeDefNode->type == AST_ARRAY_TYPE) { // Array of anonymous arrays
+                             } else if (elemTypeDefNode->type == AST_ARRAY_TYPE) {
                                 elemType = TYPE_ARRAY;
                              }
                        }
@@ -702,22 +669,21 @@ Value makeValueForType(VarType type, AST *type_def_param) {
                      }
 
                      bool bounds_ok = true;
-                     // Extract bounds from the children of definition_node_for_array (which are AST_SUBRANGE)
                      for (int i = 0; i < dims; i++) {
                          AST *subrange = definition_node_for_array->children[i];
                          if (!subrange || subrange->type != AST_SUBRANGE || !subrange->left || !subrange->right) {
                              bounds_ok = false; break;
                          }
-                         // Evaluate bounds - assuming they are constant integer expressions
-                         Value low_val = eval(subrange->left);
-                         Value high_val = eval(subrange->right);
-                         // For now, strictly expect integer bounds for simplicity
+
+                         // --- MODIFICATION: Use evaluateCompileTimeValue instead of eval ---
+                         Value low_val = evaluateCompileTimeValue(subrange->left);
+                         Value high_val = evaluateCompileTimeValue(subrange->right);
+
                          if (low_val.type == TYPE_INTEGER && high_val.type == TYPE_INTEGER) {
                              lbs[i] = (int)low_val.i_val;
                              ubs[i] = (int)high_val.i_val;
                          } else {
-                             // TODO: Support char or other ordinal bounds if necessary by converting to integer ordinals
-                             fprintf(stderr, "Runtime error: Array bounds must be integer constants for now in makeValueForType. Dim %d has types %s..%s\n", i, varTypeToString(low_val.type), varTypeToString(high_val.type));
+                             fprintf(stderr, "Runtime error: Array bounds must be integer constants for now. Dim %d has types %s..%s\n", i, varTypeToString(low_val.type), varTypeToString(high_val.type));
                              bounds_ok = false;
                          }
                          freeValue(&low_val);
@@ -728,54 +694,43 @@ Value makeValueForType(VarType type, AST *type_def_param) {
                      }
 
                      if (bounds_ok) {
-                         // Pass the element type definition node (elemTypeDefNode) to makeArrayND.
-                         // This is important for initializing elements that are themselves complex types (records, other arrays).
                          v = makeArrayND(dims, lbs, ubs, elemType, elemTypeDefNode);
                      } else {
                          fprintf(stderr, "Error: Failed to initialize array in makeValueForType due to invalid or non-integer bounds.\n");
-                         // v will retain dimensions = 0
                      }
                      free(lbs);
                      free(ubs);
                  } else {
                      fprintf(stderr, "Warning: Invalid dimension count (%d) or element type (%s) for array in makeValueForType.\n", dims, varTypeToString(elemType));
-                     // v will retain dimensions = 0
                  }
             } else {
-                 // This warning will now include the type of the node that was expected to be AST_ARRAY_TYPE
                  fprintf(stderr, "Warning: Cannot initialize array value. Type definition missing, not an array type, or could not be resolved. (Actual node type for definition: %s)\n",
                          definition_node_for_array ? astTypeToString(definition_node_for_array->type) : "NULL");
-                 // v will have dimensions = 0 as initialized if this path is taken
             }
 
             #ifdef DEBUG
             fprintf(stderr, "[DEBUG makeValueForType - ARRAY CASE EXIT] Returning Value: type=%s, dimensions=%d\n", varTypeToString(v.type), v.dimensions);
             #endif
             break;
-        } // End TYPE_ARRAY case
+        }
         case TYPE_MEMORYSTREAM: v.mstream = createMStream(); break;
         case TYPE_ENUM:
              v.enum_val.ordinal = 0;
-             // Use type_def_param (copied ENUM_TYPE node) for the name
-             v.enum_val.enum_name = (type_def_param && type_def_param->token && type_def_param->token->value) ? strdup(type_def_param->token->value) : strdup("<unknown_enum>");
+             v.enum_val.enum_name = (node_to_inspect && node_to_inspect->token && node_to_inspect->token->value) ? strdup(node_to_inspect->token->value) : strdup("<unknown_enum>");
              if (!v.enum_val.enum_name) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
              break;
         case TYPE_BYTE:    v.i_val = 0; break;
         case TYPE_WORD:    v.i_val = 0; break;
-        case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; v.max_length = 0; break; // Init max_length
+        case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; v.max_length = 0; break;
         case TYPE_POINTER:
-            v.ptr_val = NULL; // Initialize pointer to nil
-            // v.base_type_node was set above
+            v.ptr_val = NULL;
             break;
-        case TYPE_VOID:    /* No value needed */ break;
+        case TYPE_VOID:
+            break;
         default:
             fprintf(stderr, "Warning: makeValueForType called with unhandled type %d (%s)\n", type, varTypeToString(type));
             break;
     }
-
-    #ifdef DEBUG
-    // (Keep final debug print)
-    #endif
 
     return v;
 }
@@ -1848,4 +1803,19 @@ int calculateArrayTotalSize(const Value* array_val) {
         total_size *= (array_val->upper_bounds[i] - array_val->lower_bounds[i] + 1);
     }
     return total_size;
+}
+
+int computeFlatOffset(Value *array, int *indices) {
+    int offset = 0;
+    // This forward-iterating version is correct for row-major arrays.
+    for (int i = 0; i < array->dimensions; i++) {
+        // Bounds check for the current dimension
+        if (indices[i] < array->lower_bounds[i] || indices[i] > array->upper_bounds[i]) {
+            fprintf(stderr, "Runtime error: Index %d out of bounds [%d..%d] in dimension %d.\n",
+                    indices[i], array->lower_bounds[i], array->upper_bounds[i], i + 1);
+            EXIT_FAILURE_HANDLER();
+        }
+        offset = offset * (array->upper_bounds[i] - array->lower_bounds[i] + 1) + (indices[i] - array->lower_bounds[i]);
+    }
+    return offset;
 }

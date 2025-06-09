@@ -310,7 +310,7 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     if (!new_symbol->value) { fprintf(stderr, "Memory allocation error (malloc Value) in insertGlobalSymbol\n"); free(new_symbol->name); free(new_symbol); EXIT_FAILURE_HANDLER(); }
 
     // Initialize the contents of the Value struct using the helper function
-    *(new_symbol->value) = makeValueForType(type, type_def); // Use assignment to copy the returned Value
+    *(new_symbol->value) = makeValueForType(type, type_def, new_symbol); // Use assignment to copy the returned Value
 
     DEBUG_PRINT("[DEBUG SYMBOL] Created Symbol '%s' at %p (Value @ %p, base_type_node @ %p).\n",
                 new_symbol->name, (void*)new_symbol, (void*)new_symbol->value, (void*)(new_symbol->value ? new_symbol->value->base_type_node : NULL));
@@ -397,7 +397,7 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
-    *(sym->value) = makeValueForType(type, type_def); // Initialize using helper
+    *(sym->value) = makeValueForType(type, type_def, sym); // Initialize using helper
 
     DEBUG_PRINT("[DEBUG SYMBOL] Created Symbol '%s' at %p (Value @ %p, base_type_node @ %p).\n",
                 sym->name, (void*)sym, (void*)sym->value, (void*)(sym->value ? sym->value->base_type_node : NULL));

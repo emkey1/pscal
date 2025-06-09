@@ -505,7 +505,7 @@ Value executeBuiltinTrunc(AST *node) {
         fprintf(stderr, "Runtime error: trunc argument must be a numeric type.\n");
         EXIT_FAILURE_HANDLER();
     }
-    return makeValueForType(TYPE_INTEGER, NULL);
+    return makeValueForType(TYPE_INTEGER, NULL, NULL);
 
 }
 
@@ -1093,7 +1093,7 @@ Value executeBuiltinChr(AST *node) {
         fprintf(stderr, "Runtime error: chr expects an integer argument.\n");
         EXIT_FAILURE_HANDLER();
     }
-    return makeValueForType(TYPE_INTEGER, NULL);
+    return makeValueForType(TYPE_INTEGER, NULL, NULL);
 }
 
 // System
@@ -1462,7 +1462,7 @@ Value executeBuiltinRandom(AST *node) {
         fprintf(stderr, "Runtime error: Random expects 0 or 1 argument.\n");
         EXIT_FAILURE_HANDLER();
     }
-    return makeValueForType(TYPE_INTEGER, NULL);
+    return makeValueForType(TYPE_INTEGER, NULL, NULL);
 }
 
 Value executeBuiltinDelay(AST *node) {
@@ -2766,7 +2766,7 @@ Value executeBuiltinNew(AST *node) {
     // --- Initialize the allocated memory based on the base type ---
     // Initialize the Value structure located at the allocated_memory address with default values for its type.
     // makeValueForType creates a Value and initializes its contents (e.g., NULL string, empty record).
-    *(allocated_memory) = makeValueForType(baseVarType, actualBaseTypeDef); // Use assignment to copy the returned Value.
+    *(allocated_memory) = makeValueForType(baseVarType, actualBaseTypeDef, NULL); // Use assignment to copy the returned Value.
 
     #ifdef DEBUG // Debug print to confirm allocation and initialization.
     fprintf(stderr, "[DEBUG new] Allocated memory for pointed-to Value* at %p for base type %s. Initialized content.\n",

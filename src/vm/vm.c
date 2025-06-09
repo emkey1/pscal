@@ -160,7 +160,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     if (!sym->value) { /* ... */ free(sym->name); free(sym); return NULL; }
 
     // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
-    *(sym->value) = makeValueForType(type, type_def_for_value_init);
+    *(sym->value) = makeValueForType(type, type_def_for_value_init, sym);
     
     sym->is_alias = false;
     sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
@@ -805,7 +805,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    *(sym->value) = makeValueForType(sym->type, sym->type_def); // type_def might be NULL
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym); // type_def might be NULL
                 }
 
                 Value value_from_stack = peek(vm, 0); // Value to be assigned is on top of stack
@@ -1048,7 +1048,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Malloc failed for array indices.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                
+
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
                     if (index_val.type != TYPE_INTEGER) {
@@ -1061,7 +1061,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&index_val);
                 }
 
-                Value array_val = pop(vm); // This is a shallow copy from the stack
+                Value array_val = pop(vm);
                 if (array_val.type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Cannot index non-array type.");
                     free(indices);
@@ -1069,8 +1069,21 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                int offset = computeFlatOffset(&array_val, indices);
+                // --- START MODIFICATION ---
+                // In-lined and corrected offset calculation logic.
+                int offset = 0;
+                for (int i = 0; i < array_val.dimensions; i++) {
+                    if (indices[i] < array_val.lower_bounds[i] || indices[i] > array_val.upper_bounds[i]) {
+                        runtimeError(vm, "Runtime error: Index %d is out of bounds [%d..%d] in dimension %d.",
+                                indices[i], array_val.lower_bounds[i], array_val.upper_bounds[i], i + 1);
+                        free(indices);
+                        freeValue(&array_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    offset = offset * (array_val.upper_bounds[i] - array_val.lower_bounds[i] + 1) + (indices[i] - array_val.lower_bounds[i]);
+                }
                 free(indices);
+                // --- END MODIFICATION ---
 
                 int total_size = calculateArrayTotalSize(&array_val);
                 if (offset < 0 || offset >= total_size) {
@@ -1079,14 +1092,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                      return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Create a deep copy of the single element we want to push to the stack.
                 Value element_copy = makeCopyOfValue(&array_val.array_val[offset]);
-                
-                // The Value struct 'array_val' is a copy from the stack and will go out of scope.
-                // We do not free it, because that would free the data buffer of the original symbol.
+                freeValue(&array_val);
                 push(vm, element_copy);
-                goto next_instruction;
+                break;
             }
+
             case OP_SET_ELEMENT: {
                 uint8_t dimension_count = READ_BYTE();
                 Value value_to_set = pop(vm);
@@ -1103,74 +1114,53 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         runtimeError(vm, "VM Error: Array index must be an integer.");
                         free(indices);
                         freeValue(&index_val);
+                        freeValue(&value_to_set);
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     indices[dimension_count - 1 - i] = (int)index_val.i_val;
                     freeValue(&index_val);
                 }
 
-                // Pop the original array struct. This is a shallow copy containing
-                // pointers to the actual data buffers we want to modify.
                 Value array_val = pop(vm);
                 if (array_val.type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Cannot index non-array type.");
                     free(indices);
                     freeValue(&array_val);
+                    freeValue(&value_to_set);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // We will modify this array's data directly in place,
-                // rather than creating a deep copy.
-                int offset = computeFlatOffset(&array_val, indices);
+                // --- START MODIFICATION ---
+                // In-lined and corrected offset calculation logic.
+                int offset = 0;
+                for (int i = 0; i < array_val.dimensions; i++) {
+                    if (indices[i] < array_val.lower_bounds[i] || indices[i] > array_val.upper_bounds[i]) {
+                        runtimeError(vm, "Runtime error: Index %d is out of bounds [%d..%d] in dimension %d.",
+                                indices[i], array_val.lower_bounds[i], array_val.upper_bounds[i], i + 1);
+                        free(indices);
+                        freeValue(&array_val);
+                        freeValue(&value_to_set);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    offset = offset * (array_val.upper_bounds[i] - array_val.lower_bounds[i] + 1) + (indices[i] - array_val.lower_bounds[i]);
+                }
                 free(indices);
+                // --- END MODIFICATION ---
 
                 int total_size = calculateArrayTotalSize(&array_val);
                  if (offset < 0 || offset >= total_size) {
                      runtimeError(vm, "VM Error: Calculated array offset (%d) is out of bounds (size %d).", offset, total_size);
-                     freeValue(&array_val); // Free the popped array value
+                     freeValue(&array_val);
+                     freeValue(&value_to_set);
                      return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Free the contents of the *old element* at the target location.
                 freeValue(&array_val.array_val[offset]);
-
-                // Place a deep copy of the new value into the element slot.
                 array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
-                
-                // We are done with the value_to_set that was on the stack.
                 freeValue(&value_to_set);
-
-                // Push the MODIFIED array value back onto the stack for the
-                // subsequent OP_SET_GLOBAL instruction.
                 push(vm, array_val);
-                goto next_instruction;
+                break;
             }
-            case OP_GET_FIELD: {
-                uint8_t field_name_idx = READ_BYTE();
-                Value record_val = pop(vm);
-
-                if (record_val.type != TYPE_RECORD) {
-                    runtimeError(vm, "VM Error: Cannot access field on a non-record type.");
-                    freeValue(&record_val);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
-                FieldValue* current = record_val.record_val;
-                while (current) {
-                    if (strcmp(current->name, field_name) == 0) {
-                        push(vm, makeCopyOfValue(&current->value));
-                        freeValue(&record_val);
-                        goto next_instruction; // Exit switch and go to next instruction
-                    }
-                    current = current->next;
-                }
-
-                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
-                freeValue(&record_val);
-                return INTERPRET_RUNTIME_ERROR;
-            }
-
             case OP_SET_FIELD: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value value_to_set = pop(vm);

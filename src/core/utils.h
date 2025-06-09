@@ -47,7 +47,6 @@ const char *astTypeToString(ASTNodeType type);
 void dumpSymbolTable(void);
 void dumpSymbol(Symbol *sym);
 
-
 MStream *createMStream(void);
 FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
@@ -69,7 +68,7 @@ Value makeFile(FILE *f);
 Value makeRecord(FieldValue *rec);
 Value makeMStream(MStream *ms);
 Value makeVoid(void);
-Value makeValueForType(VarType type, AST *type_def); // This simplifies the code.  Transitioning to it
+Value makeValueForType(VarType type, AST *type_def, Symbol* context_symbol);
 
 // Token
 Token *newToken(TokenType type, const char *value, int line, int column);
@@ -96,8 +95,6 @@ void freeUnitSymbolTable(Symbol *symbol_table);
 
 // Arrays
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def);
-
-
-
+int computeFlatOffset(Value *array, int *indices);
 
 #endif // UTILS_H

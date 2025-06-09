@@ -2549,6 +2549,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
     }
 }
 
+/*
 int computeFlatOffset(Value *array, int *indices) {
     int offset = 0;
     int multiplier = 1;
@@ -2570,6 +2571,7 @@ int computeFlatOffset(Value *array, int *indices) {
 
     return offset;
 }
+ */
 
 Value makeCopyOfValue(Value *src) {
     Value v;
@@ -2863,7 +2865,7 @@ Value setUnion(Value setA, Value setB) {
     }
     // TODO: Add check for base type compatibility if needed later
 
-    Value result = makeValueForType(TYPE_SET, NULL); // Creates empty set structure {size=0, values=NULL, capacity=0}
+    Value result = makeValueForType(TYPE_SET, NULL, NULL); // Creates empty set structure {size=0, values=NULL, capacity=0}
     result.max_length = setA.set_val.set_size + setB.set_val.set_size; // Initial capacity guess
 
     if (result.max_length > 0) {
@@ -2900,7 +2902,7 @@ Value setDifference(Value setA, Value setB) {
     if (setA.type != TYPE_SET || setB.type != TYPE_SET) { /* Error */ return makeVoid();}
     // TODO: Base type check?
 
-    Value result = makeValueForType(TYPE_SET, NULL);
+    Value result = makeValueForType(TYPE_SET, NULL, NULL);
     result.max_length = setA.set_val.set_size; // Max possible size is size of A
     if (result.max_length > 0) {
          result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
@@ -2927,7 +2929,7 @@ Value setIntersection(Value setA, Value setB) {
     if (setA.type != TYPE_SET || setB.type != TYPE_SET) { /* Error */ return makeVoid();}
     // TODO: Base type check?
 
-    Value result = makeValueForType(TYPE_SET, NULL);
+    Value result = makeValueForType(TYPE_SET, NULL, NULL);
     // Max possible size is the smaller of the two input sets
     result.max_length = (setA.set_val.set_size < setB.set_val.set_size) ? setA.set_val.set_size : setB.set_val.set_size;
      if (result.max_length > 0) {
