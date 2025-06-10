@@ -445,6 +445,16 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, b);
                 break;
             }
+            case OP_DUP: {
+                if (vm->stackTop == vm->stack) {
+                    runtimeError(vm, "VM Error: Stack underflow (dup from empty stack).");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                // The `peek` function returns a Value struct, but `makeCopyOfValue` expects a pointer.
+                // We pass the address of the top stack element directly.
+                push(vm, makeCopyOfValue(&vm->stackTop[-1]));
+                break;
+            }
             case OP_AND:
             case OP_OR: {
                 Value b_val = pop(vm);

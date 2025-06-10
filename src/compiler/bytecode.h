@@ -38,6 +38,7 @@ typedef enum {
     OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
     OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
     OP_SWAP,          // OPCODE to swap the top two stack items.
+    OP_DUP,           // Duplicate the top value on the stack
 
     // OP_DEFINE_GLOBAL: Operand1: name_const_idx, Operand2: type_name_const_idx (or 0), Operand3: var_type_enum
     OP_DEFINE_GLOBAL, 

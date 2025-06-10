@@ -601,6 +601,87 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             break;
         }
+        case AST_CASE: {
+            int line = getLine(node);
+            if (line <= 0) line = current_line_approx;
+
+            // 1. Compile the main case expression. Its value will be on the stack.
+            compileRValue(node->left, chunk, line);
+
+            // List of jumps that need to be patched to point to the end of the case statement.
+            int* end_jumps = NULL;
+            int end_jumps_count = 0;
+            int end_jumps_capacity = 0;
+
+            int next_branch_jump = -1; // Holds the last JUMP_IF_FALSE to be patched
+
+            // 2. Iterate through each `case` branch.
+            for (int i = 0; i < node->child_count; i++) {
+                AST* branch = node->children[i];
+                if (!branch || branch->type != AST_CASE_BRANCH) continue;
+                
+                // Patch the jump from the previous branch check (if any) to here.
+                if (next_branch_jump != -1) {
+                    patchShort(chunk, next_branch_jump, chunk->count - (next_branch_jump + 2));
+                }
+
+                AST* labels = branch->left;
+                
+                // Limitation: For now, only handle single labels per branch.
+                if (labels->type == AST_COMPOUND || labels->type == AST_SUBRANGE) {
+                    fprintf(stderr, "L%d: Compiler NOTE: CASE statement with multiple labels or ranges per branch is not yet implemented. Branch ignored.\n", getLine(labels));
+                    continue;
+                }
+
+                // 2a. Compile the check for this branch's single label.
+                writeBytecodeChunk(chunk, OP_DUP, getLine(labels)); // stack: [case_val, case_val]
+                compileRValue(labels, chunk, getLine(labels));     // stack: [case_val, case_val, label_val]
+                writeBytecodeChunk(chunk, OP_EQUAL, line);          // stack: [case_val, bool_result]
+                
+                // 2b. Jump to the next branch check if this label doesn't match.
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);  // consumes bool_result, stack: [case_val]
+                next_branch_jump = chunk->count;
+                emitShort(chunk, 0xFFFF, line);
+
+                // 2c. If the label matched, we fall through.
+                // The stack has the original case_val. Pop it since we found our branch.
+                writeBytecodeChunk(chunk, OP_POP, line);
+                // Compile the statement for this branch.
+                compileStatement(branch->right, chunk, getLine(branch->right));
+
+                // 2d. Jump to the end of the entire case statement.
+                writeBytecodeChunk(chunk, OP_JUMP, line);
+                // Store this jump's offset to patch later.
+                if (end_jumps_count >= end_jumps_capacity) {
+                    end_jumps_capacity = end_jumps_capacity < 8 ? 8 : end_jumps_capacity * 2;
+                    end_jumps = realloc(end_jumps, sizeof(int) * end_jumps_capacity);
+                }
+                end_jumps[end_jumps_count++] = chunk->count;
+                emitShort(chunk, 0xFFFF, line);
+            }
+            
+            // 3. Handle the ELSE part or the fall-through case.
+            // Patch the last JUMP_IF_FALSE to jump here.
+            if (next_branch_jump != -1) {
+                patchShort(chunk, next_branch_jump, chunk->count - (next_branch_jump + 2));
+            }
+            
+            // If we fall through all branch checks, the original case value is still on the stack. Pop it.
+            writeBytecodeChunk(chunk, OP_POP, line);
+            
+            if (node->extra) { // 'extra' holds the ELSE block
+                compileStatement(node->extra, chunk, getLine(node->extra));
+            }
+
+            // 4. Patch all the jumps from successful branches to point to the current end.
+            for (int i = 0; i < end_jumps_count; i++) {
+                int jump_offset_addr = end_jumps[i];
+                patchShort(chunk, jump_offset_addr, chunk->count - (jump_offset_addr + 2));
+            }
+            free(end_jumps);
+
+            break;
+        }
         case AST_REPEAT: {
             int loopStart = chunk->count;
             // The body of the loop is the left child (which is an AST_COMPOUND)
@@ -623,18 +704,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
             break;
         }
-        case AST_CASE: {
-            // NOTE: Full compilation for CASE statements is complex.
-            // This placeholder prevents the warning but does not implement functionality.
-            // We compile the main expression and pop it to keep the stack balanced.
-            fprintf(stderr, "L%d: Compiler NOTE: CASE statement compilation is not yet implemented. Statement will be ignored.\n", line);
-            if (node->left) {
-                compileRValue(node->left, chunk, line);
-                writeBytecodeChunk(chunk, OP_POP, line);
-            }
-            break;
-        }
-        // Add this case as well
         case AST_READLN: {
             // `readln` arguments are all L-Values.
             // The VM builtin expects pointers to the Value structs of these variables.
