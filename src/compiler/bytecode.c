@@ -258,6 +258,9 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_SET_INDIRECT:
             printf("OP_SET_INDIRECT\n");
             return offset + 1;
+        case OP_GET_INDIRECT: 
+            printf("OP_GET_INDIRECT\n");
+            return offset + 1;
         case OP_SWAP: printf("OP_SWAP\n"); return offset + 1;
         case OP_JUMP_IF_FALSE: {
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
