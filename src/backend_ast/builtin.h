@@ -28,6 +28,8 @@ Value vm_builtin_abs(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_round(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_halt(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_delay(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_new(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dispose(struct VM_s* vm, int arg_count, Value* args);
 
 // --- AST-BASED BUILT-INS (for AST interpreter) ---
 

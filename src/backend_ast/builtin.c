@@ -38,6 +38,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"closegraph", vm_builtin_closegraph},
     {"delay", vm_builtin_delay},
     {"destroytexture", vm_builtin_destroytexture},
+    {"dispose", vm_builtin_dispose},
     {"fillrect", vm_builtin_fillrect},
     {"getmaxx", vm_builtin_getmaxx},
     {"getmousestate", vm_builtin_getmousestate},
@@ -49,6 +50,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"inttostr", vm_builtin_inttostr},
     {"length", vm_builtin_length},
     {"loadsound", vm_builtin_loadsound},
+    {"new", vm_builtin_new},
     {"playsound", vm_builtin_playsound},
     {"quittextsystem", vm_builtin_quittextsystem},
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
@@ -73,6 +75,103 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
         compareVmBuiltinMappings
     );
     return found ? found->handler : NULL;
+}
+
+Value vm_builtin_new(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_POINTER) {
+        runtimeError(vm, "new() expects a single pointer variable argument.");
+        return makeVoid();
+    }
+    
+    // The argument on the stack is a pointer TO the pointer variable's Value struct
+    Value* pointerVarValuePtr = (Value*)args[0].ptr_val;
+    if (!pointerVarValuePtr) {
+        runtimeError(vm, "VM internal error: new() received a null LValue pointer.");
+        return makeVoid();
+    }
+    if (pointerVarValuePtr->type != TYPE_POINTER) {
+        runtimeError(vm, "Argument to new() must be of pointer type. Got %s.", varTypeToString(pointerVarValuePtr->type));
+        return makeVoid();
+    }
+
+    AST *baseTypeNode = pointerVarValuePtr->base_type_node;
+    if (!baseTypeNode) {
+        runtimeError(vm, "Cannot determine base type for pointer variable in new().");
+        return makeVoid();
+    }
+
+    // This logic is similar to the AST version's
+    VarType baseVarType = TYPE_VOID;
+    AST* actualBaseTypeDef = baseTypeNode;
+
+    if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
+        const char* typeName = actualBaseTypeDef->token->value;
+        if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "real")==0) { baseVarType=TYPE_REAL; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "char")==0) { baseVarType=TYPE_CHAR; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "string")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "boolean")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "byte")==0) { baseVarType=TYPE_BYTE; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "word")==0) { baseVarType=TYPE_WORD; actualBaseTypeDef = NULL; }
+        else {
+            AST* lookedUpType = lookupType(typeName);
+            if (!lookedUpType) { runtimeError(vm, "Cannot resolve base type '%s' in new().", typeName); return makeVoid(); }
+            actualBaseTypeDef = lookedUpType;
+            baseVarType = actualBaseTypeDef->var_type;
+        }
+    } else {
+         baseVarType = actualBaseTypeDef->var_type;
+    }
+
+    if (baseVarType == TYPE_VOID) { runtimeError(vm, "Cannot determine valid base type in new()."); return makeVoid(); }
+    
+    Value* allocated_memory = malloc(sizeof(Value));
+    if (!allocated_memory) { runtimeError(vm, "Memory allocation failed in new()."); return makeVoid(); }
+    
+    *(allocated_memory) = makeValueForType(baseVarType, actualBaseTypeDef, NULL);
+    
+    // Update the pointer variable that was passed by reference
+    pointerVarValuePtr->ptr_val = allocated_memory;
+
+    return makeVoid();
+}
+
+Value vm_builtin_dispose(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_POINTER) {
+        runtimeError(vm, "dispose() expects a single pointer variable argument.");
+        return makeVoid();
+    }
+    
+    Value* pointerVarValuePtr = (Value*)args[0].ptr_val;
+    if (!pointerVarValuePtr) {
+        runtimeError(vm, "VM internal error: dispose() received a null LValue pointer.");
+        return makeVoid();
+    }
+    if (pointerVarValuePtr->type != TYPE_POINTER) {
+        runtimeError(vm, "Argument to dispose() must be a pointer.");
+        return makeVoid();
+    }
+
+    Value* valueToDispose = pointerVarValuePtr->ptr_val;
+    if (valueToDispose == NULL) {
+        // Disposing a nil pointer is a safe no-op.
+        return makeVoid();
+    }
+    
+    // Get the address value BEFORE freeing the memory
+    uintptr_t disposedAddrValue = (uintptr_t)valueToDispose;
+    
+    // Free the memory and the Value struct itself
+    freeValue(valueToDispose);
+    free(valueToDispose);
+    
+    // Set the original pointer variable to nil
+    pointerVarValuePtr->ptr_val = NULL;
+    
+    // Call the new helper to find and nullify any dangling aliases
+    vm_nullifyAliases(vm, disposedAddrValue);
+    
+    return makeVoid();
 }
 
 // Comparison function for bsearch (case-insensitive)

@@ -27,6 +27,23 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
+// Scans all global symbols and the entire VM value stack to find and nullify
+// any pointers that are aliases of a memory address that is being disposed.
+void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
+    // 1. Scan global symbols using the existing hash table helper
+    if (vm->vmGlobalSymbols) {
+        nullifyPointerAliasesByAddrValue(vm->vmGlobalSymbols, disposedAddrValue);
+    }
+
+    // 2. Scan the entire VM value stack for local variables and parameters
+    //    across all active call frames.
+    for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+        if (slot->type == TYPE_POINTER && (uintptr_t)slot->ptr_val == disposedAddrValue) {
+            slot->ptr_val = NULL; // This is an alias, set it to nil.
+        }
+    }
+}
+
 // runtimeError - Assuming your existing one is fine.
 void runtimeError(VM* vm, const char* format, ...) {
     va_list args;
@@ -332,31 +349,37 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         switch (instruction_val) {
             case OP_RETURN: {
                  if (vm->frameCount == 0) {
-                     // We are returning from the top-level script. This is not an error;
-                     // it means the program has finished executing.
+                     // Returning from the top-level script, program is finished.
                      #ifdef DEBUG
                      if (dumpExec) printf("--- Returning from top-level script. VM shutting down. ---\n");
                      #endif
-                     
-                     // Pop the final implicit value off the stack if any, then signal successful completion.
                      if (vm->stackTop > vm->stack) {
-                         pop(vm);
+                         pop(vm); // Pop final implicit value if any
                      }
                      return INTERPRET_OK;
                  }
 
-                 // This is a return from a normal function/procedure call.
-                 Value returnValue = pop(vm); // Pop the function's result (or a dummy value for procedures)
+                 // Pop the result that the callee placed on top of its stack.
+                 Value returnValue = pop(vm);
 
+                 // Get the frame we are returning FROM (the callee's frame).
+                 CallFrame* calleeFrame = &vm->frames[vm->frameCount - 1];
+
+                 // The instruction pointer should be restored from the callee's frame.
+                 vm->ip = calleeFrame->return_address;
+
+                 // Reset the stack top to the beginning of the callee's frame.
+                 // This erases all of the callee's locals and arguments from the stack.
+                 vm->stackTop = calleeFrame->slots;
+                 
+                 // Finally, decrement the frame count.
                  vm->frameCount--;
-                 CallFrame* frame = &vm->frames[vm->frameCount]; // Get the frame we are returning TO (the caller)
                  
-                 vm->stackTop = frame->slots;    // Reset stack top, popping the callee's entire frame (args + locals).
-                 push(vm, returnValue);          // Push the function's actual result value back onto the caller's stack.
-                 
-                 vm->ip = frame->return_address; // Jump back to the caller's next instruction.
+                 // Push the return value. It now sits on top of the caller's stack, ready for use.
+                 push(vm, returnValue);
+
                  break;
-             }
+            }
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT(); // Uses the macro
                 push(vm, makeCopyOfValue(&constant));
@@ -727,7 +750,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     if (strcmp(current->name, field_name) == 0) {
                         // Pop the record value, push a pointer to the field's value
                         pop(vm);
-                        push(vm, makePointer(&current->value, NULL)); // The pointer is to the Value struct
+                        push(vm, makePointer(&current->value, NULL));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -735,7 +758,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
             }
-
             case OP_GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
                 int* indices = malloc(sizeof(int) * dimension_count);
@@ -760,22 +782,49 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
                 break;
             }
-
             case OP_SET_INDIRECT: {
                 Value value_to_set = pop(vm);
-                Value pointer_val = pop(vm);
+                Value pointer_to_lvalue = pop(vm);
 
-                if (pointer_val.type != TYPE_POINTER) {
+                if (pointer_to_lvalue.type != TYPE_POINTER) {
                     runtimeError(vm, "VM Error: SET_INDIRECT requires an address on the stack.");
+                    freeValue(&value_to_set); // Clean up popped value
+                    freeValue(&pointer_to_lvalue);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
-                freeValue(target_lvalue_ptr); // Free the old value at the target location
-                *target_lvalue_ptr = makeCopyOfValue(&value_to_set); // Copy new value into place
+                Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
+                if (!target_lvalue_ptr) {
+                    runtimeError(vm, "VM Error: SET_INDIRECT called with a nil LValue pointer.");
+                    freeValue(&value_to_set);
+                    freeValue(&pointer_to_lvalue);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
 
+                // --- NEW LOGIC: Special handling for pointer assignment ---
+                if (target_lvalue_ptr->type == TYPE_POINTER &&
+                    (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
+                    
+                    // This is a pointer assignment (e.g., p1 := p2 or p1 := nil).
+                    // We only update the internal pointer value, not the type of the variable itself.
+                    target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
+                    
+                    // Also copy the base type node if the source is a non-nil pointer.
+                    if (value_to_set.type == TYPE_POINTER) {
+                         target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
+                    }
+                    // The type of the target L-Value remains TYPE_POINTER.
+
+                } else {
+                    // This is a regular assignment to a non-pointer (e.g., p1^ := 5),
+                    // or the types are otherwise incompatible for direct pointer assignment.
+                    freeValue(target_lvalue_ptr); // Free the old value at the target location
+                    *target_lvalue_ptr = makeCopyOfValue(&value_to_set); // Copy new value into place
+                }
+
+                // Clean up the temporary values that were on the stack
                 freeValue(&value_to_set);
-                freeValue(&pointer_val); // This just sets the ptr_val to NULL, it's safe
+                freeValue(&pointer_to_lvalue);
                 break;
             }
             case OP_GET_INDIRECT: {
@@ -886,24 +935,36 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     free(lower_bounds);
                     free(upper_bounds);
                 } else {
-                    (void)READ_BYTE(); // Consume the type specifier byte for non-array types
+                    // This is for non-array types (Integer, Pointer, Record, etc.)
+                    // The compiler provides the type name's index in the constant pool.
+                    uint8_t type_name_idx = READ_BYTE();
+                    Value typeNameVal = vm->chunk->constants[type_name_idx];
+                    AST* type_def_node = NULL;
 
-                     if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    // If a type name was provided (e.g., for PInt = ^Integer, it's 'pint'),
+                    // look up its full definition AST node from the type table created by the parser.
+                    if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
+                        type_def_node = lookupType(typeNameVal.s_val);
+                    }
+
+                    if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
                          runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
                          return INTERPRET_RUNTIME_ERROR;
-                     }
+                    }
 
-                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                     if (sym == NULL) {
-                         sym = createSymbolForVM(varNameVal.s_val, declaredType, NULL);
-                         if (!sym) {
+                    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                    if (sym == NULL) {
+                        // Pass the looked-up AST node to the symbol creation function.
+                        // This node contains the necessary metadata for pointer base types.
+                        sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_node);
+                        if (!sym) {
                              runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
                              return INTERPRET_RUNTIME_ERROR;
-                         }
-                         hashTableInsert(vm->vmGlobalSymbols, sym);
-                     } else {
+                        }
+                        hashTableInsert(vm->vmGlobalSymbols, sym);
+                    } else {
                          runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
-                     }
+                    }
                 }
                 break;
             }
@@ -922,79 +983,56 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 Value varNameVal = READ_CONSTANT();
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
                     runtimeError(vm, "VM Error: Invalid var name constant for SET_GLOBAL.");
-                    // Value is peeked, so no pop needed before error return
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (!sym) {
                     runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", varNameVal.s_val);
-                    // Value is peeked, so no pop needed before error return
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (!sym->value) { // Should have been initialized by OP_DEFINE_GLOBAL
+                if (!sym->value) {
                     sym->value = (Value*)malloc(sizeof(Value));
                     if (!sym->value) {
                         runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym); // type_def might be NULL
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
                 }
 
-                Value value_from_stack = peek(vm, 0); // Value to be assigned is on top of stack
-                Value value_to_assign; // This will hold the (potentially coerced) value to store
+                // Pop the value from the stack first.
+                Value value_from_stack = pop(vm);
+                Value value_to_assign;
 
-                // Perform type coercion
+                // --- Perform type coercion (this logic can be simplified now) ---
                 if (sym->type == TYPE_CHAR && value_from_stack.type == TYPE_STRING) {
                     if (value_from_stack.s_val && strlen(value_from_stack.s_val) == 1) {
                         value_to_assign = makeChar(value_from_stack.s_val[0]);
-                        // No need to free value_from_stack.s_val here, it's owned by the constant pool or another Value
                     } else {
                         runtimeError(vm, "Runtime Error: Cannot assign multi-character string or null string to CHAR variable '%s'.", sym->name);
-                        // Don't pop yet, the error will stop execution.
+                        freeValue(&value_from_stack); // Free the popped value before exiting
                         return INTERPRET_RUNTIME_ERROR;
                     }
                 } else if (sym->type == TYPE_REAL && value_from_stack.type == TYPE_INTEGER) {
                     value_to_assign = makeReal((double)value_from_stack.i_val);
                 } else if (sym->type == TYPE_INTEGER && value_from_stack.type == TYPE_REAL) {
-                    // Standard Pascal usually requires explicit Trunc/Round for Real->Integer.
-                    // For now, let's allow direct assignment with truncation for VM simplicity, or error.
-                    // runtimeError(vm, "Runtime Error: Cannot implicitly assign REAL to INTEGER for '%s'. Use Trunc() or Round().", sym->name);
-                    // return INTERPRET_RUNTIME_ERROR;
-                    value_to_assign = makeInt((long long)value_from_stack.r_val); // Implicit truncation
+                    value_to_assign = makeInt((long long)value_from_stack.r_val);
                 }
-                // Add other coercions like Integer to Byte/Word with range checks if desired
                 else {
-                    // No coercion needed, or types are incompatible (makeCopyOfValue will handle copy)
-                    // If types are truly incompatible and not handled by makeCopyOfValue implicitly,
-                    // an error should be raised here after checking sym->type vs value_from_stack.type
-                    if (sym->type != value_from_stack.type && typeWarn) { // Basic check
-                         // More sophisticated checks needed for assign-compatibility like array types, record types etc.
-                         // For now, if not char/real/int coercion, rely on direct copy or error later if problematic
-                        // fprintf(stderr, "VM Warning: Potential type mismatch assigning %s to %s for '%s'\n",
-                        //        varTypeToString(value_from_stack.type), varTypeToString(sym->type), sym->name);
-                    }
-                    value_to_assign = value_from_stack; // Use the stack value directly for makeCopyOfValue
+                    // No coercion needed, use the popped value directly for the copy
+                    value_to_assign = value_from_stack;
                 }
 
                 freeValue(sym->value); // Free existing contents of the symbol's value
                 *(sym->value) = makeCopyOfValue(&value_to_assign); // Assign a deep copy
 
-                // If value_to_assign was a new temporary Value created by makeChar/makeReal,
-                // and if makeCopyOfValue did not consume its *contents*, it would need freeing.
-                // However, makeChar/makeReal for primitives don't allocate contents that makeCopyOfValue wouldn't handle.
-                // If value_to_assign refers to value_from_stack, makeCopyOfValue handles its contents.
-                if (value_to_assign.type != value_from_stack.type && value_to_assign.s_val != value_from_stack.s_val) {
-                    // This condition means value_to_assign is a new temporary (e.g. from makeChar for string->char coercion)
-                    // and makeCopyOfValue would have duplicated its primitive data.
-                    // If makeChar itself allocated something for s_val (it doesn't for char), it'd be freed here.
-                    // Since makeChar just sets c_val, and makeReal sets r_val, freeValue is a no-op for their *contents*.
+                // If a new temporary value was created for coercion, free it
+                if (value_to_assign.type != value_from_stack.type) {
                     freeValue(&value_to_assign);
                 }
 
-
-                Value popped_val_after_assign = pop(vm); // Now pop the original value from stack
-                freeValue(&popped_val_after_assign);    // And free its contents
-
+                // Free the original value popped from the stack
+                freeValue(&value_from_stack);
+                
                 break;
             }
             case OP_GET_LOCAL: {
@@ -1008,11 +1046,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 // Free the old value at the slot before overwriting, if it's a complex type
                 freeValue(&frame->slots[slot]);
-                // Peek the value from the top of the stack and make a deep copy into the slot
-                Value value_to_set = peek(vm, 0);
+                // POP the value from the top of the stack and make a deep copy into the slot
+                Value value_to_set = pop(vm); // Changed from peek(vm, 0)
                 frame->slots[slot] = makeCopyOfValue(&value_to_set);
-                // NOTE: Standard assignment semantics often leave the assigned value on the stack.
-                // The compiler should emit an OP_POP if the value is not needed. So we don't pop here.
+                // Free the temporary value that was popped from the stack
+                freeValue(&value_to_set);
                 break;
             }
             case OP_JUMP_IF_FALSE: {

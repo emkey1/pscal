@@ -74,6 +74,7 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures);
+void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 
 void runtimeError(VM* vm, const char* format, ...);
 
