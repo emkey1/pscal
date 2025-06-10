@@ -22,6 +22,19 @@
 #include "utils.h"
 #include "builtin.h"
 
+// SDL Global Variable Definitions
+SDL_Window* gSdlWindow = NULL;
+SDL_Renderer* gSdlRenderer = NULL;
+SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
+bool gSdlInitialized = false;
+int gSdlWidth = 0;
+int gSdlHeight = 0;
+TTF_Font* gSdlFont = NULL;
+int gSdlFontSize   = 16;
+SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
+int gSdlTextureWidths[MAX_SDL_TEXTURES];
+int gSdlTextureHeights[MAX_SDL_TEXTURES];
+bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
 void InitializeTextureSystem(void) {
@@ -2169,9 +2182,7 @@ Value executeBuiltinRenderTextToTexture(AST *node) {
 }
 
 
-
-// Add these implementations at the end of the file
-Value vm_builtin_initgraph(int arg_count, Value* args) {
+Value vm_builtin_initgraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
         return makeVoid();
@@ -2181,12 +2192,15 @@ Value vm_builtin_initgraph(int arg_count, Value* args) {
     return makeVoid();
 }
 
-// ... Implement all the other vm_builtin_... functions for SDL ...
-// The logic inside each function is the same as its AST counterpart,
-// you just get the arguments from the `args` array instead of calling `eval()`.
-// For example:
-Value vm_builtin_fillrect(int arg_count, Value* args) {
-    if (arg_count != 4) { /* error */ return makeVoid(); }
+Value vm_builtin_closegraph(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "CloseGraph expects 0 arguments.");
+    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+    return makeVoid();
+}
+
+Value vm_builtin_fillrect(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) { runtimeError(vm, "FillRect expects 4 integer arguments."); return makeVoid(); }
     // ... type checks for all 4 args being integer ...
     SDL_Rect rect;
     rect.x = (int)args[0].i_val;
@@ -2197,5 +2211,184 @@ Value vm_builtin_fillrect(int arg_count, Value* args) {
     if (rect.h < 0) { rect.y += rect.h; rect.h = -rect.h; }
     SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
     SDL_RenderFillRect(gSdlRenderer, &rect);
+    return makeVoid();
+}
+
+Value vm_builtin_updatescreen(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "UpdateScreen expects 0 arguments.");
+    if (gSdlRenderer) SDL_RenderPresent(gSdlRenderer);
+    return makeVoid();
+}
+
+Value vm_builtin_cleardevice(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "Runtime error: ClearDevice expects 0 arguments.");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        runtimeError(vm, "Runtime error: Graphics mode not initialized before ClearDevice.");
+        return makeVoid();
+    }
+    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+    SDL_RenderClear(gSdlRenderer);
+    return makeVoid();
+}
+
+Value vm_builtin_getmaxx(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "GetMaxX expects 0 arguments.");
+    return makeInt(gSdlWidth > 0 ? gSdlWidth - 1 : 0);
+}
+
+Value vm_builtin_setrgbcolor(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) { runtimeError(vm, "SetRGBColor expects 3 arguments."); return makeVoid(); }
+    gSdlCurrentColor.r = (Uint8)args[0].i_val;
+    gSdlCurrentColor.g = (Uint8)args[1].i_val;
+    gSdlCurrentColor.b = (Uint8)args[2].i_val;
+    gSdlCurrentColor.a = 255;
+    if (gSdlRenderer) {
+        SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    }
+    return makeVoid();
+}
+
+Value vm_builtin_quittextsystem(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "QuitTextSystem expects 0 arguments.");
+    if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
+    if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
+    return makeVoid();
+}
+
+Value vm_builtin_gettextsize(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) { runtimeError(vm, "GetTextSize expects 3 arguments."); return makeVoid(); }
+    if (!gSdlFont) { runtimeError(vm, "Font not initialized for GetTextSize."); return makeVoid(); }
+    
+    const char* text = AS_STRING(args[0]);
+    Value* width_ptr = (Value*)args[1].ptr_val;
+    Value* height_ptr = (Value*)args[2].ptr_val;
+    
+    int w, h;
+    TTF_SizeUTF8(gSdlFont, text, &w, &h);
+    
+    freeValue(width_ptr); *width_ptr = makeInt(w);
+    freeValue(height_ptr); *height_ptr = makeInt(h);
+    
+    return makeVoid();
+}
+
+Value vm_builtin_getmousestate(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) { runtimeError(vm, "GetMouseState expects 3 arguments."); return makeVoid(); }
+    
+    Value* x_ptr = (Value*)args[0].ptr_val;
+    Value* y_ptr = (Value*)args[1].ptr_val;
+    Value* buttons_ptr = (Value*)args[2].ptr_val;
+
+    int mse_x, mse_y;
+    Uint32 sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+    int pscal_buttons = 0;
+    if (sdl_buttons & SDL_BUTTON_LMASK) pscal_buttons |= 1;
+    if (sdl_buttons & SDL_BUTTON_MMASK) pscal_buttons |= 2;
+    if (sdl_buttons & SDL_BUTTON_RMASK) pscal_buttons |= 4;
+
+    freeValue(x_ptr); *x_ptr = makeInt(mse_x);
+    freeValue(y_ptr); *y_ptr = makeInt(mse_y);
+    freeValue(buttons_ptr); *buttons_ptr = makeInt(pscal_buttons);
+
+    return makeVoid();
+}
+
+Value vm_builtin_destroytexture(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "DestroyTexture expects 1 integer argument."); return makeVoid(); }
+    int textureID = (int)args[0].i_val;
+    if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID]) {
+        SDL_DestroyTexture(gSdlTextures[textureID]);
+        gSdlTextures[textureID] = NULL;
+    }
+    return makeVoid();
+}
+
+Value vm_builtin_rendercopyrect(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 5) { runtimeError(vm, "RenderCopyRect expects 5 arguments."); return makeVoid(); }
+    int textureID = (int)args[0].i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || !gSdlTextures[textureID]) return makeVoid();
+    SDL_Rect dstRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
+    SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, &dstRect);
+    return makeVoid();
+}
+
+Value vm_builtin_setalphablend(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_BOOLEAN) { runtimeError(vm, "SetAlphaBlend expects 1 boolean argument."); return makeVoid(); }
+    SDL_BlendMode mode = AS_BOOLEAN(args[0]) ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE;
+    if (gSdlRenderer) SDL_SetRenderDrawBlendMode(gSdlRenderer, mode);
+    return makeVoid();
+}
+
+Value vm_builtin_rendertexttotexture(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) { runtimeError(vm, "RenderTextToTexture expects 4 arguments."); return makeInt(-1); }
+    if (!gSdlFont) { runtimeError(vm, "Font not initialized for RenderTextToTexture."); return makeInt(-1); }
+
+    const char* text = AS_STRING(args[0]);
+    SDL_Color color = { (Uint8)args[1].i_val, (Uint8)args[2].i_val, (Uint8)args[3].i_val, 255 };
+    
+    SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text, color);
+    if (!surf) return makeInt(-1);
+
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
+    SDL_FreeSurface(surf);
+    if (!tex) return makeInt(-1);
+
+    int free_slot = -1;
+    for(int i = 0; i < MAX_SDL_TEXTURES; i++) { if (!gSdlTextures[i]) { free_slot = i; break; } }
+    if (free_slot == -1) { SDL_DestroyTexture(tex); return makeInt(-1); }
+
+    gSdlTextures[free_slot] = tex;
+    SDL_QueryTexture(tex, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+
+    return makeInt(free_slot);
+}
+
+Value vm_builtin_inittextsystem(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        runtimeError(vm, "Graphics system not initialized before InitTextSystem.");
+        return makeVoid();
+    }
+    // Lazy Initialize SDL_ttf if not already done
+    if (!gSdlTtfInitialized) {
+        if (TTF_Init() == -1) {
+            runtimeError(vm, "SDL_ttf system initialization failed: %s", TTF_GetError());
+            return makeVoid();
+        }
+        gSdlTtfInitialized = true;
+    }
+
+    // Get arguments from the args array
+    Value fontNameVal = args[0];
+    Value fontSizeVal = args[1];
+
+    if (fontNameVal.type != TYPE_STRING || fontSizeVal.type != TYPE_INTEGER) {
+        runtimeError(vm, "InitTextSystem argument type mismatch. Expected (String, Integer).");
+        return makeVoid(); // Don't free args, they are on the VM stack
+    }
+
+    const char* font_path = fontNameVal.s_val;
+    int font_size = (int)fontSizeVal.i_val;
+
+    // Close previous font if one was loaded
+    if (gSdlFont) {
+        TTF_CloseFont(gSdlFont);
+        gSdlFont = NULL;
+    }
+
+    gSdlFont = TTF_OpenFont(font_path, font_size);
+    if (!gSdlFont) {
+        runtimeError(vm, "Failed to load font '%s': %s", font_path, TTF_GetError());
+        return makeVoid();
+    }
+    gSdlFontSize = font_size;
+
     return makeVoid();
 }

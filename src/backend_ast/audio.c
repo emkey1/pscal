@@ -1,10 +1,4 @@
-// audio.c
-//
-// audio.c
-// Pscal
-//
-// Created by Michael Miller on 5/10/25.
-//
+// src/backend_ast/audio.c
 
 #include "audio.h"
 #include "globals.h" // For EXIT_FAILURE_HANDLER
@@ -13,6 +7,7 @@
 #include <stdio.h>
 #include <string.h> // For strdup
 #include <SDL2/SDL.h> // Need basic SDL for SDL_InitSubSystem, SDL_WasInit
+#include "vm/vm.h" // <<< ADDED: For VM struct and runtimeError prototype
 
 // Define and initialize global variables from audio.h
 Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
@@ -21,14 +16,12 @@ bool gSoundSystemInitialized = false;
 // VM-native version of LoadSound.
 Value vm_builtin_loadsound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
-        fprintf(stderr, "Runtime error: LoadSound expects 1 argument (FileName: String).\n");
-        // In the VM, we might not want to exit, but return an error value.
-        // For now, returning -1 is consistent.
+        runtimeError(vm, "LoadSound expects 1 argument (FileName: String).");
         return makeInt(-1);
     }
     Value fileNameVal = args[0];
     if (fileNameVal.type != TYPE_STRING || fileNameVal.s_val == NULL) {
-        fprintf(stderr, "Runtime error: LoadSound argument must be a valid String. Got %s.\n", varTypeToString(fileNameVal.type));
+        runtimeError(vm, "LoadSound argument must be a valid String. Got %s.", varTypeToString(fileNameVal.type));
         return makeInt(-1);
     }
 
@@ -387,14 +380,23 @@ Value executeBuiltinIsSoundPlaying(AST *node) {
     return makeBoolean(playing != 0);
 }
 
-Value vm_builtin_initsoundsystem(int arg_count, Value* args) {
-    if (arg_count != 0) { /* error */ }
-    audioInitSystem();
+Value vm_builtin_initsoundsystem(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "InitSoundSystem expects 0 arguments.");
+    else audioInitSystem();
     return makeVoid();
 }
 
-Value vm_builtin_playsound(int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { /* error */ }
-    audioPlaySound((int)args[0].i_val);
+Value vm_builtin_playsound(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "PlaySound expects 1 integer argument.");
+    } else {
+        audioPlaySound((int)args[0].i_val);
+    }
+    return makeVoid();
+}
+
+Value vm_builtin_quitsoundsystem(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "QuitSoundSystem expects 0 arguments.");
+    else audioQuitSystem();
     return makeVoid();
 }

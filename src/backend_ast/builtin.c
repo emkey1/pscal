@@ -1,3 +1,5 @@
+// src/backend_ast/builtin.c
+
 #include "backend_ast/builtin.h"
 #include "frontend/parser.h"
 #include "core/utils.h"
@@ -5,8 +7,11 @@
 #include "symbol/symbol.h"
 #include "backend_ast/sdl.h"
 #include "backend_ast/audio.h"
-// Duplicates removed
 #include "globals.h"                  // Assuming globals.h is directly in src/
+#include "backend_ast/audio.h"
+#include "backend_ast/sdl.h"
+#include "backend_ast/builtin_network_api.h"
+#include "vm/vm.h"
 
 // Standard library includes remain the same
 #include <math.h>
@@ -17,7 +22,6 @@
 #include <sys/ioctl.h> // For ioctl, FIONREAD (Terminal I/O)
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
-
 
 // Comparison function for bsearch (case-insensitive) - MUST be defined before the table that uses it
 static int compareVmBuiltinMappings(const void *key, const void *element) {
@@ -71,7 +75,6 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
     return found ? found->handler : NULL;
 }
 
-
 // Comparison function for bsearch (case-insensitive)
 static int compareBuiltinMappings(const void *key, const void *element) {
     const char *target_name = (const char *)key;
@@ -79,7 +82,6 @@ static int compareBuiltinMappings(const void *key, const void *element) {
     return strcasecmp(target_name, mapping->name);
 }
 
-// Define the dispatch table - MUST BE SORTED ALPHABETICALLY BY NAME (lowercase)
 static const BuiltinMapping builtin_dispatch_table[] = {
     {"abs",       executeBuiltinAbs},
     {"api_receive", executeBuiltinAPIReceive},
@@ -93,7 +95,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"cos",       executeBuiltinCos},
     {"createtargettexture", executeBuiltinCreateTargetTexture},
     {"createtexture", executeBuiltinCreateTexture},
-    {"dec",       executeBuiltinDec},         // Include Dec
+    {"dec",       executeBuiltinDec},
     {"delay",     executeBuiltinDelay},
     {"destroytexture", executeBuiltinDestroyTexture},
     {"dispose",   executeBuiltinDispose},
@@ -130,7 +132,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"mstreamcreate", executeBuiltinMstreamCreate},
     {"mstreamfree", executeBuiltinMstreamFree},
     {"mstreamloadfromfile", executeBuiltinMstreamLoadFromFile},
-    {"mstreamsavetofile", executeBuiltinMstreamSaveToFile}, // Corrected name based on registration
+    {"mstreamsavetofile", executeBuiltinMstreamSaveToFile},
     {"new",       executeBuiltinNew},
     {"ord",       executeBuiltinOrd},
     {"outtextxy", executeBuiltinOutTextXY},
@@ -152,7 +154,6 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"rendercopyrect", executeBuiltinRenderCopyRect},
     {"rendertexttotexture", executeBuiltinRenderTextToTexture},
     {"reset",     executeBuiltinReset},
-    // {"result",    executeBuiltinResult}, // 'result' is special, handled differently? Let's assume not dispatched here.
     {"rewrite",   executeBuiltinRewrite},
     {"round",     executeBuiltinRound},
     {"screencols", executeBuiltinScreenCols},
@@ -177,30 +178,10 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"waitkeyevent", executeBuiltinWaitKeyEvent},
     {"wherex",    executeBuiltinWhereX},
     {"wherey",    executeBuiltinWhereY}
-    // Add Write/Writeln/Read/Readln if you want them dispatched here,
-    // but they are currently handled directly in the interpreter's main switch.
 };
 
 // Calculate the number of entries in the table
 static const size_t num_builtins = sizeof(builtin_dispatch_table) / sizeof(builtin_dispatch_table[0]);
-
-// Looks up a built-in by name and returns its C function handler.
-BuiltinHandler getBuiltinHandler(const char *name) {
-    if (!name) return NULL;
-
-    BuiltinMapping *found = (BuiltinMapping *)bsearch(
-        name,
-        builtin_dispatch_table,
-        num_builtins,
-        sizeof(BuiltinMapping),
-        compareBuiltinMappings
-    );
-
-    if (found) {
-        return found->handler;
-    }
-    return NULL;
-}
 
 void assignValueToLValue(AST *lvalueNode, Value newValue) {
     if (!lvalueNode) {
@@ -2970,7 +2951,7 @@ int getBuiltinIDForCompiler(const char *name) {
 // VM Versions
 
 Value vm_builtin_inttostr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) return makeString("");
+    if (arg_count != 1) { runtimeError(vm, "IntToStr requires 1 argument."); return makeString(""); }
     Value arg = args[0];
     long long value_to_convert = 0;
     switch (arg.type) {
@@ -2983,7 +2964,7 @@ Value vm_builtin_inttostr(VM* vm, int arg_count, Value* args) {
         case TYPE_CHAR:
             value_to_convert = (long long)arg.c_val;
             break;
-        default: return makeString("");
+        default: runtimeError(vm, "IntToStr requires an integer-compatible argument."); return makeString("");
     }
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "%lld", value_to_convert);
@@ -2991,37 +2972,62 @@ Value vm_builtin_inttostr(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_length(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) return makeInt(0);
+    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "Length requires 1 string argument."); return makeInt(0); }
     return makeInt(args[0].s_val ? strlen(args[0].s_val) : 0);
 }
 
-Value vm_builtin_abs(int arg_count, Value* args) {
-    if (arg_count != 1) return makeInt(0);
+Value vm_builtin_abs(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
     if (args[0].type == TYPE_INTEGER) return makeInt(llabs(args[0].i_val));
     if (args[0].type == TYPE_REAL) return makeReal(fabs(args[0].r_val));
+    runtimeError(vm, "abs expects a numeric argument.");
     return makeInt(0);
 }
 
-Value vm_builtin_round(int arg_count, Value* args) {
-    if (arg_count != 1) return makeInt(0);
+Value vm_builtin_round(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Round expects 1 argument."); return makeInt(0); }
     if (args[0].type == TYPE_REAL) return makeInt((long long)round(args[0].r_val));
     if (args[0].type == TYPE_INTEGER) return makeInt(args[0].i_val);
+    runtimeError(vm, "Round expects a numeric argument.");
     return makeInt(0);
 }
 
-Value vm_builtin_halt(int arg_count, Value* args) {
+Value vm_builtin_halt(VM* vm, int arg_count, Value* args) {
     long long code = 0;
     if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
         code = args[0].i_val;
+    } else if (arg_count > 1) {
+        runtimeError(vm, "Halt expects 0 or 1 integer argument.");
     }
     exit((int)code);
     return makeVoid(); // Unreachable
 }
 
-Value vm_builtin_delay(int arg_count, Value* args) {
-    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
-        long long ms = args[0].i_val;
-        if (ms > 0) usleep((useconds_t)ms * 1000);
+Value vm_builtin_delay(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_WORD)) {
+        runtimeError(vm, "Delay requires an integer or word argument.");
+        return makeVoid();
     }
+    long long ms = args[0].i_val;
+    if (ms > 0) usleep((useconds_t)ms * 1000);
     return makeVoid();
+}
+
+
+// Looks up a built-in by name and returns its C function handler.
+BuiltinHandler getBuiltinHandler(const char *name) {
+    if (!name) return NULL;
+
+    BuiltinMapping *found = (BuiltinMapping *)bsearch(
+        name,
+        builtin_dispatch_table,
+        num_builtins,
+        sizeof(BuiltinMapping),
+        compareBuiltinMappings
+    );
+
+    if (found) {
+        return found->handler;
+    }
+    return NULL;
 }

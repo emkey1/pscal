@@ -12,10 +12,8 @@
 #include "types.h"
 #include "ast.h"
 
-// --- START MODIFICATION ---
-// Forward declare the VM struct to break circular dependencies
+// Forward declare the VM struct
 struct VM_s;
-// --- END MODIFICATION ---
 
 #define MAX_SOUNDS 32
 
@@ -36,13 +34,14 @@ Value executeBuiltinPlaySound(AST *node);
 Value executeBuiltinQuitSoundSystem(AST *node);
 Value executeBuiltinIsSoundPlaying(AST *node);
 
-// --- START MODIFICATION ---
-// Prototypes for VM-native built-in handlers
-// Use the explicit struct tag 'struct VM_s*' to match the forward declaration.
+// VM-native built-ins
 Value vm_builtin_initsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_loadsound(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
-// --- END MODIFICATION ---
+Value vm_builtin_initsoundsystem(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_loadsound(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 
 #endif // PSCAL_AUDIO_H

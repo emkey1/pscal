@@ -52,6 +52,7 @@ typedef enum {
     OP_GET_FIELD_ADDRESS,
     OP_GET_ELEMENT_ADDRESS,
     OP_SET_INDIRECT,
+    OP_GET_INDIRECT, 
 
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions

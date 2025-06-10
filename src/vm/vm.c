@@ -778,6 +778,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&pointer_val); // This just sets the ptr_val to NULL, it's safe
                 break;
             }
+            case OP_GET_INDIRECT: {
+                Value pointer_val = pop(vm);
+                if (pointer_val.type != TYPE_POINTER) {
+                    runtimeError(vm, "VM Error: GET_INDIRECT requires an address on the stack.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
+                if (target_lvalue_ptr == NULL) {
+                    runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                // Push a copy of the value at the address
+                push(vm, makeCopyOfValue(target_lvalue_ptr));
+                freeValue(&pointer_val); // Clean up the temporary pointer value
+                break;
+            }
+
             case OP_DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 VarType declaredType = (VarType)READ_BYTE();

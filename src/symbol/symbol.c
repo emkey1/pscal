@@ -18,23 +18,6 @@
 #include "core/list.h"
 #include "frontend/ast.h"
 
-// SDL Globals
-SDL_Window* gSdlWindow = NULL;
-SDL_Renderer* gSdlRenderer = NULL;
-SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
-bool gSdlInitialized = false;
-int gSdlWidth = 0;
-int gSdlHeight = 0;
-TTF_Font* gSdlFont = NULL;
-int gSdlFontSize   = 16;
-SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
-int gSdlTextureWidths[MAX_SDL_TEXTURES];
-int gSdlTextureHeights[MAX_SDL_TEXTURES];
-bool gSdlTtfInitialized = false;
-// SDL Stuff End
-
-
-
 // --- Hash Table Implementation ---
 
 /**
