@@ -31,6 +31,18 @@ Value vm_builtin_delay(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_new(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_dispose(struct VM_s* vm, int arg_count, Value* args);
 
+// --- VM-NATIVE FILE I/O ---
+Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_reset(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_close(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_readln(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_eof(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_ioresult(struct VM_s* vm, int arg_count, Value* args);
+
+// --- VM-NATIVE RANDOM FUNCTIONS ---
+Value vm_builtin_randomize(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_random(struct VM_s* vm, int arg_count, Value* args);
+
 // --- AST-BASED BUILT-INS (for AST interpreter) ---
 
 // Prototypes from builtin.c

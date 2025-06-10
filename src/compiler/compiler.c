@@ -289,27 +289,25 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // First, compile the L-Value of the base expression (e.g., myRec or p^)
+            // Recursively compile the L-Value of the base (e.g., myRec or p^)
             compileLValue(node->left, chunk, getLine(node->left));
-            
-            // Now, the address of the base is on the stack.
-            // We must dereference it to get the actual struct/record value on the stack.
-            writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
 
-            // The record is now on the stack. We can now get the address of the specific field.
+            // Now, get the address of the specific field.
             int fieldNameIndex = addConstantToChunk(chunk, makeString(node->token->value));
             writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
             writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
             break;
         }
         case AST_ARRAY_ACCESS: {
-            // This logic needs a similar review, but let's fix one thing at a time.
-            // For now, keep the existing logic.
+            // Get the L-Value of the base array (e.g., address of 'myArray' or value of 'p')
             compileLValue(node->left, chunk, getLine(node->left));
-            writeBytecodeChunk(chunk, OP_GET_INDIRECT, line); // Added to dereference array pointer if needed
+
+            // Compile all index expressions. Their values will be on the stack.
             for (int i = 0; i < node->child_count; i++) {
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
+            
+            // Now, get the address of the specific element.
             writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;

@@ -34,11 +34,14 @@ static int compareVmBuiltinMappings(const void *key, const void *element) {
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"abs", vm_builtin_abs},
+    {"assign", vm_builtin_assign},
     {"cleardevice", vm_builtin_cleardevice},
+    {"close", vm_builtin_close},
     {"closegraph", vm_builtin_closegraph},
     {"delay", vm_builtin_delay},
     {"destroytexture", vm_builtin_destroytexture},
     {"dispose", vm_builtin_dispose},
+    {"eof", vm_builtin_eof},
     {"fillrect", vm_builtin_fillrect},
     {"getmaxx", vm_builtin_getmaxx},
     {"getmousestate", vm_builtin_getmousestate},
@@ -48,14 +51,19 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"initsoundsystem", vm_builtin_initsoundsystem},
     {"inittextsystem", vm_builtin_inittextsystem},
     {"inttostr", vm_builtin_inttostr},
+    {"ioresult", vm_builtin_ioresult},
     {"length", vm_builtin_length},
     {"loadsound", vm_builtin_loadsound},
     {"new", vm_builtin_new},
     {"playsound", vm_builtin_playsound},
     {"quittextsystem", vm_builtin_quittextsystem},
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
+    {"random", vm_builtin_random},
+    {"randomize", vm_builtin_randomize},
+    {"readln", vm_builtin_readln},
     {"rendercopyrect", vm_builtin_rendercopyrect},
     {"rendertexttotexture", vm_builtin_rendertexttotexture},
+    {"reset", vm_builtin_reset},
     {"round", vm_builtin_round},
     {"setalphablend", vm_builtin_setalphablend},
     {"setrgbcolor", vm_builtin_setrgbcolor},
@@ -171,6 +179,112 @@ Value vm_builtin_dispose(VM* vm, int arg_count, Value* args) {
     // Call the new helper to find and nullify any dangling aliases
     vm_nullifyAliases(vm, disposedAddrValue);
     
+    return makeVoid();
+}
+
+Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "Assign requires 2 arguments."); return makeVoid(); }
+
+    Value* fileVarLValue = (Value*)args[0].ptr_val; // Arg 0 is an LValue (address)
+    Value* fileNameVal = &args[1];                  // Arg 1 is an RValue (string)
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First arg to Assign must be a file variable."); return makeVoid(); }
+    if (fileNameVal->type != TYPE_STRING) { runtimeError(vm, "Second arg to Assign must be a string."); return makeVoid(); }
+    
+    if (fileVarLValue->filename) free(fileVarLValue->filename);
+    fileVarLValue->filename = fileNameVal->s_val ? strdup(fileNameVal->s_val) : NULL;
+
+    return makeVoid();
+}
+
+Value vm_builtin_reset(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Reset requires 1 argument."); return makeVoid(); }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Reset must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
+    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+
+    FILE* f = fopen(fileVarLValue->filename, "r");
+    if (f == NULL) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+    }
+    fileVarLValue->f_val = f;
+    return makeVoid();
+}
+
+Value vm_builtin_close(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Close requires 1 argument."); return makeVoid(); }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Close must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->f_val) {
+        fclose(fileVarLValue->f_val);
+        fileVarLValue->f_val = NULL;
+    }
+    // Standard Pascal does not de-assign the filename on Close.
+    return makeVoid();
+}
+
+Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Eof requires 1 argument."); return makeBoolean(true); }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Eof must be a file variable."); return makeBoolean(true); }
+    if (!fileVarLValue->f_val) { return makeBoolean(true); } // File not open is considered EOF
+    
+    int c = fgetc(fileVarLValue->f_val);
+    if (c == EOF) {
+        return makeBoolean(true);
+    }
+    ungetc(c, fileVarLValue->f_val); // Push character back
+    return makeBoolean(false);
+}
+
+Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "Readln requires 2 arguments (file, string LValue)."); return makeVoid(); }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    Value* strVarLValue = (Value*)args[1].ptr_val;
+    
+    if (fileVarLValue->type != TYPE_FILE || !fileVarLValue->f_val) { runtimeError(vm, "Invalid file variable for Readln."); return makeVoid(); }
+    if (strVarLValue->type != TYPE_STRING) { runtimeError(vm, "Second argument to Readln must be a string variable."); return makeVoid(); }
+
+    char buffer[DEFAULT_STRING_CAPACITY];
+    if (fgets(buffer, sizeof(buffer), fileVarLValue->f_val) != NULL) {
+        buffer[strcspn(buffer, "\n\r")] = 0; // Trim newline
+        freeValue(strVarLValue); // Free old string
+        *strVarLValue = makeString(buffer);
+    } else {
+        freeValue(strVarLValue);
+        *strVarLValue = makeString(""); // EOF or error, return empty string
+    }
+    return makeVoid();
+}
+
+Value vm_builtin_ioresult(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) { runtimeError(vm, "IOResult requires 0 arguments."); return makeInt(0); }
+    int err = last_io_error;
+    last_io_error = 0;
+    return makeInt(err);
+}
+
+// --- VM BUILT-IN IMPLEMENTATIONS: RANDOM ---
+
+Value vm_builtin_randomize(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) { runtimeError(vm, "Randomize requires 0 arguments."); return makeVoid(); }
+    srand((unsigned int)time(NULL));
+    return makeVoid();
+}
+
+Value vm_builtin_random(VM* vm, int arg_count, Value* args) {
+    if (arg_count == 0) {
+        return makeReal((double)rand() / ((double)RAND_MAX + 1.0));
+    }
+    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
+        long long n = args[0].i_val;
+        if (n <= 0) { runtimeError(vm, "Random argument must be > 0."); return makeInt(0); }
+        return makeInt(rand() % n);
+    }
+    runtimeError(vm, "Random requires 0 arguments, or 1 integer argument.");
     return makeVoid();
 }
 
