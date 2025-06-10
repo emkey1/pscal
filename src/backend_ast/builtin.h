@@ -30,6 +30,7 @@ Value vm_builtin_halt(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_delay(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_new(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_dispose(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_exit(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE FILE I/O ---
 Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);
@@ -46,6 +47,7 @@ Value vm_builtin_random(struct VM_s* vm, int arg_count, Value* args);
 // --- AST-BASED BUILT-INS (for AST interpreter) ---
 
 // Prototypes from builtin.c
+Value executeBuiltinExit(AST *node);
 Value executeBuiltinCos(AST *node);
 Value executeBuiltinSin(AST *node);
 Value executeBuiltinTan(AST *node);

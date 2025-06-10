@@ -42,6 +42,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"destroytexture", vm_builtin_destroytexture},
     {"dispose", vm_builtin_dispose},
     {"eof", vm_builtin_eof},
+    {"exit", vm_builtin_exit},
     {"fillrect", vm_builtin_fillrect},
     {"getmaxx", vm_builtin_getmaxx},
     {"getmousestate", vm_builtin_getmousestate},
@@ -144,6 +145,21 @@ Value vm_builtin_new(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vm_builtin_exit(VM* vm, int arg_count, Value* args) {
+    // A proper 'exit' would unwind the current call stack frame.
+    // For now, as a simpler implementation, we can treat it like 'halt'.
+    // A future improvement would be a dedicated OP_EXIT opcode.
+    if (arg_count > 0) {
+        runtimeError(vm, "exit does not take any arguments.");
+        return makeVoid(); // Return to be safe, though runtimeError may halt
+    }
+    // Set a flag or use a special return that the VM loop can check
+    // to perform an early return from the current function.
+    // For now, we will have it halt execution as a placeholder.
+    exit(0);
+    return makeVoid(); // Unreachable
+}
+
 Value vm_builtin_dispose(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_POINTER) {
         runtimeError(vm, "dispose() expects a single pointer variable argument.");
@@ -241,21 +257,120 @@ Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "Readln requires 2 arguments (file, string LValue)."); return makeVoid(); }
-    Value* fileVarLValue = (Value*)args[0].ptr_val;
-    Value* strVarLValue = (Value*)args[1].ptr_val;
-    
-    if (fileVarLValue->type != TYPE_FILE || !fileVarLValue->f_val) { runtimeError(vm, "Invalid file variable for Readln."); return makeVoid(); }
-    if (strVarLValue->type != TYPE_STRING) { runtimeError(vm, "Second argument to Readln must be a string variable."); return makeVoid(); }
+    FILE* input_stream = stdin;
+    int start_index = 0;
 
-    char buffer[DEFAULT_STRING_CAPACITY];
-    if (fgets(buffer, sizeof(buffer), fileVarLValue->f_val) != NULL) {
-        buffer[strcspn(buffer, "\n\r")] = 0; // Trim newline
-        freeValue(strVarLValue); // Free old string
-        *strVarLValue = makeString(buffer);
-    } else {
-        freeValue(strVarLValue);
-        *strVarLValue = makeString(""); // EOF or error, return empty string
+    // Check if the first argument is a file variable
+    if (arg_count > 0 && args[0].type == TYPE_POINTER) {
+        Value* first_arg_lvalue = (Value*)args[0].ptr_val;
+        if (first_arg_lvalue && first_arg_lvalue->type == TYPE_FILE) {
+            if (first_arg_lvalue->f_val) {
+                input_stream = first_arg_lvalue->f_val;
+                start_index = 1; // Start processing variables from the next argument
+            } else {
+                runtimeError(vm, "File not open for Readln.");
+                last_io_error = 1; // Set I/O error status
+                return makeVoid();
+            }
+        }
+    }
+
+    // If there are no variables to read into, just consume the rest of the line.
+    if (arg_count == start_index) {
+        int c;
+        while ((c = fgetc(input_stream)) != '\n' && c != EOF);
+        last_io_error = 0;
+        return makeVoid();
+    }
+
+    // Read the entire line into a buffer first. This is key to how `readln` works.
+    char line_buffer[4096]; // A large buffer for the line
+    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
+        // Hitting EOF is not necessarily an I/O error for readln.
+        last_io_error = ferror(input_stream) ? errno : 0;
+        return makeVoid();
+    }
+
+    // Use a pointer to traverse the line buffer as we parse values from it.
+    char* buffer_ptr = line_buffer;
+
+    for (int i = start_index; i < arg_count; i++) {
+        Value* target_lvalue = (Value*)args[i].ptr_val;
+        if (!target_lvalue) {
+            runtimeError(vm, "VM internal error: Readln received a null LValue pointer for argument %d.", i + 1);
+            continue;
+        }
+
+        int n_scanned = 0;
+        int items_scanned = 0;
+
+        // Skip leading whitespace before trying to parse the next value.
+        // The %n specifier in sscanf is used to count characters consumed.
+        if (sscanf(buffer_ptr, " %n", &n_scanned) == 0) {
+             buffer_ptr += n_scanned;
+        } else {
+            // This case handles when the rest of the buffer is empty or only whitespace.
+            // No more values can be read.
+            last_io_error = 1; // Set I/O error because we expected another value.
+            break;
+        }
+
+        switch (target_lvalue->type) {
+            case TYPE_INTEGER:
+            case TYPE_BYTE:
+            case TYPE_WORD: {
+                long long temp_val;
+                items_scanned = sscanf(buffer_ptr, "%lld%n", &temp_val, &n_scanned);
+                if (items_scanned == 1) {
+                    freeValue(target_lvalue);
+                    *target_lvalue = makeValueForType(target_lvalue->type, NULL, NULL); // Recreate with correct type
+                    target_lvalue->i_val = temp_val;
+                    buffer_ptr += n_scanned;
+                }
+                break;
+            }
+            case TYPE_REAL: {
+                double temp_val;
+                items_scanned = sscanf(buffer_ptr, "%lf%n", &temp_val, &n_scanned);
+                if (items_scanned == 1) {
+                    freeValue(target_lvalue);
+                    *target_lvalue = makeReal(temp_val);
+                    buffer_ptr += n_scanned;
+                }
+                break;
+            }
+            case TYPE_CHAR: {
+                char temp_val;
+                items_scanned = sscanf(buffer_ptr, "%c%n", &temp_val, &n_scanned);
+                if (items_scanned == 1) {
+                    freeValue(target_lvalue);
+                    *target_lvalue = makeChar(temp_val);
+                    buffer_ptr += n_scanned;
+                }
+                break;
+            }
+            case TYPE_STRING: {
+                // For readln, a string variable consumes the rest of the line from the current point.
+                buffer_ptr[strcspn(buffer_ptr, "\n\r")] = 0; // Trim trailing newline from our buffer ptr
+                freeValue(target_lvalue);
+                *target_lvalue = makeString(buffer_ptr);
+                goto end_readln; // Reading a string finishes the readln operation.
+            }
+            default:
+                runtimeError(vm, "Cannot use Readln with a variable of type %s.", varTypeToString(target_lvalue->type));
+                goto end_readln; // Exit loop on unsupported type
+        }
+
+        if (items_scanned != 1) {
+            last_io_error = 1; // Set I/O error if a value could not be parsed.
+            break; // Stop parsing this line.
+        }
+    }
+
+end_readln:
+    if (last_io_error == 0) {
+        // Only reset if no new errors occurred during parsing.
+        last_io_error = 0;
     }
     return makeVoid();
 }
@@ -317,9 +432,10 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"drawpolygon", executeBuiltinDrawPolygon},
     {"drawrect",  executeBuiltinDrawRect},
     {"eof",       executeBuiltinEOF},
+    {"exit",      executeBuiltinExit},
     {"exp",       executeBuiltinExp},
     {"fillcircle", executeBuiltinFillCircle},
-    {"fillrect", executeBuiltinFillRect},
+    {"fillrect",  executeBuiltinFillRect},
     {"getmaxx",   executeBuiltinGetMaxX},
     {"getmaxy",   executeBuiltinGetMaxY},
     {"getmousestate", executeBuiltinGetMouseState},
@@ -402,148 +518,54 @@ void assignValueToLValue(AST *lvalueNode, Value newValue) {
         EXIT_FAILURE_HANDLER();
     }
 
-    if (lvalueNode->type == AST_VARIABLE) {
-        // Simple variable assignment - use updateSymbol which handles everything
-        if (!lvalueNode->token || !lvalueNode->token->value) {
-            fprintf(stderr, "Runtime error: Invalid AST_VARIABLE node in assignValueToLValue.\n"); EXIT_FAILURE_HANDLER();
-        }
-        updateSymbol(lvalueNode->token->value, newValue);
-
-    } else if (lvalueNode->type == AST_FIELD_ACCESS) {
-        // Record field assignment
-        // 1. Find the base record symbol
-        AST* baseVarNode = lvalueNode->left;
-        while(baseVarNode && baseVarNode->type != AST_VARIABLE) { // Simple traversal - enhance if needed
-             if (baseVarNode->left) baseVarNode = baseVarNode->left;
-             else { fprintf(stderr,"Runtime error: Cannot find base var for field assign in assignValueToLValue\n"); EXIT_FAILURE_HANDLER(); }
-        }
-         if (!baseVarNode || baseVarNode->type != AST_VARIABLE || !baseVarNode->token) { fprintf(stderr,"Runtime error: Invalid base variable node for field assign in assignValueToLValue\n"); EXIT_FAILURE_HANDLER();}
-         Symbol *recSym = lookupSymbol(baseVarNode->token->value);
-         if (!recSym || !recSym->value || recSym->value->type != TYPE_RECORD) { fprintf(stderr,"Runtime error: Base variable '%s' is not a record in assignValueToLValue\n", baseVarNode->token ? baseVarNode->token->value : "?"); EXIT_FAILURE_HANDLER(); }
-         if (recSym->is_const) { fprintf(stderr,"Runtime error: Cannot assign to field of constant '%s'\n", recSym->name); EXIT_FAILURE_HANDLER(); }
-
-        // 2. Find the specific field *within the symbol's actual value*
-        FieldValue *field = recSym->value->record_val;
-        const char *targetFieldName = lvalueNode->token ? lvalueNode->token->value : NULL;
-        if (!targetFieldName) { fprintf(stderr,"Runtime error: Invalid FIELD_ACCESS node (missing token) in assignValueToLValue\n"); EXIT_FAILURE_HANDLER();}
-        while (field) {
-            if (field->name && strcmp(field->name, targetFieldName) == 0) {
-                 // Found the field to update
-
-                 // 3. Check type compatibility (optional but recommended)
-                 if (field->value.type != newValue.type) {
-                       bool compatible = false;
-                       if (field->value.type == TYPE_REAL && newValue.type == TYPE_INTEGER) compatible = true;
-                       else if (field->value.type == TYPE_STRING && newValue.type == TYPE_CHAR) compatible = true;
-                       // ... add others ...
-
-                       if (!compatible && typeWarn) {
-                           fprintf(stderr, "Warning: Type mismatch assigning to field '%s.%s'. Expected %s, got %s.\n",
-                                   recSym->name, targetFieldName, varTypeToString(field->value.type), varTypeToString(newValue.type));
-                       }
-                       // Perform promotion on newValue if needed
-                       if (field->value.type == TYPE_REAL && newValue.type == TYPE_INTEGER) {
-                           newValue.r_val = (double)newValue.i_val; newValue.type = TYPE_REAL;
-                       }
-                       // Add other necessary promotions here...
-                 }
-
-                 // 4. Free the *current* value stored in the field
-                 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG ASSIGN_LVAL] Freeing old value for field '%s'\n", field->name);
-                 #endif
-                 freeValue(&field->value); // Frees heap data held by the current field value
-
-                 // 5. Assign a DEEP COPY of the newValue into the field
-                 #ifdef DEBUG
-                 fprintf(stderr, "[DEBUG ASSIGN_LVAL] Assigning new value (type %s) to field '%s'\n", varTypeToString(newValue.type), field->name);
-                 #endif
-                 field->value = makeCopyOfValue(&newValue); // makeCopyOfValue performs deep copy
-
-                 return; // Assignment done
-            }
-            field = field->next;
-        }
-        fprintf(stderr, "Runtime error: Field '%s' not found in record '%s' for assignment.\n", targetFieldName, recSym->name);
-        EXIT_FAILURE_HANDLER();
-
-    } else if (lvalueNode->type == AST_ARRAY_ACCESS) {
-         // Array element assignment
-         // 1. Find the base array/string symbol
-         AST* baseVarNode = lvalueNode->left;
-         while(baseVarNode && baseVarNode->type != AST_VARIABLE) { /* traversal */ if (baseVarNode->left) baseVarNode=baseVarNode->left; else { /* error */ } }
-         if (!baseVarNode || baseVarNode->type != AST_VARIABLE || !baseVarNode->token) { /* Error */ }
-         Symbol *arrSym = lookupSymbol(baseVarNode->token->value);
-         if (!arrSym || !arrSym->value || (arrSym->value->type != TYPE_ARRAY && arrSym->value->type != TYPE_STRING)) { /* Error */ }
-         if (arrSym->is_const) { /* Error */ }
-
-         // Handle string element assignment
-         if (arrSym->value->type == TYPE_STRING) {
-              if (lvalueNode->child_count != 1) { fprintf(stderr, "Runtime error: String assignment requires exactly one index\n"); EXIT_FAILURE_HANDLER(); }
-              if (newValue.type != TYPE_CHAR && !(newValue.type == TYPE_STRING && newValue.s_val && strlen(newValue.s_val)==1) ) {
-                    fprintf(stderr, "Runtime error: Assignment to string index requires char or single-char string.\n"); EXIT_FAILURE_HANDLER();
-              }
-              Value indexVal = eval(lvalueNode->children[0]);
-              if(indexVal.type != TYPE_INTEGER) { fprintf(stderr, "Runtime error: String index must be an integer.\n"); EXIT_FAILURE_HANDLER(); }
-              long long idx = indexVal.i_val;
-              int len = arrSym->value->s_val ? (int)strlen(arrSym->value->s_val) : 0;
-              if (idx < 1 || idx > len) { fprintf(stderr, "Runtime error: String index %lld out of bounds [1..%d] for assignment.\n", idx, len); EXIT_FAILURE_HANDLER(); }
-
-              char char_to_assign = (newValue.type == TYPE_CHAR) ? newValue.c_val : newValue.s_val[0];
-               if (!arrSym->value->s_val) { /* Should not happen */ } else { arrSym->value->s_val[idx - 1] = char_to_assign; }
-         }
-         // Handle array element assignment
-         else if (arrSym->value->type == TYPE_ARRAY) {
-             if (!arrSym->value->array_val) { fprintf(stderr, "Runtime error: Array '%s' not initialized before assignment.\n", arrSym->name); EXIT_FAILURE_HANDLER(); }
-             if (lvalueNode->child_count != arrSym->value->dimensions) { fprintf(stderr, "Runtime error: Incorrect number of indices for array '%s'.\n", arrSym->name); EXIT_FAILURE_HANDLER(); }
-
-             // Calculate indices and offset
-             int *indices = malloc(sizeof(int) * arrSym->value->dimensions);
-             if (!indices) { fprintf(stderr,"FATAL: Malloc failed for indices array\n"); EXIT_FAILURE_HANDLER(); }
-             for (int i = 0; i < lvalueNode->child_count; i++) {
-                  Value idxVal = eval(lvalueNode->children[i]);
-                  if (idxVal.type != TYPE_INTEGER) { fprintf(stderr,"Runtime error: Array index must be integer\n"); free(indices); EXIT_FAILURE_HANDLER(); }
-                  indices[i] = (int)idxVal.i_val;
-             }
-             int offset = computeFlatOffset(arrSym->value, indices);
-             // Bounds check offset... (You need to calculate total_size based on bounds)
-             int total_size = 1;
-             for(int d=0; d<arrSym->value->dimensions; ++d) total_size *= (arrSym->value->upper_bounds[d] - arrSym->value->lower_bounds[d] + 1);
-             if (offset < 0 || offset >= total_size) { fprintf(stderr, "Runtime error: Array index out of bounds (offset %d, size %d).\n", offset, total_size); free(indices); EXIT_FAILURE_HANDLER(); }
-
-             // Check type compatibility
-             VarType elementType = arrSym->value->element_type;
-             if (elementType != newValue.type) {
-                  // Add compatibility checks/promotions for newValue if needed
-                   bool compatible = false;
-                   if(elementType == TYPE_REAL && newValue.type == TYPE_INTEGER) compatible = true;
-                   // ... other compatible types ...
-                   if(!compatible && typeWarn) { fprintf(stderr, "Warning: Type mismatch assigning to array '%s' element.\n", arrSym->name); }
-                   // Perform promotion if necessary
-                   if (elementType == TYPE_REAL && newValue.type == TYPE_INTEGER) { newValue.r_val = (double)newValue.i_val; newValue.type = TYPE_REAL; }
-             }
-
-             // Find target element
-             Value *targetElement = &(arrSym->value->array_val[offset]);
-
-             // Free existing element value
-             #ifdef DEBUG
-             fprintf(stderr, "[DEBUG ASSIGN_LVAL] Freeing old value for array element at offset %d\n", offset);
-             #endif
-             freeValue(targetElement);
-
-             // Assign deep copy of new value
-             #ifdef DEBUG
-             fprintf(stderr, "[DEBUG ASSIGN_LVAL] Assigning new value (type %s) to array element at offset %d\n", varTypeToString(newValue.type), offset);
-             #endif
-             *targetElement = makeCopyOfValue(&newValue);
-
-             free(indices);
-         }
-    } else {
-        fprintf(stderr, "Runtime error: Cannot assign to the given expression type (%s).\n", astTypeToString(lvalueNode->type));
+    Value* target_ptr = resolveLValueToPtr(lvalueNode);
+    if (!target_ptr) {
+        fprintf(stderr, "Runtime error: LValue could not be resolved for assignment.\n");
+        freeValue(&newValue); // Free the value that won't be assigned
         EXIT_FAILURE_HANDLER();
     }
+
+    // --- NEW LOGIC: Handle fixed-length string assignment ---
+    if (target_ptr->type == TYPE_STRING && target_ptr->max_length > 0) {
+        // This is a fixed-length string.
+        const char* source_str = "";
+        char char_buf[2]; // for assigning a char to a string
+
+        if (newValue.type == TYPE_STRING) {
+            source_str = newValue.s_val ? newValue.s_val : "";
+        } else if (newValue.type == TYPE_CHAR) {
+            char_buf[0] = newValue.c_val;
+            char_buf[1] = '\0';
+            source_str = char_buf;
+        } else {
+             fprintf(stderr, "Runtime error: Cannot assign type %s to a fixed-length string.\n", varTypeToString(newValue.type));
+             freeValue(&newValue);
+             EXIT_FAILURE_HANDLER();
+        }
+
+        // Copy up to max_length, then pad with spaces.
+        size_t source_len = strlen(source_str);
+        size_t copy_len = (source_len > (size_t)target_ptr->max_length) ? (size_t)target_ptr->max_length : source_len;
+        
+        // Copy the part of the string that fits.
+        strncpy(target_ptr->s_val, source_str, copy_len);
+
+        // Null-terminate at the end of the copied content.
+        if (copy_len < (size_t)target_ptr->max_length) {
+             target_ptr->s_val[copy_len] = '\0';
+        } else {
+             target_ptr->s_val[target_ptr->max_length] = '\0';
+        }
+
+        freeValue(&newValue); // Free the incoming value
+        return; // Assignment is done
+    }
+    // --- END NEW LOGIC ---
+
+    // For all other types, use the original logic.
+    freeValue(target_ptr); // Free the old value at the target location.
+    *target_ptr = makeCopyOfValue(&newValue); // Assign a deep copy of the new value.
+    freeValue(&newValue); // Free the (now copied) incoming value.
 }
 
 // Attempts to get the current cursor position using ANSI DSR query.
@@ -3159,6 +3181,16 @@ int getBuiltinIDForCompiler(const char *name) {
         }
     }
     return -1; // Not found
+}
+Value executeBuiltinExit(AST *node) {
+    // A true 'exit' would exit the current procedure. As a simplification
+    // for now, we will have it exit the entire program with code 0.
+    if (node->child_count > 0) {
+        fprintf(stderr, "Runtime error: exit does not take arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    exit(0);
+    return makeVoid(); // Unreachable
 }
 
 // VM Versions

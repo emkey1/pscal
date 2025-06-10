@@ -636,11 +636,21 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         // Add this case as well
         case AST_READLN: {
-            // NOTE: READLN requires new opcodes and VM logic to handle user input.
-            // This placeholder prevents the warning for now.
-            fprintf(stderr, "L%d: Compiler NOTE: READLN statement is not yet implemented. Statement will be ignored.\n", line);
-            // If READLN had arguments, we would need to pop them if they were evaluated.
-            // Since they are L-Values, we don't compile them here.
+            // `readln` arguments are all L-Values.
+            // The VM builtin expects pointers to the Value structs of these variables.
+            // compileLValue does exactly this: pushes the address of the variable onto the stack.
+            for (int i = 0; i < node->child_count; i++) {
+                AST* arg_node = node->children[i];
+                compileLValue(arg_node, chunk, getLine(arg_node));
+            }
+
+            // Now, call the built-in `readln` function using the generic OP_CALL_BUILTIN.
+            int nameIndex = addConstantToChunk(chunk, makeString("readln"));
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+
+            // `readln` is a procedure, so it doesn't leave a value on the stack. No OP_POP is needed.
             break;
         }
         case AST_WRITE: {

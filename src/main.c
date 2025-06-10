@@ -170,7 +170,9 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             // --- DEFAULT: COMPILE TO BYTECODE AND EXECUTE WITH VM ---
             BytecodeChunk chunk;
             initBytecodeChunk(&chunk); // Initialize chunk here
-            fprintf(stderr, "--- Compiling AST to Bytecode ---\n");
+            if (dump_bytecode_flag) {
+                fprintf(stderr, "--- Compiling AST to Bytecode ---\n");
+            }
             bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
             
             if (compilation_ok_for_vm) {
@@ -178,7 +180,9 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                 }
-            fprintf(stderr, "\n--- Executing Program with VM ---\n");
+                if (dump_bytecode_flag) {
+                    fprintf(stderr, "\n--- Executing Program with VM ---\n");
+                }
             VM vm;
             initVM(&vm);
             InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
@@ -186,7 +190,9 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             globalSymbols = NULL; // Prevent subsequent freeHashTable(globalSymbols) in main's cleanup.
             
             if (result_vm == INTERPRET_OK) {
-                fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
+                if (dump_bytecode_flag) {
+                    fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
+                }
                 overall_success_status = true;
             } else {
                 fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
