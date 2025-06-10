@@ -18,6 +18,60 @@
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
 
+
+// Comparison function for bsearch (case-insensitive) - MUST be defined before the table that uses it
+static int compareVmBuiltinMappings(const void *key, const void *element) {
+    const char *target_name = (const char *)key;
+    const VmBuiltinMapping *mapping = (const VmBuiltinMapping *)element;
+    return strcasecmp(target_name, mapping->name);
+}
+
+// The new dispatch table for the VM - MUST be defined before the function that uses it
+// This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
+static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
+    {"abs", vm_builtin_abs},
+    {"cleardevice", vm_builtin_cleardevice},
+    {"closegraph", vm_builtin_closegraph},
+    {"delay", vm_builtin_delay},
+    {"destroytexture", vm_builtin_destroytexture},
+    {"fillrect", vm_builtin_fillrect},
+    {"getmaxx", vm_builtin_getmaxx},
+    {"getmousestate", vm_builtin_getmousestate},
+    {"gettextsize", vm_builtin_gettextsize},
+    {"halt", vm_builtin_halt},
+    {"initgraph", vm_builtin_initgraph},
+    {"initsoundsystem", vm_builtin_initsoundsystem},
+    {"inittextsystem", vm_builtin_inittextsystem},
+    {"inttostr", vm_builtin_inttostr},
+    {"length", vm_builtin_length},
+    {"loadsound", vm_builtin_loadsound},
+    {"playsound", vm_builtin_playsound},
+    {"quittextsystem", vm_builtin_quittextsystem},
+    {"quitsoundsystem", vm_builtin_quitsoundsystem},
+    {"rendercopyrect", vm_builtin_rendercopyrect},
+    {"rendertexttotexture", vm_builtin_rendertexttotexture},
+    {"round", vm_builtin_round},
+    {"setalphablend", vm_builtin_setalphablend},
+    {"setrgbcolor", vm_builtin_setrgbcolor},
+    {"updatescreen", vm_builtin_updatescreen},
+};
+
+static const size_t num_vm_builtins = sizeof(vm_builtin_dispatch_table) / sizeof(vm_builtin_dispatch_table[0]);
+
+// This function now comes AFTER the table and comparison function it uses.
+VmBuiltinFn getVmBuiltinHandler(const char *name) {
+    if (!name) return NULL;
+    VmBuiltinMapping *found = (VmBuiltinMapping *)bsearch(
+        name,
+        vm_builtin_dispatch_table,
+        num_vm_builtins,
+        sizeof(VmBuiltinMapping),
+        compareVmBuiltinMappings
+    );
+    return found ? found->handler : NULL;
+}
+
+
 // Comparison function for bsearch (case-insensitive)
 static int compareBuiltinMappings(const void *key, const void *element) {
     const char *target_name = (const char *)key;
@@ -2911,4 +2965,63 @@ int getBuiltinIDForCompiler(const char *name) {
         }
     }
     return -1; // Not found
+}
+
+// VM Versions
+
+Value vm_builtin_inttostr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) return makeString("");
+    Value arg = args[0];
+    long long value_to_convert = 0;
+    switch (arg.type) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+            value_to_convert = arg.i_val;
+            break;
+        case TYPE_CHAR:
+            value_to_convert = (long long)arg.c_val;
+            break;
+        default: return makeString("");
+    }
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%lld", value_to_convert);
+    return makeString(buffer);
+}
+
+Value vm_builtin_length(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) return makeInt(0);
+    return makeInt(args[0].s_val ? strlen(args[0].s_val) : 0);
+}
+
+Value vm_builtin_abs(int arg_count, Value* args) {
+    if (arg_count != 1) return makeInt(0);
+    if (args[0].type == TYPE_INTEGER) return makeInt(llabs(args[0].i_val));
+    if (args[0].type == TYPE_REAL) return makeReal(fabs(args[0].r_val));
+    return makeInt(0);
+}
+
+Value vm_builtin_round(int arg_count, Value* args) {
+    if (arg_count != 1) return makeInt(0);
+    if (args[0].type == TYPE_REAL) return makeInt((long long)round(args[0].r_val));
+    if (args[0].type == TYPE_INTEGER) return makeInt(args[0].i_val);
+    return makeInt(0);
+}
+
+Value vm_builtin_halt(int arg_count, Value* args) {
+    long long code = 0;
+    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
+        code = args[0].i_val;
+    }
+    exit((int)code);
+    return makeVoid(); // Unreachable
+}
+
+Value vm_builtin_delay(int arg_count, Value* args) {
+    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
+        long long ms = args[0].i_val;
+        if (ms > 0) usleep((useconds_t)ms * 1000);
+    }
+    return makeVoid();
 }

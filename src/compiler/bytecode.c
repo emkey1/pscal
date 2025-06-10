@@ -152,8 +152,6 @@ void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value) {
     chunk->code[offset_in_code + 1] = (uint8_t)(value & 0xFF);
 }
 
-// --- Bytecode Disassembler ---
-
 // Corrected helper function to find procedure/function name by its bytecode address
 static const char* findProcedureNameByAddress(HashTable* procedureTable, uint16_t address) {
     if (!procedureTable) return NULL;
@@ -225,8 +223,17 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_OR:       printf("OP_OR\n"); return offset + 1;
         case OP_SHL:      printf("OP_SHL\n"); return offset + 1;
         case OP_SHR:      printf("OP_SHR\n"); return offset + 1;
-
-        // --- START MODIFICATION ---
+            
+        case OP_GET_GLOBAL_ADDRESS: {
+            uint8_t name_index = chunk->code[offset + 1];
+            printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));
+            return offset + 2;
+        }
+        case OP_GET_LOCAL_ADDRESS: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_GET_LOCAL_ADDRESS", slot);
+            return offset + 2;
+        }
 
         case OP_GET_LOCAL: {
             uint8_t slot = chunk->code[offset + 1];
@@ -238,31 +245,19 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printf("%-16s %4d (slot)\n", "OP_SET_LOCAL", slot);
             return offset + 2;
         }
-        case OP_GET_ELEMENT: {
-            uint8_t dims = chunk->code[offset + 1];
-            printf("%-16s %4d (dims)\n", "OP_GET_ELEMENT", dims);
-            return offset + 2;
-        }
-        case OP_SET_ELEMENT: {
-            uint8_t dims = chunk->code[offset + 1];
-            printf("%-16s %4d (dims)\n", "OP_SET_ELEMENT", dims);
-            return offset + 2;
-        }
-
-        // --- END MODIFICATION ---
-
-        case OP_GET_FIELD: {
+        case OP_GET_FIELD_ADDRESS: {
             uint8_t const_idx = chunk->code[offset + 1];
-            printf("%-16s %4d '%s'\n", "OP_GET_FIELD", const_idx,
-                   AS_STRING(chunk->constants[const_idx]));
+            printf("%-16s %4d '%s'\n", "OP_GET_FIELD_ADDRESS", const_idx, AS_STRING(chunk->constants[const_idx]));
             return offset + 2;
         }
-        case OP_SET_FIELD: {
-            uint8_t const_idx = chunk->code[offset + 1];
-            printf("%-16s %4d '%s'\n", "OP_SET_FIELD", const_idx,
-                   AS_STRING(chunk->constants[const_idx]));
+        case OP_GET_ELEMENT_ADDRESS: {
+            uint8_t dims = chunk->code[offset + 1];
+            printf("%-16s %4d (dims)\n", "OP_GET_ELEMENT_ADDRESS", dims);
             return offset + 2;
         }
+        case OP_SET_INDIRECT:
+            printf("OP_SET_INDIRECT\n");
+            return offset + 1;
         case OP_SWAP: printf("OP_SWAP\n"); return offset + 1;
         case OP_JUMP_IF_FALSE: {
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];

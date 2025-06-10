@@ -5,6 +5,36 @@
 #include "frontend/ast.h"
 #include "globals.h"
 
+// --- START: MODIFIED VM BUILT-IN SECTION ---
+
+// Forward declare the VM struct to break circular include dependencies.
+struct VM_s;
+
+// New signature for VM-native built-in functions, using the struct tag.
+typedef Value (*VmBuiltinFn)(struct VM_s* vm, int arg_count, Value* args);
+
+// New struct for the VM's built-in dispatch table.
+typedef struct {
+    const char* name;
+    VmBuiltinFn handler;
+} VmBuiltinMapping;
+
+// Function to get a handler from the new VM dispatch table.
+VmBuiltinFn getVmBuiltinHandler(const char* name);
+
+// Prototypes for VM-native general-purpose built-in handlers
+Value vm_builtin_inttostr(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_length(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_abs(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_round(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_halt(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_delay(struct VM_s* vm, int arg_count, Value* args);
+
+// --- END: MODIFIED VM BUILT-IN SECTION ---
+
+
+// --- AST-based built-in handlers (for AST interpreter path) ---
+
 // Math Functions
 Value executeBuiltinCos(AST *node);
 Value executeBuiltinSin(AST *node);
@@ -56,7 +86,7 @@ Value executeBuiltinResult(AST *node);
 Value executeBuiltinProcedure(AST *node);
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc);
 int isBuiltin(const char *name);
-int getBuiltinIDForCompiler(const char *name); // <<< NEW DECLARATION
+int getBuiltinIDForCompiler(const char *name);
 
 // Networking
 Value executeBuiltinAPISend(AST *node);
@@ -79,10 +109,10 @@ Value executeBuiltinHigh(AST *node);
 Value executeBuiltinSucc(AST *node);
 
 // Terminal Extended Color stuff
-Value executeBuiltinTextColor(AST *node); // Existing 16-color
-Value executeBuiltinTextBackground(AST *node); // Existing 16-color
-Value executeBuiltinTextColorE(AST *node); // <--- ADD for 256 foreground
-Value executeBuiltinTextBackgroundE(AST *node); // <--- ADD for 256 background
+Value executeBuiltinTextColor(AST *node);
+Value executeBuiltinTextBackground(AST *node);
+Value executeBuiltinTextColorE(AST *node);
+Value executeBuiltinTextBackgroundE(AST *node);
 
 // Pointers/Memory Management
 Value executeBuiltinNew(AST *node);
@@ -100,4 +130,4 @@ BuiltinRoutineType getBuiltinType(const char *name);
 void assignValueToLValue(AST *lvalueNode, Value newValue);
 BuiltinHandler getBuiltinHandler(const char *name);
 
-#endif
+#endif // BUILTIN_H

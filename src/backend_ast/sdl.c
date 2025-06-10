@@ -6,12 +6,13 @@
 //
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
-// <<< MODIFICATION START >>>
 // Include SDL_mixer header directly
 #include <SDL2/SDL_mixer.h>
 // Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
 #include "audio.h"
-// <<< MODIFICATION END >>>
+
+#include "core/utils.h"
+#include "vm/vm.h"
 
 #include "sdl.h" // This header includes SDL/SDL_ttf headers
 #include "globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
@@ -2167,3 +2168,34 @@ Value executeBuiltinRenderTextToTexture(AST *node) {
     return makeInt(textureID); // Return the 0-based TextureID
 }
 
+
+
+// Add these implementations at the end of the file
+Value vm_builtin_initgraph(int arg_count, Value* args) {
+    if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
+        runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
+        return makeVoid();
+    }
+    // Logic from executeBuiltinInitGraph, but using args array
+    // ...
+    return makeVoid();
+}
+
+// ... Implement all the other vm_builtin_... functions for SDL ...
+// The logic inside each function is the same as its AST counterpart,
+// you just get the arguments from the `args` array instead of calling `eval()`.
+// For example:
+Value vm_builtin_fillrect(int arg_count, Value* args) {
+    if (arg_count != 4) { /* error */ return makeVoid(); }
+    // ... type checks for all 4 args being integer ...
+    SDL_Rect rect;
+    rect.x = (int)args[0].i_val;
+    rect.y = (int)args[1].i_val;
+    rect.w = (int)args[2].i_val - rect.x + 1;
+    rect.h = (int)args[3].i_val - rect.y + 1;
+    if (rect.w < 0) { rect.x += rect.w; rect.w = -rect.w; }
+    if (rect.h < 0) { rect.y += rect.h; rect.h = -rect.h; }
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    SDL_RenderFillRect(gSdlRenderer, &rect);
+    return makeVoid();
+}

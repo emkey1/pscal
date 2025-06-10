@@ -75,9 +75,6 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 // Takes a BytecodeChunk that was successfully compiled.
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures);
 
-// Stack operations (can be static helpers in vm.c or part of public API if needed elsewhere)
-// void push(VM* vm, Value value);
-// Value pop(VM* vm);
-// Value peek(VM* vm, int distance); // Peek 'distance' items down the stack (0 is top)
+void runtimeError(VM* vm, const char* format, ...);
 
 #endif // PSCAL_VM_H

@@ -36,7 +36,6 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
-static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -594,124 +593,97 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             AST* lvalue = node->left;
             AST* rvalue = node->right;
 
-            // Handle complex L-Values by generating specialized opcode sequences
-            if (lvalue->type == AST_ARRAY_ACCESS) {
-                // For an assignment like: MyArray[i, j] := RValue
-                // We want the stack to be [Array, Index_i, Index_j, RValue] before OP_SET_ELEMENT
+            // First, compile the LValue to get its ADDRESS on the stack.
+            compileExpression(lvalue, chunk, line);
 
-                // 1. Compile the base array object expression
-                compileExpression(lvalue->left, chunk, getLine(lvalue->left));
+            // Second, compile the RValue to get the VALUE to store.
+            compileExpression(rvalue, chunk, line);
 
-                // 2. Compile all the index expressions
-                for (int i = 0; i < lvalue->child_count; i++) {
-                    compileExpression(lvalue->children[i], chunk, getLine(lvalue->children[i]));
-                }
-
-                // 3. Compile the Right-Hand-Side expression
-                compileExpression(rvalue, chunk, getLine(rvalue));
-
-                // 4. Emit the opcode to perform the set. The VM will pop all the above values.
-                writeBytecodeChunk(chunk, OP_SET_ELEMENT, line);
-                writeBytecodeChunk(chunk, (uint8_t)lvalue->child_count, line);
-
-                // 5. OP_SET_ELEMENT leaves the *modified array* on the stack. Now we must
-                //    store this modified array back into its original variable.
-                compileStoreForLValue(lvalue->left, chunk, line);
-
-            } else if (lvalue->type == AST_FIELD_ACCESS) {
-                // For an assignment like: MyRec.field := RValue
-                // We want the stack to be [Record, RValue] before OP_SET_FIELD
-
-                // 1. Compile the base record object expression
-                compileExpression(lvalue->left, chunk, getLine(lvalue->left));
-                // 2. Compile the Right-Hand-Side expression
-                compileExpression(rvalue, chunk, getLine(rvalue));
-
-                // 3. Emit the opcode with the field name as an operand
-                int fieldNameIndex = addConstantToChunk(chunk, makeString(lvalue->token->value));
-                writeBytecodeChunk(chunk, OP_SET_FIELD, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
-
-                // 4. OP_SET_FIELD leaves the *modified record* on the stack. Store it back.
-                compileStoreForLValue(lvalue->left, chunk, line);
-
-            } else {
-                // This is for simple assignments like: X := RValue
-                compileExpression(rvalue, chunk, getLine(rvalue));
-                compileStoreForLValue(lvalue, chunk, line);
-            }
+            // Finally, emit the instruction to store the value at the address.
+            writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
             break;
         }
         case AST_FOR_TO:
         case AST_FOR_DOWNTO: {
-            if (!node->left || !node->right || !node->extra || node->child_count < 1) {
-                fprintf(stderr, "L%d: Compiler error: Malformed FOR loop AST node.\n", line);
-                compiler_had_error = true;
-                break;
+            bool is_downto = node->type == AST_FOR_DOWNTO;
+            AST* var_node = node->children[0];
+            AST* start_node = node->left;
+            AST* end_node = node->right;
+            AST* body_node = node->extra;
+
+            // --- START: MODIFIED LOGIC ---
+            int var_slot = -1;
+            int var_name_idx = -1;
+            
+            // Check if the loop variable is a local or global.
+            if (current_function_compiler) {
+                var_slot = resolveLocal(current_function_compiler, var_node->token->value);
             }
 
-            AST* loopVarNode = node->children[0];
-            const char* varName = loopVarNode->token->value;
-            int varNameIndex = addConstantToChunk(chunk, makeString(varName));
-
-            // 1. Compile and assign the start value
-            compileExpression(node->left, chunk, getLine(node->left));
-            writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
-
-            // 2. Mark the loop start address
-            int loop_start_address = chunk->count;
-
-            // 3. Compile the loop condition check
-            //    Stack: [ ... ]
-            compileExpression(node->right, chunk, getLine(node->right)); // End value
-            //    Stack: [ ..., EndValue ]
-            writeBytecodeChunk(chunk, OP_GET_GLOBAL, line); // Loop variable's current value
-            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
-            //    Stack: [ ..., EndValue, CurrentValue ]
-
-            if (node->type == AST_FOR_TO) {
-                writeBytecodeChunk(chunk, OP_GREATER, line); // Check if Current > End
-            } else { // AST_FOR_DOWNTO
-                writeBytecodeChunk(chunk, OP_LESS, line); // Check if Current < End
+            if (var_slot == -1) { // Not found as a local, treat as global
+                var_name_idx = addConstantToChunk(chunk, makeString(var_node->token->value));
             }
-            //    Stack: [ ..., ResultOfComparison (boolean) ]
-            
-            // 4. Jump out of the loop if the condition is met (loop is finished)
-            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); // Jumps if comparison is FALSE (i.e., continue loop)
-            int exit_jump_operand_offset = chunk->count;
-            emitShort(chunk, 0xFFFF, line); // Placeholder for jump distance
 
-            // 5. Compile the loop body
-            compileStatement(node->extra, chunk, getLine(node->extra));
+            // 1. Compile and set the initial value
+            compileExpression(start_node, chunk, getLine(start_node));
+            if (var_slot != -1) {
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+            }
 
-            // 6. Increment/Decrement the loop variable
-            writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
-            
-            Value one_val = makeInt(1);
-            int one_const_idx = addConstantToChunk(chunk, one_val);
+            int loopStart = chunk->count;
+
+            // 2. Loop condition check
+            if (var_slot != -1) {
+                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+            }
+            compileExpression(end_node, chunk, getLine(end_node));
+            writeBytecodeChunk(chunk, is_downto ? OP_LESS_EQUAL : OP_GREATER_EQUAL, line);
+
+            // 3. Jump out of the loop if condition is met
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            int exitJump = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
+
+            // 4. Compile the loop body
+            compileStatement(body_node, chunk, getLine(body_node));
+
+            // 5. Increment/Decrement loop variable
+            if (var_slot != -1) {
+                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+            }
+            int one_const_idx = addConstantToChunk(chunk, makeInt(1));
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)one_const_idx, line);
+            writeBytecodeChunk(chunk, is_downto ? OP_SUBTRACT : OP_ADD, line);
 
-            if (node->type == AST_FOR_TO) {
-                writeBytecodeChunk(chunk, OP_ADD, line);
-            } else { // AST_FOR_DOWNTO
-                writeBytecodeChunk(chunk, OP_SUBTRACT, line);
+            if (var_slot != -1) {
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
-            
-            writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-            writeBytecodeChunk(chunk, (uint8_t)varNameIndex, line);
 
-            // 7. Jump back to the beginning of the loop
+            // 6. Jump back to the top of the loop
             writeBytecodeChunk(chunk, OP_JUMP, line);
-            int backward_jump_offset = loop_start_address - (chunk->count + 2); // +2 for the jump's own operands
+            int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
 
-            // 8. Patch the forward jump to exit the loop
-            uint16_t forward_jump_offset = (uint16_t)(chunk->count - (exit_jump_operand_offset + 2));
-            patchShort(chunk, exit_jump_operand_offset, forward_jump_offset);
-
+            // 7. Patch the exit jump
+            patchShort(chunk, exitJump, (uint16_t)(chunk->count - (exitJump + 2)));
+            // --- END MODIFICATION ---
             break;
         }
         case AST_IF: {
@@ -856,87 +828,64 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             if (!node_token || !node_token->value) { /* error */ break; }
             const char* varName = node_token->value;
 
+            // Check if we are compiling an L-Value for an assignment.
+            // A simple way to check is to see if the parent node is an AST_ASSIGN's left child.
+            bool is_lvalue_for_assignment = (node->parent && node->parent->type == AST_ASSIGN && node->parent->left == node);
+
             int local_slot = -1;
             if (current_function_compiler) {
                 local_slot = resolveLocal(current_function_compiler, varName);
             }
 
-            if (local_slot != -1) {
-                // It's a local variable.
-                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
-            } else if (strcasecmp(varName, "quitrequested") == 0) {
-                // Special handling for QuitRequested: compile as a host function call
-                // This mirrors the AST interpreter's special handling for this variable.
-                #ifdef DEBUG
-                if(dumpExec) fprintf(stderr, "L%d: Compiler: AST_VARIABLE '%s' recognized as special. Emitting OP_CALL_HOST for HOST_FN_QUIT_REQUESTED.\n", line, varName);
-                #endif
-                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
-                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
-                // No arguments are pushed for HOST_FN_QUIT_REQUESTED when used like a variable.
-                // The host function itself doesn't expect arguments from the stack for this ID.
-            } else {
-                // Check if it's a known compile-time constant first
-                Value* const_val_ptr = findCompilerConstant(varName);
-                if (const_val_ptr) {
-                    // It's a compile-time constant, emit OP_CONSTANT with its value
-                    // makeCopyOfValue is important here, especially if the constant is a string,
-                    // to ensure the chunk's constant pool owns its copy of the data.
-                    Value val_to_add_to_chunk = makeCopyOfValue(const_val_ptr);
-                    int constIndex = addConstantToChunk(chunk, val_to_add_to_chunk);
-                    // val_to_add_to_chunk is a temporary on-stack Value struct.
-                    // If makeCopyOfValue allocated memory for val_to_add_to_chunk.s_val (for strings),
-                    // addConstantToChunk just copies the pointer. The chunk now "owns" that s_val.
-                    // So, no freeValue(&val_to_add_to_chunk) is needed here.
-
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+            if (is_lvalue_for_assignment) {
+                if (local_slot != -1) {
+                    writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, line);
+                    writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 } else {
-                    // If not a compile-time constant, treat as a variable to be fetched globally
-                    int nameIndex = addConstantToChunk(chunk, makeString(varName)); // makeString creates copy for the constant pool
-                    writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+                    int nameIndex = addConstantToChunk(chunk, makeString(varName));
+                    writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, line);
                     writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                }
+            } else {
+                // This is an R-Value context (loading the value).
+                if (local_slot != -1) {
+                    writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                    writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
+                } else {
+                    // It could be a constant or a global variable.
+                    Value* const_val_ptr = findCompilerConstant(varName);
+                    if (const_val_ptr) {
+                        int constIndex = addConstantToChunk(chunk, makeCopyOfValue(const_val_ptr));
+                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                        writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+                    } else {
+                        int nameIndex = addConstantToChunk(chunk, makeString(varName));
+                        writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    }
                 }
             }
             break;
         }
-        // --- NEW: Handle Field and Array Access ---
         case AST_FIELD_ACCESS: {
-            // First, put the record object on the stack
+            // Compile the container (the record or array of records)
             compileExpression(node->left, chunk, getLine(node->left));
-            // Then, emit the GET_FIELD opcode with the field name
+            // Emit the opcode to get the field's address
             int fieldNameIndex = addConstantToChunk(chunk, makeString(node->token->value));
-            writeBytecodeChunk(chunk, OP_GET_FIELD, line);
+            writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
             writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
             break;
         }
         case AST_ARRAY_ACCESS: {
-            // First, put the array object on the stack
+            // Compile the container (the array)
             compileExpression(node->left, chunk, getLine(node->left));
-            
-            int dimension_count = node->child_count;
-            if (dimension_count > 255) {
-                 fprintf(stderr, "L%d: Compiler error: Maximum number of array dimensions (255) exceeded for access.\n", line);
-                 compiler_had_error = true;
-                 dimension_count = 0; // Prevent further processing
+            // Compile all index expressions
+            for (int i = 0; i < node->child_count; i++) {
+                compileExpression(node->children[i], chunk, getLine(node->children[i]));
             }
-
-            for (int i = 0; i < dimension_count; i++) {
-                if (node->children[i]) {
-                    compileExpression(node->children[i], chunk, getLine(node->children[i]));
-                } else {
-                    fprintf(stderr, "L%d: Compiler error: Array access node has a NULL index expression at index %d.\n", line, i);
-                    compiler_had_error = true;
-                    // Push a dummy value to avoid corrupting the stack
-                    int dummyIdx = addConstantToChunk(chunk, makeInt(0));
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
-                }
-            }
-            
-            // Finally, emit the GET_ELEMENT opcode followed by the dimension count
-            writeBytecodeChunk(chunk, OP_GET_ELEMENT, line);
-            writeBytecodeChunk(chunk, (uint8_t)dimension_count, line);
+            // Emit the opcode to get the element's address
+            writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
         }
         case AST_BINARY_OP: {
@@ -1170,55 +1119,3 @@ static void compileExpression(AST* node, BytecodeChunk* chunk, int current_line_
             break;
     }
 }
-
-static void compileStoreForLValue(AST* container, BytecodeChunk* chunk, int line) {
-    if (!container) {
-        fprintf(stderr, "L%d: Compiler internal error: compileStoreForLValue called with null container.\n", line);
-        compiler_had_error = true;
-        return;
-    }
-
-    switch (container->type) {
-        case AST_VARIABLE: {
-            if (!container->token || !container->token->value) {
-                fprintf(stderr, "L%d: Compiler error: AST_VARIABLE node missing token in compileStoreForLValue.\n", line);
-                compiler_had_error = true;
-                break;
-            }
-            int local_slot = -1;
-            if (current_function_compiler) {
-                local_slot = resolveLocal(current_function_compiler, container->token->value);
-            }
-
-            if (local_slot != -1) {
-                // It's a local variable.
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
-            } else {
-                // It's a global variable.
-                int nameIndex = addConstantToChunk(chunk, makeString(container->token->value));
-                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-            }
-            break;
-        }
-        case AST_ARRAY_ACCESS:
-        case AST_FIELD_ACCESS:
-             // This case is now an error, because the recursive call to store the modified
-             // array/record should resolve to its base variable (which is handled above).
-             // If we get here, it means something like a[i][j] where the base is not a simple variable,
-             // which would require further logic not yet implemented.
-            fprintf(stderr, "L%d: Compiler error: Storing into nested complex lvalues (e.g., array of records) is not yet fully supported by this part of the compiler.\n", line);
-            compiler_had_error = true;
-            // Pop the value that was meant to be stored to prevent stack corruption.
-            writeBytecodeChunk(chunk, OP_POP, line);
-            break;
-        default:
-            fprintf(stderr, "L%d: Compiler error: Cannot use AST node of type %s as a storage target.\n", line, astTypeToString(container->type));
-            compiler_had_error = true;
-            // Pop the value that was meant to be stored.
-            writeBytecodeChunk(chunk, OP_POP, line);
-            break;
-    }
-}
-

@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
+#include "backend_ast/audio.h"  
 
 // --- VM Helper Functions ---
 
@@ -27,7 +28,7 @@ static void resetStack(VM* vm) {
 }
 
 // runtimeError - Assuming your existing one is fine.
-static void runtimeError(VM* vm, const char* format, ...) {
+void runtimeError(VM* vm, const char* format, ...) {
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
@@ -356,10 +357,26 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                  vm->ip = frame->return_address; // Jump back to the caller's next instruction.
                  break;
              }
-
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT(); // Uses the macro
                 push(vm, makeCopyOfValue(&constant));
+                break;
+            }
+            case OP_GET_GLOBAL_ADDRESS: {
+                Value varNameVal = READ_CONSTANT();
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { /* error */ return INTERPRET_RUNTIME_ERROR; }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makePointer(sym->value, NULL)); // Push a pointer to the symbol's Value struct
+                break;
+            }
+            case OP_GET_LOCAL_ADDRESS: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                push(vm, makePointer(&frame->slots[slot], NULL)); // Push a pointer to the Value struct on the stack
                 break;
             }
             // Pass instruction_val to the macro
@@ -695,6 +712,72 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val);
                 break;
             }
+            case OP_GET_FIELD_ADDRESS: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value* record_val_ptr = vm->stackTop - 1; // Peek, don't pop
+
+                if (record_val_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_val_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        // Pop the record value, push a pointer to the field's value
+                        pop(vm);
+                        push(vm, makePointer(&current->value, NULL)); // The pointer is to the Value struct
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            case OP_GET_ELEMENT_ADDRESS: {
+                uint8_t dimension_count = READ_BYTE();
+                int* indices = malloc(sizeof(int) * dimension_count);
+                if (!indices) { /* Malloc error */ return INTERPRET_RUNTIME_ERROR; }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    Value index_val = pop(vm);
+                    if (index_val.type != TYPE_INTEGER) { /* Error */ }
+                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    freeValue(&index_val);
+                }
+
+                Value* array_val_ptr = vm->stackTop - 1; // Peek at the array
+                if (array_val_ptr->type != TYPE_ARRAY) { /* Error */ }
+
+                int offset = computeFlatOffset(array_val_ptr, indices);
+                free(indices);
+                if (offset < 0 || offset >= calculateArrayTotalSize(array_val_ptr)) { /* Bounds error */ }
+
+                // Pop the array value, push a pointer to the element's value
+                pop(vm);
+                push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+                break;
+            }
+
+            case OP_SET_INDIRECT: {
+                Value value_to_set = pop(vm);
+                Value pointer_val = pop(vm);
+
+                if (pointer_val.type != TYPE_POINTER) {
+                    runtimeError(vm, "VM Error: SET_INDIRECT requires an address on the stack.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
+                freeValue(target_lvalue_ptr); // Free the old value at the target location
+                *target_lvalue_ptr = makeCopyOfValue(&value_to_set); // Copy new value into place
+
+                freeValue(&value_to_set);
+                freeValue(&pointer_val); // This just sets the ptr_val to NULL, it's safe
+                break;
+            }
             case OP_DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 VarType declaredType = (VarType)READ_BYTE();
@@ -729,10 +812,20 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
                     VarType elem_var_type = (VarType)READ_BYTE();
 
-                    // The element type name is for disassembly/debugging, so we consume the byte but don't use it.
-                    (void)READ_BYTE();
+                    // Read the element type name from the constant pool.
+                    uint8_t elem_name_idx = READ_BYTE();
+                    Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                    AST* elem_type_def = NULL;
 
-                    Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, NULL);
+                    // If a type name was provided, look up its AST definition.
+                    // This is crucial for creating arrays of records or other named types.
+                    if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+                        elem_type_def = lookupType(elem_name_val.s_val);
+                    }
+
+                    // Pass the found type definition to makeArrayND.
+                    Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+                   
 
                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                     if (sym == NULL) {
@@ -1063,234 +1156,35 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&popped_val);
                 break;
             }
-            case OP_GET_ELEMENT: {
-                uint8_t dimension_count = READ_BYTE();
-                int* indices = malloc(sizeof(int) * dimension_count);
-                if (!indices) {
-                    runtimeError(vm, "VM Error: Malloc failed for array indices.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                for (int i = 0; i < dimension_count; i++) {
-                    Value index_val = pop(vm);
-                    if (index_val.type != TYPE_INTEGER) {
-                        runtimeError(vm, "VM Error: Array index must be an integer.");
-                        free(indices);
-                        freeValue(&index_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
-                    freeValue(&index_val);
-                }
-
-                Value array_val = pop(vm);
-                if (array_val.type != TYPE_ARRAY) {
-                    runtimeError(vm, "VM Error: Cannot index non-array type.");
-                    free(indices);
-                    freeValue(&array_val);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                // --- START MODIFICATION ---
-                // In-lined and corrected offset calculation logic.
-                int offset = 0;
-                for (int i = 0; i < array_val.dimensions; i++) {
-                    if (indices[i] < array_val.lower_bounds[i] || indices[i] > array_val.upper_bounds[i]) {
-                        runtimeError(vm, "Runtime error: Index %d is out of bounds [%d..%d] in dimension %d.",
-                                indices[i], array_val.lower_bounds[i], array_val.upper_bounds[i], i + 1);
-                        free(indices);
-                        freeValue(&array_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    offset = offset * (array_val.upper_bounds[i] - array_val.lower_bounds[i] + 1) + (indices[i] - array_val.lower_bounds[i]);
-                }
-                free(indices);
-                // --- END MODIFICATION ---
-
-                int total_size = calculateArrayTotalSize(&array_val);
-                if (offset < 0 || offset >= total_size) {
-                     runtimeError(vm, "VM Error: Calculated array offset (%d) is out of bounds (size %d).", offset, total_size);
-                     freeValue(&array_val);
-                     return INTERPRET_RUNTIME_ERROR;
-                }
-
-                Value element_copy = makeCopyOfValue(&array_val.array_val[offset]);
-                freeValue(&array_val);
-                push(vm, element_copy);
-                break;
-            }
-
-            case OP_SET_ELEMENT: {
-                uint8_t dimension_count = READ_BYTE();
-                Value value_to_set = pop(vm);
-
-                int* indices = malloc(sizeof(int) * dimension_count);
-                if (!indices) {
-                    runtimeError(vm, "VM Error: Malloc failed for array indices.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                for (int i = 0; i < dimension_count; i++) {
-                    Value index_val = pop(vm);
-                    if (index_val.type != TYPE_INTEGER) {
-                        runtimeError(vm, "VM Error: Array index must be an integer.");
-                        free(indices);
-                        freeValue(&index_val);
-                        freeValue(&value_to_set);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
-                    freeValue(&index_val);
-                }
-
-                Value array_val = pop(vm);
-                if (array_val.type != TYPE_ARRAY) {
-                    runtimeError(vm, "VM Error: Cannot index non-array type.");
-                    free(indices);
-                    freeValue(&array_val);
-                    freeValue(&value_to_set);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                // --- START MODIFICATION ---
-                // In-lined and corrected offset calculation logic.
-                int offset = 0;
-                for (int i = 0; i < array_val.dimensions; i++) {
-                    if (indices[i] < array_val.lower_bounds[i] || indices[i] > array_val.upper_bounds[i]) {
-                        runtimeError(vm, "Runtime error: Index %d is out of bounds [%d..%d] in dimension %d.",
-                                indices[i], array_val.lower_bounds[i], array_val.upper_bounds[i], i + 1);
-                        free(indices);
-                        freeValue(&array_val);
-                        freeValue(&value_to_set);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    offset = offset * (array_val.upper_bounds[i] - array_val.lower_bounds[i] + 1) + (indices[i] - array_val.lower_bounds[i]);
-                }
-                free(indices);
-                // --- END MODIFICATION ---
-
-                int total_size = calculateArrayTotalSize(&array_val);
-                 if (offset < 0 || offset >= total_size) {
-                     runtimeError(vm, "VM Error: Calculated array offset (%d) is out of bounds (size %d).", offset, total_size);
-                     freeValue(&array_val);
-                     freeValue(&value_to_set);
-                     return INTERPRET_RUNTIME_ERROR;
-                }
-
-                freeValue(&array_val.array_val[offset]);
-                array_val.array_val[offset] = makeCopyOfValue(&value_to_set);
-                freeValue(&value_to_set);
-                push(vm, array_val);
-                break;
-            }
-            case OP_SET_FIELD: {
-                uint8_t field_name_idx = READ_BYTE();
-                Value value_to_set = pop(vm);
-                Value record_val = pop(vm);
-
-                if (record_val.type != TYPE_RECORD) {
-                    runtimeError(vm, "VM Error: Cannot set field on a non-record type.");
-                    freeValue(&value_to_set); freeValue(&record_val);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
-                FieldValue* current = record_val.record_val;
-                bool field_found = false;
-                while (current) {
-                    if (strcmp(current->name, field_name) == 0) {
-                        freeValue(&current->value);
-                        current->value = makeCopyOfValue(&value_to_set);
-                        field_found = true;
-                        break;
-                    }
-                    current = current->next;
-                }
-
-                if (!field_found) {
-                     runtimeError(vm, "VM Error: Field '%s' not found in record for setting.", field_name);
-                     freeValue(&value_to_set); freeValue(&record_val);
-                     return INTERPRET_RUNTIME_ERROR;
-                }
-                push(vm, record_val);
-                freeValue(&value_to_set);
-                goto next_instruction;
-            }
             case OP_CALL_BUILTIN: {
                 uint8_t name_const_idx = READ_BYTE();
                 uint8_t arg_count = READ_BYTE();
 
-                Value builtinNameVal = vm->chunk->constants[name_const_idx];
-                const char* builtin_name = AS_STRING(builtinNameVal);
-
-                BuiltinHandler handler = getBuiltinHandler(builtin_name);
-                if (!handler) {
-                    runtimeError(vm, "VM Error: Unimplemented built-in '%s' called.", builtin_name);
-                    for (int i = 0; i < arg_count; ++i) pop(vm);
+                if (vm->stackTop - vm->stack < arg_count) {
+                    runtimeError(vm, "VM Stack underflow for built-in arguments.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Token dummyToken;
-                dummyToken.type = TOKEN_IDENTIFIER;
-                dummyToken.value = (char*)builtin_name;
-                dummyToken.line = 0;
-                dummyToken.column = 0;
-                AST* temp_call_node = newASTNode(AST_PROCEDURE_CALL, &dummyToken);
+                Value* args = vm->stackTop - arg_count;
+                const char* builtin_name = AS_STRING(vm->chunk->constants[name_const_idx]);
+                
+                VmBuiltinFn handler = getVmBuiltinHandler(builtin_name);
 
-                if (arg_count > 0) {
-                    if (vm->stackTop - vm->stack < arg_count) {
-                        runtimeError(vm, "VM Stack underflow for built-in '%s' args.", builtin_name);
-                        freeAST(temp_call_node);
-                        return INTERPRET_RUNTIME_ERROR;
+                if (handler) {
+                    Value result = handler(vm, arg_count, args);
+                    
+                    vm->stackTop -= arg_count; // Pop arguments
+
+                    if (getBuiltinType(builtin_name) == BUILTIN_TYPE_FUNCTION) {
+                        push(vm, result);
+                    } else {
+                        freeValue(&result);
                     }
-                    Value* args = (Value*)malloc(sizeof(Value) * arg_count);
-                    if (!args) { freeAST(temp_call_node); return INTERPRET_RUNTIME_ERROR; }
-                    for (int i = 0; i < arg_count; i++) {
-                        args[arg_count - 1 - i] = pop(vm);
-                    }
-
-                    for (int i = 0; i < arg_count; i++) {
-                        Value arg_val = args[i];
-                        AST* arg_node = NULL;
-                        char buffer[128];
-
-                        switch(arg_val.type) {
-                            case TYPE_INTEGER:
-                            case TYPE_BYTE:
-                            case TYPE_WORD:
-                                snprintf(buffer, sizeof(buffer), "%lld", arg_val.i_val);
-                                arg_node = newASTNode(AST_NUMBER, newToken(TOKEN_INTEGER_CONST, buffer, 0, 0));
-                                break;
-                            case TYPE_REAL:
-                                snprintf(buffer, sizeof(buffer), "%f", arg_val.r_val);
-                                arg_node = newASTNode(AST_NUMBER, newToken(TOKEN_REAL_CONST, buffer, 0, 0));
-                                break;
-                            case TYPE_STRING:
-                                arg_node = newASTNode(AST_STRING, newToken(TOKEN_STRING_CONST, arg_val.s_val, 0, 0));
-                                break;
-                            case TYPE_BOOLEAN:
-                                arg_node = newASTNode(AST_BOOLEAN, newToken(arg_val.i_val ? TOKEN_TRUE : TOKEN_FALSE, "", 0, 0));
-                                arg_node->i_val = arg_val.i_val;
-                                break;
-                            default:
-                                arg_node = newASTNode(AST_NOOP, NULL);
-                                break;
-                        }
-                        addChild(temp_call_node, arg_node);
-                        freeValue(&args[i]);
-                    }
-                    free(args);
-                }
-
-                Value result_val = handler(temp_call_node);
-
-                if (getBuiltinType(builtin_name) == BUILTIN_TYPE_FUNCTION) {
-                    push(vm, result_val);
                 } else {
-                    freeValue(&result_val);
+                    runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name);
+                    vm->stackTop -= arg_count; // Pop args to clean stack
+                    return INTERPRET_RUNTIME_ERROR;
                 }
-
-                freeAST(temp_call_node);
                 break;
             }
             case OP_CALL: { // EXECUTION logic for OP_CALL

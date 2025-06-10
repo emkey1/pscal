@@ -18,6 +18,33 @@
 Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
 bool gSoundSystemInitialized = false;
 
+// VM-native version of LoadSound.
+Value vm_builtin_loadsound(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        fprintf(stderr, "Runtime error: LoadSound expects 1 argument (FileName: String).\n");
+        // In the VM, we might not want to exit, but return an error value.
+        // For now, returning -1 is consistent.
+        return makeInt(-1);
+    }
+    Value fileNameVal = args[0];
+    if (fileNameVal.type != TYPE_STRING || fileNameVal.s_val == NULL) {
+        fprintf(stderr, "Runtime error: LoadSound argument must be a valid String. Got %s.\n", varTypeToString(fileNameVal.type));
+        return makeInt(-1);
+    }
+
+    // This path-handling logic can be shared or duplicated from the AST version.
+    char full_path[512];
+    const char* filename_to_pass = fileNameVal.s_val;
+    if (filename_to_pass && filename_to_pass[0] != '.' && filename_to_pass[0] != '/') {
+        const char* default_sound_dir = "/usr/local/pscal/lib/sounds/";
+        snprintf(full_path, sizeof(full_path), "%s%s", default_sound_dir, filename_to_pass);
+        filename_to_pass = full_path;
+    }
+    
+    int soundID = audioLoadSound(filename_to_pass);
+    return makeInt(soundID);
+}
+
 // Internal helper to set all entries in the loaded sounds array to NULL
 void initializeSoundArray(void) {
     for (int i = 0; i < MAX_SOUNDS; ++i) {
@@ -358,4 +385,16 @@ Value executeBuiltinIsSoundPlaying(AST *node) {
 
     // Return a Pascal Boolean Value (True if playing, False otherwise)
     return makeBoolean(playing != 0);
+}
+
+Value vm_builtin_initsoundsystem(int arg_count, Value* args) {
+    if (arg_count != 0) { /* error */ }
+    audioInitSystem();
+    return makeVoid();
+}
+
+Value vm_builtin_playsound(int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { /* error */ }
+    audioPlaySound((int)args[0].i_val);
+    return makeVoid();
 }

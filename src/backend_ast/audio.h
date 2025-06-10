@@ -7,43 +7,42 @@
 #ifndef PSCAL_AUDIO_H
 #define PSCAL_AUDIO_H
 
-#include <SDL2/SDL.h> // Include the SDL_mixer header
-#include <SDL2/SDL_mixer.h> // Include the SDL_mixer header
-#include "types.h"          // For the Value struct if needed (though helpers won't return Value)
-#include "ast.h"            // For AST node if needed
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_mixer.h>
+#include "types.h"
+#include "ast.h"
 
-#define MAX_SOUNDS 32 // Define a maximum number of sound effects we can load
+// --- START MODIFICATION ---
+// Forward declare the VM struct to break circular dependencies
+struct VM_s;
+// --- END MODIFICATION ---
 
-// Global array to store pointers to loaded sound chunks (sound effects)
+#define MAX_SOUNDS 32
+
 extern Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
-// Flag to track if the sound system (SDL Audio + Mix_Init/OpenAudio) is initialized
 extern bool gSoundSystemInitialized;
 
-// Helper functions for C-side audio management
-void initializeSoundArray(void); // Internal helper to initialize the sound array pointers to NULL
-
-// Initialize the SDL audio subsystem and SDL_mixer
+void initializeSoundArray(void);
 void audioInitSystem(void);
-
-// Load a sound file (like a .wav). Returns an integer ID (1-based index) or -1 on error.
 int audioLoadSound(const char* filename);
-
-// Play a loaded sound effect once. Takes the 1-based sound ID.
 void audioPlaySound(int soundID);
-
-// Free a loaded sound effect from memory. Takes the 1-based sound ID.
 void audioFreeSound(int soundID);
-
-// Shut down SDL_mixer and the SDL audio subsystem
 void audioQuitSystem(void);
 
-// The builtins
+// AST-based built-ins
 Value executeBuiltinInitSoundSystem(AST *node);
 Value executeBuiltinLoadSound(AST *node);
 Value executeBuiltinPlaySound(AST *node);
 Value executeBuiltinQuitSoundSystem(AST *node);
 Value executeBuiltinIsSoundPlaying(AST *node);
 
-
+// --- START MODIFICATION ---
+// Prototypes for VM-native built-in handlers
+// Use the explicit struct tag 'struct VM_s*' to match the forward declaration.
+Value vm_builtin_initsoundsystem(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_loadsound(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
+// --- END MODIFICATION ---
 
 #endif // PSCAL_AUDIO_H

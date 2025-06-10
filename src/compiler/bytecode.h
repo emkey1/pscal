@@ -43,14 +43,15 @@ typedef enum {
     OP_DEFINE_GLOBAL, 
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
+    OP_GET_GLOBAL_ADDRESS,
     
     OP_GET_LOCAL,     // Get local scoped variables
     OP_SET_LOCAL,     // Set local scoped variables
+    OP_GET_LOCAL_ADDRESS,
     
-    OP_GET_FIELD,     // Pops a record, pushes the value of a field. Operand: field name const_idx.
-    OP_SET_FIELD,     // Pops a value, then a record. Sets field in record. Operand: field name const_idx.
-    OP_GET_ELEMENT,   // Pops index, then array. Pushes the element value.
-    OP_SET_ELEMENT,   // Pops value, then index, then array. Sets element in array.
+    OP_GET_FIELD_ADDRESS,
+    OP_GET_ELEMENT_ADDRESS,
+    OP_SET_INDIRECT,
 
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
