@@ -38,6 +38,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"cleardevice", vm_builtin_cleardevice},
     {"close", vm_builtin_close},
     {"closegraph", vm_builtin_closegraph},
+    {"dec", vm_builtin_dec},
     {"delay", vm_builtin_delay},
     {"destroytexture", vm_builtin_destroytexture},
     {"dispose", vm_builtin_dispose},
@@ -48,6 +49,8 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"getmousestate", vm_builtin_getmousestate},
     {"gettextsize", vm_builtin_gettextsize},
     {"halt", vm_builtin_halt},
+    {"high", vm_builtin_high},
+    {"inc", vm_builtin_inc},
     {"initgraph", vm_builtin_initgraph},
     {"initsoundsystem", vm_builtin_initsoundsystem},
     {"inittextsystem", vm_builtin_inittextsystem},
@@ -55,7 +58,9 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"ioresult", vm_builtin_ioresult},
     {"length", vm_builtin_length},
     {"loadsound", vm_builtin_loadsound},
+    {"low", vm_builtin_low},
     {"new", vm_builtin_new},
+    {"ord", vm_builtin_ord}, 
     {"playsound", vm_builtin_playsound},
     {"quittextsystem", vm_builtin_quittextsystem},
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
@@ -84,6 +89,93 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
         compareVmBuiltinMappings
     );
     return found ? found->handler : NULL;
+}
+
+Value vm_builtin_dec(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1 || arg_count > 2) { runtimeError(vm, "Dec expects 1 or 2 arguments."); return makeVoid(); }
+
+    Value* target_lvalue = (Value*)args[0].ptr_val;
+    if (!target_lvalue) { runtimeError(vm, "First argument to Dec must be a variable."); return makeVoid(); }
+
+    long long decrement = 1;
+    if (arg_count == 2) {
+        if (args[1].type != TYPE_INTEGER) { runtimeError(vm, "Dec amount must be an integer."); return makeVoid(); }
+        decrement = args[1].i_val;
+    }
+
+    if (target_lvalue->type == TYPE_INTEGER) target_lvalue->i_val -= decrement;
+    else if (target_lvalue->type == TYPE_CHAR) target_lvalue->c_val -= decrement;
+    else if (target_lvalue->type == TYPE_ENUM) target_lvalue->enum_val.ordinal -= decrement;
+    else { runtimeError(vm, "Cannot Dec a non-ordinal type."); }
+    
+    return makeVoid();
+}
+
+Value vm_builtin_ord(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "ord expects 1 argument."); return makeInt(0); }
+    Value arg = args[0];
+    if (arg.type == TYPE_CHAR) return makeInt((long long)arg.c_val);
+    if (arg.type == TYPE_BOOLEAN) return makeInt(arg.i_val);
+    if (arg.type == TYPE_ENUM) return makeInt(arg.enum_val.ordinal);
+    if (arg.type == TYPE_INTEGER) return makeInt(arg.i_val);
+    runtimeError(vm, "ord expects an ordinal type argument.");
+    return makeInt(0);
+}
+
+Value vm_builtin_inc(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1 || arg_count > 2) { runtimeError(vm, "Inc expects 1 or 2 arguments."); return makeVoid(); }
+    
+    Value* target_lvalue = (Value*)args[0].ptr_val;
+    if (!target_lvalue) { runtimeError(vm, "First argument to Inc must be a variable."); return makeVoid(); }
+
+    long long increment = 1;
+    if (arg_count == 2) {
+        if (args[1].type != TYPE_INTEGER) { runtimeError(vm, "Inc amount must be an integer."); return makeVoid(); }
+        increment = args[1].i_val;
+    }
+
+    if (target_lvalue->type == TYPE_INTEGER) target_lvalue->i_val += increment;
+    else if (target_lvalue->type == TYPE_CHAR) target_lvalue->c_val += increment;
+    else if (target_lvalue->type == TYPE_ENUM) target_lvalue->enum_val.ordinal += increment;
+    else { runtimeError(vm, "Cannot Inc a non-ordinal type."); }
+    
+    return makeVoid();
+}
+
+Value vm_builtin_low(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "Low() expects a single type identifier."); return makeInt(0); }
+    const char* typeName = AS_STRING(args[0]);
+
+    if (strcasecmp(typeName, "integer") == 0) return makeInt(-2147483648);
+    if (strcasecmp(typeName, "char") == 0) return makeChar((char)0);
+    if (strcasecmp(typeName, "boolean") == 0) return makeBoolean(false);
+    if (strcasecmp(typeName, "byte") == 0) return makeInt(0);
+    if (strcasecmp(typeName, "word") == 0) return makeInt(0);
+
+    AST* typeDef = lookupType(typeName);
+    if (typeDef && typeDef->var_type == TYPE_ENUM) return makeEnum(typeName, 0);
+
+    runtimeError(vm, "Low() not supported for type '%s'.", typeName);
+    return makeInt(0);
+}
+
+Value vm_builtin_high(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "High() expects a single type identifier."); return makeInt(0); }
+    const char* typeName = AS_STRING(args[0]);
+
+    if (strcasecmp(typeName, "integer") == 0) return makeInt(2147483647);
+    if (strcasecmp(typeName, "char") == 0) return makeChar((char)255);
+    if (strcasecmp(typeName, "boolean") == 0) return makeBoolean(true);
+    if (strcasecmp(typeName, "byte") == 0) return makeInt(255);
+    if (strcasecmp(typeName, "word") == 0) return makeInt(65535);
+
+    AST* typeDef = lookupType(typeName);
+    if (typeDef && typeDef->var_type == TYPE_ENUM && typeDef->type == AST_ENUM_TYPE) {
+        return makeEnum(typeName, typeDef->child_count - 1);
+    }
+
+    runtimeError(vm, "High() not supported for type '%s'.", typeName);
+    return makeInt(0);
 }
 
 Value vm_builtin_new(VM* vm, int arg_count, Value* args) {

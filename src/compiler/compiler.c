@@ -605,80 +605,119 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             int line = getLine(node);
             if (line <= 0) line = current_line_approx;
 
-            // 1. Compile the main case expression. Its value will be on the stack.
+            // 1. Compile the main expression to be tested. Its value is now on the stack.
             compileRValue(node->left, chunk, line);
 
-            // List of jumps that need to be patched to point to the end of the case statement.
-            int* end_jumps = NULL;
+            int else_jump = -1; // Jump from the end of the last branch to the end of the CASE
+            
+            // List of jumps from each successful branch to the very end of the CASE statement.
+            int *end_jumps = NULL;
             int end_jumps_count = 0;
-            int end_jumps_capacity = 0;
 
-            int next_branch_jump = -1; // Holds the last JUMP_IF_FALSE to be patched
-
-            // 2. Iterate through each `case` branch.
+            // 2. Iterate through each CASE branch (e.g., '1: stmtA; 2,3: stmtB;')
             for (int i = 0; i < node->child_count; i++) {
                 AST* branch = node->children[i];
                 if (!branch || branch->type != AST_CASE_BRANCH) continue;
-                
-                // Patch the jump from the previous branch check (if any) to here.
-                if (next_branch_jump != -1) {
-                    patchShort(chunk, next_branch_jump, chunk->count - (next_branch_jump + 2));
+
+                int next_branch_jump = -1; // Jumps to the start of the next branch's label checks.
+
+                // This is the beginning of the checks for the current branch.
+                // If a previous branch didn't match, it would have jumped here.
+                if (else_jump != -1) {
+                    patchShort(chunk, else_jump, chunk->count - (else_jump + 2));
                 }
 
-                AST* labels = branch->left;
-                
-                // Limitation: For now, only handle single labels per branch.
-                if (labels->type == AST_COMPOUND || labels->type == AST_SUBRANGE) {
-                    fprintf(stderr, "L%d: Compiler NOTE: CASE statement with multiple labels or ranges per branch is not yet implemented. Branch ignored.\n", getLine(labels));
-                    continue;
+                AST* labels_node = branch->left;
+                AST** labels_to_check = &labels_node;
+                int num_labels = 1;
+                if (labels_node->type == AST_COMPOUND) {
+                    labels_to_check = labels_node->children;
+                    num_labels = labels_node->child_count;
                 }
 
-                // 2a. Compile the check for this branch's single label.
-                writeBytecodeChunk(chunk, OP_DUP, getLine(labels)); // stack: [case_val, case_val]
-                compileRValue(labels, chunk, getLine(labels));     // stack: [case_val, case_val, label_val]
-                writeBytecodeChunk(chunk, OP_EQUAL, line);          // stack: [case_val, bool_result]
-                
-                // 2b. Jump to the next branch check if this label doesn't match.
-                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);  // consumes bool_result, stack: [case_val]
-                next_branch_jump = chunk->count;
-                emitShort(chunk, 0xFFFF, line);
+                // 3. For each label within the current branch.
+                for (int j = 0; j < num_labels; j++) {
+                    AST* label = labels_to_check[j];
+                    
+                    // Duplicate the case value for comparison.
+                    writeBytecodeChunk(chunk, OP_DUP, line);
+                    
+                    if (label->type == AST_SUBRANGE) {
+                        // For ranges like 'A'..'C', check if value is within bounds.
+                        // Stack: [case_val, case_val]
+                        compileRValue(label->left, chunk, getLine(label)); // Stack: [case_val, case_val, 'A']
+                        writeBytecodeChunk(chunk, OP_SWAP, line);           // Stack: [case_val, 'A', case_val]
+                        writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);  // Stack: [case_val, true/false]
+                        
+                        int jump_if_lower = chunk->count;
+                        writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
+                        
+                        // If we are here, it means case_val >= 'A' was true.
+                        writeBytecodeChunk(chunk, OP_DUP, line); // Stack: [case_val, case_val]
+                        compileRValue(label->right, chunk, getLine(label)); // Stack: [case_val, case_val, 'C']
+                        writeBytecodeChunk(chunk, OP_SWAP, line);            // Stack: [case_val, 'C', case_val]
+                        writeBytecodeChunk(chunk, OP_LESS_EQUAL, line);   // Stack: [case_val, true/false]
+                        
+                        patchShort(chunk, jump_if_lower, chunk->count - (jump_if_lower + 2));
 
-                // 2c. If the label matched, we fall through.
-                // The stack has the original case_val. Pop it since we found our branch.
-                writeBytecodeChunk(chunk, OP_POP, line);
-                // Compile the statement for this branch.
+                    } else {
+                        // For single labels like 'A' or 5.
+                        compileRValue(label, chunk, getLine(label));
+                        writeBytecodeChunk(chunk, OP_EQUAL, line);
+                    }
+                    
+                    // If the result of the comparison is true, jump past the next branch check.
+                    int jump_to_body = chunk->count;
+                    writeBytecodeChunk(chunk, OP_NOT, line);
+                    writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
+                    
+                    // If we fall through, the label didn't match. Jump to the next branch's check.
+                    if (next_branch_jump != -1) {
+                       patchShort(chunk, next_branch_jump, chunk->count - (next_branch_jump + 2));
+                    }
+                    next_branch_jump = chunk->count;
+                    writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
+                    
+                    // Patch the jump for a successful match to land here.
+                    patchShort(chunk, jump_to_body, chunk->count - (jump_to_body + 2));
+                }
+                
+                // This is the start of the body for the current branch.
+                writeBytecodeChunk(chunk, OP_POP, line); // Pop the matched case value.
                 compileStatement(branch->right, chunk, getLine(branch->right));
-
-                // 2d. Jump to the end of the entire case statement.
-                writeBytecodeChunk(chunk, OP_JUMP, line);
-                // Store this jump's offset to patch later.
-                if (end_jumps_count >= end_jumps_capacity) {
-                    end_jumps_capacity = end_jumps_capacity < 8 ? 8 : end_jumps_capacity * 2;
-                    end_jumps = realloc(end_jumps, sizeof(int) * end_jumps_capacity);
-                }
+                
+                // After executing the body, jump to the very end of the CASE statement.
+                end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
                 end_jumps[end_jumps_count++] = chunk->count;
-                emitShort(chunk, 0xFFFF, line);
-            }
-            
-            // 3. Handle the ELSE part or the fall-through case.
-            // Patch the last JUMP_IF_FALSE to jump here.
-            if (next_branch_jump != -1) {
-                patchShort(chunk, next_branch_jump, chunk->count - (next_branch_jump + 2));
-            }
-            
-            // If we fall through all branch checks, the original case value is still on the stack. Pop it.
-            writeBytecodeChunk(chunk, OP_POP, line);
-            
-            if (node->extra) { // 'extra' holds the ELSE block
-                compileStatement(node->extra, chunk, getLine(node->extra));
+                writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
+                
+                // The next set of label checks will begin here.
+                if (next_branch_jump != -1) {
+                   patchShort(chunk, next_branch_jump, chunk->count - (next_branch_jump + 2));
+                }
+                else_jump = next_branch_jump;
             }
 
-            // 4. Patch all the jumps from successful branches to point to the current end.
-            for (int i = 0; i < end_jumps_count; i++) {
-                int jump_offset_addr = end_jumps[i];
-                patchShort(chunk, jump_offset_addr, chunk->count - (jump_offset_addr + 2));
+            // After all branches, if an 'else' exists, compile it.
+            if (node->extra) {
+                if (else_jump != -1) {
+                    patchShort(chunk, else_jump, chunk->count - (else_jump + 2));
+                }
+                 writeBytecodeChunk(chunk, OP_POP, line); // Pop the case value before else.
+                compileStatement(node->extra, chunk, getLine(node->extra));
+            } else {
+                if (else_jump != -1) {
+                    patchShort(chunk, else_jump, chunk->count - (else_jump + 2));
+                }
+                // If no else, and no branches matched, we still need to pop the case value.
+                writeBytecodeChunk(chunk, OP_POP, line);
             }
-            free(end_jumps);
+            
+            // This is the end of the CASE. Patch all jumps from successful branches to here.
+            for (int i = 0; i < end_jumps_count; i++) {
+                patchShort(chunk, end_jumps[i], chunk->count - (end_jumps[i] + 2));
+            }
+            if (end_jumps) free(end_jumps);
 
             break;
         }
@@ -761,23 +800,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool is_downto = node->type == AST_FOR_DOWNTO;
             AST* var_node = node->children[0];
             AST* start_node = node->left;
-            AST* end_node = node->right;
+            AST* end_node = node->right; // This is now used
             AST* body_node = node->extra;
 
-            // --- START: MODIFIED LOGIC ---
             int var_slot = -1;
             int var_name_idx = -1;
             
-            // Check if the loop variable is a local or global.
             if (current_function_compiler) {
                 var_slot = resolveLocal(current_function_compiler, var_node->token->value);
             }
 
-            if (var_slot == -1) { // Not found as a local, treat as global
+            if (var_slot == -1) {
                 var_name_idx = addConstantToChunk(chunk, makeString(var_node->token->value));
             }
 
-            // 1. Compile and set the initial value
             compileRValue(start_node, chunk, getLine(start_node));
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
@@ -789,7 +825,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             int loopStart = chunk->count;
 
-            // 2. Loop condition check
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
@@ -797,18 +832,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
+            
+            // --- FIX: COMPILE THE END VALUE ---
             compileRValue(end_node, chunk, getLine(end_node));
-            writeBytecodeChunk(chunk, is_downto ? OP_LESS_EQUAL : OP_GREATER_EQUAL, line);
+            
+            writeBytecodeChunk(chunk, is_downto ? OP_GREATER_EQUAL : OP_LESS_EQUAL, line);
 
-            // 3. Jump out of the loop if condition is met
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
             int exitJump = chunk->count;
             emitShort(chunk, 0xFFFF, line);
 
-            // 4. Compile the loop body
             compileStatement(body_node, chunk, getLine(body_node));
 
-            // 5. Increment/Decrement loop variable
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
@@ -829,14 +864,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
 
-            // 6. Jump back to the top of the loop
             writeBytecodeChunk(chunk, OP_JUMP, line);
             int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
 
-            // 7. Patch the exit jump
             patchShort(chunk, exitJump, (uint16_t)(chunk->count - (exitJump + 2)));
-            // --- END MODIFICATION ---
             break;
         }
         case AST_IF: {
@@ -1123,29 +1155,44 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             Symbol* func_symbol = functionName ? lookupSymbolIn(procedure_table, functionName) : NULL;
             
-            if (node->child_count > 0 && node->children) {
-                for (int i = 0; i < node->child_count; i++) {
-                    AST* arg_node = node->children[i];
-                    if (!arg_node) continue;
-                    
-                    bool is_var_param = false;
-                    
-                    if (functionName && (strcasecmp(functionName, "new") == 0 || strcasecmp(functionName, "dispose") == 0)) {
-                        is_var_param = true;
-                    }
-                    else if (func_symbol && func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                        AST* param_group_node = func_symbol->type_def->children[i];
-                        if (param_group_node && param_group_node->type == AST_VAR_DECL && param_group_node->by_ref) {
+            // Special handling for built-ins that take type identifiers instead of values.
+            if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
+                if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
+                    AST* type_arg_node = node->children[0];
+                    // Push the *name* of the type as a string constant.
+                    int typeNameIndex = addConstantToChunk(chunk, makeString(type_arg_node->token->value));
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)typeNameIndex, line);
+                } else {
+                    fprintf(stderr, "L%d: Compiler error: Argument to '%s' must be a single type identifier.\n", line, functionName);
+                    compiler_had_error = true;
+                }
+            } else {
+                if (node->child_count > 0 && node->children) {
+                    for (int i = 0; i < node->child_count; i++) {
+                        AST* arg_node = node->children[i];
+                        if (!arg_node) continue;
+                        
+                        bool is_var_param = false;
+                        
+                        if (functionName && (strcasecmp(functionName, "new") == 0 || strcasecmp(functionName, "dispose") == 0)) {
                             is_var_param = true;
                         }
-                    }
+                        else if (func_symbol && func_symbol->type_def && i < func_symbol->type_def->child_count) {
+                            AST* param_node = func_symbol->type_def->children[i];
+                            if (param_node && param_node->by_ref) {
+                                is_var_param = true;
+                            }
+                        }
 
-                    if (is_var_param) {
-                        compileLValue(arg_node, chunk, getLine(arg_node));
-                    } else {
-                        compileRValue(arg_node, chunk, getLine(arg_node));
+                        if (is_var_param) {
+                            compileLValue(arg_node, chunk, getLine(arg_node));
+                        } else {
+                            compileRValue(arg_node, chunk, getLine(arg_node));
+                        }
                     }
                 }
+            // --- ADDED THIS BRACE ---
             }
             
             if (isBuiltin(functionName)) {

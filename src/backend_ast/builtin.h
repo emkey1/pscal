@@ -31,6 +31,11 @@ Value vm_builtin_delay(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_new(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_dispose(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_exit(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_ord(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_inc(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dec(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_low(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_high(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE FILE I/O ---
 Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);

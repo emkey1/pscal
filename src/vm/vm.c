@@ -19,7 +19,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
-#include "backend_ast/audio.h"  
+#include "backend_ast/audio.h"
 
 // --- VM Helper Functions ---
 
@@ -85,6 +85,7 @@ static Value pop(VM* vm) { // Using your original name 'pop'
     return *vm->stackTop;
 }
 
+/*
 static Value peek(VM* vm, int distance) { // Using your original name 'peek'
     if (vm->stackTop - vm->stack < distance + 1) {
         runtimeError(vm, "VM Error: Stack underflow (peek too deep).");
@@ -92,6 +93,7 @@ static Value peek(VM* vm, int distance) { // Using your original name 'peek'
     }
     return vm->stackTop[-(distance + 1)];
 }
+ */
 
 // --- Host Function C Implementations ---
 static Value vm_host_quit_requested(VM* vm) {
@@ -157,11 +159,6 @@ static inline uint16_t READ_SHORT(VM* vm_param) { // Pass vm explicitly here
 }
 
 #define READ_HOST_ID() ((HostFunctionID)READ_BYTE())
-// This assumes that your HostFunctionID values will fit within a uint8_t.
-// If you anticipate having more than 255 host functions, you'd use READ_SHORT(vm)
-// and the compiler would need to emit two bytes for the ID. For now, one byte is fine.
-// Note: READ_BYTE() implicitly uses 'vm' because it's used inside interpretBytecode
-// where 'vm' is in scope and points to the current VM instance.
 
 // --- Symbol Management (VM specific) ---
 static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init) {
@@ -188,20 +185,6 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     return sym;
 }
 
-// Ensure these are defined or included (e.g., from utils.h or types.h)
-// If they are macros, they will use 'value' as their argument.
-#ifndef IS_BOOLEAN
-    #define IS_BOOLEAN(val) ((val).type == TYPE_BOOLEAN)
-    #define AS_BOOLEAN(val) ((val).i_val != 0) // Assumes 0 is false, non-0 is true for i_val storage
-    #define IS_INTEGER(val) ((val).type == TYPE_INTEGER)
-    #define AS_INTEGER(val) ((val).i_val)
-    #define IS_REAL(val)    ((val).type == TYPE_REAL)
-    #define AS_REAL(val)    ((val).r_val)
-    #define IS_STRING(val)  ((val).type == TYPE_STRING)
-    #define AS_STRING(val)  ((val).s_val)
-    #define IS_CHAR(val)    ((val).type == TYPE_CHAR)
-    #define AS_CHAR(val)    ((val).c_val)
-#endif
 
 // --- Main Interpretation Loop ---
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures) {
@@ -214,7 +197,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
     #ifdef DEBUG
-    if (dumpExec) { // from all.txt [cite: 1391]
+    if (dumpExec) { // from all.txt
         printf("\n--- VM Initial State ---\n");
         printf("IP: %p (offset 0)\n", (void*)vm->ip);
         printf("Stack top: %p (empty)\n", (void*)vm->stackTop);
@@ -225,10 +208,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     }
     #endif
     
-#define READ_BYTE() (*vm->ip++)
-#define READ_CONSTANT() (vm->chunk->constants[READ_BYTE()])
-#define READ_HOST_ID() ((HostFunctionID)READ_BYTE())
-// Corrected BINARY_OP to use the passed instruction_val
 #define BINARY_OP(op_char_for_error_msg, current_instruction_code) \
     do { \
         Value b_val_popped = pop(vm); \
@@ -349,7 +328,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         switch (instruction_val) {
             case OP_RETURN: {
                  if (vm->frameCount == 0) {
-                     // Returning from the top-level script, program is finished.
                      #ifdef DEBUG
                      if (dumpExec) printf("--- Returning from top-level script. VM shutting down. ---\n");
                      #endif
@@ -359,23 +337,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                      return INTERPRET_OK;
                  }
 
-                 // Pop the result that the callee placed on top of its stack.
                  Value returnValue = pop(vm);
-
-                 // Get the frame we are returning FROM (the callee's frame).
                  CallFrame* calleeFrame = &vm->frames[vm->frameCount - 1];
-
-                 // The instruction pointer should be restored from the callee's frame.
                  vm->ip = calleeFrame->return_address;
-
-                 // Reset the stack top to the beginning of the callee's frame.
-                 // This erases all of the callee's locals and arguments from the stack.
                  vm->stackTop = calleeFrame->slots;
-                 
-                 // Finally, decrement the frame count.
                  vm->frameCount--;
-                 
-                 // Push the return value. It now sits on top of the caller's stack, ready for use.
                  push(vm, returnValue);
 
                  break;
@@ -402,7 +368,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makePointer(&frame->slots[slot], NULL)); // Push a pointer to the Value struct on the stack
                 break;
             }
-            // Pass instruction_val to the macro
             case OP_ADD:      BINARY_OP("+", instruction_val); break;
             case OP_SUBTRACT: BINARY_OP("-", instruction_val); break;
             case OP_MULTIPLY: BINARY_OP("*", instruction_val); break;
@@ -450,8 +415,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Stack underflow (dup from empty stack).");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                // The `peek` function returns a Value struct, but `makeCopyOfValue` expects a pointer.
-                // We pass the address of the top stack element directly.
                 push(vm, makeCopyOfValue(&vm->stackTop[-1]));
                 break;
             }
@@ -461,7 +424,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 Value a_val = pop(vm);
                 Value result_val;
 
-                // Pascal's AND/OR can be logical for Booleans or bitwise for Integers
                 if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
                     bool ba = AS_BOOLEAN(a_val);
                     bool bb = AS_BOOLEAN(b_val);
@@ -568,8 +530,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_LESS_EQUAL: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                Value result_val; // Default initialization is not strictly needed if comparison_succeeded ensures it's set.
-                                  // However, to be safe, you could do result_val = makeNil(); if it might be used uninitialized.
+                Value result_val;
                 bool comparison_succeeded = false;
 
                 // Numeric comparison (Integers and Reals)
@@ -589,7 +550,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         case OP_GREATER_EQUAL: result_val = makeBoolean(fa >= fb); break;
                         case OP_LESS:          result_val = makeBoolean(fa < fb);  break;
                         case OP_LESS_EQUAL:    result_val = makeBoolean(fa <= fb); break;
-                        default: // Should not be reached if instruction_val is one of these opcodes
+                        default:
                             runtimeError(vm, "VM Error: Unexpected numeric comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
@@ -629,6 +590,32 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;
+                } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
+                    char a_char, b_char;
+                    if (IS_CHAR(a_val)) {
+                        a_char = AS_CHAR(a_val);
+                    } else {
+                        if (strlen(AS_STRING(a_val)) != 1) goto comparison_error_label;
+                        a_char = AS_STRING(a_val)[0];
+                    }
+                    if (IS_CHAR(b_val)) {
+                        b_char = AS_CHAR(b_val);
+                    } else {
+                        if (strlen(AS_STRING(b_val)) != 1) goto comparison_error_label;
+                        b_char = AS_STRING(b_val)[0];
+                    }
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean(a_char == b_char); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean(a_char != b_char); break;
+                        case OP_GREATER:       result_val = makeBoolean(a_char > b_char);  break;
+                        case OP_GREATER_EQUAL: result_val = makeBoolean(a_char >= b_char); break;
+                        case OP_LESS:          result_val = makeBoolean(a_char < b_char);  break;
+                        case OP_LESS_EQUAL:    result_val = makeBoolean(a_char <= b_char); break;
+                        default:
+                             runtimeError(vm, "VM Error: Unexpected char/string comparison opcode %d.", instruction_val);
+                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
                 }
                 // Boolean comparison
                 else if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
@@ -637,9 +624,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                      switch (instruction_val) {
                         case OP_EQUAL:         result_val = makeBoolean(ba == bb); break;
                         case OP_NOT_EQUAL:     result_val = makeBoolean(ba != bb); break;
-                        // For Booleans, >, >=, <, <= are sometimes defined as (True > False)
-                        // Or disallowed. Standard Pascal typically allows comparison.
-                        // Let's assume True=1, False=0 for these.
                         case OP_GREATER:       result_val = makeBoolean(ba > bb);  break;
                         case OP_GREATER_EQUAL: result_val = makeBoolean(ba >= bb); break;
                         case OP_LESS:          result_val = makeBoolean(ba < bb);  break;
@@ -699,7 +683,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         ptrs_equal = (a_val.ptr_val == b_val.ptr_val);
                     }
 
-                    // Only OP_EQUAL and OP_NOT_EQUAL are valid for pointers
                     if (instruction_val == OP_EQUAL) {
                         result_val = makeBoolean(ptrs_equal);
                     } else if (instruction_val == OP_NOT_EQUAL) {
@@ -711,33 +694,25 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     comparison_succeeded = true;
                 }
 
-
+comparison_error_label:
                 if (comparison_succeeded) {
                     push(vm, result_val);
                 } else {
-                    // Expanded error message
                     const char* op_str = "unknown_comparison_op";
-                    char a_repr[128];
-                    char b_repr[128];
                     switch (instruction_val) {
                         case OP_EQUAL:         op_str = "="; break;
                         case OP_NOT_EQUAL:     op_str = "<>"; break;
                         case OP_GREATER:       op_str = ">";  break;
-                        case OP_GREATER_EQUAL: op_str = ">="; break; // Opcode 10
+                        case OP_GREATER_EQUAL: op_str = ">="; break;
                         case OP_LESS:          op_str = "<";  break;
-                        case OP_LESS_EQUAL:    op_str = "<="; break; // Opcode 11
-                        // Add other comparison opcodes if they exist and are handled by this block
-                        default: op_str = "unknown_comparison_op_code"; break; // Should not happen if instruction_val is one of the above
+                        case OP_LESS_EQUAL:    op_str = "<="; break;
+                        default: op_str = "unknown_comparison_op_code"; break;
                     }
-                    // Buffer for string representations of values, if you choose to include them.
-                    // char a_val_buffer[128] = "N/A";
-                    // char b_val_buffer[128] = "N/A";
-                    // You would need a function like: void valueToString(Value v, char* buffer, size_t buffer_len);
-                    // For now, sticking to types.
-                    runtimeError(vm, "Runtime Error: Operands not comparable for operator '%s'. Left operand: %s (type %s), Right operand: %s (type %s).",
+                    
+                    runtimeError(vm, "Runtime Error: Operands not comparable for operator '%s'. Left operand: %s, Right operand: %s.",
                                                  op_str,
-                                                 a_repr, varTypeToString(a_val.type),
-                                                 b_repr, varTypeToString(b_val.type));
+                                                 varTypeToString(a_val.type),
+                                                 varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
@@ -747,27 +722,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             }
             case OP_GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
-                Value* base_val_ptr = vm->stackTop - 1; // Peek at the value on the stack
+                Value* base_val_ptr = vm->stackTop - 1;
 
                 Value* record_struct_ptr = NULL;
 
-                // Check if the value on the stack is a pointer or a record itself.
                 if (base_val_ptr->type == TYPE_POINTER) {
-                    // It's a pointer. The value we need to inspect is on the heap.
                     if (base_val_ptr->ptr_val == NULL) {
                         runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     record_struct_ptr = base_val_ptr->ptr_val;
                 } else if (base_val_ptr->type == TYPE_RECORD) {
-                    // It's a record struct itself (e.g., from a non-pointer variable).
                     record_struct_ptr = base_val_ptr;
                 } else {
                     runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Now, record_struct_ptr points to the actual record Value struct.
                 if (record_struct_ptr->type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -777,9 +748,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 FieldValue* current = record_struct_ptr->record_val;
                 while (current) {
                     if (strcmp(current->name, field_name) == 0) {
-                        // We found the field. Pop the base value from the stack.
                         pop(vm);
-                        // Push a new pointer that points directly to the field's Value struct.
                         push(vm, makePointer(&current->value, NULL));
                         goto next_instruction;
                     }
@@ -808,7 +777,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 free(indices);
                 if (offset < 0 || offset >= calculateArrayTotalSize(array_val_ptr)) { /* Bounds error */ }
 
-                // Pop the array value, push a pointer to the element's value
                 pop(vm);
                 push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
                 break;
@@ -819,7 +787,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
                 if (pointer_to_lvalue.type != TYPE_POINTER) {
                     runtimeError(vm, "VM Error: SET_INDIRECT requires an address on the stack.");
-                    freeValue(&value_to_set); // Clean up popped value
+                    freeValue(&value_to_set);
                     freeValue(&pointer_to_lvalue);
                     return INTERPRET_RUNTIME_ERROR;
                 }
@@ -832,28 +800,20 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // --- NEW LOGIC: Special handling for pointer assignment ---
                 if (target_lvalue_ptr->type == TYPE_POINTER &&
                     (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
                     
-                    // This is a pointer assignment (e.g., p1 := p2 or p1 := nil).
-                    // We only update the internal pointer value, not the type of the variable itself.
                     target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
                     
-                    // Also copy the base type node if the source is a non-nil pointer.
                     if (value_to_set.type == TYPE_POINTER) {
                          target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
                     }
-                    // The type of the target L-Value remains TYPE_POINTER.
 
                 } else {
-                    // This is a regular assignment to a non-pointer (e.g., p1^ := 5),
-                    // or the types are otherwise incompatible for direct pointer assignment.
-                    freeValue(target_lvalue_ptr); // Free the old value at the target location
-                    *target_lvalue_ptr = makeCopyOfValue(&value_to_set); // Copy new value into place
+                    freeValue(target_lvalue_ptr);
+                    *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
                 }
 
-                // Clean up the temporary values that were on the stack
                 freeValue(&value_to_set);
                 freeValue(&pointer_to_lvalue);
                 break;
@@ -869,9 +829,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                // Push a copy of the value at the address
                 push(vm, makeCopyOfValue(target_lvalue_ptr));
-                freeValue(&pointer_val); // Clean up the temporary pointer value
+                freeValue(&pointer_val);
                 break;
             }
 
@@ -909,25 +868,18 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
                     VarType elem_var_type = (VarType)READ_BYTE();
 
-                    // Read the element type name from the constant pool.
                     uint8_t elem_name_idx = READ_BYTE();
                     Value elem_name_val = vm->chunk->constants[elem_name_idx];
                     AST* elem_type_def = NULL;
 
-                    // If a type name was provided, look up its AST definition.
-                    // This is crucial for creating arrays of records or other named types.
                     if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
                         elem_type_def = lookupType(elem_name_val.s_val);
                     }
 
-                    // Pass the found type definition to makeArrayND.
                     Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
                    
-
                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                     if (sym == NULL) {
-                        // Replace the call to createSymbolForVM with manual symbol creation
-                        // to avoid the unnecessary and problematic call to makeValueForType.
                         sym = (Symbol*)malloc(sizeof(Symbol));
                         if (!sym) {
                             runtimeError(vm, "VM Error: Malloc failed for Symbol struct for global array '%s'.", varNameVal.s_val);
@@ -940,15 +892,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         }
                         toLowerString(sym->name);
                         
-                        sym->type = declaredType; // This is TYPE_ARRAY
-                        sym->type_def = NULL;     // We don't have the AST node in the VM
+                        sym->type = declaredType;
+                        sym->type_def = NULL;
                         sym->value = (Value*)malloc(sizeof(Value));
                         if (!sym->value) {
                              runtimeError(vm, "VM Error: Malloc failed for Value struct for global array '%s'.", varNameVal.s_val);
                              free(sym->name); free(sym); freeValue(&array_val); free(lower_bounds); free(upper_bounds); return INTERPRET_RUNTIME_ERROR;
                         }
-
-                        // Directly assign the correctly-created array value, bypassing makeValueForType(TYPE_ARRAY, NULL).
+                        
                         *(sym->value) = array_val;
 
                         sym->is_alias = false;
@@ -966,14 +917,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     free(lower_bounds);
                     free(upper_bounds);
                 } else {
-                    // This is for non-array types (Integer, Pointer, Record, etc.)
-                    // The compiler provides the type name's index in the constant pool.
                     uint8_t type_name_idx = READ_BYTE();
                     Value typeNameVal = vm->chunk->constants[type_name_idx];
                     AST* type_def_node = NULL;
 
-                    // If a type name was provided (e.g., for PInt = ^Integer, it's 'pint'),
-                    // look up its full definition AST node from the type table created by the parser.
                     if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
                         type_def_node = lookupType(typeNameVal.s_val);
                     }
@@ -985,8 +932,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                     if (sym == NULL) {
-                        // Pass the looked-up AST node to the symbol creation function.
-                        // This node contains the necessary metadata for pointer base types.
                         sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_node);
                         if (!sym) {
                              runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
@@ -1030,17 +975,15 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
                 }
 
-                // Pop the value from the stack first.
                 Value value_from_stack = pop(vm);
                 Value value_to_assign;
 
-                // --- Perform type coercion (this logic can be simplified now) ---
                 if (sym->type == TYPE_CHAR && value_from_stack.type == TYPE_STRING) {
                     if (value_from_stack.s_val && strlen(value_from_stack.s_val) == 1) {
                         value_to_assign = makeChar(value_from_stack.s_val[0]);
                     } else {
                         runtimeError(vm, "Runtime Error: Cannot assign multi-character string or null string to CHAR variable '%s'.", sym->name);
-                        freeValue(&value_from_stack); // Free the popped value before exiting
+                        freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
                 } else if (sym->type == TYPE_REAL && value_from_stack.type == TYPE_INTEGER) {
@@ -1049,19 +992,16 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     value_to_assign = makeInt((long long)value_from_stack.r_val);
                 }
                 else {
-                    // No coercion needed, use the popped value directly for the copy
                     value_to_assign = value_from_stack;
                 }
 
-                freeValue(sym->value); // Free existing contents of the symbol's value
-                *(sym->value) = makeCopyOfValue(&value_to_assign); // Assign a deep copy
+                freeValue(sym->value);
+                *(sym->value) = makeCopyOfValue(&value_to_assign);
 
-                // If a new temporary value was created for coercion, free it
                 if (value_to_assign.type != value_from_stack.type) {
                     freeValue(&value_to_assign);
                 }
 
-                // Free the original value popped from the stack
                 freeValue(&value_from_stack);
                 
                 break;
@@ -1075,17 +1015,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                // Free the old value at the slot before overwriting, if it's a complex type
                 freeValue(&frame->slots[slot]);
-                // POP the value from the top of the stack and make a deep copy into the slot
-                Value value_to_set = pop(vm); // Changed from peek(vm, 0)
+                Value value_to_set = pop(vm);
                 frame->slots[slot] = makeCopyOfValue(&value_to_set);
-                // Free the temporary value that was popped from the stack
                 freeValue(&value_to_set);
                 break;
             }
             case OP_JUMP_IF_FALSE: {
-                uint16_t offset_val = READ_SHORT(vm); // Use READ_SHORT(vm) to pass vm
+                uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
                 bool jump_condition_met = false;
                 if (IS_BOOLEAN(condition_value)) {
@@ -1095,8 +1032,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&condition_value);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                // freeValue(&condition_value); // Only if makeCopyOfValue was used on stack for the boolean. Primitives usually don't need this.
-
+                
                 if (jump_condition_met) {
                     vm->ip += offset_val;
                 }
@@ -1108,22 +1044,18 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_WRITE_LN: {
-                #define MAX_WRITELN_ARGS_VM 32 // Keep this define or ensure it's globally accessible
+                #define MAX_WRITELN_ARGS_VM 32
                 uint8_t argCount = READ_BYTE();
-                Value args_for_writeln[MAX_WRITELN_ARGS_VM]; // Still using a temporary array to reverse popped args
+                Value args_for_writeln[MAX_WRITELN_ARGS_VM];
 
                 if (argCount > MAX_WRITELN_ARGS_VM) {
                     runtimeError(vm, "VM Error: Too many arguments for OP_WRITE_LN (max %d).", MAX_WRITELN_ARGS_VM);
-                    // Note: If actual_args was dynamic, it would need freeing here on error.
-                    // Since args_for_writeln is stack-based, it's okay.
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Pop arguments from VM stack into the temporary C array to get them in correct order
                 for (int i = 0; i < argCount; i++) {
-                    if (vm->stackTop == vm->stack) { // Check for underflow before each pop
+                    if (vm->stackTop == vm->stack) {
                         runtimeError(vm, "VM Error: Stack underflow preparing arguments for OP_WRITE_LN. Expected %d, premature empty.", argCount);
-                        // Clean up already popped arguments in args_for_writeln if any
                         for (int k = 0; k < i; ++k) {
                             freeValue(&args_for_writeln[argCount - 1 - k]);
                         }
@@ -1132,67 +1064,33 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     args_for_writeln[argCount - 1 - i] = pop(vm);
                 }
 
-                // Print arguments using logic similar to the AST interpreter's WriteLn
                 for (int i = 0; i < argCount; i++) {
-                    Value val = args_for_writeln[i]; // Get the argument in the correct order
+                    Value val = args_for_writeln[i];
 
-                    // Note: The AST interpreter checks argNode->type == AST_FORMATTED_EXPR.
-                    // The VM bytecode for formatted expressions would likely be different
-                    // (e.g., a dedicated OP_WRITE_FORMATTED or the formatting done before OP_WRITE_LN,
-                    // resulting in a pre-formatted string on the stack).
-                    // For now, we'll assume 'val' is the raw value to be printed.
-                    // If formatting opcodes are added later, this logic might need adjustment
-                    // or OP_WRITE_LN would expect already formatted strings.
-
-                    // Replicate printing logic from AST interpreter for consistency:
                     if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
                         fprintf(stdout, "%lld", val.i_val);
                     } else if (val.type == TYPE_REAL) {
                         fprintf(stdout, "%f", val.r_val);
                     } else if (val.type == TYPE_BOOLEAN) {
-                        // AST interpreter's WriteLn prints booleans as TRUE/FALSE words.
-                        // The specific `fprintf` for boolean in AST was:
-                        // else if (val.type == TYPE_BOOLEAN) fprintf(output, "%s", (val.i_val != 0) ? "true" : "false");
-                        // Let's use that for consistency:
-                        fprintf(stdout, "%s", (val.i_val != 0) ? "TRUE" : "FALSE"); // Standard Pascal output
+                        fprintf(stdout, "%s", (val.i_val != 0) ? "TRUE" : "FALSE");
                     } else if (val.type == TYPE_STRING) {
-                        // Print string content directly without adding extra quotes
                         fprintf(stdout, "%s", val.s_val ? val.s_val : "");
                     } else if (val.type == TYPE_CHAR) {
-                        // Print char directly without quotes
                         fputc(val.c_val, stdout);
                     } else if (val.type == TYPE_ENUM) {
                         fprintf(stdout, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "?");
                     }
-                    // Other types like NIL, POINTER, RECORD, ARRAY, SET, FILE are typically not directly printable
-                    // by a simple WriteLn argument in standard Pascal without formatting or specific handling.
-                    // The AST interpreter had:
-                    // else if (val.type != TYPE_FILE) fprintf(output, "[unprintable_type_%d]", val.type);
-                    // We can adopt a similar placeholder for unhandled types.
                     else if (val.type == TYPE_NIL) {
-                        fprintf(stdout, "NIL"); // Consistent with AST version of printValueToStream
+                        fprintf(stdout, "NIL");
                     }
-                    // Add other types as needed, or a default placeholder:
                     else if (val.type != TYPE_FILE && val.type != TYPE_MEMORYSTREAM && val.type != TYPE_POINTER && val.type != TYPE_RECORD && val.type != TYPE_ARRAY && val.type != TYPE_SET) {
-                         // This condition is getting complex. A helper function or a switch might be cleaner.
-                         // For now, if it's not one of the above and not a known complex unprintable:
                          fprintf(stdout, "<VM_PRINT_TYPE_%s>", varTypeToString(val.type));
                     }
-
-
-                    // Free the Value struct's contents (e.g., s_val if it was a string)
-                    // This 'val' is a copy from args_for_writeln, which itself was a copy from stack.
+                    
                     freeValue(&val);
-
-                    if (i < argCount - 1) {
-                        // Standard Pascal WriteLn typically does not add spaces between arguments unless
-                        // they are formatted with field widths. If you want spaces, add printf(" ");
-                        // AST interpreter's WriteLn does not add spaces by default.
-                        // For now, no space to match typical WriteLn behavior for unformatted args.
-                    }
                 }
-                printf("\n"); // The "Ln" part
-                fflush(stdout); // Ensure output is flushed
+                printf("\n");
+                fflush(stdout);
                 break;
             }
             case OP_WRITE: {
@@ -1273,14 +1171,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 break;
             }
-            case OP_CALL: { // EXECUTION logic for OP_CALL
+            case OP_CALL: {
                   if (vm->frameCount >= VM_CALL_STACK_MAX) {
                       runtimeError(vm, "VM Error: Call stack overflow.");
                       return INTERPRET_RUNTIME_ERROR;
                   }
 
-                  uint16_t target_address = READ_SHORT(vm); // Read 2-byte address
-                  uint8_t declared_arity = READ_BYTE();   // Read 1-byte declared arity
+                  uint16_t target_address = READ_SHORT(vm);
+                  uint8_t declared_arity = READ_BYTE();
 
                   if (vm->stackTop - vm->stack < declared_arity) {
                       runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %d, have %ld.",
@@ -1289,10 +1187,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                   }
 
                   CallFrame* frame = &vm->frames[vm->frameCount++];
-                  frame->return_address = vm->ip; // Current ip is *after* OP_CALL's operands
-                  frame->slots = vm->stackTop - declared_arity; // New frame starts where args are on stack
+                  frame->return_address = vm->ip;
+                  frame->slots = vm->stackTop - declared_arity;
 
-                  // Find the procedure's symbol to get locals_count
                   Symbol* proc_symbol = NULL;
                   if(vm->procedureTable) {
                       for (int i = 0; i < HASHTABLE_SIZE; i++) {
@@ -1307,18 +1204,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                   }
                   if (!proc_symbol) {
                       runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
-                      vm->frameCount--; // Revert frame increment
+                      vm->frameCount--;
                       return INTERPRET_RUNTIME_ERROR;
                   }
                   frame->function_symbol = proc_symbol;
                   frame->locals_count = proc_symbol->locals_count;
 
-                  // Reserve space on stack for local variables by pushing nils
                   for (int i = 0; i < frame->locals_count; i++) {
                       push(vm, makeNil());
                   }
                   
-                  vm->ip = vm->chunk->code + target_address; // Jump to the function/procedure
+                  vm->ip = vm->chunk->code + target_address;
                   break;
             }
             case OP_HALT:
@@ -1335,18 +1231,15 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_FORMAT_VALUE: {
-                // Read operands from the bytecode stream
                 uint8_t width = READ_BYTE();
                 uint8_t precision_raw = READ_BYTE();
-                int precision = (precision_raw == 0xFF) ? -1 : precision_raw; // Convert 0xFF back to -1
+                int precision = (precision_raw == 0xFF) ? -1 : precision_raw;
 
-                // Pop the raw value to be formatted
                 Value raw_val = pop(vm);
 
-                char buf[DEFAULT_STRING_CAPACITY]; // From globals.h
+                char buf[DEFAULT_STRING_CAPACITY];
                 buf[0] = '\0';
 
-                // This logic is borrowed from the working AST interpreter's eval function
                 if (raw_val.type == TYPE_REAL) {
                     if (precision >= 0) {
                         snprintf(buf, sizeof(buf), "%*.*f", width, precision, raw_val.r_val);
@@ -1367,10 +1260,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     snprintf(buf, sizeof(buf), "%*s", width, "?");
                 }
 
-                // Free the raw value that was popped
                 freeValue(&raw_val);
                 
-                // Push the newly formatted string value back onto the stack
                 push(vm, makeString(buf));
                 break;
             }
@@ -1379,16 +1270,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;
         }
-        next_instruction:; 
+        next_instruction:;
     }
     return INTERPRET_OK;
 }
-
-/*
- #ifdef DEBUG
- static void dumpSymbolValue(Value* v) {
- if (!v) { printf("NULL_Value_Ptr"); return; }
- printValueToStream(*v, stderr);
- }
- #endif
- */
