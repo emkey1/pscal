@@ -1807,15 +1807,21 @@ int calculateArrayTotalSize(const Value* array_val) {
 
 int computeFlatOffset(Value *array, int *indices) {
     int offset = 0;
-    // This forward-iterating version is correct for row-major arrays.
-    for (int i = 0; i < array->dimensions; i++) {
+    int multiplier = 1;
+
+    for (int i = array->dimensions - 1; i >= 0; i--) {
         // Bounds check for the current dimension
         if (indices[i] < array->lower_bounds[i] || indices[i] > array->upper_bounds[i]) {
             fprintf(stderr, "Runtime error: Index %d out of bounds [%d..%d] in dimension %d.\n",
                     indices[i], array->lower_bounds[i], array->upper_bounds[i], i + 1);
             EXIT_FAILURE_HANDLER();
         }
-        offset = offset * (array->upper_bounds[i] - array->lower_bounds[i] + 1) + (indices[i] - array->lower_bounds[i]);
+        
+        // Add the contribution of the current dimension to the total offset
+        offset += (indices[i] - array->lower_bounds[i]) * multiplier;
+        
+        // Update the multiplier for the next (more significant) dimension
+        multiplier *= (array->upper_bounds[i] - array->lower_bounds[i] + 1);
     }
     return offset;
 }

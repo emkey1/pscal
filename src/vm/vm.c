@@ -722,23 +722,27 @@ comparison_error_label:
             }
             case OP_GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
-                Value* base_val_ptr = vm->stackTop - 1;
+                Value* base_val_ptr = vm->stackTop - 1; // Peek at the value on the stack
 
                 Value* record_struct_ptr = NULL;
 
+                // Check if the value on the stack is a pointer or a record itself.
                 if (base_val_ptr->type == TYPE_POINTER) {
+                    // It's a pointer. The value we need to inspect is on the heap.
                     if (base_val_ptr->ptr_val == NULL) {
                         runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     record_struct_ptr = base_val_ptr->ptr_val;
                 } else if (base_val_ptr->type == TYPE_RECORD) {
+                    // It's a record struct itself (e.g., from a non-pointer variable).
                     record_struct_ptr = base_val_ptr;
                 } else {
                     runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                // Now, record_struct_ptr points to the actual record Value struct.
                 if (record_struct_ptr->type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -748,7 +752,9 @@ comparison_error_label:
                 FieldValue* current = record_struct_ptr->record_val;
                 while (current) {
                     if (strcmp(current->name, field_name) == 0) {
+                        // We found the field. Pop the base value from the stack.
                         pop(vm);
+                        // Push a new pointer that points directly to the field's Value struct.
                         push(vm, makePointer(&current->value, NULL));
                         goto next_instruction;
                     }
@@ -770,13 +776,27 @@ comparison_error_label:
                     freeValue(&index_val);
                 }
 
-                Value* array_val_ptr = vm->stackTop - 1; // Peek at the array
-                if (array_val_ptr->type != TYPE_ARRAY) { /* Error */ }
+                // 1. The value on the stack is a POINTER to the array.
+                Value* pointer_to_array_val = vm->stackTop - 1; // Peek at the pointer
+                if (pointer_to_array_val->type != TYPE_POINTER) {
+                    runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
+                    free(indices);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                
+                // 2. Dereference the pointer to get the actual array Value struct.
+                Value* array_val_ptr = (Value*)pointer_to_array_val->ptr_val;
+                if (array_val_ptr->type != TYPE_ARRAY) {
+                    runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                    free(indices);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
 
-                int offset = computeFlatOffset(array_val_ptr, indices);
+                int offset = computeFlatOffset(array_val_ptr, indices); // Use the correct, dereferenced pointer
                 free(indices);
                 if (offset < 0 || offset >= calculateArrayTotalSize(array_val_ptr)) { /* Bounds error */ }
 
+                // Pop the pointer to the array value, push a pointer to the element's value
                 pop(vm);
                 push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
                 break;
