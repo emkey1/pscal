@@ -38,12 +38,14 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"cleardevice", vm_builtin_cleardevice},
     {"close", vm_builtin_close},
     {"closegraph", vm_builtin_closegraph},
+    {"cos", vm_builtin_cos}, // <<< ADD
     {"dec", vm_builtin_dec},
     {"delay", vm_builtin_delay},
     {"destroytexture", vm_builtin_destroytexture},
     {"dispose", vm_builtin_dispose},
     {"eof", vm_builtin_eof},
     {"exit", vm_builtin_exit},
+    {"exp", vm_builtin_exp}, // <<< ADD
     {"fillrect", vm_builtin_fillrect},
     {"getmaxx", vm_builtin_getmaxx},
     {"getmousestate", vm_builtin_getmousestate},
@@ -57,10 +59,11 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"inttostr", vm_builtin_inttostr},
     {"ioresult", vm_builtin_ioresult},
     {"length", vm_builtin_length},
+    {"ln", vm_builtin_ln}, // <<< ADD
     {"loadsound", vm_builtin_loadsound},
     {"low", vm_builtin_low},
     {"new", vm_builtin_new},
-    {"ord", vm_builtin_ord}, 
+    {"ord", vm_builtin_ord},
     {"playsound", vm_builtin_playsound},
     {"quittextsystem", vm_builtin_quittextsystem},
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
@@ -73,6 +76,10 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"round", vm_builtin_round},
     {"setalphablend", vm_builtin_setalphablend},
     {"setrgbcolor", vm_builtin_setrgbcolor},
+    {"sin", vm_builtin_sin}, // <<< ADD
+    {"sqrt", vm_builtin_sqrt}, // <<< ADD
+    {"tan", vm_builtin_tan}, // <<< ADD
+    {"trunc", vm_builtin_trunc}, // <<< ADD
     {"updatescreen", vm_builtin_updatescreen},
 };
 
@@ -89,6 +96,59 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
         compareVmBuiltinMappings
     );
     return found ? found->handler : NULL;
+}
+
+Value vm_builtin_sqrt(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "sqrt expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    if (x < 0) { runtimeError(vm, "sqrt expects a non-negative argument."); return makeReal(0.0); }
+    return makeReal(sqrt(x));
+}
+
+Value vm_builtin_exp(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "exp expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(exp(x));
+}
+
+Value vm_builtin_ln(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "ln expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    if (x <= 0) { runtimeError(vm, "ln expects a positive argument."); return makeReal(0.0); }
+    return makeReal(log(x));
+}
+
+Value vm_builtin_cos(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "cos expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(cos(x));
+}
+
+Value vm_builtin_sin(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "sin expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(sin(x));
+}
+
+Value vm_builtin_tan(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "tan expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(tan(x));
+}
+
+Value vm_builtin_trunc(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "trunc expects 1 argument."); return makeInt(0); }
+    Value arg = args[0];
+    if (arg.type == TYPE_INTEGER) return makeInt(arg.i_val);
+    if (arg.type == TYPE_REAL) return makeInt((long long)arg.r_val);
+    runtimeError(vm, "trunc expects a numeric argument.");
+    return makeInt(0);
 }
 
 Value vm_builtin_dec(VM* vm, int arg_count, Value* args) {

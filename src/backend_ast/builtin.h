@@ -45,6 +45,15 @@ Value vm_builtin_readln(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_eof(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_ioresult(struct VM_s* vm, int arg_count, Value* args);
 
+// --- VM-NATIVE MATHY STUFF ---
+Value vm_builtin_sqrt(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_exp(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_ln(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_cos(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_sin(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_tan(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_trunc(struct VM_s* vm, int arg_count, Value* args);
+
 // --- VM-NATIVE RANDOM FUNCTIONS ---
 Value vm_builtin_randomize(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_random(struct VM_s* vm, int arg_count, Value* args);
