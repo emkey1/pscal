@@ -1431,88 +1431,8 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
             }
         }
     }
-
-    // Handle nested uses clauses
-    // The logic here uses unitParser to get a new AST for the nested unit
-    // and then recursively calls linkUnit on that new AST.
-    if (unit_ast->left && unit_ast->left->type == AST_USES_CLAUSE) {
-        AST *uses_clause = unit_ast->left;
-        List *unit_list = uses_clause->unit_list; // List owns the unit name strings
-        for (int i = 0; i < listSize(unit_list); i++) {
-            char *unit_name = listGet(unit_list, i); // listGet does not copy name
-            char *unit_path = findUnitFile(unit_name); // findUnitFile allocates memory
-            if (unit_path == NULL) {
-                fprintf(stderr, "Error: Unit '%s' not found.\n", unit_name);
-                EXIT_FAILURE_HANDLER(); // Exit if a used unit is not found
-            }
-             // ADDED: Code to read the file into a buffer named nested_source.
-             char *nested_source = NULL;
-             FILE *nested_file = fopen(unit_path, "r");
-             if (!nested_file) {
-                  char error_msg[512];
-                  snprintf(error_msg, sizeof(error_msg), "Could not open unit file '%s' for unit '%s'", unit_path, unit_name);
-                  perror(error_msg);
-                  free(unit_path);
-                  EXIT_FAILURE_HANDLER();
-             }
-             fseek(nested_file, 0, SEEK_END);
-             long nested_fsize = ftell(nested_file);
-             rewind(nested_file);
-             nested_source = malloc(nested_fsize + 1);
-             if (!nested_source) {
-                 fprintf(stderr, "Memory allocation error reading unit '%s'\n", unit_name);
-                 fclose(nested_file); free(unit_path);
-                 EXIT_FAILURE_HANDLER();
-             }
-             fread(nested_source, 1, nested_fsize, nested_file);
-             nested_source[nested_fsize] = '\0';
-             fclose(nested_file);
-             free(unit_path); // Free the path string after reading
-
-
-            Lexer lexer; // Local lexer instance
-            initLexer(&lexer, nested_source); // CORRECTED: Use the source buffer
-
-            Parser unit_parser_instance; // Local parser instance
-            unit_parser_instance.lexer = &lexer;
-            unit_parser_instance.current_token = getNextToken(&lexer); // getNextToken allocates the first token
-
-            AST *linked_unit_ast = unitParser(&unit_parser_instance, recursion_depth + 1, unit_name);
-
-            // ADDED: Free the allocated nested_source buffer if it was allocated
-            if (nested_source) free(nested_source);
-
-            // ADDED: Free the final token owned by the nested parser instance
-            // This token might be the EOF token or an error token if parsing failed/ended early.
-            if (unit_parser_instance.current_token) {
-                freeToken(unit_parser_instance.current_token);
-                unit_parser_instance.current_token = NULL;
-            }
-
-
-            if (!linked_unit_ast) { /* unitParser already reported error, continue to next unit */ continue; }
-
-            // Recursively call linkUnit on the parsed nested unit AST.
-            // This call will process the nested unit's symbols (variables/constants),
-            // free its symbol_table (using the logic above), and free the nested_unit_ast itself
-            // at the end of *that* call (using the logic at the very end of this function).
-            linkUnit(linked_unit_ast, recursion_depth + 1);
-
-            // No need to free linked_unit_ast here, the recursive call handles it.
-        } // End for loop
-    } // End if uses_clause
-
-    // ADDED: Free the unit_ast itself after its contents (symbols/types/uses) are linked.
-    // The main Program AST (parsed in main.c) is the root and is freed by freeAST(GlobalAST) in main.
-    // AST nodes created by unitParser *within the 'uses' loop* are of type AST_UNIT
-    // and are not part of the main Program AST structure. They are temporary and need to be freed here.
-    if (unit_ast->type == AST_UNIT) {
-        DEBUG_PRINT("[DEBUG] linkUnit: Freeing unit_ast for '%s' at %p\n",
-                    unit_ast->token ? unit_ast->token->value : "NULL",
-                    (void*)unit_ast);
-        freeAST(unit_ast); // This will recursively free its children, token, etc.
-    }
 }
+
 // buildUnitSymbolTable traverses the interface AST node and creates a symbol table
 // containing all exported symbols (variables, procedures, functions, types) for the unit.
 // buildUnitSymbolTable traverses the unit's interface AST node and builds a linked list

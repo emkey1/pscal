@@ -126,8 +126,13 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     Parser parser;
     parser.lexer = &lexer;
     parser.current_token = getNextToken(&lexer);
+    
+    // --- MODIFICATION: Initialize the main bytecode chunk here ---
+    BytecodeChunk chunk;
+    initBytecodeChunk(&chunk);
 
-    AST *GlobalAST = buildProgramAST(&parser);
+    // --- MODIFICATION: Pass the chunk to the AST builder ---
+    AST *GlobalAST = buildProgramAST(&parser, &chunk);
 
     if (parser.current_token) {
         freeToken(parser.current_token);
@@ -168,10 +173,10 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             overall_success_status = true;
         } else {
             // --- DEFAULT: COMPILE TO BYTECODE AND EXECUTE WITH VM ---
-            BytecodeChunk chunk;
-            initBytecodeChunk(&chunk); // Initialize chunk here
+            // The chunk is already initialized and populated with unit implementations.
+            // We just need to compile the main program block now.
             if (dump_bytecode_flag) {
-                fprintf(stderr, "--- Compiling AST to Bytecode ---\n");
+                fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
             }
             bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
             
@@ -204,7 +209,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 overall_success_status = false;
             }
             
-            freeBytecodeChunk(&chunk); // Free chunk resources after use
+            // This is already done below
+            // freeBytecodeChunk(&chunk);
         }
     } else if (!dump_ast_json_flag) {
         fprintf(stderr, "Failed to build Program AST for execution.\n");
@@ -215,6 +221,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     }
 
     // --- Cleanup ---
+    freeBytecodeChunk(&chunk); // Free chunk resources after use
     freeProcedureTable();
     freeTypeTableASTNodes();
     freeTypeTable();
@@ -236,7 +243,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 
     return overall_success_status ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-
 
 // Consistent main function structure for argument parsing
 int main(int argc, char *argv[]) {

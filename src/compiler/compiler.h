@@ -22,5 +22,6 @@ Value* findCompilerConstant(const char* name_original_case);
 Value evaluateCompileTimeValue(AST* node); // For parser to evaluate const expressions
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk);
+void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk);
 
 #endif // PSCAL_COMPILER_H

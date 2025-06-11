@@ -111,12 +111,24 @@ static void patchBreaks(BytecodeChunk* chunk) {
 
     if (current_loop->break_jumps) {
         free(current_loop->break_jumps);
+        // --- MODIFICATION: Set pointer to NULL after freeing ---
+        current_loop->break_jumps = NULL;
     }
 }
 
 static void endLoop(void) {
     if (loop_depth < 0) return;
-    // The break jumps should have been patched before calling this.
+    
+    // --- MODIFICATION: This function should ONLY manage the loop depth. ---
+    // The patching and freeing is handled entirely by patchBreaks().
+    // We can add a check here to catch logic errors.
+    if (loop_stack[loop_depth].break_jumps != NULL) {
+        fprintf(stderr, "Compiler internal warning: endLoop called but break_jumps was not freed. Indicates missing patchBreaks() call.\n");
+        // Safeguard free, though the call site is the real issue.
+        free(loop_stack[loop_depth].break_jumps);
+        loop_stack[loop_depth].break_jumps = NULL;
+    }
+
     loop_depth--;
 }
 
@@ -387,12 +399,15 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
-    initBytecodeChunk(outputChunk);
+    // Do NOT re-initialize the chunk here, it's already populated with unit code.
+    // initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;
     compiler_had_error = false;
     current_function_compiler = NULL;
 
     if (rootNode->type == AST_PROGRAM) {
+        // The `USES` clause has already been handled during parsing.
+        // We only need to compile the main program block here.
         if (rootNode->right && rootNode->right->type == AST_BLOCK) {
             compileNode(rootNode->right, outputChunk, getLine(rootNode));
         } else {
@@ -1350,4 +1365,24 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
             break;
     }
+}
+
+void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
+    if (!unit_ast || unit_ast->type != AST_UNIT) {
+        return;
+    }
+    // The implementation block is stored in the 'extra' child of the AST_UNIT node
+    AST* impl_decls = unit_ast->extra;
+    if (!impl_decls || impl_decls->type != AST_COMPOUND) {
+        return;
+    }
+
+    #ifdef DEBUG
+    fprintf(stderr, "[Compiler] Compiling IMPLEMENTATION section for unit '%s'.\n",
+            unit_ast->token ? unit_ast->token->value : "?");
+    #endif
+
+    // compileNode with an AST_COMPOUND will iterate through its children
+    // (the procedures/functions) and compile them.
+    compileNode(impl_decls, outputChunk, getLine(impl_decls));
 }

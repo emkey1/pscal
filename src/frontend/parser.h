@@ -5,6 +5,7 @@
 #include "lexer.h"
 #include "ast.h"
 #include <stdbool.h>
+#include "compiler/bytecode.h"
 
 typedef struct {
     Lexer *lexer;
@@ -18,7 +19,7 @@ void addProcedure(AST *proc_decl, const char* unit_context_name);
 Symbol *lookupProcedure(const char *name_to_lookup);
 
 // Full parser API
-AST *buildProgramAST(Parser *parser);
+AST *buildProgramAST(Parser *parser, BytecodeChunk* chunk);
 AST *block(Parser *parser);
 AST *declarations(Parser *parser, bool in_interface);
 AST *constDeclaration(Parser *parser);
@@ -47,7 +48,7 @@ AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
 AST *term(Parser *parser);
-AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed); 
+AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk); 
 AST *enumDeclaration(Parser *parser);
 Symbol *lookupProcedure(const char *name_to_lookup);
 
