@@ -192,10 +192,10 @@ static int resolveLocal(FunctionCompilerState* fc, const char* name) {
 }
 
 // Helper to add a constant during compilation
-void addCompilerConstant(const char* name_original_case, Value value, int line) {
+void addCompilerConstant(const char* name_original_case, const Value* value, int line) {
     if (compilerConstantCount >= MAX_COMPILER_CONSTANTS) {
         fprintf(stderr, "L%d: Compiler error: Too many compile-time constants.\n", line);
-        freeValue(&value);
+        // Do not free value; caller is responsible.
         compiler_had_error = true;
         return;
     }
@@ -203,20 +203,32 @@ void addCompilerConstant(const char* name_original_case, Value value, int line) 
     strncpy(canonical_name, name_original_case, sizeof(canonical_name) - 1);
     canonical_name[sizeof(canonical_name) - 1] = '\0';
     toLowerString(canonical_name);
+
     for (int i = 0; i < compilerConstantCount; i++) {
         if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
             fprintf(stderr, "L%d: Compiler warning: Constant '%s' redefined.\n", line, name_original_case);
             freeValue(&compilerConstants[i].value);
-            compilerConstants[i].value = makeCopyOfValue(&value);
-            freeValue(&value);
+            
+            // <<<< FIX: Pass 'value' directly, not its address. >>>>
+            compilerConstants[i].value = makeCopyOfValue(value);
+
+            // <<<< FIX: Remove this free. Caller is responsible. >>>>
+            // freeValue(&value);
             return;
         }
     }
+
+    // This block handles adding a NEW constant.
     compilerConstants[compilerConstantCount].name = strdup(canonical_name);
-    compilerConstants[compilerConstantCount].value = makeCopyOfValue(&value);
+    
+    // <<<< FIX: Pass 'value' directly, not its address. >>>>
+    compilerConstants[compilerConstantCount].value = makeCopyOfValue(value);
+    
     compilerConstantCount++;
     
-    freeValue(&value);}
+    // <<<< FIX: Remove this free. Caller is responsible. >>>>
+    // freeValue(&value);
+}
 
 // Helper to find a compile-time constant
 Value* findCompilerConstant(const char* name_original_case) {
@@ -477,21 +489,31 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             if (declarations && declarations->type == AST_COMPOUND) {
                 // Pass 1: Compile variable declarations from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
-                    if (declarations->children[i] && declarations->children[i]->type == AST_VAR_DECL) {
-                        compileNode(declarations->children[i], chunk, getLine(declarations->children[i]));
+                    AST* decl_child = declarations->children[i];
+                    if (decl_child && decl_child->type == AST_VAR_DECL) {
+                        // We call compileNode on the VAR_DECL itself.
+                        compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
                 // Pass 2: Compile routines from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
-                    if (declarations->children[i] && (declarations->children[i]->type == AST_PROCEDURE_DECL || declarations->children[i]->type == AST_FUNCTION_DECL)) {
-                        compileNode(declarations->children[i], chunk, getLine(declarations->children[i]));
+                    AST* decl_child = declarations->children[i];
+                    if (decl_child && (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL)) {
+                        // We call compileNode on the routine declaration itself.
+                        compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
             }
             
             // Pass 3: Compile the main statement block.
-            if (statements) {
-                compileNode(statements, chunk, getLine(statements));
+            if (statements && statements->type == AST_COMPOUND) {
+                 // <<<< FIX: We compile the STATEMENTS, not the whole block again >>>>
+                 // Loop through the statements and compile each one.
+                 for (int i = 0; i < statements->child_count; i++) {
+                    if (statements->children[i]) {
+                        compileNode(statements->children[i], chunk, getLine(statements->children[i]));
+                    }
+                 }
             }
             break;
         }
@@ -891,21 +913,28 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_READLN: {
-            // `readln` arguments are all L-Values.
-            // The VM builtin expects pointers to the Value structs of these variables.
-            // compileLValue does exactly this: pushes the address of the variable onto the stack.
-            for (int i = 0; i < node->child_count; i++) {
+            int line = getLine(node);
+            
+            int var_start_index = 0;
+            // Check if the first argument is a file variable. We can guess based on its type,
+            // which the annotation pass should have set on the AST node.
+            if (node->child_count > 0 && node->children[0]->var_type == TYPE_FILE) {
+                // If the first arg is a file, compile it as an R-Value.
+                compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                var_start_index = 1; // The rest of the args are variables to read into.
+            }
+
+            // Compile all subsequent arguments as L-Values (addresses).
+            for (int i = var_start_index; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
                 compileLValue(arg_node, chunk, getLine(arg_node));
             }
 
-            // Now, call the built-in `readln` function using the generic OP_CALL_BUILTIN.
+            // Call the built-in `readln` function. This part is correct.
             int nameIndex = addStringConstant(chunk, "readln");
             writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
             writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-
-            // `readln` is a procedure, so it doesn't leave a value on the stack. No OP_POP is needed.
             break;
         }
         case AST_WRITE: {
@@ -930,7 +959,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (return_slot != -1) {
                     writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                    writeBytecodeChunk(chunk, OP_POP, line); // Pop the RHS value after setting the local
+                    // The OP_POP instruction that was here has been removed.
                 } else {
                     fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
                     compiler_had_error = true;
@@ -1169,6 +1198,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             set_const_val.set_val.set_size = 0;
             set_const_val.set_val.set_values = NULL;
 
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG SET] Initialized set_const_val at %p. size=%d, capacity=%d\n",
+                    (void*)&set_const_val, set_const_val.set_val.set_size, set_const_val.max_length);
+#endif
+
             for (int i = 0; i < node->child_count; i++) {
                 AST* member = node->children[i];
                 if (member->type == AST_SUBRANGE) {
@@ -1199,6 +1233,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     freeValue(&elem_val);
                 }
             }
+
+            // <<<< ADD THIS DEBUG PRINT >>>>
+            fprintf(stderr, "[DEBUG SET] Finished building set. Final size=%d, capacity=%d. Adding to chunk.\n",
+                    set_const_val.set_val.set_size, set_const_val.max_length);
+
             // Pass the address of the fully constructed set Value.
             int constIndex = addConstantToChunk(chunk, &set_const_val);
             // Now that a deep copy is in the chunk, free our temporary set value.

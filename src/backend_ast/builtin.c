@@ -410,44 +410,45 @@ Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
 
 Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
-    int start_index = 0;
+    int var_start_index = 0;
 
-    // Check if the first argument is a file variable
-    if (arg_count > 0 && args[0].type == TYPE_POINTER) {
-        Value* first_arg_lvalue = (Value*)args[0].ptr_val;
-        if (first_arg_lvalue && first_arg_lvalue->type == TYPE_FILE) {
-            if (first_arg_lvalue->f_val) {
-                input_stream = first_arg_lvalue->f_val;
-                start_index = 1; // Start processing variables from the next argument
-            } else {
-                runtimeError(vm, "File not open for Readln.");
-                last_io_error = 1; // Set I/O error status
-                return makeVoid();
-            }
+    // <<<< FIX STARTS HERE >>>>
+    // Check if the first argument is a file R-Value.
+    if (arg_count > 0 && args[0].type == TYPE_FILE) {
+        if (args[0].f_val) {
+            input_stream = args[0].f_val;
+            var_start_index = 1; // Variables to read into start from the next argument.
+        } else {
+            runtimeError(vm, "File not open for Readln.");
+            last_io_error = 1;
+            return makeVoid();
         }
     }
 
-    // If there are no variables to read into, just consume the rest of the line.
-    if (arg_count == start_index) {
+    if (arg_count == var_start_index) {
         int c;
         while ((c = fgetc(input_stream)) != '\n' && c != EOF);
         last_io_error = 0;
         return makeVoid();
     }
 
-    // Read the entire line into a buffer first. This is key to how `readln` works.
-    char line_buffer[4096]; // A large buffer for the line
+    char line_buffer[4096];
     if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
-        // Hitting EOF is not necessarily an I/O error for readln.
         last_io_error = ferror(input_stream) ? errno : 0;
         return makeVoid();
     }
 
-    // Use a pointer to traverse the line buffer as we parse values from it.
     char* buffer_ptr = line_buffer;
 
-    for (int i = start_index; i < arg_count; i++) {
+    for (int i = var_start_index; i < arg_count; i++) {
+        // The remaining args must be pointers (L-Values).
+        if (args[i].type != TYPE_POINTER) {
+            runtimeError(vm, "Readln requires an LValue for arguments to read into.");
+            goto end_readln_vm;
+        }
         Value* target_lvalue = (Value*)args[i].ptr_val;
+        // <<<< END OF MAJOR FIX, with minor logic fixes below >>>>
+
         if (!target_lvalue) {
             runtimeError(vm, "VM internal error: Readln received a null LValue pointer for argument %d.", i + 1);
             continue;
@@ -456,14 +457,16 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
         int n_scanned = 0;
         int items_scanned = 0;
 
-        // Skip leading whitespace before trying to parse the next value.
-        // The %n specifier in sscanf is used to count characters consumed.
-        if (sscanf(buffer_ptr, " %n", &n_scanned) == 0) {
+        // Skip leading whitespace from the current position in the line buffer.
+        if (sscanf(buffer_ptr, " %n", &n_scanned) > 0) {
              buffer_ptr += n_scanned;
         } else {
-            // This case handles when the rest of the buffer is empty or only whitespace.
-            // No more values can be read.
-            last_io_error = 1; // Set I/O error because we expected another value.
+            sscanf(buffer_ptr, "%n", &n_scanned);
+            buffer_ptr += n_scanned;
+        }
+
+        if (*buffer_ptr == '\0') {
+            last_io_error = 1;
             break;
         }
 
@@ -475,7 +478,7 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
                 items_scanned = sscanf(buffer_ptr, "%lld%n", &temp_val, &n_scanned);
                 if (items_scanned == 1) {
                     freeValue(target_lvalue);
-                    *target_lvalue = makeValueForType(target_lvalue->type, NULL, NULL); // Recreate with correct type
+                    *target_lvalue = makeValueForType(target_lvalue->type, NULL, NULL);
                     target_lvalue->i_val = temp_val;
                     buffer_ptr += n_scanned;
                 }
@@ -492,36 +495,36 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
                 break;
             }
             case TYPE_CHAR: {
-                char temp_val;
-                items_scanned = sscanf(buffer_ptr, "%c%n", &temp_val, &n_scanned);
-                if (items_scanned == 1) {
+                if (*buffer_ptr != '\0') {
                     freeValue(target_lvalue);
-                    *target_lvalue = makeChar(temp_val);
-                    buffer_ptr += n_scanned;
+                    *target_lvalue = makeChar(*buffer_ptr);
+                    buffer_ptr++;
+                    items_scanned = 1;
                 }
                 break;
             }
             case TYPE_STRING: {
-                // For readln, a string variable consumes the rest of the line from the current point.
-                buffer_ptr[strcspn(buffer_ptr, "\n\r")] = 0; // Trim trailing newline from our buffer ptr
+                char* end_of_line = strpbrk(buffer_ptr, "\n\r");
+                if (end_of_line) {
+                    *end_of_line = '\0';
+                }
                 freeValue(target_lvalue);
                 *target_lvalue = makeString(buffer_ptr);
-                goto end_readln; // Reading a string finishes the readln operation.
+                goto end_readln_vm;
             }
             default:
                 runtimeError(vm, "Cannot use Readln with a variable of type %s.", varTypeToString(target_lvalue->type));
-                goto end_readln; // Exit loop on unsupported type
+                goto end_readln_vm;
         }
 
         if (items_scanned != 1) {
-            last_io_error = 1; // Set I/O error if a value could not be parsed.
-            break; // Stop parsing this line.
+            last_io_error = 1;
+            break;
         }
     }
 
-end_readln:
+end_readln_vm:
     if (last_io_error == 0) {
-        // Only reset if no new errors occurred during parsing.
         last_io_error = 0;
     }
     return makeVoid();

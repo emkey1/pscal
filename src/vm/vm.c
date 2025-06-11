@@ -615,6 +615,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;
+                } else if ((IS_CHAR(a_val) && IS_INTEGER(b_val)) || (IS_INTEGER(a_val) && IS_CHAR(b_val))) {
+                    // Handle comparing a char to an integer (its ordinal value)
+                    long long int_val = IS_INTEGER(a_val) ? AS_INTEGER(a_val) : AS_INTEGER(b_val);
+                    char char_val = IS_CHAR(a_val) ? AS_CHAR(a_val) : AS_CHAR(b_val);
+
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean((long long)char_val == int_val); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean((long long)char_val != int_val); break;
+                        case OP_GREATER:       result_val = makeBoolean((long long)char_val > int_val);  break;
+                        case OP_GREATER_EQUAL: result_val = makeBoolean((long long)char_val >= int_val); break;
+                        case OP_LESS:          result_val = makeBoolean((long long)char_val < int_val);  break;
+                        case OP_LESS_EQUAL:    result_val = makeBoolean((long long)char_val <= int_val); break;
+                        default:
+                             runtimeError(vm, "VM Error: Unexpected char/integer comparison opcode %d.", instruction_val);
+                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
                 }
                 // Char comparison
                 else if (IS_CHAR(a_val) && IS_CHAR(b_val)) {
@@ -888,28 +905,7 @@ comparison_error_label:
                     freeValue(&pointer_to_lvalue);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                
-                // --- NEW: Check for our special string character pointer ---
-                if (pointer_to_lvalue.base_type_node == (AST*)0xDEADBEEF) {
-                    // This is a character assignment within a string.
-                    char* target_char_ptr = (char*)pointer_to_lvalue.ptr_val;
-                    
-                    // The value to set must be a character.
-                    if (value_to_set.type != TYPE_CHAR) {
-                        runtimeError(vm, "VM Error: Type mismatch for string index assignment. Expected CHAR.");
-                        // fall through to cleanup
-                    } else {
-                        *target_char_ptr = value_to_set.c_val; // Assign the character
-                    }
-                    
-                    // Cleanup and break
-                    freeValue(&value_to_set);
-                    freeValue(&pointer_to_lvalue);
-                    break;
-                }
-                // --- END NEW ---
 
-                // Original logic for assigning to a full Value*
                 Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                 if (!target_lvalue_ptr) {
                     runtimeError(vm, "VM Error: SET_INDIRECT called with a nil LValue pointer.");
@@ -918,16 +914,51 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (target_lvalue_ptr->type == TYPE_POINTER &&
-                    (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
-                    
+                // Handle assigning a single-character string to a CHAR variable
+                if (target_lvalue_ptr->type == TYPE_CHAR && value_to_set.type == TYPE_STRING) {
+                    if (value_to_set.s_val && strlen(value_to_set.s_val) == 1) {
+                        target_lvalue_ptr->c_val = value_to_set.s_val[0]; // Assign the character
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign multi-character or null string to a CHAR variable.");
+                    }
+                }
+                // Handle pointer assignment (pointer or nil)
+                else if (target_lvalue_ptr->type == TYPE_POINTER && (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
                     target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
-                    
                     if (value_to_set.type == TYPE_POINTER) {
                          target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
                     }
-
-                } else {
+                }
+                // Handle INTEGER to REAL promotion
+                else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
+                    target_lvalue_ptr->r_val = (double)value_to_set.i_val;
+                }
+                // Handle assigning INTEGER to BYTE with a range check
+                else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
+                    if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
+                        runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
+                    }
+                    target_lvalue_ptr->i_val = value_to_set.i_val & 0xFF; // Truncate to 8 bits
+                }
+                // Handle assigning INTEGER to WORD with a range check
+                else if (target_lvalue_ptr->type == TYPE_WORD && value_to_set.type == TYPE_INTEGER) {
+                    if (value_to_set.i_val < 0 || value_to_set.i_val > 65535) {
+                        runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
+                    }
+                    target_lvalue_ptr->i_val = value_to_set.i_val & 0xFFFF; // Truncate to 16 bits
+                }
+                // Handle promotions from smaller ordinals to INTEGER
+                else if (target_lvalue_ptr->type == TYPE_INTEGER &&
+                         (value_to_set.type == TYPE_BYTE || value_to_set.type == TYPE_WORD || value_to_set.type == TYPE_BOOLEAN)) {
+                    target_lvalue_ptr->i_val = value_to_set.i_val;
+                }
+                // Handle CHAR to INTEGER promotion (using ordinal value)
+                else if (target_lvalue_ptr->type == TYPE_INTEGER && value_to_set.type == TYPE_CHAR) {
+                    target_lvalue_ptr->i_val = (long long)value_to_set.c_val;
+                }
+                else {
+                    // For all other cases, perform a standard deep copy.
+                    // This handles INT:=INT, REAL:=REAL, STRING:=STRING, RECORD:=RECORD, etc.
                     freeValue(target_lvalue_ptr);
                     *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
                 }

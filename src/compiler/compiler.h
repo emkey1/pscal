@@ -17,7 +17,7 @@ extern CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
 extern int compilerConstantCount;
 
 void resetCompilerConstants(void);
-void addCompilerConstant(const char* name_original_case, Value value, int line);
+void addCompilerConstant(const char* name_original_case, const Value* value, int line);
 Value* findCompilerConstant(const char* name_original_case);
 Value evaluateCompileTimeValue(AST* node); // For parser to evaluate const expressions
 

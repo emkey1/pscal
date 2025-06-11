@@ -1029,7 +1029,7 @@ AST *constDeclaration(Parser *parser) {
 
     if (const_eval_result.type != TYPE_VOID && const_eval_result.type != TYPE_UNKNOWN) {
         // Use cn->value and cn->line, as 'cn' is still valid.
-        addCompilerConstant(cn->value, const_eval_result, cn->line);
+        addCompilerConstant(cn->value, &const_eval_result, cn->line);
 #ifdef DEBUG
         Value* check_val = findCompilerConstant(cn->value);
         if (check_val) {
