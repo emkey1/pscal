@@ -2573,7 +2573,7 @@ int computeFlatOffset(Value *array, int *indices) {
 }
  */
 
-Value makeCopyOfValue(Value *src) {
+Value makeCopyOfValue(const Value *src) {
     Value v;
     v = *src;  // shallow copy to start
 

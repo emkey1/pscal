@@ -64,76 +64,38 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From 
     chunk->count++;
 }
 
-int addConstantToChunk(BytecodeChunk* chunk, Value value) {
+int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG addConstantToChunk] ENTER. Adding value type %s. chunk ptr: %p\n", varTypeToString(value.type), (void*)chunk);
-    if (value.type == TYPE_STRING) {
-        fprintf(stderr, "[DEBUG addConstantToChunk] String value to add: '%s'\n", value.s_val ? value.s_val : "NULL_SVAL");
+    fprintf(stderr, "[DEBUG addConstantToChunk] ENTER. Adding value type %s. chunk ptr: %p\n", varTypeToString(value->type), (void*)chunk);
+    if (value->type == TYPE_STRING) {
+        fprintf(stderr, "[DEBUG addConstantToChunk] String value to add: '%s'\n", value->s_val ? value->s_val : "NULL_SVAL");
     }
     fflush(stderr);
 #endif
 
     // First, check if an identical constant already exists to avoid duplicates.
     for (int i = 0; i < chunk->constants_count; i++) {
-        Value existing = chunk->constants[i];
-        if (existing.type == value.type) {
-            if (existing.type == TYPE_INTEGER && existing.i_val == value.i_val) {
-                freeValue(&value); // Free the incoming value as we don't need it
-                return i;
-            }
-            if (existing.type == TYPE_REAL && existing.r_val == value.r_val) {
-                freeValue(&value);
-                return i;
-            }
-            if (existing.type == TYPE_STRING && existing.s_val && value.s_val && strcmp(existing.s_val, value.s_val) == 0) {
-                freeValue(&value);
-                return i;
-            }
+        Value* existing = &chunk->constants[i];
+        if (existing->type == value->type) {
+            if (existing->type == TYPE_INTEGER && existing->i_val == value->i_val) return i;
+            if (existing->type == TYPE_REAL && existing->r_val == value->r_val) return i;
+            if (existing->type == TYPE_STRING && existing->s_val && value->s_val && strcmp(existing->s_val, value->s_val) == 0) return i;
         }
     }
 
     if (chunk->constants_capacity < chunk->constants_count + 1) {
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG addConstantToChunk] Reallocating constants. Old cap: %d, Old count: %d\n", chunk->constants_capacity, chunk->constants_count);
-        fflush(stderr);
-#endif
         int oldCapacity = chunk->constants_capacity;
         chunk->constants_capacity = oldCapacity < 8 ? 8 : oldCapacity * 2;
         chunk->constants = (Value*)reallocate(chunk->constants,
                                              sizeof(Value) * oldCapacity,
                                              sizeof(Value) * chunk->constants_capacity);
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG addConstantToChunk] Reallocated. New cap: %d. chunk->constants ptr: %p\n", chunk->constants_capacity, (void*)chunk->constants);
-        fflush(stderr);
-#endif
     }
-
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG addConstantToChunk] BEFORE assignment: chunk->constants_count = %d. Dest addr: %p. Value.s_val addr: %p\n",
-            chunk->constants_count,
-            (void*)&(chunk->constants[chunk->constants_count]),
-            (void*)(value.type == TYPE_STRING ? value.s_val : NULL));
-    fflush(stderr);
-#endif
-
-    // <<<< FIX: Perform a deep copy into the constants array >>>>
-    // This ensures the chunk owns its own copy of all data.
-    chunk->constants[chunk->constants_count] = makeCopyOfValue(&value);
     
-    // <<<< FIX: Free the original temporary value passed to this function >>>>
-    // Since we made a deep copy, we must now free the original.
-    freeValue(&value);
+    // Perform a deep copy from the provided pointer.
+    chunk->constants[chunk->constants_count] = makeCopyOfValue(value);
 
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG addConstantToChunk] AFTER assignment. Copied value type %s to index %d.\n",
-            varTypeToString(chunk->constants[chunk->constants_count].type), chunk->constants_count);
-    if (chunk->constants[chunk->constants_count].type == TYPE_STRING) {
-         fprintf(stderr, "[DEBUG addConstantToChunk] Copied string: '%s'\n",
-                 chunk->constants[chunk->constants_count].s_val ? chunk->constants[chunk->constants_count].s_val : "NULL_SVAL_COPIED");
-    }
-    fflush(stderr);
-#endif
-
+    // The function NO LONGER frees the incoming value. The caller is responsible.
+    
     return chunk->constants_count++;
 }
 

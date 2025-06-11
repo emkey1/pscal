@@ -13,7 +13,7 @@ Value executeProcedureCall(AST *node);
 //ExecStatus executeWithScope(AST *node, bool is_global_scope);
 void executeWithScope(AST *node, bool is_global_scope);
 
-Value makeCopyOfValue(Value *src);
+Value makeCopyOfValue(const Value *src);
 
 // Memory
 FieldValue *copyRecord(FieldValue *orig);

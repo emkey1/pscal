@@ -27,6 +27,48 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
+static bool vmSetContains(const Value* setVal, const Value* itemVal) {
+    if (!setVal || setVal->type != TYPE_SET || !itemVal) {
+        return false;
+    }
+
+    long long item_ord;
+    bool item_is_ordinal = false;
+    
+    // Get ordinal value of the item
+    switch (itemVal->type) {
+        case TYPE_INTEGER:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_BOOLEAN:
+            item_ord = itemVal->i_val;
+            item_is_ordinal = true;
+            break;
+        case TYPE_CHAR:
+            item_ord = (long long)itemVal->c_val;
+            item_is_ordinal = true;
+            break;
+        case TYPE_ENUM:
+            item_ord = (long long)itemVal->enum_val.ordinal;
+            item_is_ordinal = true;
+            break;
+        default:
+            item_is_ordinal = false;
+            break;
+    }
+
+    if (!item_is_ordinal) return false; // Item is not of a type that can be in a set
+
+    // Search for the ordinal value in the set's values array
+    if (!setVal->set_val.set_values) return false;
+    for (int i = 0; i < setVal->set_val.set_size; i++) {
+        if (setVal->set_val.set_values[i] == item_ord) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Scans all global symbols and the entire VM value stack to find and nullify
 // any pointers that are aliases of a memory address that is being disposed.
 void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
@@ -766,6 +808,44 @@ comparison_error_label:
             }
             case OP_GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
+                
+                // This part is new: Check for string indexing first
+                if (dimension_count == 1) { // String indexing always has one dimension
+                    Value* base_ptr = vm->stackTop - 1; // Peek at the base LValue
+                    if (base_ptr->type == TYPE_POINTER) {
+                        Value* base_val = (Value*)base_ptr->ptr_val;
+                        if (base_val && base_val->type == TYPE_STRING) {
+                            // It's a string! Handle it here.
+                            Value index_val = pop(vm);
+                            if (index_val.type != TYPE_INTEGER) {
+                                runtimeError(vm, "VM Error: String index must be an integer.");
+                                freeValue(&index_val);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            long long pscal_index = index_val.i_val;
+                            freeValue(&index_val);
+
+                            // Pop the base pointer to the string Value
+                            pop(vm);
+
+                            // Bounds check (Pascal strings are 1-based)
+                            size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
+                            if (pscal_index < 1 || (size_t)pscal_index > len) {
+                                runtimeError(vm, "Runtime Error: String index (%lld) out of bounds for string of length %zu.", pscal_index, len);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+
+                            // Push a special pointer: address of the char within the string's buffer.
+                            // We will need to make OP_SET_INDIRECT aware of this.
+                            // We use a trick: the base_type_node for this special pointer will be set
+                            // to a specific non-null value that OP_SET_INDIRECT can check.
+                            push(vm, makePointer(&base_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF)); // Use a sentinel value
+                            break; // Exit the case
+                        }
+                    }
+                }
+                
+                // If it wasn't a string, proceed with the original array logic.
                 int* indices = malloc(sizeof(int) * dimension_count);
                 if (!indices) { /* Malloc error */ return INTERPRET_RUNTIME_ERROR; }
 
@@ -776,15 +856,13 @@ comparison_error_label:
                     freeValue(&index_val);
                 }
 
-                // 1. The value on the stack is a POINTER to the array.
-                Value* pointer_to_array_val = vm->stackTop - 1; // Peek at the pointer
+                Value* pointer_to_array_val = vm->stackTop - 1;
                 if (pointer_to_array_val->type != TYPE_POINTER) {
                     runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
                     free(indices);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 
-                // 2. Dereference the pointer to get the actual array Value struct.
                 Value* array_val_ptr = (Value*)pointer_to_array_val->ptr_val;
                 if (array_val_ptr->type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
@@ -792,11 +870,10 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                int offset = computeFlatOffset(array_val_ptr, indices); // Use the correct, dereferenced pointer
+                int offset = computeFlatOffset(array_val_ptr, indices);
                 free(indices);
-                if (offset < 0 || offset >= calculateArrayTotalSize(array_val_ptr)) { /* Bounds error */ }
+                if (offset < 0 || offset >= calculateArrayTotalSize(array_val_ptr)) { /* Bounds error */ return INTERPRET_RUNTIME_ERROR; }
 
-                // Pop the pointer to the array value, push a pointer to the element's value
                 pop(vm);
                 push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
                 break;
@@ -811,7 +888,28 @@ comparison_error_label:
                     freeValue(&pointer_to_lvalue);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                
+                // --- NEW: Check for our special string character pointer ---
+                if (pointer_to_lvalue.base_type_node == (AST*)0xDEADBEEF) {
+                    // This is a character assignment within a string.
+                    char* target_char_ptr = (char*)pointer_to_lvalue.ptr_val;
+                    
+                    // The value to set must be a character.
+                    if (value_to_set.type != TYPE_CHAR) {
+                        runtimeError(vm, "VM Error: Type mismatch for string index assignment. Expected CHAR.");
+                        // fall through to cleanup
+                    } else {
+                        *target_char_ptr = value_to_set.c_val; // Assign the character
+                    }
+                    
+                    // Cleanup and break
+                    freeValue(&value_to_set);
+                    freeValue(&pointer_to_lvalue);
+                    break;
+                }
+                // --- END NEW ---
 
+                // Original logic for assigning to a full Value*
                 Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                 if (!target_lvalue_ptr) {
                     runtimeError(vm, "VM Error: SET_INDIRECT called with a nil LValue pointer.");
@@ -838,6 +936,28 @@ comparison_error_label:
                 freeValue(&pointer_to_lvalue);
                 break;
             }
+            case OP_IN: {
+                // Stack before: [...item, set]
+                Value set_val = pop(vm);
+                Value item_val = pop(vm);
+                    
+                if (set_val.type != TYPE_SET) {
+                    runtimeError(vm, "Right operand of IN must be a set.");
+                    freeValue(&item_val);
+                    freeValue(&set_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                    
+                bool result = vmSetContains(&set_val, &item_val);
+                    
+                // Free the popped values
+                freeValue(&item_val);
+                freeValue(&set_val);
+                
+                push(vm, makeBoolean(result));
+                break;
+            }
+
             case OP_GET_INDIRECT: {
                 Value pointer_val = pop(vm);
                 if (pointer_val.type != TYPE_POINTER) {

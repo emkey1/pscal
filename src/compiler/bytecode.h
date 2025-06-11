@@ -53,7 +53,9 @@ typedef enum {
     OP_GET_FIELD_ADDRESS,
     OP_GET_ELEMENT_ADDRESS,
     OP_SET_INDIRECT,
-    OP_GET_INDIRECT, 
+    OP_GET_INDIRECT,
+    
+    OP_IN, // For set membership
 
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
@@ -93,7 +95,7 @@ typedef struct {
 void initBytecodeChunk(BytecodeChunk* chunk);
 void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add byte to chunk
 void freeBytecodeChunk(BytecodeChunk* chunk);
-int addConstantToChunk(BytecodeChunk* chunk, Value value); // Add a value to constant pool, return index
+int addConstantToChunk(BytecodeChunk* chunk, const Value* value); // Add a value to constant pool, return index
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable);
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);

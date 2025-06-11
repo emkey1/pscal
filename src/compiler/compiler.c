@@ -1,3 +1,4 @@
+// src/compiler/compiler.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
@@ -43,6 +44,41 @@ typedef struct {
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
+
+static int addStringConstant(BytecodeChunk* chunk, const char* str) {
+    Value val = makeString(str);
+    int index = addConstantToChunk(chunk, &val);
+    freeValue(&val); // The temporary Value's contents are freed here.
+    return index;
+}
+
+static int addIntConstant(BytecodeChunk* chunk, long long intValue) {
+    Value val = makeInt(intValue);
+    int index = addConstantToChunk(chunk, &val);
+    // No need to call freeValue for simple types, but it's harmless.
+    return index;
+}
+
+static int addRealConstant(BytecodeChunk* chunk, double floatValue) {
+    Value val = makeReal(floatValue);
+    int index = addConstantToChunk(chunk, &val);
+    // No need to call freeValue for simple types, but it's harmless.
+    return index;
+}
+
+static int addNilConstant(BytecodeChunk* chunk) {
+    Value val = makeNil();
+    int index = addConstantToChunk(chunk, &val);
+    // freeValue(&val) is not needed as TYPE_NIL holds no dynamic memory.
+    return index;
+}
+
+static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
+    Value val = makeBoolean(boolValue);
+    int index = addConstantToChunk(chunk, &val);
+    // No freeValue needed for simple boolean types.
+    return index;
+}
 
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -177,9 +213,10 @@ void addCompilerConstant(const char* name_original_case, Value value, int line) 
         }
     }
     compilerConstants[compilerConstantCount].name = strdup(canonical_name);
-    compilerConstants[compilerConstantCount].value = value;
+    compilerConstants[compilerConstantCount].value = makeCopyOfValue(&value);
     compilerConstantCount++;
-}
+    
+    freeValue(&value);}
 
 // Helper to find a compile-time constant
 Value* findCompilerConstant(const char* name_original_case) {
@@ -210,6 +247,7 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_STRING:
+            if (node->token && strlen(node->token->value) == 1) return makeChar(node->token->value[0]);
             if (node->token) return makeString(node->token->value);
             break;
         case AST_BOOLEAN:
@@ -281,6 +319,7 @@ Value evaluateCompileTimeValue(AST* node) {
     }
     return makeVoid();
 }
+
 
 // Reset for each compilation
 void resetCompilerConstants(void) {
@@ -354,7 +393,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 }
             } else {
-                int nameIndex = addConstantToChunk(chunk, makeString(varName));
+                int nameIndex =  addStringConstant(chunk, varName);
                 writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, line);
                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             }
@@ -365,7 +404,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             compileLValue(node->left, chunk, getLine(node->left));
 
             // Now, get the address of the specific field.
-            int fieldNameIndex = addConstantToChunk(chunk, makeString(node->token->value));
+            int fieldNameIndex = addStringConstant(chunk, node->token->value);
             writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
             writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
             break;
@@ -431,23 +470,31 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
     switch (node->type) {
         case AST_BLOCK: {
-            for (int i = 0; i < node->child_count; i++) {
-                AST* child = node->children[i];
-                if (!child) continue;
-                if (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) {
-                    compileNode(child, chunk, getLine(child) > 0 ? getLine(child) : line);
+            // An AST_BLOCK should have two children: declarations and statements.
+            AST* declarations = (node->child_count > 0) ? node->children[0] : NULL;
+            AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
+
+            if (declarations && declarations->type == AST_COMPOUND) {
+                // Pass 1: Compile variable declarations from the declaration block.
+                for (int i = 0; i < declarations->child_count; i++) {
+                    if (declarations->children[i] && declarations->children[i]->type == AST_VAR_DECL) {
+                        compileNode(declarations->children[i], chunk, getLine(declarations->children[i]));
+                    }
+                }
+                // Pass 2: Compile routines from the declaration block.
+                for (int i = 0; i < declarations->child_count; i++) {
+                    if (declarations->children[i] && (declarations->children[i]->type == AST_PROCEDURE_DECL || declarations->children[i]->type == AST_FUNCTION_DECL)) {
+                        compileNode(declarations->children[i], chunk, getLine(declarations->children[i]));
+                    }
                 }
             }
-            for (int i = 0; i < node->child_count; i++) {
-                AST* child = node->children[i];
-                if (!child) continue;
-                if (child->type != AST_PROCEDURE_DECL && child->type != AST_FUNCTION_DECL) {
-                    compileNode(child, chunk, getLine(child) > 0 ? getLine(child) : line);
-                }
+            
+            // Pass 3: Compile the main statement block.
+            if (statements) {
+                compileNode(statements, chunk, getLine(statements));
             }
             break;
         }
-
         case AST_VAR_DECL: {
             if (current_function_compiler == NULL) { // Global variables
                 AST* type_specifier_node = node->right;
@@ -475,7 +522,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 for (int i = 0; i < node->child_count; i++) {
                     AST* varNameNode = node->children[i];
                     if (varNameNode && varNameNode->token) {
-                        int var_name_idx = addConstantToChunk(chunk, makeString(varNameNode->token->value));
+                        int var_name_idx = addStringConstant(chunk, varNameNode->token->value);
                         writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)node->var_type, getLine(varNameNode)); // The overall type (e.g., TYPE_ARRAY)
@@ -495,8 +542,25 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 if (subrange && subrange->type == AST_SUBRANGE) {
                                     Value lower_b = evaluateCompileTimeValue(subrange->left);
                                     Value upper_b = evaluateCompileTimeValue(subrange->right);
-                                    writeBytecodeChunk(chunk, addConstantToChunk(chunk, lower_b), getLine(varNameNode));
-                                    writeBytecodeChunk(chunk, addConstantToChunk(chunk, upper_b), getLine(varNameNode));
+                                    
+                                    // Use the new helper for the lower bound
+                                    if (lower_b.type == TYPE_INTEGER) {
+                                        writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                    } else {
+                                        fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                        compiler_had_error = true;
+                                    }
+                                    freeValue(&lower_b);
+                                    
+                                    // Use the new helper for the upper bound
+                                    if (upper_b.type == TYPE_INTEGER) {
+                                        writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                    } else {
+                                        fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                        compiler_had_error = true;
+                                    }
+                                    freeValue(&upper_b);
+                                    
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
                                     compiler_had_error = true;
@@ -508,12 +572,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             AST* elem_type = actual_type_def_node->right;
                             writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                             const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                            writeBytecodeChunk(chunk, addConstantToChunk(chunk, makeString(elem_type_name)), getLine(varNameNode));
+                            
+                            // <<<< FIX for Snippet 1 >>>>
+                            writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
 
                         } else {
                             // This handles simple types, records, and other non-array aliased types.
                             const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
-                            writeBytecodeChunk(chunk, addConstantToChunk(chunk, makeString(type_name)), getLine(varNameNode));
+                            
+                            // <<<< FIX for Snippet 2 >>>>
+                            writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, type_name), getLine(varNameNode));
                         }
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                     }
@@ -623,7 +691,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
         writeBytecodeChunk(chunk, (uint8_t)return_value_slot, line);
     } else {
-        int nil_const_idx = addConstantToChunk(chunk, makeNil());
+        int nil_const_idx = addNilConstant(chunk);
         writeBytecodeChunk(chunk, OP_CONSTANT, line);
         writeBytecodeChunk(chunk, (uint8_t)nil_const_idx, line);
     }
@@ -809,7 +877,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (node->right) {
                 compileRValue(node->right, chunk, getLine(node->right));
             } else {
-                int falseConstIdx = addConstantToChunk(chunk, makeBoolean(false));
+                int falseConstIdx = addBooleanConstant(chunk, false);
                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
                 writeBytecodeChunk(chunk, (uint8_t)falseConstIdx, line);
             }
@@ -832,7 +900,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // Now, call the built-in `readln` function using the generic OP_CALL_BUILTIN.
-            int nameIndex = addConstantToChunk(chunk, makeString("readln"));
+            int nameIndex = addStringConstant(chunk, "readln");
             writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
             writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
@@ -890,7 +958,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             if (var_slot == -1) {
-                var_name_idx = addConstantToChunk(chunk, makeString(var_node->token->value));
+                var_name_idx = addStringConstant(chunk, var_node->token->value);
             }
 
             // 1. Initial assignment of the loop variable
@@ -936,7 +1004,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
-            int one_const_idx = addConstantToChunk(chunk, makeInt(1));
+            int one_const_idx = addIntConstant(chunk, 1);
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)one_const_idx, line);
             writeBytecodeChunk(chunk, is_downto ? OP_SUBTRACT : OP_ADD, line);
@@ -1018,7 +1086,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
                 normalized_name[sizeof(normalized_name) - 1] = '\0';
                 toLowerString(normalized_name);
-                int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
+                int nameIndex = addStringConstant(chunk, normalized_name);
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, call_line);
                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, call_line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line);
@@ -1060,6 +1128,30 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     }
 }
 
+// --- NEW STATIC HELPER FOR COMPILING SETS ---
+// This is a simplified adaptation of the logic from `evalSet`
+static void addOrdinalToSetValue(Value* setVal, long long ordinal) {
+    // Check for duplicates
+    for (int i = 0; i < setVal->set_val.set_size; i++) {
+        if (setVal->set_val.set_values[i] == ordinal) {
+            return; // Already in set
+        }
+    }
+    // Reallocate if needed
+    if (setVal->set_val.set_size >= setVal->max_length) {
+        int new_capacity = (setVal->max_length == 0) ? 8 : setVal->max_length * 2;
+        long long* new_values = realloc(setVal->set_val.set_values, sizeof(long long) * new_capacity);
+        if (!new_values) {
+            fprintf(stderr, "FATAL: realloc failed in addOrdinalToSetValue\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        setVal->set_val.set_values = new_values;
+        setVal->max_length = new_capacity;
+    }
+    // Add the new element
+    setVal->set_val.set_values[setVal->set_val.set_size++] = ordinal;
+}
+
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1068,15 +1160,65 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
     Token* node_token = node->token;
 
     switch (node->type) {
-        case AST_NUMBER: {
-            if (!node_token) { /* error */ break; }
-            Value numVal;
-            if (node_token->type == TOKEN_REAL_CONST) {
-                numVal = makeReal(atof(node_token->value));
-            } else {
-                numVal = makeInt(atoll(node_token->value));
+        case AST_SET: {
+            // Create a temporary Value struct to build the set constant.
+            Value set_const_val;
+            memset(&set_const_val, 0, sizeof(Value));
+            set_const_val.type = TYPE_SET;
+            set_const_val.max_length = 0;
+            set_const_val.set_val.set_size = 0;
+            set_const_val.set_val.set_values = NULL;
+
+            for (int i = 0; i < node->child_count; i++) {
+                AST* member = node->children[i];
+                if (member->type == AST_SUBRANGE) {
+                    Value start_val = evaluateCompileTimeValue(member->left);
+                    Value end_val = evaluateCompileTimeValue(member->right);
+                    if ((start_val.type == TYPE_INTEGER || start_val.type == TYPE_CHAR) &&
+                        (end_val.type == TYPE_INTEGER || end_val.type == TYPE_CHAR)) {
+                        long long start_ord = (start_val.type == TYPE_INTEGER) ? start_val.i_val : start_val.c_val;
+                        long long end_ord = (end_val.type == TYPE_INTEGER) ? end_val.i_val : end_val.c_val;
+                        for (long long j = start_ord; j <= end_ord; j++) {
+                           addOrdinalToSetValue(&set_const_val, j);
+                        }
+                    } else {
+                        fprintf(stderr, "L%d: Compiler error: Set range bounds must be constant ordinal types.\n", getLine(member));
+                        compiler_had_error = true;
+                    }
+                    freeValue(&start_val);
+                    freeValue(&end_val);
+                } else {
+                    Value elem_val = evaluateCompileTimeValue(member);
+                    if (elem_val.type == TYPE_INTEGER || elem_val.type == TYPE_CHAR) {
+                        long long ord = (elem_val.type == TYPE_INTEGER) ? elem_val.i_val : elem_val.c_val;
+                        addOrdinalToSetValue(&set_const_val, ord);
+                    } else {
+                        fprintf(stderr, "L%d: Compiler error: Set elements must be constant ordinal types.\n", getLine(member));
+                        compiler_had_error = true;
+                    }
+                    freeValue(&elem_val);
+                }
             }
-            int constIndex = addConstantToChunk(chunk, numVal);
+            // Pass the address of the fully constructed set Value.
+            int constIndex = addConstantToChunk(chunk, &set_const_val);
+            // Now that a deep copy is in the chunk, free our temporary set value.
+            freeValue(&set_const_val);
+
+            writeBytecodeChunk(chunk, OP_CONSTANT, line);
+            writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+            break;
+        }
+        case AST_NUMBER: {
+            if (!node_token || !node_token->value) { /* error */ break; }
+            
+            int constIndex;
+            // Use the appropriate helper based on the token type
+            if (node_token->type == TOKEN_REAL_CONST) {
+                constIndex = addRealConstant(chunk, atof(node_token->value));
+            } else {
+                constIndex = addIntConstant(chunk, atoll(node_token->value));
+            }
+
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
@@ -1099,14 +1241,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_STRING: {
             if (!node_token || !node_token->value) { /* error */ break; }
-            Value strVal = makeString(node_token->value);
-            int constIndex = addConstantToChunk(chunk, strVal);
+
+            int constIndex = addStringConstant(chunk, node_token->value);
+
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
         }
         case AST_NIL: {
-            int constIndex = addConstantToChunk(chunk, makeNil());
+            int constIndex = addNilConstant(chunk);
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
@@ -1145,13 +1288,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
                 }
             } else {
+                // Check if it's a compile-time constant first.
                 Value* const_val_ptr = findCompilerConstant(varName);
                 if (const_val_ptr) {
-                    int constIndex = addConstantToChunk(chunk, makeCopyOfValue(const_val_ptr));
+                    // <<<< FIX for compile-time constant >>>>
+                    // Pass the pointer to the constant value directly.
+                    int constIndex = addConstantToChunk(chunk, const_val_ptr);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
                 } else {
-                    int nameIndex = addConstantToChunk(chunk, makeString(varName));
+                    // <<<< FIX for global variable >>>>
+                    // It's a global variable, so add its name to the constants
+                    // using the new helper and emit OP_GET_GLOBAL.
+                    int nameIndex = addStringConstant(chunk, varName);
                     writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
                 }
@@ -1185,6 +1334,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     case TOKEN_LESS_EQUAL:    writeBytecodeChunk(chunk, OP_LESS_EQUAL, line); break;
                     case TOKEN_GREATER:       writeBytecodeChunk(chunk, OP_GREATER, line); break;
                     case TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line); break;
+                    case TOKEN_IN:            writeBytecodeChunk(chunk, OP_IN, line); break;
                     default:
                         fprintf(stderr, "L%d: Compiler error: Unknown binary operator %s\n", line, tokenTypeToString(node_token->type));
                         compiler_had_error = true;
@@ -1208,19 +1358,21 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_BOOLEAN: {
-            if (!node_token && node->i_val == 0 && node->var_type == TYPE_BOOLEAN) {
-            } else if (!node_token) {
-                fprintf(stderr, "L%d: Compiler error: AST_BOOLEAN node missing token.\n", line);
-                compiler_had_error = true;
-                break;
+            // The check for node_token is still useful for malformed ASTs,
+            // though the first 'if' condition was unusual. We can simplify the check.
+            if (!node_token) {
+                 // This case might be hit for certain internally generated boolean values.
+                 // Let's trust node->i_val. The old code did this as well.
             }
-            Value boolConst = makeBoolean(node->i_val != 0);
-            int constIndex = addConstantToChunk(chunk, boolConst);
+
+            // Use the new helper to add the boolean constant and get its index.
+            // The node->i_val for booleans is 0 for false and 1 for true.
+            int constIndex = addBooleanConstant(chunk, (node->i_val != 0));
+            
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
             break;
         }
-
         case AST_PROCEDURE_CALL: {
             int line = getLine(node);
             if (line <= 0) line = current_line_approx;
@@ -1241,7 +1393,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
                 compiler_had_error = true;
                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                // Use the new helper to add a nil constant.
+                writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 break;
             }
 
@@ -1252,7 +1405,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
                     // Push the *name* of the type as a string constant.
-                    int typeNameIndex = addConstantToChunk(chunk, makeString(type_arg_node->token->value));
+                    int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)typeNameIndex, line);
                 } else {
@@ -1294,13 +1447,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compiler_had_error = true;
                     for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                    // Use the new helper to add a nil constant.
+                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 } else if (type == BUILTIN_TYPE_FUNCTION) {
                     char normalized_name[MAX_SYMBOL_LENGTH];
                     strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
                     normalized_name[sizeof(normalized_name) - 1] = '\0';
                     toLowerString(normalized_name);
-                    int nameIndex = addConstantToChunk(chunk, makeString(normalized_name));
+                    int nameIndex = addStringConstant(chunk, normalized_name);
                     writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
                     writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
@@ -1309,7 +1463,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compiler_had_error = true;
                     for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 }
             } else { // User-defined function call
                 char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
@@ -1333,14 +1487,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         compiler_had_error = true;
                         for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                        writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                        writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                     } else {
                         if (func_symbol->arity != node->child_count) {
                             fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n", line, original_display_name, func_symbol->arity, node->child_count);
                             compiler_had_error = true;
                             for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                             writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                            writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                            writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                         } else {
                             writeBytecodeChunk(chunk, OP_CALL, line);
                             emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
@@ -1353,14 +1507,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                      compiler_had_error = true;
                      for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                      writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                     writeBytecodeChunk(chunk, (uint8_t)addConstantToChunk(chunk, makeNil()), line);
+                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 }
             }
             break;
         }
         default:
             fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileRValue.\n", line, astTypeToString(node->type));
-            int dummyIdx = addConstantToChunk(chunk, makeInt(0)); // Push dummy 0 for expression context
+            int dummyIdx = addIntConstant(chunk, 0); // Push dummy 0 for expression context
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
             writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
             break;
