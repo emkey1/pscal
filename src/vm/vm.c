@@ -1035,14 +1035,17 @@ comparison_error_label:
             case OP_SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                // Free the old value at the slot before overwriting, if it's a complex type
                 freeValue(&frame->slots[slot]);
-                Value value_to_set = pop(vm);
+                // POP the value from the top of the stack and make a deep copy into the slot
+                Value value_to_set = pop(vm); // Changed from peek(vm, 0)
                 frame->slots[slot] = makeCopyOfValue(&value_to_set);
+                // Free the temporary value that was popped from the stack
                 freeValue(&value_to_set);
                 break;
             }
             case OP_JUMP_IF_FALSE: {
-                uint16_t offset_val = READ_SHORT(vm);
+                uint16_t offset_val = READ_SHORT(vm); // Use READ_SHORT(vm) to pass vm
                 Value condition_value = pop(vm);
                 bool jump_condition_met = false;
                 if (IS_BOOLEAN(condition_value)) {
@@ -1052,9 +1055,10 @@ comparison_error_label:
                     freeValue(&condition_value);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                
+                // freeValue(&condition_value); // Only if makeCopyOfValue was used on stack for the boolean. Primitives usually don't need this.
+
                 if (jump_condition_met) {
-                    vm->ip += offset_val;
+                    vm->ip += (int16_t)offset_val;
                 }
                 break;
             }

@@ -23,6 +23,18 @@ typedef struct {
     bool is_ref;
 } CompilerLocal;
 
+#define MAX_LOOP_DEPTH 16 // Max nested loops
+
+typedef struct {
+    int start;          // Address of the loop's start
+    int* break_jumps;   // Dynamic array of jump instructions from 'break'
+    int break_count;    // Number of 'break' statements
+    int scope_depth;    // The scope depth of this loop
+} Loop;
+
+static Loop loop_stack[MAX_LOOP_DEPTH];
+static int loop_depth = -1; // -1 means we are not in a loop
+
 typedef struct {
     CompilerLocal locals[MAX_GLOBALS]; // Re-use MAX_GLOBALS for max locals per function
     int local_count;
@@ -31,7 +43,6 @@ typedef struct {
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
-
 
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -58,6 +69,55 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->local_count = 0;
     fc->scope_depth = 0;
     fc->name = NULL;
+}
+
+static void startLoop(int start_address) {
+    if (loop_depth + 1 >= MAX_LOOP_DEPTH) {
+        fprintf(stderr, "Compiler error: Loop nesting too deep.\n");
+        compiler_had_error = true;
+        return;
+    }
+    loop_depth++;
+    loop_stack[loop_depth].start = start_address;
+    loop_stack[loop_depth].break_jumps = NULL;
+    loop_stack[loop_depth].break_count = 0;
+    loop_stack[loop_depth].scope_depth = current_function_compiler ? current_function_compiler->scope_depth : 0;
+}
+
+static void addBreakJump(BytecodeChunk* chunk, int line) {
+    if (loop_depth < 0) {
+        fprintf(stderr, "L%d: Compiler error: 'break' statement outside of a loop.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    Loop* current_loop = &loop_stack[loop_depth];
+    current_loop->break_count++;
+    current_loop->break_jumps = realloc(current_loop->break_jumps, sizeof(int) * current_loop->break_count);
+    
+    writeBytecodeChunk(chunk, OP_JUMP, line);
+    current_loop->break_jumps[current_loop->break_count - 1] = chunk->count; // Store offset of the operand
+    emitShort(chunk, 0xFFFF, line); // Placeholder
+}
+
+static void patchBreaks(BytecodeChunk* chunk) {
+    if (loop_depth < 0) return;
+    Loop* current_loop = &loop_stack[loop_depth];
+    int jump_target = chunk->count; // The address to jump to is the one right after the loop.
+
+    for (int i = 0; i < current_loop->break_count; i++) {
+        int jump_offset = current_loop->break_jumps[i];
+        patchShort(chunk, jump_offset, (uint16_t)(jump_target - (jump_offset + 2)));
+    }
+
+    if (current_loop->break_jumps) {
+        free(current_loop->break_jumps);
+    }
+}
+
+static void endLoop(void) {
+    if (loop_depth < 0) return;
+    // The break jumps should have been patched before calling this.
+    loop_depth--;
 }
 
 static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool is_ref) {
@@ -567,6 +627,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
+        case AST_BREAK: { // <<< NEW CASE
+            addBreakJump(chunk, line);
+            break;
+        }
         case AST_WRITELN: {
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {
@@ -577,28 +641,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_WHILE: {
-            int loopStart = chunk->count; // Mark address for the top of the loop (for condition re-check)
+            startLoop(chunk->count); // <<< MODIFIED: Mark loop start
 
-            // 1. Compile the condition expression
+            int loopStart = chunk->count;
+
             compileRValue(node->left, chunk, line);
 
-            // 2. Emit a conditional jump that skips the body if the condition is false
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
-            int exitJumpOffset = chunk->count; // Remember where the jump operand is
-            emitShort(chunk, 0xFFFF, line);     // Write a placeholder jump distance
+            int exitJumpOffset = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
 
-            // 3. Compile the loop body
             compileStatement(node->right, chunk, getLine(node->right));
 
-            // 4. Emit an unconditional jump back to the top of the loop
             writeBytecodeChunk(chunk, OP_JUMP, line);
-            int backwardJumpOffset = loopStart - (chunk->count + 2); // +2 for this jump's own operands
+            int backwardJumpOffset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backwardJumpOffset, line);
 
-            // 5. Patch the original conditional jump to point to the instruction right after the loop
-            uint16_t forwardJumpOffset = (uint16_t)(chunk->count - (exitJumpOffset + 2));
-            patchShort(chunk, exitJumpOffset, forwardJumpOffset);
-
+            patchShort(chunk, exitJumpOffset, (uint16_t)(chunk->count - (exitJumpOffset + 2)));
+            
+            patchBreaks(chunk); // <<< MODIFIED: Patch any breaks inside the loop
+            endLoop(); // <<< MODIFIED: End loop context
             break;
         }
         case AST_CASE: {
@@ -722,25 +784,27 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_REPEAT: {
+            startLoop(chunk->count); // <<< MODIFIED
             int loopStart = chunk->count;
-            // The body of the loop is the left child (which is an AST_COMPOUND)
+
             if (node->left) {
                 compileStatement(node->left, chunk, getLine(node->left));
             }
-            // The until condition is the right child
+
             if (node->right) {
                 compileRValue(node->right, chunk, getLine(node->right));
             } else {
-                // An until without a condition is a syntax error, but we'll treat it as `until false` (infinite loop)
                 int falseConstIdx = addConstantToChunk(chunk, makeBoolean(false));
                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
                 writeBytecodeChunk(chunk, (uint8_t)falseConstIdx, line);
             }
-            // Jump back to the start if the condition is false
+
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
-            // The offset is negative to jump backwards
             int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
+
+            patchBreaks(chunk); // <<< MODIFIED
+            endLoop(); // <<< MODIFIED
             break;
         }
         case AST_READLN: {
@@ -800,7 +864,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool is_downto = node->type == AST_FOR_DOWNTO;
             AST* var_node = node->children[0];
             AST* start_node = node->left;
-            AST* end_node = node->right; // This is now used
+            AST* end_node = node->right;
             AST* body_node = node->extra;
 
             int var_slot = -1;
@@ -814,6 +878,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 var_name_idx = addConstantToChunk(chunk, makeString(var_node->token->value));
             }
 
+            // 1. Initial assignment of the loop variable
             compileRValue(start_node, chunk, getLine(start_node));
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
@@ -823,8 +888,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
 
+            // 2. Setup loop context for handling 'break'
+            startLoop(-1); // Start address is not needed for FOR loop's break handling
+
             int loopStart = chunk->count;
 
+            // 3. The loop condition check
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
@@ -833,7 +902,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
             
-            // --- FIX: COMPILE THE END VALUE ---
             compileRValue(end_node, chunk, getLine(end_node));
             
             writeBytecodeChunk(chunk, is_downto ? OP_GREATER_EQUAL : OP_LESS_EQUAL, line);
@@ -842,8 +910,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             int exitJump = chunk->count;
             emitShort(chunk, 0xFFFF, line);
 
+            // 4. Compile the loop body
             compileStatement(body_node, chunk, getLine(body_node));
-
+            
+            // 5. Increment/Decrement the loop variable
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
@@ -864,11 +934,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
 
+            // 6. Jump back to the top of the loop to re-evaluate the condition
             writeBytecodeChunk(chunk, OP_JUMP, line);
             int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
 
+            // 7. This is the exit point for the loop. Patch the initial condition jump.
             patchShort(chunk, exitJump, (uint16_t)(chunk->count - (exitJump + 2)));
+            
+            // 8. Patch any 'break' statements that occurred inside the loop body.
+            patchBreaks(chunk);
+            endLoop();
+            
             break;
         }
         case AST_IF: {
