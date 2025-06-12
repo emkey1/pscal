@@ -136,13 +136,17 @@ static void push(VM* vm, Value value) { // Using your original name 'push'
     vm->stackTop++;
 }
 
-static Value pop(VM* vm) { // Using your original name 'pop'
+static Value pop(VM* vm) {
     if (vm->stackTop == vm->stack) {
         runtimeError(vm, "VM Error: Stack underflow (pop from empty stack).");
         return makeNil();
     }
     vm->stackTop--;
-    return *vm->stackTop;
+    Value result = *vm->stackTop; // Make a copy of the value to return.
+    // Overwrite the just-popped slot with a safe NIL value to invalidate it
+    // and prevent dangling pointers if the returned copy's contents are freed.
+    *vm->stackTop = makeNil();
+    return result;
 }
 
 /*

@@ -2181,14 +2181,58 @@ Value executeBuiltinRenderTextToTexture(AST *node) {
     return makeInt(textureID); // Return the 0-based TextureID
 }
 
-
 Value vm_builtin_initgraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
         return makeVoid();
     }
-    // Logic from executeBuiltinInitGraph, but using args array
-    // ...
+
+    if (!gSdlInitialized) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
+            runtimeError(vm, "Runtime error: SDL_Init failed in InitGraph: %s", SDL_GetError());
+            return makeVoid();
+        }
+        gSdlInitialized = true;
+    }
+
+    if (gSdlWindow || gSdlRenderer) {
+        if(gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
+        if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+    }
+
+    int width = (int)args[0].i_val;
+    int height = (int)args[1].i_val;
+    const char* title = args[2].s_val ? args[2].s_val : "Pscal Graphics";
+
+    if (width <= 0 || height <= 0) {
+        runtimeError(vm, "Runtime error: InitGraph width and height must be positive.");
+        return makeVoid();
+    }
+    
+    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
+    if (!gSdlWindow) {
+        runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
+        return makeVoid();
+    }
+
+    gSdlWidth = width;
+    gSdlHeight = height;
+
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!gSdlRenderer) {
+        runtimeError(vm, "Runtime error: SDL_CreateRenderer failed: %s", SDL_GetError());
+        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
+        return makeVoid();
+    }
+
+    InitializeTextureSystem();
+    
+    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderPresent(gSdlRenderer);
+
+    gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
+    
     return makeVoid();
 }
 
@@ -2403,5 +2447,70 @@ Value vm_builtin_inittextsystem(VM* vm, int arg_count, Value* args) {
     }
     gSdlFontSize = font_size;
 
+    return makeVoid();
+}
+
+Value vm_builtin_fillcircle(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) {
+        runtimeError(vm, "FillCircle expects 3 integer arguments (CenterX, CenterY, Radius).");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        runtimeError(vm, "Graphics mode not initialized before FillCircle.");
+        return makeVoid();
+    }
+
+    // Type checking for arguments
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER) {
+        runtimeError(vm, "FillCircle arguments must be integers.");
+        return makeVoid();
+    }
+
+    int centerX = (int)args[0].i_val;
+    int centerY = (int)args[1].i_val;
+    int radius = (int)args[2].i_val;
+
+    if (radius < 0) return makeVoid();
+
+    // Set the draw color from the global state
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    
+    // Efficient filling method using horizontal lines
+    for (int dy = -radius; dy <= radius; ++dy) {
+        int dx = (int)floor(sqrt((double)(radius * radius) - (dy * dy)));
+        SDL_RenderDrawLine(gSdlRenderer, centerX - dx, centerY + dy, centerX + dx, centerY + dy);
+    }
+
+    return makeVoid();
+}
+
+Value vm_builtin_graphloop(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_INTEGER && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
+        runtimeError(vm, "GraphLoop argument must be an integer-like type.");
+        return makeVoid();
+    }
+
+    long long ms = args[0].i_val;
+    if (ms < 0) ms = 0;
+
+    if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
+        Uint32 startTime = SDL_GetTicks();
+        Uint32 targetTime = startTime + (Uint32)ms;
+        SDL_Event event;
+
+        while (SDL_GetTicks() < targetTime) {
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT) {
+                    break_requested = 1;
+                    return makeVoid(); // Exit immediately on quit event
+                }
+            }
+            SDL_Delay(1); // Prevent 100% CPU usage
+        }
+    }
     return makeVoid();
 }
