@@ -1344,15 +1344,14 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
 
     // 1. Parse variable list into groupNode children
     while (parser->current_token->type == TOKEN_IDENTIFIER) {
-        Token* originalVarToken = parser->current_token;
-        Token* copiedVarToken = copyToken(originalVarToken);
-        if (!copiedVarToken) { /* Malloc error */ freeAST(groupNode); EXIT_FAILURE_HANDLER(); }
-        eat(parser, TOKEN_IDENTIFIER); // Frees original token
+        // Pass current_token directly to newASTNode, which handles copying.
+        AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
+        if (!varNode) { /* Malloc error */ freeAST(groupNode); EXIT_FAILURE_HANDLER(); }
+        
+        // Eat the token *after* it has been copied by newASTNode.
+        eat(parser, TOKEN_IDENTIFIER);
 
-        AST *varNode = newASTNode(AST_VARIABLE, copiedVarToken);
-        if (!varNode) { /* Malloc error */ freeToken(copiedVarToken); freeAST(groupNode); EXIT_FAILURE_HANDLER(); }
-        addChild(groupNode, varNode); // Sets varNode->parent = groupNode
-        freeToken(copiedVarToken); // Free the parser's temporary copy
+        addChild(groupNode, varNode);
 
         if (parser->current_token->type == TOKEN_COMMA) {
             eat(parser, TOKEN_COMMA);
@@ -1552,15 +1551,17 @@ AST *paramList(Parser *parser) {
 
         AST *group = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
         while (1) { // Parse identifier names into group->children
-            Token* originalIdToken = parser->current_token;
-            if (originalIdToken->type != TOKEN_IDENTIFIER) { errorParser(parser, "Expected identifier in parameter list"); freeAST(group); freeAST(compound); return NULL; }
-            Token* copiedIdToken = copyToken(originalIdToken);
-            if (!copiedIdToken) { fprintf(stderr, "Memory allocation failed for token copy in paramList\n"); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
-            eat(parser, TOKEN_IDENTIFIER); // Frees original token
-            AST *id_node = newASTNode(AST_VARIABLE, copiedIdToken);
-            if (!id_node) { fprintf(stderr, "Memory allocation failed for id_node in paramList\n"); freeToken(copiedIdToken); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
-            addChild(group, id_node); // Sets id_node->parent = group
-            freeToken(copiedIdToken); // Frees the parser's temporary copy
+            if (parser->current_token->type != TOKEN_IDENTIFIER) { errorParser(parser, "Expected identifier in parameter list"); freeAST(group); freeAST(compound); return NULL; }
+            
+            // Directly use current_token to create the node, which copies it internally.
+            AST *id_node = newASTNode(AST_VARIABLE, parser->current_token);
+            if (!id_node) { fprintf(stderr, "Memory allocation failed for id_node in paramList\n"); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
+            
+            // Eat the token AFTER it has been safely copied.
+            eat(parser, TOKEN_IDENTIFIER);
+            
+            addChild(group, id_node);
+
             if (parser->current_token->type == TOKEN_COMMA) { eat(parser, TOKEN_COMMA); }
             else { break; }
         }
@@ -1579,11 +1580,10 @@ AST *paramList(Parser *parser) {
             param_decl->children = malloc(sizeof(AST *));
             if (!param_decl->children) { /* Malloc Check */ freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
 
-            Token* nameTokenCopy = copyToken(group->children[i]->token);
-            if (!nameTokenCopy) { /* Malloc Check */ freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
-            param_decl->children[0] = newASTNode(AST_VARIABLE, nameTokenCopy);
-            if (!param_decl->children[0]) { /* Malloc check */ freeToken(nameTokenCopy); freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
-            freeToken(nameTokenCopy);
+            // Instead of copying the token, just copy the AST node which is safer.
+            param_decl->children[0] = copyAST(group->children[i]);
+            if (!param_decl->children[0]) { /* Malloc check */ freeAST(originalTypeNode); freeAST(group); freeAST(compound); freeAST(param_decl); EXIT_FAILURE_HANDLER(); }
+
             param_decl->children[0]->parent = param_decl;
 
             param_decl->var_type = originalTypeNode->var_type;

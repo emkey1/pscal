@@ -1083,18 +1083,23 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
-            // This is the correct handler for procedure calls as statements.
-            // It's nearly identical to the R-Value version, but it pops function results.
-            int call_line = getLine(node);
             const char* calleeName = node->token->value;
             Symbol* proc_symbol = lookupSymbolIn(procedure_table, calleeName);
+            // Add a flag to identify read/readln calls
+            bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
+
 
             // Compile arguments first
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
                 bool is_var_param = false;
 
-                if (calleeName && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0)) {
+                // For read/readln, any argument that is NOT a file variable is a VAR param.
+                // The annotation pass should have set the var_type on the argument's AST node.
+                if (is_read_proc && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) {
+                    is_var_param = true;
+                }
+                else if (calleeName && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0)) {
                     is_var_param = true;
                 } else if (proc_symbol && proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
                     AST* param_node = proc_symbol->type_def->children[i];
@@ -1116,26 +1121,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 normalized_name[sizeof(normalized_name) - 1] = '\0';
                 toLowerString(normalized_name);
                 int nameIndex = addStringConstant(chunk, normalized_name);
-                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, call_line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, call_line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line);
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 
                 // If a function is called as a statement, pop its return value
                 if (getBuiltinType(calleeName) == BUILTIN_TYPE_FUNCTION) {
-                    writeBytecodeChunk(chunk, OP_POP, call_line);
+                    writeBytecodeChunk(chunk, OP_POP, line);
                 }
             } else {
                 if (proc_symbol && proc_symbol->is_defined) {
-                    writeBytecodeChunk(chunk, OP_CALL, call_line);
-                    emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, call_line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, call_line);
+                    writeBytecodeChunk(chunk, OP_CALL, line);
+                    emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                     
                     // If it's a user function, pop its result
                     if (proc_symbol->type != TYPE_VOID) {
-                        writeBytecodeChunk(chunk, OP_POP, call_line);
+                        writeBytecodeChunk(chunk, OP_POP, line);
                     }
                 } else {
-                    fprintf(stderr, "L%d: Compiler Error: Undefined or forward-declared procedure '%s'.\n", call_line, calleeName);
+                    fprintf(stderr, "L%d: Compiler Error: Undefined or forward-declared procedure '%s'.\n", line, calleeName);
                     compiler_had_error = true;
                 }
             }
@@ -1565,8 +1570,8 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
         return;
     }
     // The implementation block is stored in the 'extra' child of the AST_UNIT node
-    AST* impl_decls = unit_ast->extra;
-    if (!impl_decls || impl_decls->type != AST_COMPOUND) {
+    AST* impl_block = unit_ast->extra;
+    if (!impl_block || impl_block->type != AST_COMPOUND) {
         return;
     }
 
@@ -1575,7 +1580,14 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
             unit_ast->token ? unit_ast->token->value : "?");
     #endif
 
-    // compileNode with an AST_COMPOUND will iterate through its children
-    // (the procedures/functions) and compile them.
-    compileNode(impl_decls, outputChunk, getLine(impl_decls));
+    // The implementation block is a compound node containing procedure/function declarations.
+    // We must iterate through them and compile each one individually.
+    for (int i = 0; i < impl_block->child_count; i++) {
+        AST* decl_node = impl_block->children[i];
+        if (decl_node && (decl_node->type == AST_PROCEDURE_DECL || decl_node->type == AST_FUNCTION_DECL)) {
+            // This call will create a jump over the body, compile the body,
+            // and patch the jump, correctly adding the function's bytecode.
+            compileNode(decl_node, outputChunk, getLine(decl_node));
+        }
+    }
 }
