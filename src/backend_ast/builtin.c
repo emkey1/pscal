@@ -293,6 +293,7 @@ Value vm_builtin_new(VM* vm, int arg_count, Value* args) {
     
     // Update the pointer variable that was passed by reference
     pointerVarValuePtr->ptr_val = allocated_memory;
+    pointerVarValuePtr->type = TYPE_POINTER;
 
     return makeVoid();
 }

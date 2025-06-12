@@ -118,15 +118,32 @@ void addChild(AST *parent, AST *child) {
 void setLeft(AST *parent, AST *child) {
     if (!parent) return;
     parent->left = child;
-    if (child) child->parent = parent;
+    if (child) {
+#ifdef DEBUG
+        fprintf(stderr, "[setLeft] Parent: %p (Type: %s), Child: %p (Type: %s). Setting child->parent to %p.\n",
+                (void*)parent, astTypeToString(parent->type),
+                (void*)child, astTypeToString(child->type),
+                (void*)parent);
+        fflush(stderr);
+#endif
+        child->parent = parent;
+    }
 }
 
 void setRight(AST *parent, AST *child) {
     if (!parent) return;
     parent->right = child;
-    if (child) child->parent = parent;
+    if (child) {
+#ifdef DEBUG
+        fprintf(stderr, "[setRight] Parent: %p (Type: %s), Child: %p (Type: %s). Setting child->parent to %p.\n",
+                (void*)parent, astTypeToString(parent->type),
+                (void*)child, astTypeToString(child->type),
+                (void*)parent);
+        fflush(stderr);
+#endif
+        child->parent = parent;
+    }
 }
-
 void setExtra(AST *parent, AST *child) {
     if (!parent) return;
     parent->extra = child;

@@ -2503,13 +2503,16 @@ AST *factor(Parser *parser) {
 
         // Check if it's a function call (lvalue doesn't handle the LPAREN)
         if (parser->current_token && parser->current_token->type == TOKEN_LPAREN && node->type == AST_VARIABLE) {
-             // It's a function call with arguments
-             node->type = AST_PROCEDURE_CALL; // Change type
+             // It's a function call. Create a NEW procedure call node.
+             AST* funcCallNode = newASTNode(AST_PROCEDURE_CALL, node->token);
+             freeAST(node); // Free the original AST_VARIABLE node.
+             node = funcCallNode; // The new procedure call node is now our main node.
+
              eat(parser, TOKEN_LPAREN);      // Eat '('
              if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
                  AST* args = exprList(parser); // Parse argument list
                  if (!args || args->type == AST_NOOP) { errorParser(parser,"Bad arg list"); return node; }
-                 // Transfer arguments safely (ensure your existing logic is robust)
+                 // Transfer arguments safely
                  if (args && args->type == AST_COMPOUND && args->child_count > 0) {
                       node->children = args->children; node->child_count = args->child_count; node->child_capacity = args->child_capacity;
                       args->children = NULL; args->child_count = 0; args->child_capacity = 0;
