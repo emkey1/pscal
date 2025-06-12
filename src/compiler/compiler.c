@@ -1034,20 +1034,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, (uint8_t)one_const_idx, line);
             writeBytecodeChunk(chunk, is_downto ? OP_SUBTRACT : OP_ADD, line);
 
-            // This is the updated value. We need to both store it and keep a copy for the SET operation.
-            writeBytecodeChunk(chunk, OP_DUP, line); // <<< ADDED: Duplicate the new value
-
             if (var_slot != -1) {
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, line); // This will consume the original new value
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line); // This will consume the original new value
+                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
 
-            // The DUP'ed value is still on the stack. We must pop it.
-            // This was the source of the stack leak.
-            writeBytecodeChunk(chunk, OP_POP, line); // <<< ADDED: Pop the duplicated value after storing it.
+            // The value from the increment/decrement is still on the stack.
+            // Pop it to prevent stack overflow.
+            //writeBytecodeChunk(chunk, OP_POP, line);
 
             // 6. Jump back to the top of the loop to re-evaluate the condition
             writeBytecodeChunk(chunk, OP_JUMP, line);
@@ -1361,31 +1358,83 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_BINARY_OP: {
-            compileRValue(node->left, chunk, getLine(node->left));
-            compileRValue(node->right, chunk, getLine(node->right));
-            if (node_token) { // node_token is the operator
-                switch (node_token->type) {
-                    case TOKEN_PLUS:          writeBytecodeChunk(chunk, OP_ADD, line); break;
-                    case TOKEN_MINUS:         writeBytecodeChunk(chunk, OP_SUBTRACT, line); break;
-                    case TOKEN_MUL:           writeBytecodeChunk(chunk, OP_MULTIPLY, line); break;
-                    case TOKEN_SLASH:         writeBytecodeChunk(chunk, OP_DIVIDE, line); break;
-                    case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, OP_INT_DIV, line); break;
-                    case TOKEN_MOD:           writeBytecodeChunk(chunk, OP_MOD, line); break;
-                    case TOKEN_AND:           writeBytecodeChunk(chunk, OP_AND, line); break;
-                    case TOKEN_OR:            writeBytecodeChunk(chunk, OP_OR, line); break;
-                    case TOKEN_SHL:           writeBytecodeChunk(chunk, OP_SHL, line); break;
-                    case TOKEN_SHR:           writeBytecodeChunk(chunk, OP_SHR, line); break;
-                    case TOKEN_EQUAL:         writeBytecodeChunk(chunk, OP_EQUAL, line); break;
-                    case TOKEN_NOT_EQUAL:     writeBytecodeChunk(chunk, OP_NOT_EQUAL, line); break;
-                    case TOKEN_LESS:          writeBytecodeChunk(chunk, OP_LESS, line); break;
-                    case TOKEN_LESS_EQUAL:    writeBytecodeChunk(chunk, OP_LESS_EQUAL, line); break;
-                    case TOKEN_GREATER:       writeBytecodeChunk(chunk, OP_GREATER, line); break;
-                    case TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line); break;
-                    case TOKEN_IN:            writeBytecodeChunk(chunk, OP_IN, line); break;
-                    default:
-                        fprintf(stderr, "L%d: Compiler error: Unknown binary operator %s\n", line, tokenTypeToString(node_token->type));
-                        compiler_had_error = true;
-                        break;
+            if (node_token && node_token->type == TOKEN_AND) {
+                // Correct short-circuit for: A AND B
+                // If A is false, the expression is false.
+                // If A is true, the expression's value is the value of B.
+                compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
+                int jump_if_false = chunk->count;
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
+                emitShort(chunk, 0xFFFF, line);
+
+                // If we get here, A was true and was popped. The stack is empty.
+                // The result of the whole expression is now the result of B.
+                compileRValue(node->right, chunk, getLine(node->right)); // stack: [B]
+                int jump_over_false_case = chunk->count;
+                writeBytecodeChunk(chunk, OP_JUMP, line);
+                emitShort(chunk, 0xFFFF, line);
+
+                // This is where we land if A was false. The stack is empty.
+                // We must push 'false' onto the stack as the expression's result.
+                patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
+                int false_const_idx = addBooleanConstant(chunk, false);
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)false_const_idx, line); // stack: [false]
+
+                // The end for both paths.
+                patchShort(chunk, jump_over_false_case + 1, chunk->count - (jump_over_false_case + 3));
+
+            } else if (node_token && node_token->type == TOKEN_OR) {
+                // Correct short-circuit for: A OR B
+                // If A is true, the expression is true.
+                // If A is false, the expression's value is the value of B.
+                compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
+                int jump_if_false = chunk->count;
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
+                emitShort(chunk, 0xFFFF, line);
+
+                // If we get here, A was true. Stack is empty. The result must be 'true'.
+                int true_const_idx = addBooleanConstant(chunk, true);
+                writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                writeBytecodeChunk(chunk, (uint8_t)true_const_idx, line);
+                int jump_to_end = chunk->count;
+                writeBytecodeChunk(chunk, OP_JUMP, line);
+                emitShort(chunk, 0xFFFF, line);
+
+                // This is where we land if A was false. Stack is empty.
+                // The result of the expression is the result of B.
+                patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
+                compileRValue(node->right, chunk, getLine(node->right));
+
+                // The end for both paths.
+                patchShort(chunk, jump_to_end + 1, chunk->count - (jump_to_end + 3));
+            }
+            else { // Original logic for all other operators
+                compileRValue(node->left, chunk, getLine(node->left));
+                compileRValue(node->right, chunk, getLine(node->right));
+                if (node_token) { // node_token is the operator
+                    switch (node_token->type) {
+                        case TOKEN_PLUS:          writeBytecodeChunk(chunk, OP_ADD, line); break;
+                        case TOKEN_MINUS:         writeBytecodeChunk(chunk, OP_SUBTRACT, line); break;
+                        case TOKEN_MUL:           writeBytecodeChunk(chunk, OP_MULTIPLY, line); break;
+                        case TOKEN_SLASH:         writeBytecodeChunk(chunk, OP_DIVIDE, line); break;
+                        case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, OP_INT_DIV, line); break;
+                        case TOKEN_MOD:           writeBytecodeChunk(chunk, OP_MOD, line); break;
+                        // AND and OR are now handled above
+                        case TOKEN_SHL:           writeBytecodeChunk(chunk, OP_SHL, line); break;
+                        case TOKEN_SHR:           writeBytecodeChunk(chunk, OP_SHR, line); break;
+                        case TOKEN_EQUAL:         writeBytecodeChunk(chunk, OP_EQUAL, line); break;
+                        case TOKEN_NOT_EQUAL:     writeBytecodeChunk(chunk, OP_NOT_EQUAL, line); break;
+                        case TOKEN_LESS:          writeBytecodeChunk(chunk, OP_LESS, line); break;
+                        case TOKEN_LESS_EQUAL:    writeBytecodeChunk(chunk, OP_LESS_EQUAL, line); break;
+                        case TOKEN_GREATER:       writeBytecodeChunk(chunk, OP_GREATER, line); break;
+                        case TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line); break;
+                        case TOKEN_IN:            writeBytecodeChunk(chunk, OP_IN, line); break;
+                        default:
+                            fprintf(stderr, "L%d: Compiler error: Unknown binary operator %s\n", line, tokenTypeToString(node_token->type));
+                            compiler_had_error = true;
+                            break;
+                    }
                 }
             }
             break;

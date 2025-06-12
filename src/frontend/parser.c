@@ -655,6 +655,16 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         name_for_table = mangled_name; // Use the new mangled name
     }
 
+    // --- ADDED: Check for duplicates before inserting ---
+    if (hashTableLookup(procedure_table, name_for_table)) {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG addProcedure] Routine '%s' already exists in procedure_table. Skipping duplicate add.\n", name_for_table);
+        #endif
+        free(name_for_table); // Free the name we constructed, since we're not using it.
+        return; // Exit the function to prevent insertion
+    }
+    // --- END ADDED CODE ---
+
 
     // THIS IS THE CRITICAL CHANGE - ALLOCATE A Symbol, NOT A Procedure
     Symbol *sym = (Symbol *)malloc(sizeof(Symbol)); // <<< THIS SHOULD BE sizeof(Symbol)
@@ -722,7 +732,6 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     }
     #endif
 }
-
 void insertType(const char *name, AST *typeAST) {
     TypeEntry *entry = malloc(sizeof(TypeEntry));
     entry->name = strdup(name);

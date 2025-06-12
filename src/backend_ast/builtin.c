@@ -331,8 +331,8 @@ Value vm_builtin_textbackground(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_textcolore(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
-        runtimeError(vm, "TextColorE expects 1 integer argument.");
+    if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_BYTE && args[0].type != TYPE_WORD)) { // <<< MODIFIED LINE
+        runtimeError(vm, "TextColorE expects an integer-compatible argument (Integer, Word, Byte)."); // Changed error message
         return makeVoid();
     }
     gCurrentTextColor = (int)AS_INTEGER(args[0]);
