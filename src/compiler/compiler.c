@@ -491,15 +491,13 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (decl_child && decl_child->type == AST_VAR_DECL) {
-                        // We call compileNode on the VAR_DECL itself.
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
-                // Pass 2: Compile routines from the declaration block.
+                // Pass 2: Compile routines from the declaration block. <<<< THIS WAS MISSING
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (decl_child && (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL)) {
-                        // We call compileNode on the routine declaration itself.
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
@@ -507,8 +505,6 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
-                 // <<<< FIX: We compile the STATEMENTS, not the whole block again >>>>
-                 // Loop through the statements and compile each one.
                  for (int i = 0; i < statements->child_count; i++) {
                     if (statements->children[i]) {
                         compileNode(statements->children[i], chunk, getLine(statements->children[i]));
