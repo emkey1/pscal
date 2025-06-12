@@ -12,12 +12,12 @@
 #include "symbol/symbol.h"     // For HashTable, if VM manages globals using it directly
 
 // --- VM Configuration ---
-#define VM_STACK_MAX 256       // Maximum number of Values on the operand stack
-#define VM_GLOBALS_MAX 256     // Maximum number of global variables (for simple array storage)
+#define VM_STACK_MAX 4096       // Maximum number of Values on the operand stack
+#define VM_GLOBALS_MAX 4096     // Maximum number of global variables (for simple array storage)
 
-#define MAX_HOST_FUNCTIONS 128
+#define MAX_HOST_FUNCTIONS 4096
 
-#define VM_CALL_STACK_MAX 256
+#define VM_CALL_STACK_MAX 4096
 
 // Forward declaration
 struct VM_s;

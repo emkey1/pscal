@@ -1,3 +1,5 @@
+// src/frontend/lexer.c
+
 #include "frontend/lexer.h"
 #include "core/utils.h"
 #include "globals.h"
@@ -352,24 +354,58 @@ Token *getNextToken(Lexer *lexer) {
              continue; // Resume token search
          }
 
-        // Handle Hex Constant (# followed by hex digits)
+        // Handle Character Code Constant (# followed by decimal digits)
         if (lexer->current_char == '#') {
-            // Check if the next char is a hex digit. number() will handle validation.
-             if (lexer->pos + 1 < strlen(lexer->text) && isHexDigit(lexer->text[lexer->pos+1])) {
-#ifdef DEBUG
-                  fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 1)\n"); fflush(stderr);
-#endif
-                  return number(lexer); // Parses #...
-             } else {
-                  // If '#' is not followed by a hex digit, treat as UNKNOWN
-                  char bad_char[2] = {lexer->current_char, '\0'};
-                  advance(lexer);
-#ifdef DEBUG
-                  fprintf(stderr, "LEXER_DEBUG: getNextToken(return Hex Constant 2)\n"); fflush(stderr);
-#endif
-                  return newToken(TOKEN_UNKNOWN, bad_char, start_line, start_column);
-             }
+            advance(lexer); // Consume '#'
+            size_t start = lexer->pos;
+            while (isdigit((unsigned char)lexer->current_char)) {
+                advance(lexer);
+            }
+            size_t len = lexer->pos - start;
+            if (len == 0) {
+                lexerError(lexer, "Character code literal must have at least one digit after '#'");
+                return newToken(TOKEN_UNKNOWN, "#", start_line, start_column);
+            }
+            char *num_str = malloc(len + 1);
+            if (!num_str) { fprintf(stderr, "malloc failed in getNextToken for char code\n"); EXIT_FAILURE_HANDLER(); }
+            strncpy(num_str, lexer->text + start, len);
+            num_str[len] = '\0';
+            long val = atol(num_str);
+            free(num_str);
+
+            if (val < 0 || val > 255) {
+                lexerError(lexer, "Character code value out of range (0-255)");
+            }
+            // Represent this as a single-character string constant for the parser.
+            // The parser's `evaluateCompileTimeValue` will see a STRING_CONST of length 1
+            // and correctly convert it to a CHAR value.
+            char char_buf[2];
+            char_buf[0] = (char)val;
+            char_buf[1] = '\0';
+            return newToken(TOKEN_STRING_CONST, char_buf, start_line, start_column);
         }
+        
+        // Handle Hex Constant ($ followed by hex digits)
+        if (lexer->current_char == '$') {
+            advance(lexer); // Consume '$'
+            size_t start = lexer->pos;
+            while (isHexDigit(lexer->current_char)) {
+                advance(lexer);
+            }
+            size_t len = lexer->pos - start;
+            if (len == 0) {
+                lexerError(lexer, "Hex literal must have at least one digit after '$'");
+                return newToken(TOKEN_UNKNOWN, "$", start_line, start_column);
+            }
+            char *hex_str = malloc(len + 1);
+            if (!hex_str) { fprintf(stderr, "malloc failed in getNextToken for hex const\n"); EXIT_FAILURE_HANDLER(); }
+            strncpy(hex_str, lexer->text + start, len);
+            hex_str[len] = '\0';
+            Token* token = newToken(TOKEN_HEX_CONST, hex_str, start_line, start_column);
+            free(hex_str);
+            return token;
+        }
+
 
         // Handle Identifiers and Keywords
         if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {
@@ -510,4 +546,14 @@ Token *getNextToken(Lexer *lexer) {
 
     // End of input reached
     return newToken(TOKEN_EOF, "EOF", start_line, start_column);
+}
+
+void lexerError(Lexer *lexer, const char *msg) {
+    if (!lexer || !msg) {
+        fprintf(stderr, "Lexer error: (null lexer or message passed to handler)\n");
+    } else {
+        fprintf(stderr, "Lexer error at line %d, column %d: %s (current char: '%c')\n",
+                lexer->line, lexer->column, msg, lexer->current_char);
+    }
+    EXIT_FAILURE_HANDLER();
 }

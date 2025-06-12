@@ -1371,7 +1371,7 @@ void OSdlCleanupAtExit(void) {
     // Halt any currently playing sound effects and music (good practice before cleanup)
     // Only do this if the sound system was initialized by pscal at some point.
     // However, SDL_Init(SDL_INIT_AUDIO) might have been called by SDL_Init(SDL_INIT_EVERYTHING)
-    // even if audioInitSystem wasn't. For safety, check if SDL_mixer was actually used.
+    // even if audioInitSystem wasn't. For safety, check if SDL_WasInit(SDL_INIT_AUDIO) is true.
     // A simple check: if gSoundSystemInitialized was ever true, or if SDL_WasInit(SDL_INIT_AUDIO) is true.
 
     // If audioQuitSystem might have already freed sounds, this loop is safe as it checks for NULL.
@@ -2237,6 +2237,19 @@ Value vm_builtin_cleardevice(VM* vm, int arg_count, Value* args) {
 Value vm_builtin_getmaxx(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "GetMaxX expects 0 arguments.");
     return makeInt(gSdlWidth > 0 ? gSdlWidth - 1 : 0);
+}
+
+Value vm_builtin_getmaxy(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) runtimeError(vm, "GetMaxY expects 0 arguments.");
+    return makeInt(gSdlHeight > 0 ? gSdlHeight - 1 : 0);
+}
+
+Value vm_builtin_getticks(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "GetTicks expects 0 arguments.");
+        return makeInt(0);
+    }
+    return makeInt((long long)SDL_GetTicks());
 }
 
 Value vm_builtin_setrgbcolor(VM* vm, int arg_count, Value* args) {

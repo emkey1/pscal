@@ -36,10 +36,30 @@ Value vm_builtin_inc(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_dec(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_low(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_high(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_screencols(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_screenrows(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_sqr(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_chr(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_succ(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_upcase(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_pos(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_copy(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_realtostr(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_paramcount(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_paramstr(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_wherex(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_wherey(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_keypressed(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_readkey(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_textcolor(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_textbackground(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_textcolore(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_textbackgrounde(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE FILE I/O ---
 Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_reset(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_rewrite(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_close(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_readln(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_eof(struct VM_s* vm, int arg_count, Value* args);
@@ -167,9 +187,9 @@ Value executeBuiltinIsSoundPlaying(AST *node);
 Value executeBuiltinAPISend(AST *node);
 Value executeBuiltinAPIReceive(AST *node);
 
-
 // General helper prototypes
 void nullifyPointerAliasesByAddrValue(HashTable* table, uintptr_t disposedAddrValue);
+int getCursorPosition(int *row, int *col);
 
 typedef enum {
     BUILTIN_TYPE_NONE,

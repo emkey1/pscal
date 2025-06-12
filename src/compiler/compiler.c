@@ -1034,13 +1034,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, (uint8_t)one_const_idx, line);
             writeBytecodeChunk(chunk, is_downto ? OP_SUBTRACT : OP_ADD, line);
 
+            // This is the updated value. We need to both store it and keep a copy for the SET operation.
+            writeBytecodeChunk(chunk, OP_DUP, line); // <<< ADDED: Duplicate the new value
+
             if (var_slot != -1) {
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, line); // This will consume the original new value
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
+                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line); // This will consume the original new value
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
+
+            // The DUP'ed value is still on the stack. We must pop it.
+            // This was the source of the stack leak.
+            writeBytecodeChunk(chunk, OP_POP, line); // <<< ADDED: Pop the duplicated value after storing it.
 
             // 6. Jump back to the top of the loop to re-evaluate the condition
             writeBytecodeChunk(chunk, OP_JUMP, line);

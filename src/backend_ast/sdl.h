@@ -85,6 +85,8 @@ Value vm_builtin_fillrect(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_updatescreen(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_cleardevice(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_getmaxx(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_getmaxy(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_getticks(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_setrgbcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_inittextsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_quittextsystem(struct VM_s* vm, int arg_count, Value* args);

@@ -25,6 +25,6 @@ Token *number(Lexer *lexer);
 Token *identifier(Lexer *lexer);
 Token *stringLiteral(Lexer *lexer);
 Token *getNextToken(Lexer *lexer);
-void lexer_error(Lexer *lexer, const char *msg);
+void lexerError(Lexer *lexer, const char *msg);
 
 #endif // LEXER_H

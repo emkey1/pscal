@@ -1,5 +1,3 @@
-// src/backend_ast/builtin.c
-
 #include "backend_ast/builtin.h"
 #include "frontend/parser.h"
 #include "core/utils.h"
@@ -35,20 +33,24 @@ static int compareVmBuiltinMappings(const void *key, const void *element) {
 static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"abs", vm_builtin_abs},
     {"assign", vm_builtin_assign},
+    {"chr", vm_builtin_chr},
     {"cleardevice", vm_builtin_cleardevice},
     {"close", vm_builtin_close},
     {"closegraph", vm_builtin_closegraph},
-    {"cos", vm_builtin_cos}, // <<< ADD
+    {"copy", vm_builtin_copy},
+    {"cos", vm_builtin_cos},
     {"dec", vm_builtin_dec},
     {"delay", vm_builtin_delay},
     {"destroytexture", vm_builtin_destroytexture},
     {"dispose", vm_builtin_dispose},
     {"eof", vm_builtin_eof},
     {"exit", vm_builtin_exit},
-    {"exp", vm_builtin_exp}, // <<< ADD
+    {"exp", vm_builtin_exp},
     {"fillrect", vm_builtin_fillrect},
     {"getmaxx", vm_builtin_getmaxx},
+    {"getmaxy", vm_builtin_getmaxy},
     {"getmousestate", vm_builtin_getmousestate},
+    {"getticks", vm_builtin_getticks},
     {"gettextsize", vm_builtin_gettextsize},
     {"halt", vm_builtin_halt},
     {"high", vm_builtin_high},
@@ -58,29 +60,47 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"inittextsystem", vm_builtin_inittextsystem},
     {"inttostr", vm_builtin_inttostr},
     {"ioresult", vm_builtin_ioresult},
+    {"keypressed", vm_builtin_keypressed},
     {"length", vm_builtin_length},
-    {"ln", vm_builtin_ln}, // <<< ADD
+    {"ln", vm_builtin_ln},
     {"loadsound", vm_builtin_loadsound},
     {"low", vm_builtin_low},
     {"new", vm_builtin_new},
     {"ord", vm_builtin_ord},
+    {"paramcount", vm_builtin_paramcount},
+    {"paramstr", vm_builtin_paramstr},
     {"playsound", vm_builtin_playsound},
-    {"quittextsystem", vm_builtin_quittextsystem},
+    {"pos", vm_builtin_pos},
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
+    {"quittextsystem", vm_builtin_quittextsystem},
     {"random", vm_builtin_random},
     {"randomize", vm_builtin_randomize},
+    {"readkey", vm_builtin_readkey},
     {"readln", vm_builtin_readln},
+    {"realtostr", vm_builtin_realtostr},
     {"rendercopyrect", vm_builtin_rendercopyrect},
     {"rendertexttotexture", vm_builtin_rendertexttotexture},
     {"reset", vm_builtin_reset},
+    {"rewrite", vm_builtin_rewrite},
     {"round", vm_builtin_round},
+    {"screencols", vm_builtin_screencols},
+    {"screenrows", vm_builtin_screenrows},
     {"setalphablend", vm_builtin_setalphablend},
     {"setrgbcolor", vm_builtin_setrgbcolor},
-    {"sin", vm_builtin_sin}, // <<< ADD
-    {"sqrt", vm_builtin_sqrt}, // <<< ADD
-    {"tan", vm_builtin_tan}, // <<< ADD
-    {"trunc", vm_builtin_trunc}, // <<< ADD
+    {"sin", vm_builtin_sin},
+    {"sqr", vm_builtin_sqr},
+    {"sqrt", vm_builtin_sqrt},
+    {"succ", vm_builtin_succ},
+    {"tan", vm_builtin_tan},
+    {"textbackground", vm_builtin_textbackground},
+    {"textbackgrounde", vm_builtin_textbackgrounde},
+    {"textcolor", vm_builtin_textcolor},
+    {"textcolore", vm_builtin_textcolore},
+    {"trunc", vm_builtin_trunc},
     {"updatescreen", vm_builtin_updatescreen},
+    {"upcase", vm_builtin_upcase},
+    {"wherex", vm_builtin_wherex},
+    {"wherey", vm_builtin_wherey},
 };
 
 static const size_t num_vm_builtins = sizeof(vm_builtin_dispatch_table) / sizeof(vm_builtin_dispatch_table[0]);
@@ -97,6 +117,257 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
     );
     return found ? found->handler : NULL;
 }
+
+Value vm_builtin_sqr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "Sqr expects 1 argument.");
+        return makeInt(0);
+    }
+    Value arg = args[0];
+    if (arg.type == TYPE_INTEGER) {
+        return makeInt(arg.i_val * arg.i_val);
+    } else if (arg.type == TYPE_REAL) {
+        return makeReal(arg.r_val * arg.r_val);
+    }
+    runtimeError(vm, "Sqr expects an Integer or Real argument. Got %s.", varTypeToString(arg.type));
+    return makeInt(0);
+}
+
+Value vm_builtin_chr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "Chr expects 1 integer argument.");
+        return makeChar('\0');
+    }
+    return makeChar((char)args[0].i_val);
+}
+
+Value vm_builtin_succ(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "Succ expects 1 argument.");
+        return makeVoid();
+    }
+    Value arg = args[0];
+    switch(arg.type) {
+        case TYPE_INTEGER: return makeInt(arg.i_val + 1);
+        case TYPE_CHAR:    return makeChar(arg.c_val + 1);
+        case TYPE_BOOLEAN: return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
+        // Enums would require more type info
+        default:
+            runtimeError(vm, "Succ requires an ordinal type argument. Got %s.", varTypeToString(arg.type));
+            return makeVoid();
+    }
+}
+
+Value vm_builtin_upcase(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_CHAR) {
+        runtimeError(vm, "Upcase expects 1 char argument.");
+        return makeChar('\0');
+    }
+    return makeChar(toupper(args[0].c_val));
+}
+
+Value vm_builtin_pos(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+        runtimeError(vm, "Pos expects 2 string arguments.");
+        return makeInt(0);
+    }
+    const char* needle = AS_STRING(args[0]);
+    const char* haystack = AS_STRING(args[1]);
+    if (!needle || !haystack) return makeInt(0);
+
+    const char* found = strstr(haystack, needle);
+    if (!found) {
+        return makeInt(0);
+    }
+    return makeInt((long long)(found - haystack) + 1);
+}
+
+Value vm_builtin_copy(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3 || args[0].type != TYPE_STRING || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER) {
+        runtimeError(vm, "Copy expects (String, Integer, Integer).");
+        return makeString("");
+    }
+    const char* source = AS_STRING(args[0]);
+    long long start_idx = AS_INTEGER(args[1]);
+    long long count = AS_INTEGER(args[2]);
+
+    if (!source || start_idx < 1 || count < 0) return makeString("");
+
+    size_t source_len = strlen(source);
+    if ((size_t)start_idx > source_len) return makeString("");
+
+    size_t start_0based = start_idx - 1;
+    size_t len_to_copy = count;
+    if (start_0based + len_to_copy > source_len) {
+        len_to_copy = source_len - start_0based;
+    }
+
+    char* new_str = malloc(len_to_copy + 1);
+    if (!new_str) {
+        runtimeError(vm, "Malloc failed in copy().");
+        return makeString("");
+    }
+    strncpy(new_str, source + start_0based, len_to_copy);
+    new_str[len_to_copy] = '\0';
+    
+    Value result = makeString(new_str);
+    free(new_str);
+    return result;
+}
+
+Value vm_builtin_realtostr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_REAL) {
+        runtimeError(vm, "RealToStr expects 1 real argument.");
+        return makeString("");
+    }
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%f", AS_REAL(args[0]));
+    return makeString(buffer);
+}
+
+Value vm_builtin_paramcount(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "ParamCount expects 0 arguments.");
+        return makeInt(0);
+    }
+    return makeInt(gParamCount);
+}
+
+Value vm_builtin_paramstr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "ParamStr expects 1 integer argument.");
+        return makeString("");
+    }
+    long long idx = AS_INTEGER(args[0]);
+    if (idx < 0 || idx > gParamCount) {
+         return makeString("");
+    }
+    if (idx == 0) {
+        // ParamStr(0) returns the program name, which we don't store yet.
+        return makeString("");
+    }
+    return makeString(gParamValues[idx -1]);
+}
+
+Value vm_builtin_wherex(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "WhereX expects 0 arguments.");
+        return makeInt(1);
+    }
+    int r, c;
+    if (getCursorPosition(&r, &c) == 0) {
+        return makeInt(c);
+    }
+    return makeInt(1); // Default on error
+}
+
+Value vm_builtin_wherey(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "WhereY expects 0 arguments.");
+        return makeInt(1);
+    }
+    int r, c;
+    if (getCursorPosition(&r, &c) == 0) {
+        return makeInt(r);
+    }
+    return makeInt(1); // Default on error
+}
+
+Value vm_builtin_keypressed(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "KeyPressed expects 0 arguments.");
+        return makeBoolean(false);
+    }
+    // Logic from executeBuiltinKeyPressed
+    struct termios oldt, newt;
+    int bytes_available = 0;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    newt.c_cc[VMIN] = 0;
+    newt.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    return makeBoolean(bytes_available > 0);
+}
+
+Value vm_builtin_readkey(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "ReadKey expects 0 arguments.");
+        return makeChar('\0');
+    }
+    // Logic from executeBuiltinReadKey
+    struct termios oldt, newt;
+    char c;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    read(STDIN_FILENO, &c, 1);
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    return makeChar(c);
+}
+
+Value vm_builtin_textcolor(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "TextColor expects 1 integer argument.");
+        return makeVoid();
+    }
+    long long colorCode = AS_INTEGER(args[0]);
+    gCurrentTextColor = (int)(colorCode % 16);
+    gCurrentTextBold = (colorCode >= 8 && colorCode <= 15);
+    gCurrentColorIsExt = false;
+    return makeVoid();
+}
+
+Value vm_builtin_textbackground(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "TextBackground expects 1 integer argument.");
+        return makeVoid();
+    }
+    gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
+    gCurrentBgIsExt = false;
+    return makeVoid();
+}
+
+Value vm_builtin_textcolore(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "TextColorE expects 1 integer argument.");
+        return makeVoid();
+    }
+    gCurrentTextColor = (int)AS_INTEGER(args[0]);
+    gCurrentTextBold = false;
+    gCurrentColorIsExt = true;
+    return makeVoid();
+}
+
+Value vm_builtin_textbackgrounde(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "TextBackgroundE expects 1 integer argument.");
+        return makeVoid();
+    }
+    gCurrentTextBackground = (int)AS_INTEGER(args[0]);
+    gCurrentBgIsExt = true;
+    return makeVoid();
+}
+
+Value vm_builtin_rewrite(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Rewrite requires 1 argument."); return makeVoid(); }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Rewrite must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
+    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+
+    FILE* f = fopen(fileVarLValue->filename, "w");
+    if (f == NULL) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+    }
+    fileVarLValue->f_val = f;
+    return makeVoid();
+}
+
 
 Value vm_builtin_sqrt(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "sqrt expects 1 argument."); return makeReal(0.0); }
@@ -559,6 +830,31 @@ Value vm_builtin_random(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vm_builtin_screencols(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "ScreenCols expects 0 arguments.");
+        return makeInt(80);
+    }
+    int rows, cols;
+    if (getTerminalSize(&rows, &cols) == 0) {
+        return makeInt(cols);
+    }
+    return makeInt(80); // Default on error
+}
+
+Value vm_builtin_screenrows(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "ScreenRows expects 0 arguments.");
+        return makeInt(24);
+    }
+    int rows, cols;
+    if (getTerminalSize(&rows, &cols) == 0) {
+        return makeInt(rows);
+    }
+    return makeInt(24); // Default on error
+}
+
+
 // Comparison function for bsearch (case-insensitive)
 static int compareBuiltinMappings(const void *key, const void *element) {
     const char *target_name = (const char *)key;
@@ -849,7 +1145,6 @@ Value executeBuiltinCos(AST *node) {
     double x = (arg.type == TYPE_INTEGER ? arg.i_val : arg.r_val);
     return makeReal(cos(x));
 }
-
 Value executeBuiltinSin(AST *node) {
     if (node->child_count != 1) { fprintf(stderr, "Runtime error: sin expects 1 argument.\n"); EXIT_FAILURE_HANDLER(); }
     Value arg = eval(node->children[0]);
@@ -1434,7 +1729,7 @@ Value executeBuiltinReadKey(AST *node) {
     // It's crucial to restore settings *regardless* of read success/failure
     if (tcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
         perror("ReadKey CRITICAL ERROR: tcsetattr (restore) failed");
-        // Terminal state is likely messed up now. Might need to abort.
+        // Terminal state is likely messed up now!
         // EXIT_FAILURE_HANDLER(); // Consider uncommenting if this happens
     }
 
@@ -1905,6 +2200,8 @@ Value executeBuiltinDelay(AST *node) {
     }
 
     long long ms = msVal.i_val;
+    freeValue(&msVal); // Free evaluated value
+
     if (ms < 0) ms = 0; // Treat negative delay as 0
 
     useconds_t usec = (useconds_t)ms * 1000;
@@ -1979,7 +2276,7 @@ Value executeBuiltinMstreamSaveToFile(AST *node) {
     }
     Value msVal = eval(node->children[0]);
     if (msVal.type != TYPE_MEMORYSTREAM) {
-        fprintf(stderr, "Runtime error: first parameter of SaveToFile must be a Ttype MStream.\n");
+        fprintf(stderr, "Runtime error: first parameter of SaveToFile must be a Type MStream.\n");
         EXIT_FAILURE_HANDLER();
     }
     Value fileNameVal = eval(node->children[1]);
@@ -2600,7 +2897,7 @@ Value executeBuiltinParamcount(AST *node) {
     // No arguments expected.
     return makeInt(gParamCount);
 }
-        
+
 Value executeBuiltinParamstr(AST *node) {
     if (node->child_count != 1) {
         fprintf(stderr, "Runtime error: ParamStr expects 1 argument.\n");
@@ -2712,7 +3009,7 @@ Value executeBuiltinKeyPressed(AST *node) {
 
 int isBuiltin(const char *name) {
     if (!name) return 0;
-    
+
     // Use bsearch to check if the name exists in the dispatch table
     BuiltinMapping *found = (BuiltinMapping *)bsearch(
                                                       name,                               // Key (function name)
@@ -2721,7 +3018,7 @@ int isBuiltin(const char *name) {
                                                       sizeof(BuiltinMapping),             // Size of elements
                                                       compareBuiltinMappings              // Comparison function
                                                       );
-    
+
     // Additionally check for Write/Writeln/Read/Readln if they are handled
     // directly in the interpreter and not in the dispatch table.
     if (!found) {
@@ -2730,8 +3027,8 @@ int isBuiltin(const char *name) {
             return 1; // Treat these as built-in even if not dispatched
         }
     }
-    
-    
+
+
     return (found != NULL); // Return 1 if found, 0 otherwise
 }
 
