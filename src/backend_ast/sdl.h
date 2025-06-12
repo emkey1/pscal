@@ -98,6 +98,7 @@ Value vm_builtin_setalphablend(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_rendertexttotexture(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_fillcircle(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_graphloop(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_putpixel(struct VM_s* vm, int arg_count, Value* args);
 
 #ifdef __cplusplus
 }

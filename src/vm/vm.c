@@ -143,10 +143,12 @@ static Value pop(VM* vm) {
     }
     vm->stackTop--;
     Value result = *vm->stackTop; // Make a copy of the value to return.
+    
     // Overwrite the just-popped slot with a safe NIL value to invalidate it
     // and prevent dangling pointers if the returned copy's contents are freed.
     *vm->stackTop = makeNil();
-    return result;
+    
+    return result; // Return the copy, which the caller is now responsible for.
 }
 
 /*

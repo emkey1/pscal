@@ -2333,22 +2333,43 @@ Value vm_builtin_gettextsize(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_getmousestate(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) { runtimeError(vm, "GetMouseState expects 3 arguments."); return makeVoid(); }
+    if (arg_count != 3) {
+        runtimeError(vm, "GetMouseState expects 3 arguments.");
+        return makeVoid();
+    }
+
+    // Add safety checks for argument types and null pointers
+    if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER || args[2].type != TYPE_POINTER) {
+        runtimeError(vm, "GetMouseState requires VAR parameters, but non-pointer type was received.");
+        return makeVoid();
+    }
     
     Value* x_ptr = (Value*)args[0].ptr_val;
     Value* y_ptr = (Value*)args[1].ptr_val;
     Value* buttons_ptr = (Value*)args[2].ptr_val;
 
+    if (!x_ptr || !y_ptr || !buttons_ptr) {
+        runtimeError(vm, "GetMouseState received a NIL pointer for a VAR parameter.");
+        return makeVoid();
+    }
+
     int mse_x, mse_y;
     Uint32 sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+    
     int pscal_buttons = 0;
     if (sdl_buttons & SDL_BUTTON_LMASK) pscal_buttons |= 1;
     if (sdl_buttons & SDL_BUTTON_MMASK) pscal_buttons |= 2;
     if (sdl_buttons & SDL_BUTTON_RMASK) pscal_buttons |= 4;
 
-    freeValue(x_ptr); *x_ptr = makeInt(mse_x);
-    freeValue(y_ptr); *y_ptr = makeInt(mse_y);
-    freeValue(buttons_ptr); *buttons_ptr = makeInt(pscal_buttons);
+    // Safely assign the retrieved values
+    freeValue(x_ptr);
+    *x_ptr = makeInt(mse_x);
+
+    freeValue(y_ptr);
+    *y_ptr = makeInt(mse_y);
+
+    freeValue(buttons_ptr);
+    *buttons_ptr = makeInt(pscal_buttons);
 
     return makeVoid();
 }
@@ -2512,5 +2533,32 @@ Value vm_builtin_graphloop(VM* vm, int arg_count, Value* args) {
             SDL_Delay(1); // Prevent 100% CPU usage
         }
     }
+    return makeVoid();
+}
+
+Value vm_builtin_putpixel(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "PutPixel expects 2 arguments (X, Y).");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        runtimeError(vm, "Graphics mode not initialized before PutPixel.");
+        return makeVoid();
+    }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER) {
+        runtimeError(vm, "PutPixel coordinates must be integers.");
+        return makeVoid();
+    }
+
+    int x = (int)args[0].i_val;
+    int y = (int)args[1].i_val;
+
+    // Set the draw color from the global state
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    
+    // Draw the point
+    SDL_RenderDrawPoint(gSdlRenderer, x, y);
+    
     return makeVoid();
 }

@@ -73,6 +73,8 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"paramstr", vm_builtin_paramstr},
     {"playsound", vm_builtin_playsound},
     {"pos", vm_builtin_pos},
+    {"putpixel", vm_builtin_putpixel},
+    {"quitrequested", vm_builtin_quitrequested},
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
     {"quittextsystem", vm_builtin_quittextsystem},
     {"random", vm_builtin_random},
@@ -308,6 +310,16 @@ Value vm_builtin_readkey(VM* vm, int arg_count, Value* args) {
     read(STDIN_FILENO, &c, 1);
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     return makeChar(c);
+}
+
+Value vm_builtin_quitrequested(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "QuitRequested expects 0 arguments.");
+        // Return a default value in case of error
+        return makeBoolean(false);
+    }
+    // Access the global flag and return it as a Pscal boolean
+    return makeBoolean(break_requested != 0);
 }
 
 Value vm_builtin_textcolor(VM* vm, int arg_count, Value* args) {
