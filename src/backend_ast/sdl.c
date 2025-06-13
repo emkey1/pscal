@@ -2338,12 +2338,12 @@ Value vm_builtin_getmousestate(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    // Add safety checks for argument types and null pointers
+    // --- ADD SAFETY CHECKS ---
     if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER || args[2].type != TYPE_POINTER) {
-        runtimeError(vm, "GetMouseState requires VAR parameters, but non-pointer type was received.");
+        runtimeError(vm, "GetMouseState requires VAR parameters, but a non-pointer type was received.");
         return makeVoid();
     }
-    
+
     Value* x_ptr = (Value*)args[0].ptr_val;
     Value* y_ptr = (Value*)args[1].ptr_val;
     Value* buttons_ptr = (Value*)args[2].ptr_val;
@@ -2352,6 +2352,7 @@ Value vm_builtin_getmousestate(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GetMouseState received a NIL pointer for a VAR parameter.");
         return makeVoid();
     }
+    // --- END SAFETY CHECKS ---
 
     int mse_x, mse_y;
     Uint32 sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
