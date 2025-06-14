@@ -655,15 +655,30 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         name_for_table = mangled_name; // Use the new mangled name
     }
 
-    // --- ADDED: Check for duplicates before inserting ---
-    if (hashTableLookup(procedure_table, name_for_table)) {
+    Symbol* existing_sym = hashTableLookup(procedure_table, name_for_table);
+    if (existing_sym) {
+        // An entry from the interface already exists. Update it with the implementation's AST.
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG addProcedure] Routine '%s' already exists in procedure_table. Skipping duplicate add.\n", name_for_table);
+        fprintf(stderr, "[DEBUG addProcedure] Routine '%s' already exists. Updating definition.\n", name_for_table);
         #endif
-        free(name_for_table); // Free the name we constructed, since we're not using it.
-        return; // Exit the function to prevent insertion
+
+        // Free the old, incomplete AST from the interface declaration.
+        if (existing_sym->type_def) {
+            freeAST(existing_sym->type_def);
+        }
+
+        // Replace it with a deep copy of the new, complete AST from the implementation.
+        existing_sym->type_def = copyAST(proc_decl_ast_original);
+
+        // Also update the type in case it's a function with a forward declaration.
+        if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
+            existing_sym->type = proc_decl_ast_original->var_type;
+        }
+
+        // The update is complete. Free the constructed name and return.
+        free(name_for_table);
+        return;
     }
-    // --- END ADDED CODE ---
 
 
     // THIS IS THE CRITICAL CHANGE - ALLOCATE A Symbol, NOT A Procedure

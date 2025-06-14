@@ -3,8 +3,7 @@ unit CRT;
 interface
 
 const
-//  ESC = Chr(27);
-  ESC = #27; // Changed from Chr(27)
+  ESC = Chr(27);
   // Standard Turbo Pascal Color Constants
   Black        = 0;
   Blue         = 1;
