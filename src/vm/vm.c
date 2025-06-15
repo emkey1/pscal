@@ -1220,17 +1220,21 @@ comparison_error_label:
                 break;
             }
             case OP_JUMP_IF_FALSE: {
-                uint16_t offset_val = READ_SHORT(vm); // Use READ_SHORT(vm) to pass vm
+                uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
                 bool jump_condition_met = false;
+
                 if (IS_BOOLEAN(condition_value)) {
                     jump_condition_met = !AS_BOOLEAN(condition_value);
                 } else {
                     runtimeError(vm, "VM Error: IF condition must be a Boolean.");
-                    freeValue(&condition_value);
+                    freeValue(&condition_value); // Free the value on the error path
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                // freeValue(&condition_value); // Only if makeCopyOfValue was used on stack for the boolean. Primitives usually don't need this.
+
+                // Free the popped value now that we're done with it.
+                // This is safe for simple types (like booleans) and crucial for complex types.
+                freeValue(&condition_value);
 
                 if (jump_condition_met) {
                     vm->ip += (int16_t)offset_val;
