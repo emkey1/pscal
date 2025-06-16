@@ -1,3 +1,4 @@
+// src/compiler/bytecode.h
 //
 //  bytecode.h
 //  Pscal
@@ -29,7 +30,7 @@ typedef enum {
     OP_LESS,
     OP_LESS_EQUAL,
     OP_INT_DIV,
-    OP_MOD, 
+    OP_MOD,
     OP_AND,
     OP_OR,
     OP_SHL,           // Bit Shift Left
@@ -41,7 +42,7 @@ typedef enum {
     OP_DUP,           // Duplicate the top value on the stack
 
     // OP_DEFINE_GLOBAL: Operand1: name_const_idx, Operand2: type_name_const_idx (or 0), Operand3: var_type_enum
-    OP_DEFINE_GLOBAL, 
+    OP_DEFINE_GLOBAL,
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
     OP_GET_GLOBAL_ADDRESS,
@@ -52,6 +53,7 @@ typedef enum {
     
     OP_GET_FIELD_ADDRESS,
     OP_GET_ELEMENT_ADDRESS,
+    OP_GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
     OP_SET_INDIRECT,
     OP_GET_INDIRECT,
     

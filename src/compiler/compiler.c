@@ -1,4 +1,3 @@
-// src/compiler/compiler.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
@@ -422,17 +421,26 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ARRAY_ACCESS: {
-            // Get the L-Value of the base array (e.g., address of 'myArray' or value of 'p')
-            compileLValue(node->left, chunk, getLine(node->left));
+            // Check if the base is a string for special handling
+            if (node->left && node->left->var_type == TYPE_STRING) {
+                // For string[index], push the address of the string variable, then the index.
+                // The new OP_GET_CHAR_ADDRESS will then resolve to the char's address.
+                compileLValue(node->left, chunk, getLine(node->left)); // Push address of string variable (Value*)
+                compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the single index
+                writeBytecodeChunk(chunk, OP_GET_CHAR_ADDRESS, line); // New opcode for char address
+            } else {
+                // Standard array access: push array base address, then all indices.
+                compileLValue(node->left, chunk, getLine(node->left)); // Push address of array variable (Value*)
 
-            // Compile all index expressions. Their values will be on the stack.
-            for (int i = 0; i < node->child_count; i++) {
-                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                // Compile all index expressions. Their values will be on the stack.
+                for (int i = 0; i < node->child_count; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                
+                // Now, get the address of the specific element.
+                writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             }
-            
-            // Now, get the address of the specific element.
-            writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
-            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
         }
         case AST_DEREFERENCE: {
@@ -593,6 +601,21 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             
                             // <<<< FIX for Snippet 1 >>>>
                             writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+
+                        } else if (actual_type_def_node->type == AST_VARIABLE && strcasecmp(actual_type_def_node->token->value, "string") == 0 && actual_type_def_node->right) {
+                            // Fixed-length string declaration
+                            AST* lenNode = actual_type_def_node->right;
+                            Value len_val = evaluateCompileTimeValue(lenNode);
+                            if (len_val.type == TYPE_INTEGER && len_val.i_val >= 0 && len_val.i_val <= 255) {
+                                writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, len_val.i_val), getLine(varNameNode)); // Length
+                            } else {
+                                fprintf(stderr, "L%d: Compiler error: String length must be a constant integer between 0 and 255.\n", getLine(varNameNode));
+                                compiler_had_error = true;
+                                writeBytecodeChunk(chunk, 0, getLine(varNameNode)); // Default length 0 or error sentinel
+                            }
+                            freeValue(&len_val);
+                            // Element type name (empty string for basic string type)
+                            writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, ""), getLine(varNameNode));
 
                         } else {
                             // This handles simple types, records, and other non-array aliased types.
@@ -1206,6 +1229,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 #ifdef DEBUG
             fprintf(stderr, "[DEBUG SET] Initialized set_const_val at %p. size=%d, capacity=%d\n",
                     (void*)&set_const_val, set_const_val.set_val.set_size, set_const_val.max_length);
+            fflush(stderr);
 #endif
 
             for (int i = 0; i < node->child_count; i++) {
@@ -1242,7 +1266,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             // <<<< ADD THIS DEBUG PRINT >>>>
             fprintf(stderr, "[DEBUG SET] Finished building set. Final size=%d, capacity=%d. Adding to chunk.\n",
                     set_const_val.set_val.set_size, set_const_val.max_length);
-
+            fflush(stderr);
             // Pass the address of the fully constructed set Value.
             int constIndex = addConstantToChunk(chunk, &set_const_val);
             // Now that a deep copy is in the chunk, free our temporary set value.
@@ -1630,6 +1654,7 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
     #ifdef DEBUG
     fprintf(stderr, "[Compiler] Compiling IMPLEMENTATION section for unit '%s'.\n",
             unit_ast->token ? unit_ast->token->value : "?");
+    fflush(stderr);
     #endif
 
     // The implementation block is a compound node containing procedure/function declarations.

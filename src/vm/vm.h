@@ -77,5 +77,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 
 void runtimeError(VM* vm, const char* format, ...);
+void vm_dump_stack_info(VM* vm);
+void vm_dump_stack_info_detailed(VM* vm, const char* context_message);
 
 #endif // PSCAL_VM_H
