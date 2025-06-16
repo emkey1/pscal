@@ -864,11 +864,11 @@ void freeTypeTable(void) {
 void freeValue(Value *v) {
     if (!v) return;
 
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG] freeValue called for Value* at %p, type=%s\n",
-            (void*)v, varTypeToString(v->type));
-    fflush(stderr); // Ensure debug message is printed immediately
-#endif
+//#ifdef DEBUG
+//    fprintf(stderr, "[DEBUG] freeValue called for Value* at %p, type=%s\n",
+ //           (void*)v, varTypeToString(v->type));
+//    fflush(stderr); // Ensure debug message is printed immediately
+//#endif
     switch (v->type) {
         case TYPE_VOID:
         case TYPE_INTEGER:
@@ -881,25 +881,25 @@ void freeValue(Value *v) {
             // No heap data associated with the Value struct itself for these simple types.
             // For TYPE_POINTER, ptr_val itself is an address, not heap data owned by this Value.
             // The memory pointed *to* by a TYPE_POINTER is managed by new/dispose.
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG]   No heap data to free for type %s directly within Value struct.\n", varTypeToString(v->type));
-            fflush(stderr);
-#endif
+//#ifdef DEBUG
+ //           fprintf(stderr, "[DEBUG]   No heap data to free for type %s directly within Value struct.\n", varTypeToString(v->type));
+  //          fflush(stderr);
+//#endif
             break;
         case TYPE_ENUM:
             if (v->enum_val.enum_name) {
-#ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Attempting to free enum name '%s' at %p for Value* %p\n",
-                        v->enum_val.enum_name, (void*)v->enum_val.enum_name, (void*)v);
-                fflush(stderr);
-#endif
+//#ifdef DEBUG
+ //               fprintf(stderr, "[DEBUG]   Attempting to free enum name '%s' at %p for Value* %p\n",
+   //                     v->enum_val.enum_name, (void*)v->enum_val.enum_name, (void*)v);
+  //              fflush(stderr);
+//#endif
                 free(v->enum_val.enum_name);
                 v->enum_val.enum_name = NULL;
             } else {
-#ifdef DEBUG
-                fprintf(stderr, "[DEBUG]   Enum name pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
-                fflush(stderr);
-#endif
+//#ifdef DEBUG
+ //               fprintf(stderr, "[DEBUG]   Enum name pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
+  //              fflush(stderr);
+//#endif
             }
             break;
         case TYPE_POINTER:

@@ -465,7 +465,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
-        #ifdef DEBUG
+/*        #ifdef DEBUG
         if (dumpExec) {
             fprintf(stderr,"VM Stack: ");
             for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
@@ -476,7 +476,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             fprintf(stderr,"\n");
             disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
         }
-        #endif
+        #endif */
         //vm_dump_stack_info(vm); // Call new helper at the start of each instruction
 
         instruction_val = READ_BYTE();
@@ -1529,9 +1529,15 @@ comparison_error_label:
                 }
 
                 Value* args = vm->stackTop - arg_count;
-                const char* builtin_name = AS_STRING(vm->chunk->constants[name_const_idx]);
+                const char* builtin_name_original_case = AS_STRING(vm->chunk->constants[name_const_idx]);
                 
-                VmBuiltinFn handler = getVmBuiltinHandler(builtin_name);
+                // Convert builtin_name to lowercase for lookup in the dispatch table
+                char builtin_name_lower[MAX_ID_LENGTH + 1]; // Use a buffer large enough for builtin names
+                strncpy(builtin_name_lower, builtin_name_original_case, MAX_ID_LENGTH);
+                builtin_name_lower[MAX_ID_LENGTH] = '\0'; // Ensure null termination
+                toLowerString(builtin_name_lower); // toLowerString is in utils.h/c
+                
+                VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
                     Value result = handler(vm, arg_count, args);
@@ -1541,13 +1547,13 @@ comparison_error_label:
                     }
                     vm->stackTop -= arg_count;
 
-                    if (getBuiltinType(builtin_name) == BUILTIN_TYPE_FUNCTION) {
+                    if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
                         push(vm, result);
                     } else {
                         freeValue(&result);
                     }
                 } else {
-                    runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name);
+                    runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
                     for (int i = 0; i < arg_count; i++) {
                         freeValue(&args[i]);
                     }

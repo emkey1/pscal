@@ -99,6 +99,18 @@ Value vm_builtin_rendertexttotexture(struct VM_s* vm, int arg_count, Value* args
 Value vm_builtin_fillcircle(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_graphloop(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_putpixel(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_createtargettexture(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_createtexture(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_drawcircle(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_drawline(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_drawpolygon(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_drawrect(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_getpixelcolor(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_outtextxy(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_rendercopy(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_rendercopyex(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_setcolor(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_setrendertarget(struct VM_s* vm, int arg_count, Value* args);
 
 #ifdef __cplusplus
 }

@@ -1,3 +1,4 @@
+// src/backend_ast/builtin.c
 #include "backend_ast/builtin.h"
 #include "frontend/parser.h"
 #include "core/utils.h"
@@ -32,6 +33,8 @@ static int compareVmBuiltinMappings(const void *key, const void *element) {
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"abs", vm_builtin_abs},
+    {"api_receive", vm_builtin_api_receive},
+    {"api_send", vm_builtin_api_send},
     {"assign", vm_builtin_assign},
     {"chr", vm_builtin_chr},
     {"cleardevice", vm_builtin_cleardevice},
@@ -39,10 +42,16 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"closegraph", vm_builtin_closegraph},
     {"copy", vm_builtin_copy},
     {"cos", vm_builtin_cos},
+    {"createtargettexture", vm_builtin_createtargettexture}, // Moved
+    {"createtexture", vm_builtin_createtexture}, // Moved
     {"dec", vm_builtin_dec},
     {"delay", vm_builtin_delay},
     {"destroytexture", vm_builtin_destroytexture},
     {"dispose", vm_builtin_dispose},
+    {"drawcircle", vm_builtin_drawcircle}, // Moved
+    {"drawline", vm_builtin_drawline}, // Moved
+    {"drawpolygon", vm_builtin_drawpolygon}, // Moved
+    {"drawrect", vm_builtin_drawrect}, // Moved
     {"eof", vm_builtin_eof},
     {"exit", vm_builtin_exit},
     {"exp", vm_builtin_exp},
@@ -51,8 +60,9 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"getmaxx", vm_builtin_getmaxx},
     {"getmaxy", vm_builtin_getmaxy},
     {"getmousestate", vm_builtin_getmousestate},
-    {"getticks", vm_builtin_getticks},
+    {"getpixelcolor", vm_builtin_getpixelcolor}, // Moved
     {"gettextsize", vm_builtin_gettextsize},
+    {"getticks", vm_builtin_getticks},
     {"graphloop", vm_builtin_graphloop},
     {"halt", vm_builtin_halt},
     {"high", vm_builtin_high},
@@ -62,13 +72,20 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"inittextsystem", vm_builtin_inittextsystem},
     {"inttostr", vm_builtin_inttostr},
     {"ioresult", vm_builtin_ioresult},
+    {"issoundplaying", vm_builtin_issoundplaying}, // Moved
     {"keypressed", vm_builtin_keypressed},
     {"length", vm_builtin_length},
     {"ln", vm_builtin_ln},
+    {"loadimagetotexture", vm_builtin_loadimagetotexture}, // Moved
     {"loadsound", vm_builtin_loadsound},
     {"low", vm_builtin_low},
+    {"mstreamcreate", vm_builtin_mstreamcreate},
+    {"mstreamfree", vm_builtin_mstreamfree},
+    {"mstreamloadfromfile", vm_builtin_mstreamloadfromfile},
+    {"mstreamsavetofile", vm_builtin_mstreamsavetofile},
     {"new", vm_builtin_new},
     {"ord", vm_builtin_ord},
+    {"outtextxy", vm_builtin_outtextxy}, // Moved
     {"paramcount", vm_builtin_paramcount},
     {"paramstr", vm_builtin_paramstr},
     {"playsound", vm_builtin_playsound},
@@ -81,7 +98,10 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"randomize", vm_builtin_randomize},
     {"readkey", vm_builtin_readkey},
     {"readln", vm_builtin_readln},
+    {"real", vm_builtin_real},
     {"realtostr", vm_builtin_realtostr},
+    {"rendercopy", vm_builtin_rendercopy}, // Moved
+    {"rendercopyex", vm_builtin_rendercopyex}, // Moved
     {"rendercopyrect", vm_builtin_rendercopyrect},
     {"rendertexttotexture", vm_builtin_rendertexttotexture},
     {"reset", vm_builtin_reset},
@@ -90,6 +110,8 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"screencols", vm_builtin_screencols},
     {"screenrows", vm_builtin_screenrows},
     {"setalphablend", vm_builtin_setalphablend},
+    {"setcolor", vm_builtin_setcolor}, // Moved
+    {"setrendertarget", vm_builtin_setrendertarget}, // Moved
     {"setrgbcolor", vm_builtin_setrgbcolor},
     {"sin", vm_builtin_sin},
     {"sqr", vm_builtin_sqr},
@@ -101,8 +123,9 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"textcolor", vm_builtin_textcolor},
     {"textcolore", vm_builtin_textcolore},
     {"trunc", vm_builtin_trunc},
-    {"updatescreen", vm_builtin_updatescreen},
     {"upcase", vm_builtin_upcase},
+    {"updatescreen", vm_builtin_updatescreen},
+    {"waitkeyevent", vm_builtin_waitkeyevent}, // Moved
     {"wherex", vm_builtin_wherex},
     {"wherey", vm_builtin_wherey},
 };
@@ -868,6 +891,179 @@ Value vm_builtin_screenrows(VM* vm, int arg_count, Value* args) {
     return makeInt(24); // Default on error
 }
 
+// --- VM-NATIVE MEMORY STREAM FUNCTIONS ---
+Value vm_builtin_mstreamcreate(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "MStreamCreate expects no arguments.");
+        return makeVoid();
+    }
+    MStream *ms = malloc(sizeof(MStream));
+    if (!ms) {
+        runtimeError(vm, "Memory allocation error for MStream structure in MStreamCreate.");
+        return makeVoid();
+    }
+    ms->buffer = NULL;
+    ms->size = 0;
+    ms->capacity = 0;
+    return makeMStream(ms);
+}
+
+Value vm_builtin_mstreamloadfromfile(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "MStreamLoadFromFile expects 2 arguments (MStreamVar, Filename).");
+        return makeVoid();
+    }
+
+    // Argument 0 is pointer to the Value holding the MStream*
+    if (args[0].type != TYPE_POINTER) {
+        runtimeError(vm, "MStreamLoadFromFile: First argument must be a VAR MStream.");
+        return makeVoid();
+    }
+    Value* ms_value_ptr = (Value*)args[0].ptr_val;
+    if (!ms_value_ptr || ms_value_ptr->type != TYPE_MEMORYSTREAM) {
+        runtimeError(vm, "MStreamLoadFromFile: First argument is not a valid MStream variable.");
+        return makeVoid();
+    }
+    MStream* ms = ms_value_ptr->mstream;
+    if (!ms) {
+        runtimeError(vm, "MStreamLoadFromFile: MStream variable not initialized.");
+        return makeVoid();
+    }
+
+    // Argument 1 is the filename string
+    if (args[1].type != TYPE_STRING || args[1].s_val == NULL) {
+        runtimeError(vm, "MStreamLoadFromFile: Second argument must be a string filename.");
+        return makeVoid(); // No need to free args[1] here, vm stack manages
+    }
+    const char* filename = args[1].s_val;
+
+    FILE* f = fopen(filename, "rb");
+    if (!f) {
+        runtimeError(vm, "MStreamLoadFromFile: Cannot open file '%s' for reading.", filename);
+        return makeVoid();
+    }
+
+    fseek(f, 0, SEEK_END);
+    int size = (int)ftell(f);
+    rewind(f);
+
+    unsigned char* buffer = malloc(size + 1); // +1 for null terminator for safety
+    if (!buffer) {
+        fclose(f);
+        runtimeError(vm, "MStreamLoadFromFile: Memory allocation error for file buffer.");
+        return makeVoid();
+    }
+    fread(buffer, 1, size, f);
+    buffer[size] = '\0'; // Null-terminate the buffer
+    fclose(f);
+
+    // Free existing buffer in MStream if any
+    if (ms->buffer) free(ms->buffer);
+
+    ms->buffer = buffer;
+    ms->size = size;
+    ms->capacity = size + 1; // Capacity is now exactly what's needed + null
+
+    return makeVoid();
+}
+
+Value vm_builtin_mstreamsavetofile(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "MStreamSaveToFile expects 2 arguments (MStreamVar, Filename).");
+        return makeVoid();
+    }
+
+    // Argument 0 is pointer to the Value holding the MStream*
+    if (args[0].type != TYPE_POINTER) {
+        runtimeError(vm, "MStreamSaveToFile: First argument must be a VAR MStream.");
+        return makeVoid();
+    }
+    Value* ms_value_ptr = (Value*)args[0].ptr_val;
+    if (!ms_value_ptr || ms_value_ptr->type != TYPE_MEMORYSTREAM) {
+        runtimeError(vm, "MStreamSaveToFile: First argument is not a valid MStream variable.");
+        return makeVoid();
+    }
+    MStream* ms = ms_value_ptr->mstream;
+    if (!ms) {
+        runtimeError(vm, "MStreamSaveToFile: MStream variable not initialized.");
+        return makeVoid();
+    }
+
+    // Argument 1 is the filename string
+    if (args[1].type != TYPE_STRING || args[1].s_val == NULL) {
+        runtimeError(vm, "MStreamSaveToFile: Second argument must be a string filename.");
+        return makeVoid();
+    }
+    const char* filename = args[1].s_val;
+
+    FILE* f = fopen(filename, "wb");
+    if (!f) {
+        runtimeError(vm, "MStreamSaveToFile: Cannot open file '%s' for writing.", filename);
+        return makeVoid();
+    }
+
+    if (ms->buffer && ms->size > 0) {
+        fwrite(ms->buffer, 1, ms->size, f);
+    }
+    fclose(f);
+
+    return makeVoid();
+}
+
+Value vm_builtin_mstreamfree(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "MStreamFree expects 1 argument (MStreamVar).");
+        return makeVoid();
+    }
+
+    // Argument 0 is pointer to the Value holding the MStream*
+    if (args[0].type != TYPE_POINTER) {
+        runtimeError(vm, "MStreamFree: First argument must be a VAR MStream.");
+        return makeVoid();
+    }
+    Value* ms_value_ptr = (Value*)args[0].ptr_val;
+    if (!ms_value_ptr || ms_value_ptr->type != TYPE_MEMORYSTREAM) {
+        runtimeError(vm, "MStreamFree: First argument is not a valid MStream variable.");
+        return makeVoid();
+    }
+    MStream* ms = ms_value_ptr->mstream;
+
+    if (ms) { // Only free if MStream struct itself exists
+        if (ms->buffer) {
+            free(ms->buffer);
+            ms->buffer = NULL;
+        }
+        free(ms); // Free the MStream struct
+        ms_value_ptr->mstream = NULL; // Crucial: Set the MStream pointer in the variable's Value struct to NULL
+    }
+    // If ms was NULL, it's a no-op, which is fine.
+
+    return makeVoid();
+}
+
+Value vm_builtin_real(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "Real() expects 1 argument.");
+        return makeReal(0.0);
+    }
+    Value arg = args[0];
+    switch (arg.type) {
+        case TYPE_INTEGER:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_BOOLEAN:
+            return makeReal((double)arg.i_val);
+        case TYPE_CHAR:
+            return makeReal((double)arg.c_val);
+        case TYPE_REAL:
+            // Return a copy of the real value itself, it's already a real.
+            return makeReal(arg.r_val);
+        default:
+            runtimeError(vm, "Real() argument must be an Integer, Ordinal, or Real type. Got %s.", varTypeToString(arg.type));
+            return makeReal(0.0);
+    }
+}
+
 
 // Comparison function for bsearch (case-insensitive)
 static int compareBuiltinMappings(const void *key, const void *element) {
@@ -1349,7 +1545,7 @@ Value executeBuiltinClose(AST *node) { // Return Value
      // --- ADDED ---
      freeValue(&fileVal); // Free value returned by eval
 
-    return makeVoid(); // Return void value for procedures
+    return makeVoid(); // Return void value
 }
 
 Value executeBuiltinReset(AST *node) {
@@ -1643,7 +1839,7 @@ Value executeBuiltinSqr(AST *node) {
     }
 
     Value arg = eval(node->children[0]);
-    Value result = makeVoid(); // Default error
+    Value result = makeVoid(); // Declare result value
 
     if (arg.type == TYPE_INTEGER) {
         long long i_val = arg.i_val;
@@ -1751,7 +1947,8 @@ Value executeBuiltinReadKey(AST *node) {
     if (bytes_read < 0) {
         perror("ReadKey Error: read failed");
         return makeString("");
-    } else if (bytes_read == 0) {
+    }
+    else if (bytes_read == 0) {
         // Should not happen with VMIN=1, VTIME=0 unless EOF was reached *before* read
         fprintf(stderr, "Warning: ReadKey read 0 bytes (EOF?).\n");
         return makeString("");
@@ -2190,7 +2387,7 @@ Value executeBuiltinRandom(AST *node) {
             double r = (double)rand() / ((double)RAND_MAX + 1.0);
             return makeReal(n * r);
         } else {
-            fprintf(stderr, "Runtime error: Random argument must be integer or real.\n");
+            fprintf(stderr, "Runtime error: Random expects 0 or 1 argument.\n");
             EXIT_FAILURE_HANDLER();
         }
     } else {
@@ -2589,6 +2786,36 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->child_count = 0;
         Token* retTok = newToken(TOKEN_IDENTIFIER, "mstream", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_MEMORYSTREAM); setRight(dummy, retNode); dummy->var_type = TYPE_MEMORYSTREAM;
+    }
+    // ADDED: MStreamLoadFromFile, SaveToFile, Free need VAR parameter
+    else if (strcasecmp(name, "mstreamloadfromfile") == 0 ||
+             strcasecmp(name, "mstreamsavetofile") == 0 ||
+             strcasecmp(name, "mstreamfree") == 0) {
+        dummy->child_capacity = 2; // mstream, filename for load/save. Only mstream for free.
+        dummy->children = malloc(sizeof(AST*) * dummy->child_capacity);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, TYPE_MEMORYSTREAM);
+        p1->by_ref = 1; // THIS IS THE CRUCIAL CHANGE: MStream argument is VAR
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_ms_var", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1,v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1; // Only one arg for MStreamFree and it's always the first
+
+        if (strcasecmp(name, "mstreamloadfromfile") == 0 ||
+            strcasecmp(name, "mstreamsavetofile") == 0) {
+            // Add the filename argument for Load/Save
+            AST* p2 = newASTNode(AST_VAR_DECL, NULL);
+            setTypeAST(p2, TYPE_STRING);
+            Token* pn2 = newToken(TOKEN_IDENTIFIER, "_filename_str", 0, 0);
+            AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
+            addChild(p2,v2);
+            dummy->children[1] = p2;
+            dummy->child_count = 2;
+        }
+        dummy->var_type = TYPE_VOID; // These are procedures
     }
     // --- Ordinal functions (Low, High, Succ) ---
     // These are special as their return type matches their argument's base type,
@@ -3326,18 +3553,18 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     // List known PROCEDURES (no return value) - case-insensitive compare
     const char *procedures[] = {
          // Existing procedures
-         "writeln", "write", "readln", "read", "reset", "rewrite",
-         "close", "assign", "halt", "inc", "dec", "delay",
-         "randomize", "mstreamfree", "textcolore", "textbackgrounde",
-         "initsoundsystem", "playsound", "quitsoundsystem",
-         "issoundplaying", "rendercopyex", "initgraph", "closegraph",
-         "graphloop", "updatescreen", "waitkeyevent", "cleardevice",
-         "setcolor", "setrgbcolor", "putpixel", "drawline",
-         "drawrect", "fillrect", "drawcircle", "fillcircle",
-         "inittextsystem", "quittextsystem", "outtextxy", "getmousestate",
-         "destroytexture", "updatetexture", "rendercopy",
-         "rendercopyrect", "setrendertarget", "drawpolygon",
-         "getpixelcolor", "setalphablend"
+        "assign", "cleardevice", "close", "closegraph", "dec", "delay",
+        "destroytexture", "dispose", "drawcircle", "drawline",
+        "drawpolygon", "drawrect", "exit", "fillcircle", "fillrect",
+        "graphloop", "halt", "initgraph", "initsoundsystem",
+        "inittextsystem", "mstreamfree", "mstreamloadfromfile",
+        "mstreamsavetofile", "new", "outtextxy", "playsound",
+         "putpixel", "quitsoundsystem", "quittextsystem", "randomize",
+         "read", "readln", "reset", "rewrite", "setalphablend",
+         "setcolor", "setrendertarget", "setrgbcolor",
+         "textbackground", "textbackgrounde", "textcolor",
+         "textcolore", "updatescreen", "updatetexture", "waitkeyevent",
+         "write", "writeln",
      };
     
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
@@ -3568,7 +3795,7 @@ Value executeBuiltinDispose(AST *node) {
      freeValue(valueToDispose); // Free contents (strings, records, etc.)
      free(valueToDispose);      // Free the Value struct itself
 
-     // Set the original pointer variable back to nil
+     // Set the original pointer variable to nil
      pointerVarValuePtr->ptr_val = NULL;
 
      // --- Nullify Aliases using the stored integer address value ---
@@ -3638,6 +3865,7 @@ Value executeBuiltinRealToStr(AST *node) {
 // This function needs to be declared in builtin.h as well.
 int getBuiltinIDForCompiler(const char *name) {
     if (!name) return -1;
+
     // The builtin_dispatch_table is static const in this file.
     // num_builtins is also static const.
     for (size_t i = 0; i < num_builtins; i++) {
@@ -3724,7 +3952,6 @@ Value vm_builtin_delay(VM* vm, int arg_count, Value* args) {
     if (ms > 0) usleep((useconds_t)ms * 1000);
     return makeVoid();
 }
-
 
 // Looks up a built-in by name and returns its C function handler.
 BuiltinHandler getBuiltinHandler(const char *name) {

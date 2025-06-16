@@ -56,6 +56,7 @@ Value vm_builtin_textbackground(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_textcolore(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_textbackgrounde(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_quitrequested(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_real(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
 // --- VM-NATIVE FILE I/O ---
 Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);
@@ -65,6 +66,12 @@ Value vm_builtin_close(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_readln(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_eof(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_ioresult(struct VM_s* vm, int arg_count, Value* args);
+
+// --- VM-NATIVE MEMORY STREAM FUNCTIONS ---
+Value vm_builtin_mstreamcreate(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vm_builtin_mstreamloadfromfile(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vm_builtin_mstreamsavetofile(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vm_builtin_mstreamfree(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
 // --- VM-NATIVE MATHY STUFF ---
 Value vm_builtin_sqrt(struct VM_s* vm, int arg_count, Value* args);
@@ -176,6 +183,8 @@ Value executeBuiltinRenderCopyEx(AST *node);
 Value executeBuiltinLoadImageToTexture(AST *node);
 Value executeBuiltinRenderTextToTexture(AST *node);
 Value executeBuiltinSetAlphaBlend(AST *node);
+Value vm_builtin_loadimagetotexture(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_waitkeyevent(struct VM_s* vm, int arg_count, Value* args);
 
 // Prototypes from audio.c (via audio.h)
 Value executeBuiltinInitSoundSystem(AST *node);

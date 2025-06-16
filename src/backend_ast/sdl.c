@@ -2472,6 +2472,394 @@ Value vm_builtin_inittextsystem(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vm_builtin_createtargettexture(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "CreateTargetTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before CreateTargetTexture."); return makeInt(-1); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER) { runtimeError(vm, "CreateTargetTexture arguments must be integers."); return makeInt(-1); }
+
+    int width = (int)args[0].i_val;
+    int height = (int)args[1].i_val;
+
+    if (width <= 0 || height <= 0) { runtimeError(vm, "CreateTargetTexture dimensions must be positive."); return makeInt(-1); }
+
+    int textureID = findFreeTextureID();
+    if (textureID == -1) { runtimeError(vm, "Maximum number of textures reached."); return makeInt(-1); }
+
+    SDL_Texture* newTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
+    if (!newTexture) { runtimeError(vm, "SDL_CreateTexture (for target) failed: %s", SDL_GetError()); return makeInt(-1); }
+
+    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+
+    gSdlTextures[textureID] = newTexture;
+    gSdlTextureWidths[textureID] = width;
+    gSdlTextureHeights[textureID] = height;
+    return makeInt(textureID);
+}
+
+Value vm_builtin_createtexture(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "CreateTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before CreateTexture."); return makeInt(-1); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER) { runtimeError(vm, "CreateTexture arguments must be integers."); return makeInt(-1); }
+
+    int width = (int)args[0].i_val;
+    int height = (int)args[1].i_val;
+
+    if (width <= 0 || height <= 0) { runtimeError(vm, "CreateTexture dimensions must be positive."); return makeInt(-1); }
+
+    int textureID = findFreeTextureID();
+    if (textureID == -1) { runtimeError(vm, "Maximum number of textures reached."); return makeInt(-1); }
+
+    SDL_Texture* newTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+    if (!newTexture) { runtimeError(vm, "SDL_CreateTexture failed: %s", SDL_GetError()); return makeInt(-1); }
+
+    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+
+    gSdlTextures[textureID] = newTexture;
+    gSdlTextureWidths[textureID] = width;
+    gSdlTextureHeights[textureID] = height;
+    return makeInt(textureID);
+}
+
+Value vm_builtin_drawcircle(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) { runtimeError(vm, "DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawCircle."); return makeVoid(); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER) { runtimeError(vm, "DrawCircle arguments must be integers."); return makeVoid(); }
+
+    int centerX = (int)args[0].i_val;
+    int centerY = (int)args[1].i_val;
+    int radius = (int)args[2].i_val;
+
+    if (radius < 0) return makeVoid();
+
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+
+    int x = radius;
+    int y = 0;
+    int err = 0;
+
+    while (x >= y) {
+        SDL_RenderDrawPoint(gSdlRenderer, centerX + x, centerY + y);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX - x, centerY + y);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX + x, centerY - y);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX - x, centerY - y);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX + y, centerY + x);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX - y, centerY + x);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX + y, centerY - x);
+        SDL_RenderDrawPoint(gSdlRenderer, centerX - y, centerY - x);
+        if (err <= 0) {
+            y += 1;
+            err += 2*y + 1;
+        }
+        if (err > 0) {
+            x -= 1;
+            err -= 2*x + 1;
+        }
+    }
+    return makeVoid();
+}
+
+Value vm_builtin_drawline(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) { runtimeError(vm, "DrawLine expects 4 integer arguments (x1, y1, x2, y2)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawLine."); return makeVoid(); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER ||
+        args[2].type != TYPE_INTEGER || args[3].type != TYPE_INTEGER) { runtimeError(vm, "DrawLine arguments must be integers."); return makeVoid(); }
+
+    int x1 = (int)args[0].i_val;
+    int y1 = (int)args[1].i_val;
+    int x2 = (int)args[2].i_val;
+    int y2 = (int)args[3].i_val;
+
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    SDL_RenderDrawLine(gSdlRenderer, x1, y1, x2, y2);
+    return makeVoid();
+}
+
+Value vm_builtin_drawpolygon(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "DrawPolygon expects 2 arguments (PointsArray, NumPoints)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for DrawPolygon."); return makeVoid(); }
+
+    if (args[0].type != TYPE_ARRAY || args[1].type != TYPE_INTEGER) { runtimeError(vm, "DrawPolygon argument type mismatch."); return makeVoid(); }
+    if (args[0].element_type != TYPE_RECORD) { runtimeError(vm, "DrawPolygon Points argument must be an ARRAY OF PointRecord."); return makeVoid(); }
+
+    int numPoints = (int)args[1].i_val;
+    if (numPoints < 2) return makeVoid();
+
+    int total_elements_in_pascal_array = 1;
+    for(int i=0; i < args[0].dimensions; ++i) { total_elements_in_pascal_array *= (args[0].upper_bounds[i] - args[0].lower_bounds[i] + 1); }
+    if (numPoints > total_elements_in_pascal_array) { runtimeError(vm, "NumPoints exceeds actual size of Pscal PointsArray."); return makeVoid(); }
+
+    SDL_Point* sdlPoints = malloc(sizeof(SDL_Point) * (numPoints + 1));
+    if (!sdlPoints) { runtimeError(vm, "Memory allocation failed for SDL_Point array in DrawPolygon."); return makeVoid(); }
+
+    for (int i = 0; i < numPoints; i++) {
+        Value recordValue = args[0].array_val[i];
+        if (recordValue.type != TYPE_RECORD || !recordValue.record_val) { runtimeError(vm, "Element in PointsArray is not a valid PointRecord."); free(sdlPoints); return makeVoid(); }
+        FieldValue* fieldX = recordValue.record_val;
+        FieldValue* fieldY = fieldX ? fieldX->next : NULL;
+
+        if (fieldX && strcasecmp(fieldX->name, "x") == 0 && fieldX->value.type == TYPE_INTEGER &&
+            fieldY && strcasecmp(fieldY->name, "y") == 0 && fieldY->value.type == TYPE_INTEGER) {
+            sdlPoints[i].x = (int)fieldX->value.i_val;
+            sdlPoints[i].y = (int)fieldY->value.i_val;
+        } else { runtimeError(vm, "PointRecord does not have correct X,Y integer fields."); free(sdlPoints); return makeVoid(); }
+    }
+
+    if (numPoints > 1) { sdlPoints[numPoints] = sdlPoints[0]; } // Close the polygon
+
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    SDL_RenderDrawLines(gSdlRenderer, sdlPoints, numPoints > 1 ? numPoints + 1 : numPoints);
+
+    free(sdlPoints);
+    return makeVoid();
+}
+
+Value vm_builtin_drawrect(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) { runtimeError(vm, "DrawRect expects 4 integer arguments (X1, Y1, X2, Y2)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawRect."); return makeVoid(); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER ||
+        args[2].type != TYPE_INTEGER || args[3].type != TYPE_INTEGER) { runtimeError(vm, "DrawRect arguments must be integers."); return makeVoid(); }
+
+    int x1 = (int)args[0].i_val;
+    int y1 = (int)args[1].i_val;
+    int x2 = (int)args[2].i_val;
+    int y2 = (int)args[3].i_val;
+
+    SDL_Rect rect;
+    rect.x = (x1 < x2) ? x1 : x2;
+    rect.y = (y1 < y2) ? y1 : y2;
+    rect.w = abs(x2 - x1) + 1;
+    rect.h = abs(y2 - y1) + 1;
+
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+    SDL_RenderDrawRect(gSdlRenderer, &rect);
+    return makeVoid();
+}
+
+Value vm_builtin_getpixelcolor(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 6) { runtimeError(vm, "GetPixelColor expects 6 arguments (X, Y: Integer; var R, G, B, A: Byte)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for GetPixelColor."); return makeVoid(); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER) { runtimeError(vm, "GetPixelColor X,Y coordinates must be integers."); return makeVoid(); }
+
+    if (args[2].type != TYPE_POINTER || args[3].type != TYPE_POINTER ||
+        args[4].type != TYPE_POINTER || args[5].type != TYPE_POINTER) { runtimeError(vm, "GetPixelColor R,G,B,A parameters must be VAR Byte."); return makeVoid(); }
+
+    int x = (int)args[0].i_val;
+    int y = (int)args[1].i_val;
+
+    Value* r_ptr = (Value*)args[2].ptr_val;
+    Value* g_ptr = (Value*)args[3].ptr_val;
+    Value* b_ptr = (Value*)args[4].ptr_val;
+    Value* a_ptr = (Value*)args[5].ptr_val;
+
+    if (!r_ptr || !g_ptr || !b_ptr || !a_ptr) { runtimeError(vm, "Null pointer for RGBA output in GetPixelColor."); return makeVoid(); }
+
+    SDL_Rect pixelRect = {x, y, 1, 1};
+    Uint8 rgba[4] = {0, 0, 0, 0};
+
+    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surface) { runtimeError(vm, "Could not create surface for GetPixelColor: %s", SDL_GetError()); return makeVoid(); }
+
+    if (SDL_RenderReadPixels(gSdlRenderer, &pixelRect, surface->format->format, surface->pixels, surface->pitch) != 0) {
+        runtimeError(vm, "SDL_RenderReadPixels failed in GetPixelColor: %s", SDL_GetError());
+        SDL_FreeSurface(surface);
+        return makeVoid();
+    }
+
+    Uint32 pixelValue = ((Uint32*)surface->pixels)[0];
+    SDL_GetRGBA(pixelValue, surface->format, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
+
+    SDL_FreeSurface(surface);
+
+    freeValue(r_ptr); *r_ptr = makeByte(rgba[0]);
+    freeValue(g_ptr); *g_ptr = makeByte(rgba[1]);
+    freeValue(b_ptr); *b_ptr = makeByte(rgba[2]);
+    freeValue(a_ptr); *a_ptr = makeByte(rgba[3]);
+
+    return makeVoid();
+}
+
+Value vm_builtin_loadimagetotexture(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "LoadImageToTexture expects 1 argument (FilePath: String)."); return makeInt(-1); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before LoadImageToTexture."); return makeInt(-1); }
+
+    if (!gSdlImageInitialized) {
+        int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+        if (!(IMG_Init(imgFlags) & imgFlags)) { runtimeError(vm, "SDL_image initialization failed: %s", IMG_GetError()); return makeInt(-1); }
+        gSdlImageInitialized = true;
+    }
+
+    const char* filePath = args[0].s_val;
+    int free_slot = findFreeTextureID();
+    if (free_slot == -1) { runtimeError(vm, "No free texture slots available for LoadImageToTexture."); return makeInt(-1); }
+
+    SDL_Texture* newTexture = IMG_LoadTexture(gSdlRenderer, filePath);
+    if (!newTexture) { runtimeError(vm, "Failed to load image '%s' as texture: %s", filePath, IMG_GetError()); return makeInt(-1); }
+
+    gSdlTextures[free_slot] = newTexture;
+    SDL_QueryTexture(newTexture, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
+    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+    return makeInt(free_slot);
+}
+
+Value vm_builtin_outtextxy(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) { runtimeError(vm, "OutTextXY expects 3 arguments (X, Y: Integer; Text: String)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before OutTextXY."); return makeVoid(); }
+    if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "Text system or font not initialized before OutTextXY."); return makeVoid(); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) { runtimeError(vm, "OutTextXY argument type mismatch."); return makeVoid(); }
+
+    int x = (int)args[0].i_val;
+    int y = (int)args[1].i_val;
+    const char* text_to_render = args[2].s_val ? args[2].s_val : "";
+
+    SDL_Surface* textSurface = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
+    if (!textSurface) { runtimeError(vm, "TTF_RenderUTF8_Solid failed in OutTextXY: %s", TTF_GetError()); return makeVoid(); }
+
+    SDL_Texture* textTexture = SDL_CreateTextureFromSurface(gSdlRenderer, textSurface);
+    if (!textTexture) { SDL_FreeSurface(textSurface); runtimeError(vm, "SDL_CreateTextureFromSurface failed in OutTextXY: %s", SDL_GetError()); return makeVoid(); }
+
+    SDL_Rect destRect = { x, y, textSurface->w, textSurface->h };
+    SDL_RenderCopy(gSdlRenderer, textTexture, NULL, &destRect);
+
+    SDL_DestroyTexture(textTexture);
+    SDL_FreeSurface(textSurface);
+    return makeVoid();
+}
+
+Value vm_builtin_rendercopy(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "RenderCopy expects 1 argument (TextureID: Integer)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before RenderCopy."); return makeVoid(); }
+
+    int textureID = (int)args[0].i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) { runtimeError(vm, "RenderCopy called with invalid TextureID."); return makeVoid(); }
+
+    SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, NULL);
+    return makeVoid();
+}
+
+Value vm_builtin_rendercopyex(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 13) { runtimeError(vm, "RenderCopyEx expects 13 arguments."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before RenderCopyEx."); return makeVoid(); }
+
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER ||
+        args[3].type != TYPE_INTEGER || args[4].type != TYPE_INTEGER || args[5].type != TYPE_INTEGER ||
+        args[6].type != TYPE_INTEGER || args[7].type != TYPE_INTEGER || args[8].type != TYPE_INTEGER ||
+        args[9].type != TYPE_REAL || args[10].type != TYPE_INTEGER || args[11].type != TYPE_INTEGER ||
+        args[12].type != TYPE_INTEGER) {
+        runtimeError(vm, "RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).");
+        return makeVoid();
+    }
+
+    int textureID = (int)args[0].i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) { runtimeError(vm, "RenderCopyEx called with invalid or unloaded TextureID."); return makeVoid(); }
+    SDL_Texture* texture = gSdlTextures[textureID];
+
+    SDL_Rect srcRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
+    SDL_Rect* srcRectPtr = (srcRect.w > 0 && srcRect.h > 0) ? &srcRect : NULL;
+
+    SDL_Rect dstRect = { (int)args[5].i_val, (int)args[6].i_val, (int)args[7].i_val, (int)args[8].i_val };
+
+    double angle_degrees = args[9].r_val;
+
+    SDL_Point rotationCenter;
+    SDL_Point* centerPtr = NULL;
+    int pscalRotX = (int)args[10].i_val;
+    int pscalRotY = (int)args[11].i_val;
+
+    if (pscalRotX >= 0 && pscalRotY >= 0) {
+        rotationCenter.x = pscalRotX;
+        rotationCenter.y = pscalRotY;
+        centerPtr = &rotationCenter;
+    }
+
+    SDL_RendererFlip sdl_flip = SDL_FLIP_NONE;
+    int flipMode = (int)args[12].i_val;
+    if (flipMode == 1) sdl_flip = SDL_FLIP_HORIZONTAL;
+    else if (flipMode == 2) sdl_flip = SDL_FLIP_VERTICAL;
+    else if (flipMode == 3) sdl_flip = (SDL_RendererFlip)(SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL);
+
+    SDL_RenderCopyEx(gSdlRenderer, texture, srcRectPtr, &dstRect, angle_degrees, centerPtr, sdl_flip);
+    return makeVoid();
+}
+
+Value vm_builtin_setcolor(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "SetColor expects 1 argument (color index 0-255)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before SetColor."); return makeVoid(); }
+
+    long long colorCode = args[0].i_val;
+
+    if (colorCode >= 0 && colorCode <= 15) {
+         unsigned char intensity = (colorCode > 7) ? 255 : 192;
+         gSdlCurrentColor.r = (colorCode & 4) ? intensity : 0;
+         gSdlCurrentColor.g = (colorCode & 2) ? intensity : 0;
+         gSdlCurrentColor.b = (colorCode & 1) ? intensity : 0;
+         if (colorCode == 6) { gSdlCurrentColor.g = intensity / 2; }
+         if (colorCode == 7 || colorCode == 15) { gSdlCurrentColor.r=intensity; gSdlCurrentColor.g=intensity; gSdlCurrentColor.b=intensity; }
+         if (colorCode == 8) {gSdlCurrentColor.r = 128; gSdlCurrentColor.g = 128; gSdlCurrentColor.b = 128;}
+         if (colorCode == 0) {gSdlCurrentColor.r = 0; gSdlCurrentColor.g = 0; gSdlCurrentColor.b = 0;}
+    } else {
+         int c = (int)(colorCode % 256);
+         gSdlCurrentColor.r = (c * 3) % 256;
+         gSdlCurrentColor.g = (c * 5) % 256;
+         gSdlCurrentColor.b = (c * 7) % 256;
+    }
+    gSdlCurrentColor.a = 255;
+
+    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
+
+    return makeVoid();
+}
+
+Value vm_builtin_setrendertarget(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "SetRenderTarget expects 1 argument (TextureID: Integer)."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before SetRenderTarget."); return makeVoid(); }
+
+    int textureID = (int)args[0].i_val;
+
+    SDL_Texture* targetTexture = NULL;
+    if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID] != NULL) {
+        Uint32 format;
+        int access;
+        int w, h;
+        if (SDL_QueryTexture(gSdlTextures[textureID], &format, &access, &w, &h) == 0) {
+            if (access == SDL_TEXTUREACCESS_TARGET) {
+                targetTexture = gSdlTextures[textureID];
+            } else {
+                runtimeError(vm, "TextureID %d was not created with Target access. Cannot set as render target.", textureID);
+            }
+        } else { runtimeError(vm, "Could not query texture %d for SetRenderTarget: %s", textureID, SDL_GetError()); }
+    } else if (textureID >= MAX_SDL_TEXTURES || (textureID >=0 && gSdlTextures[textureID] == NULL)) {
+        runtimeError(vm, "Invalid TextureID %d passed to SetRenderTarget. Defaulting to screen.", textureID);
+    }
+
+    SDL_SetRenderTarget(gSdlRenderer, targetTexture);
+    return makeVoid();
+}
+
+Value vm_builtin_waitkeyevent(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
+
+    SDL_Event event;
+    int waiting = 1;
+    while (waiting) {
+        if (SDL_WaitEvent(&event)) {
+            if (event.type == SDL_QUIT) { waiting = 0; }
+            else if (event.type == SDL_KEYDOWN) { waiting = 0; }
+        } else {
+            runtimeError(vm, "SDL_WaitEvent failed: %s", SDL_GetError());
+            waiting = 0;
+        }
+    }
+    return makeVoid();
+}
+
 Value vm_builtin_fillcircle(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) {
         runtimeError(vm, "FillCircle expects 3 integer arguments (CenterX, CenterY, Radius).");

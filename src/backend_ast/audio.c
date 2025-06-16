@@ -400,3 +400,15 @@ Value vm_builtin_quitsoundsystem(VM* vm, int arg_count, Value* args) {
     else audioQuitSystem();
     return makeVoid();
 }
+
+Value vm_builtin_issoundplaying(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "IsSoundPlaying expects 0 arguments.");
+        return makeBoolean(false);
+    }
+    if (!gSoundSystemInitialized) {
+        return makeBoolean(false);
+    }
+    int playing = Mix_Playing(-1);
+    return makeBoolean(playing != 0);
+}
