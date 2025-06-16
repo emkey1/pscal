@@ -293,6 +293,27 @@ Value evaluateCompileTimeValue(AST* node) {
                             }
                         } else if (node->token->type == TOKEN_PLUS) {
                             result = makeInt(left_val.i_val + right_val.i_val);
+                        } else if (node->token->type == TOKEN_MINUS) { // ADDED
+                            result = makeInt(left_val.i_val - right_val.i_val);
+                        } else if (node->token->type == TOKEN_MUL) { // ADDED
+                            result = makeInt(left_val.i_val * right_val.i_val);
+                        } else if (node->token->type == TOKEN_MOD) { // ADDED
+                            if (right_val.i_val == 0) {
+                                fprintf(stderr, "Compile-time Error: Modulo by zero in constant expression.\n");
+                            } else {
+                                result = makeInt(left_val.i_val % right_val.i_val);
+                            }
+                        } else if (node->token->type == TOKEN_SLASH) { // ADDED: Handle float division for integers
+                            // This would implicitly promote to real result, might need separate handling or type promotion logic
+                            // For now, if integer / integer results in float constant, might be an issue.
+                            // Sticking to integer result as per current type system (if allowed implicitly)
+                            if (right_val.i_val == 0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                // If result should be float, makeReal((double)left_val.i_val / right_val.i_val);
+                                // For simplicity assuming integer result if both are integer
+                                result = makeInt(left_val.i_val / right_val.i_val);
+                            }
                         }
                     }
                 }

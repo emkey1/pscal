@@ -2522,6 +2522,55 @@ Value vm_builtin_createtexture(VM* vm, int arg_count, Value* args) {
     return makeInt(textureID);
 }
 
+// VM-native implementation for UpdateTexture
+Value vm_builtin_updatetexture(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "UpdateTexture expects 2 arguments (TextureID: Integer; PixelData: ARRAY OF Byte).");
+        return makeVoid();
+    }
+
+    Value textureID_val = args[0];
+    Value pixelData_val = args[1];
+
+    if (textureID_val.type != TYPE_INTEGER || pixelData_val.type != TYPE_ARRAY) {
+        runtimeError(vm, "UpdateTexture argument type mismatch. Expected (Integer, Array).");
+        return makeVoid();
+    }
+    if (pixelData_val.element_type != TYPE_BYTE) {
+        runtimeError(vm, "UpdateTexture PixelData must be an ARRAY OF Byte. Got array of %s.", varTypeToString(pixelData_val.element_type));
+        return makeVoid();
+    }
+
+    int textureID = (int)textureID_val.i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        runtimeError(vm, "UpdateTexture called with invalid TextureID %d.", textureID);
+        return makeVoid();
+    }
+
+    int texWidth = gSdlTextureWidths[textureID];
+    int texHeight = gSdlTextureHeights[textureID];
+    int bytesPerPixel = 4; // Assuming RGBA8888 as per CreateTexture/CreateTargetTexture
+    int expectedPscalArraySize = texWidth * texHeight * bytesPerPixel;
+    int pitch = texWidth * bytesPerPixel; // Pitch for SDL_UpdateTexture
+
+    unsigned char* c_pixel_buffer = (unsigned char*)malloc(expectedPscalArraySize);
+    if (!c_pixel_buffer) {
+        runtimeError(vm, "Failed to allocate C buffer for UpdateTexture.");
+        return makeVoid();
+    }
+
+    for (int i = 0; i < expectedPscalArraySize; ++i) {
+        c_pixel_buffer[i] = (unsigned char)pixelData_val.array_val[i].i_val;
+    }
+
+    if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
+        runtimeError(vm, "SDL_UpdateTexture failed: %s", SDL_GetError());
+    }
+
+    free(c_pixel_buffer);
+    return makeVoid();
+}
+
 Value vm_builtin_drawcircle(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawCircle."); return makeVoid(); }

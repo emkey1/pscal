@@ -57,6 +57,7 @@ Value vm_builtin_textcolore(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_textbackgrounde(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_quitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_real(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vm_builtin_updatetexture(struct VM_s* vm, int arg_count, Value* args); 
 
 // --- VM-NATIVE FILE I/O ---
 Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);
