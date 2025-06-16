@@ -482,48 +482,49 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         instruction_val = READ_BYTE();
         switch (instruction_val) {
             case OP_RETURN: {
-                if (vm->frameCount == 0) { // Handling return from top-level script
-                    if (vm->stackTop > vm->stack) { // If there's any value left on the stack (main's implicit return value)
+                if (vm->frameCount == 0) { // Top-level script return
+                    if (vm->stackTop > vm->stack) {
                         Value final_return_val = pop(vm);
-                        freeValue(&final_return_val); // Free it
+                        freeValue(&final_return_val);
                     }
-                    return INTERPRET_OK; // Program ends
+                    return INTERPRET_OK;
                 }
 
-                // 1. The compiler ensures the function's return value (or a dummy nil for procedures)
-                //    is at the top of the stack when OP_RETURN is executed.
-                //    We pop it off to save it temporarily.
+                // 1. Pop the return value (pushed by compiler: function result or procedure's NIL).
                 Value returnValue = pop(vm);
 
-                CallFrame* currentFrame = &vm->frames[vm->frameCount - 1]; // Get current call frame
+                CallFrame* currentFrame = &vm->frames[vm->frameCount - 1];
 
-                // 2. Iterate through and free the Value structs for all local variables and parameters
-                //    of the current function/procedure call.
-                //    'currentFrame->slots' points to the first parameter/local.
-                //    'vm->stackTop' (after the previous pop) now points just after the last local variable/parameter.
+                // 2. Clear the stack slots used by the function's parameters and local variables.
                 for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
-                    freeValue(slot); // This cleans up heap data owned by these Value structs.
+                    freeValue(slot);
                 }
                 
-                // 3. Reset the VM's instruction pointer (IP) to the caller's return address.
+                // 3. Restore VM state (IP and stackTop).
                 vm->ip = currentFrame->return_address;
-
-                // 4. Reset the VM's stack top (stackTop) to the beginning of the current frame's slots.
-                //    This effectively "removes" the entire call frame (parameters + locals) from the stack.
                 vm->stackTop = currentFrame->slots;
 
-                // 5. Decrement the call frame count.
+                // 4. Decrement frame count.
                 vm->frameCount--;
 
-                // 6. Push the saved 'returnValue' back onto the stack. This places it at the correct
-                //    position on the caller's stack (where the function's result is expected).
-                push(vm, returnValue);
+                // --- FIX START ---
+                // Conditionally push the return value only if it's a function.
+                // Procedures return a dummy NIL, which should NOT be left on the stack.
+                // Check the function_symbol in the current CallFrame.
+                if (currentFrame->function_symbol && currentFrame->function_symbol->type != TYPE_VOID) {
+                    push(vm, returnValue); // Push the actual function result.
+                } else {
+                    // This was a procedure return (function_symbol is NULL or its type is TYPE_VOID).
+                    // The dummy NIL (or any value) pushed by the compiler should not be pushed back
+                    // onto the stack, as the caller doesn't expect it. We've already popped it into `returnValue`.
+                    // So, we do nothing further with it besides freeing it in the next step.
+                }
+                // --- FIX END ---
 
-                // 7. Free the temporary copy of the 'returnValue'.
-                //    The Value pushed in step 6 is a new copy, so this temporary one is no longer needed.
+                // 5. Free the temporary copy of the return value.
                 freeValue(&returnValue);
 
-                break; // Exit the switch case
+                break;
             }
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT();
