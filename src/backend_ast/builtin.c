@@ -3531,17 +3531,13 @@ succ_overflow:
 BuiltinRoutineType getBuiltinType(const char *name) {
     // List known FUNCTIONS (return values) - case-insensitive compare
     const char *functions[] = {
-        "paramcount", "paramstr", "length", "pos", "ord", "chr",
-        "abs", "sqrt", "cos", "sin", "tan", "ln", "exp", "trunc",
-        "random", "wherex", "wherey", "ioresult", "eof", "copy",
-        "upcase", "low", "high", "succ", "pred", "round",
-        "inttostr", "api_send", "api_receive", "screencols", "screenrows",
-        "keypressed", "mstreamcreate", "quitrequested", "loadsound",
-        "real", "readkey", "getmaxx", "getmaxy", "getticks", "sqr",
-        "realtostr", "createtexture", "createtargettexture",
-        "loadimagetotexture", "rendertexttotexture"
-        
-         // Add others like TryStrToInt, TryStrToFloat if implemented
+        "abs", "api_receive", "chr", "copy", "cos", "createtargettexture", "createtexture",
+        "eof", "exp", "getmaxx", "getmaxy", "getmousestate", "getpixelcolor", "gettextsize",
+        "getticks", "high", "inttostr", "ioresult", "issoundplaying", "keypressed", "length",
+        "ln", "loadimagetotexture", "loadsound", "low", "mstreamcreate", "ord", "paramcount",
+        "paramstr", "pos", "random", "readkey", "real", "realtostr", "rendertexttotexture",
+        "round", "screencols", "screenrows", "sin", "sqr", "sqrt", "tan", "trunc", "upcase",
+        "wherex", "wherey", "updatetexture" // Added updatetexture, was missing
     };
     int num_functions = sizeof(functions) / sizeof(functions[0]);
     for (int i = 0; i < num_functions; i++) {
@@ -3552,20 +3548,18 @@ BuiltinRoutineType getBuiltinType(const char *name) {
 
     // List known PROCEDURES (no return value) - case-insensitive compare
     const char *procedures[] = {
-         // Existing procedures
-        "assign", "cleardevice", "close", "closegraph", "dec", "delay",
-        "destroytexture", "dispose", "drawcircle", "drawline",
-        "drawpolygon", "drawrect", "exit", "fillcircle", "fillrect",
-        "graphloop", "halt", "initgraph", "initsoundsystem",
-        "inittextsystem", "mstreamfree", "mstreamloadfromfile",
-        "mstreamsavetofile", "new", "outtextxy", "playsound",
-         "putpixel", "quitsoundsystem", "quittextsystem", "randomize",
-         "read", "readln", "reset", "rewrite", "setalphablend",
-         "setcolor", "setrendertarget", "setrgbcolor",
-         "textbackground", "textbackgrounde", "textcolor",
-         "textcolore", "updatescreen", "updatetexture", "waitkeyevent",
-         "write", "writeln",
-     };
+        "assign", "api_send", "beep", "blinktext", "boldtext", "cleardevice", "close", "closegraph",
+        "cursoroff", "cursoron", "dec", "delay", "delline", "destroytexture", "dispose",
+        "drawcircle", "drawline", "drawpolygon", "drawrect", "exit", "fillcircle", "fillrect",
+        "graphloop", "halt", "highvideo", "hidecursor", "inc", "initgraph", "initsoundsystem",
+        "inittextsystem", "insline", "invertcolors", "lowvideo", "mstreamfree",
+        "mstreamloadfromfile", "mstreamsavetofile", "new", "normalcolors", "outtextxy",
+        "playsound", "putpixel", "quitsoundsystem", "quittextsystem", "randomize",
+        "read", "readln", "rendercopy", "rendercopyex", "rendercopyrect", "reset", "restorecursor",
+        "rewrite", "savecursor", "setalphablend", "setcolor", "setrendertarget", "setrgbcolor",
+        "showcursor", "succ", "textbackground", "textbackgrounde", "textcolor", "textcolore", // Re-added if not explicitly Pascal-defined
+        "underlinetext", "updatescreen", "waitkeyevent", "window"
+    };
     
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
     for (int i = 0; i < num_procedures; i++) {

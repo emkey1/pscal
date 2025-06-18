@@ -134,25 +134,26 @@ Symbol* hashTableLookup(HashTable* table, const char* name) {
     for(int i = 0; lower_name[i]; i++) lower_name[i] = tolower(lower_name[i]);
 
     int index = hashFunctionName(lower_name);
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG hashTableLookup] Looking for '%s' (lc: '%s') in bucket %d\n", name, lower_name, index); // DIAGNOSTIC
-#endif
+
+    // --- DIAGNOSTIC PRINT 8: At start of lookup ---
+    DEBUG_PRINT("[DIAG HT_LOOKUP] Looking for '%s' (key: '%s') in table %p. Bucket %d.\n", name, lower_name, (void*)table, index);
+    fflush(stderr);
+
     Symbol* current = table->buckets[index];
     while (current != NULL) {
-#ifdef DEBUG
-        fprintf(stderr, "[DEBUG hashTableLookup]   Checking against: '%s'\n", current->name); // DIAGNOSTIC
-#endif
+        // --- DIAGNOSTIC PRINT 9: Checking each entry in bucket ---
+        DEBUG_PRINT("[DIAG HT_LOOKUP]   Checking bucket %d entry: '%s' (addr: %p). Matching: %d.\n", index, current->name, (void*)current, (current->name && strcmp(current->name, lower_name) == 0));
+        fflush(stderr);
+
         if (current->name && strcmp(current->name, lower_name) == 0) {
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG hashTableLookup]   Found '%s'\n", name); // DIAGNOSTIC
-#endif
+            DEBUG_PRINT("[DIAG HT_LOOKUP] Found '%s'. Returning symbol %p.\n", name, (void*)current);
+            fflush(stderr);
             return current;
         }
         current = current->next;
     }
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG hashTableLookup]   '%s' NOT found in bucket %d\n", name, index); // DIAGNOSTIC
-#endif
+    DEBUG_PRINT("[DIAG HT_LOOKUP] '%s' NOT found in bucket %d.\n", name, index);
+    fflush(stderr);
     return NULL;
 }
 

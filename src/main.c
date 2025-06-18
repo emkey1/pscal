@@ -109,54 +109,57 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     // This populates the procedure_table with dummy AST nodes representing builtins.
     // The registerBuiltinFunction should correctly configure these dummy nodes
     // based on the builtin's parameters and return type.
-    registerBuiltinFunction("cos",       AST_FUNCTION_DECL, NULL); // Assumes AST_FUNCTION_DECL and AST_PROCEDURE_DECL are defined in ast.h
-    registerBuiltinFunction("sin",       AST_FUNCTION_DECL, NULL); // Assumes registerBuiltinFunction is defined in builtin.h/builtin.c
+    registerBuiltinFunction("cos",       AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("sin",       AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tan",       AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("sqrt",      AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ln",        AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("exp",       AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("abs",       AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("assign",    AST_PROCEDURE_DECL, NULL); // File I/O: Assigns a filename to a file variable.
-    registerBuiltinFunction("pos",       AST_FUNCTION_DECL, NULL); // String: Finds substring position.
-    registerBuiltinFunction("close",     AST_PROCEDURE_DECL, NULL); // File I/O: Closes a file.
-    registerBuiltinFunction("copy",      AST_FUNCTION_DECL, NULL); // String: Copies substring.
-    registerBuiltinFunction("halt",      AST_PROCEDURE_DECL, NULL); // System: Exits program.
-    registerBuiltinFunction("inc",       AST_PROCEDURE_DECL, NULL); // System: Increments ordinal variable.
-    registerBuiltinFunction("ioresult",  AST_FUNCTION_DECL, NULL); // File I/O: Returns status of last I/O op.
-    registerBuiltinFunction("length",    AST_FUNCTION_DECL, NULL); // String: Returns length of string.
-    registerBuiltinFunction("randomize", AST_PROCEDURE_DECL, NULL); // System: Seeds random number generator.
-    registerBuiltinFunction("random",    AST_FUNCTION_DECL, NULL); // System: Generates random number.
-    registerBuiltinFunction("reset",     AST_PROCEDURE_DECL, NULL); // File I/O: Opens file for reading.
-    registerBuiltinFunction("rewrite",   AST_PROCEDURE_DECL, NULL); // File I/O: Opens file for writing (truncates).
-    registerBuiltinFunction("trunc",       AST_FUNCTION_DECL, NULL); // Math: Truncates Real to Integer.
-    registerBuiltinFunction("chr",       AST_FUNCTION_DECL, NULL); // Ordinal: Converts integer ordinal to char.
-    registerBuiltinFunction("ord",       AST_FUNCTION_DECL, NULL); // Ordinal: Returns ordinal value.
-    registerBuiltinFunction("upcase",    AST_FUNCTION_DECL, NULL); // String: Converts character to uppercase.
-    registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL); // Memory Stream: Creates a memory stream object.
-    registerBuiltinFunction("mstreamloadfromfile", AST_PROCEDURE_DECL, NULL); // Memory Stream: Loads from file into stream.
-    registerBuiltinFunction("mstreamsavetofile", AST_PROCEDURE_DECL, NULL); // Memory Stream: Saves stream to file.
-    registerBuiltinFunction("mstreamfree", AST_PROCEDURE_DECL, NULL); // Memory Stream: Frees a memory stream object.
-    registerBuiltinFunction("api_send",  AST_FUNCTION_DECL, NULL); // Networking: Sends API request.
-    registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL); // Networking: Receives API response.
-    registerBuiltinFunction("paramcount", AST_FUNCTION_DECL, NULL); // CmdLine: Returns number of args.
-    registerBuiltinFunction("paramstr",  AST_FUNCTION_DECL, NULL); // CmdLine: Returns a specific arg string.
-    registerBuiltinFunction("readkey",   AST_FUNCTION_DECL, NULL); // Terminal IO: Reads a single key press.
-    registerBuiltinFunction("delay",     AST_PROCEDURE_DECL, NULL); // System: Pauses execution.
-    registerBuiltinFunction("keypressed", AST_FUNCTION_DECL, NULL); // Terminal IO: Checks if a key is in buffer.
-    registerBuiltinFunction("low",       AST_FUNCTION_DECL, NULL); // Ordinal: Returns lowest value of a type.
-    registerBuiltinFunction("high",      AST_FUNCTION_DECL, NULL); // Ordinal: Returns highest value of a type.
-    registerBuiltinFunction("succ",      AST_FUNCTION_DECL, NULL); // Ordinal: Returns successor of ordinal value.
+    registerBuiltinFunction("assign",    AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("pos",       AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("close",     AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("copy",      AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("halt",      AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("inc",       AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ioresult",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("length",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("randomize", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("random",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("reset",     AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("rewrite",   AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("trunc",     AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("chr",       AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ord",       AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("upcase",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mstreamloadfromfile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("mstreamsavetofile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("mstreamfree", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("api_send",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("paramcount", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("paramstr",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("readkey",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("delay",     AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("keypressed", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("low",       AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("high",      AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("succ",      AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("sqr",       AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("inttostr",  AST_FUNCTION_DECL, NULL); // Conversion: Integer to String.
-    registerBuiltinFunction("screencols", AST_FUNCTION_DECL, NULL); // Terminal IO: Get terminal width.
-    registerBuiltinFunction("screenrows", AST_FUNCTION_DECL, NULL); // Terminal IO: Get terminal height.
-    registerBuiltinFunction("dec",       AST_PROCEDURE_DECL, NULL); // System: Decrements ordinal variable.
-    registerBuiltinFunction("textcolore", AST_PROCEDURE_DECL, NULL); // Terminal IO: Set foreground color (256).
-    registerBuiltinFunction("textbackgrounde", AST_PROCEDURE_DECL, NULL); // Terminal IO: Set background color (256).
-    registerBuiltinFunction("new",       AST_PROCEDURE_DECL, NULL); // Memory: Allocates memory for pointer.
-    registerBuiltinFunction("dispose",   AST_PROCEDURE_DECL, NULL); // Memory: Frees memory for pointer.
+    registerBuiltinFunction("inttostr",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("screencols", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("screenrows", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dec",       AST_PROCEDURE_DECL, NULL);
+    // REMOVE these conflicting TextColor/TextBackground registrations.
+    // registerBuiltinFunction("textcolor", AST_PROCEDURE_DECL, NULL); // REMOVED
+    // registerBuiltinFunction("textbackground", AST_PROCEDURE_DECL, NULL); // REMOVED
+    registerBuiltinFunction("textcolore", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("textbackgrounde", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("new",       AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dispose",   AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("round",     AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("real",      AST_FUNCTION_DECL, NULL);  // Convert value to type real
+    registerBuiltinFunction("real",      AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
 
     // SDL Graphics built-ins

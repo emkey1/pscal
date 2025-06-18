@@ -722,10 +722,23 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     sym->is_alias = false;
     sym->is_local_var = false;
     sym->next = NULL;
-    sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
+    // Initialize is_defined to false for declarations; will be set to true when implementation is compiled.
+    // Built-ins registered in main.c will have this implicitly set later or handled separately if needed.
+    sym->is_defined = false; // For built-ins and user procedures parsed with body, it is defined.
     sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
-    sym->arity = 0;             // Will be updated later for user functions if needed.
+    // Calculate arity (number of parameters) from the AST node's children (parameter declarations).
+    // Each direct child of proc_decl_ast_original should be an AST_VAR_DECL representing a parameter group.
+    sym->arity = 0;
+    if (proc_decl_ast_original->children) {
+        for (int i = 0; i < proc_decl_ast_original->child_count; i++) {
+            if (proc_decl_ast_original->children[i] && proc_decl_ast_original->children[i]->type == AST_VAR_DECL) {
+                sym->arity += proc_decl_ast_original->children[i]->child_count;
+            }
+        }
+    }
     sym->locals_count = 0;      // Will be updated later.
+    sym->patches = NULL;        // Initialize patches to NULL
+    sym->patch_count = 0;       // Initialize patch_count to 0
 
     if (procedure_table) {
         hashTableInsert(procedure_table, sym);

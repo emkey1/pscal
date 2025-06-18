@@ -693,15 +693,35 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     FunctionCompilerState fc;
     initFunctionCompiler(&fc);
     current_function_compiler = &fc;
-    
-    const char* func_name = func_decl_node->token->value;
-    fc.name = func_name;
-    
-    int func_bytecode_start_address = chunk->count;
 
-    Symbol* proc_symbol = lookupSymbolIn(procedure_table, func_name);
+    const char* func_name = func_decl_node->token->value;
+    int func_bytecode_start_address = chunk->count;
+    
+    // Determine the name used for lookup (qualified or unqualified)
+    char lookup_name_buffer[MAX_SYMBOL_LENGTH * 2 + 2];
+    const char* name_to_lookup_in_table = func_name;
+    if (current_function_compiler && current_function_compiler->name) {
+        char unit_name_lower[MAX_SYMBOL_LENGTH];
+        strncpy(unit_name_lower, current_function_compiler->name, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
+        toLowerString(unit_name_lower);
+        char func_name_lower_for_lookup[MAX_SYMBOL_LENGTH];
+        strncpy(func_name_lower_for_lookup, func_name, sizeof(func_name_lower_for_lookup)-1); func_name_lower_for_lookup[sizeof(func_name_lower_for_lookup)-1] = '\0';
+        toLowerString(func_name_lower_for_lookup);
+        snprintf(lookup_name_buffer, sizeof(lookup_name_buffer), "%s.%s", unit_name_lower, func_name_lower_for_lookup);
+        name_to_lookup_in_table = lookup_name_buffer;
+    }
+
+    Symbol* proc_symbol = lookupSymbolIn(procedure_table, name_to_lookup_in_table);
+
+    // --- DIAGNOSTIC PRINT 1: After symbol lookup ---
+    DEBUG_PRINT("[DIAG CFN] %s('%s', L%d) - Symbol Lookup Result: %p. Patches: %p (Count: %d)\n",
+                __func__, func_name, line, (void*)proc_symbol,
+                (proc_symbol ? (void*)proc_symbol->patches : NULL),
+                (proc_symbol ? proc_symbol->patch_count : -1));
+    fflush(stderr);
+
     if (!proc_symbol) {
-        fprintf(stderr, "L%d: Compiler internal error: Symbol '%s' not found in procedure table during definition compilation.\n", line, func_name);
+        fprintf(stderr, "L%d: Compiler internal error: Symbol '%s' not found in procedure table during definition compilation (tried: '%s').\n", line, func_name, name_to_lookup_in_table);
         compiler_had_error = true;
         current_function_compiler = NULL;
         return;
@@ -710,20 +730,39 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
 
+    // --- DIAGNOSTIC PRINT 2: Before patching loop ---
+    DEBUG_PRINT("[DIAG CFN] %s('%s', L%d) - Before patch loop. Target addr: %d. Patches: %p (Count: %d)\n",
+                __func__, func_name, line, func_bytecode_start_address,
+                (void*)proc_symbol->patches, proc_symbol->patch_count);
+    fflush(stderr);
+
     // --- Backpatching: Patch all forward references to this function ---
     for (int i = 0; i < proc_symbol->patch_count; ++i) {
         int patch_offset = proc_symbol->patches[i];
-        // As per the other LLM's explicit instruction, patching with the absolute address
-        // (Note: This is typically a relative offset in bytecode, but following instruction.)
-        patchShort(chunk, patch_offset, (uint16_t)func_bytecode_start_address);
+        uint16_t relative_jump_offset = (uint16_t)(func_bytecode_start_address - (patch_offset + 2));
+        patchShort(chunk, patch_offset, relative_jump_offset);
+        // --- DIAGNOSTIC PRINT 3: Inside patching loop ---
+        DEBUG_PRINT("[DIAG CFN] %s('%s', L%d) - Patched offset %d with target %d (relative %d).\n",
+                    __func__, func_name, line, patch_offset, func_bytecode_start_address, relative_jump_offset);
+        fflush(stderr);
     }
-    // Free the patches array after all jumps are patched.
+    
+    // --- DIAGNOSTIC PRINT 4: Before freeing patches ---
+    DEBUG_PRINT("[DIAG CFN] %s('%s', L%d) - Before freeing patches. Patches: %p (Count: %d)\n",
+                __func__, func_name, line, (void*)proc_symbol->patches, proc_symbol->patch_count);
+    fflush(stderr);
+
     if (proc_symbol->patches) {
-        free(proc_symbol->patches);
+        free(proc_symbol->patches); // This is compiler.c:753 (or similar line number)
         proc_symbol->patches = NULL;
     }
     proc_symbol->patch_count = 0;
     
+    // --- DIAGNOSTIC PRINT 5: After freeing patches ---
+    DEBUG_PRINT("[DIAG CFN] %s('%s', L%d) - After freeing patches. Patches: %p (Count: %d)\n",
+                __func__, func_name, line, (void*)proc_symbol->patches, proc_symbol->patch_count);
+    fflush(stderr);
+
     int return_value_slot = -1;
 
     // Step 1: Add parameters to the local scope FIRST. They will occupy slots 0, 1, ...
@@ -802,7 +841,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
-        case AST_BREAK: { // <<< NEW CASE
+        case AST_BREAK: {
             addBreakJump(chunk, line);
             break;
         }
@@ -815,27 +854,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, (uint8_t)argCount, line);
             break;
         }
+        case AST_WRITE: {
+            int argCount = node->child_count;
+            for (int i = 0; i < argCount; i++) {
+                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+            }
+            writeBytecodeChunk(chunk, OP_WRITE, line);
+            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
+            break;
+        }
         case AST_WHILE: {
-            startLoop(chunk->count); // <<< MODIFIED: Mark loop start
-
+            startLoop(chunk->count);
             int loopStart = chunk->count;
-
             compileRValue(node->left, chunk, line);
-
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
             int exitJumpOffset = chunk->count;
             emitShort(chunk, 0xFFFF, line);
-
             compileStatement(node->right, chunk, getLine(node->right));
-
             writeBytecodeChunk(chunk, OP_JUMP, line);
             int backwardJumpOffset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backwardJumpOffset, line);
-
             patchShort(chunk, exitJumpOffset, (uint16_t)(chunk->count - (exitJumpOffset + 2)));
-            
-            patchBreaks(chunk); // <<< MODIFIED: Patch any breaks inside the loop
-            endLoop(); // <<< MODIFIED: End loop context
+            patchBreaks(chunk);
+            endLoop();
             break;
         }
         case AST_CASE: {
@@ -882,18 +923,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     if (label->type == AST_SUBRANGE) {
                         // For ranges like 'A'..'C', check if value is within bounds.
                         // Stack: [case_val, case_val]
-                        compileRValue(label->left, chunk, getLine(label)); // Stack: [case_val, case_val, 'A']
-                        writeBytecodeChunk(chunk, OP_SWAP, line);           // Stack: [case_val, 'A', case_val]
-                        writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);  // Stack: [case_val, true/false]
+                        compileRValue(label->left, chunk, getLine(label));
+                        writeBytecodeChunk(chunk, OP_SWAP, line);
+                        writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);
                         
                         int jump_if_lower = chunk->count;
                         writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
                         
                         // If we are here, it means case_val >= 'A' was true.
-                        writeBytecodeChunk(chunk, OP_DUP, line); // Stack: [case_val, case_val]
-                        compileRValue(label->right, chunk, getLine(label)); // Stack: [case_val, case_val, 'C']
-                        writeBytecodeChunk(chunk, OP_SWAP, line);            // Stack: [case_val, 'C', case_val]
-                        writeBytecodeChunk(chunk, OP_LESS_EQUAL, line);   // Stack: [case_val, true/false]
+                        writeBytecodeChunk(chunk, OP_DUP, line);
+                        compileRValue(label->right, chunk, getLine(label));
+                        writeBytecodeChunk(chunk, OP_SWAP, line);
+                        writeBytecodeChunk(chunk, OP_LESS_EQUAL, line);
                         
                         patchShort(chunk, jump_if_lower, chunk->count - (jump_if_lower + 2));
 
@@ -940,7 +981,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (else_jump != -1) {
                     patchShort(chunk, else_jump, chunk->count - (else_jump + 2));
                 }
-                 writeBytecodeChunk(chunk, OP_POP, line); // Pop the case value before else.
+                writeBytecodeChunk(chunk, OP_POP, line); // Pop the case value before else.
                 compileStatement(node->extra, chunk, getLine(node->extra));
             } else {
                 if (else_jump != -1) {
@@ -959,7 +1000,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_REPEAT: {
-            startLoop(chunk->count); // <<< MODIFIED
+            startLoop(chunk->count);
             int loopStart = chunk->count;
 
             if (node->left) {
@@ -978,42 +1019,42 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
 
-            patchBreaks(chunk); // <<< MODIFIED
-            endLoop(); // <<< MODIFIED
+            patchBreaks(chunk);
+            endLoop();
             break;
         }
         case AST_READLN: {
-            int line = getLine(node);
-            
             int var_start_index = 0;
-            // Check if the first argument is a file variable. We can guess based on its type,
-            // which the annotation pass should have set on the AST node.
             if (node->child_count > 0 && node->children[0]->var_type == TYPE_FILE) {
-                // If the first arg is a file, compile it as an R-Value.
                 compileRValue(node->children[0], chunk, getLine(node->children[0]));
-                var_start_index = 1; // The rest of the args are variables to read into.
+                var_start_index = 1;
             }
 
-            // Compile all subsequent arguments as L-Values (addresses).
             for (int i = var_start_index; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
                 compileLValue(arg_node, chunk, getLine(arg_node));
             }
 
-            // Call the built-in `readln` function. This part is correct.
             int nameIndex = addStringConstant(chunk, "readln");
             writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
             writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
         }
-        case AST_WRITE: {
-            int argCount = node->child_count;
-            for (int i = 0; i < argCount; i++) {
-                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+        case AST_READ: {
+            int var_start_index = 0;
+            if (node->child_count > 0 && node->children[0]->var_type == TYPE_FILE) {
+                compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                var_start_index = 1;
             }
-            writeBytecodeChunk(chunk, OP_WRITE, line);
-            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
+            for (int i = var_start_index; i < node->child_count; i++) {
+                AST* arg_node = node->children[i];
+                compileLValue(arg_node, chunk, getLine(arg_node));
+            }
+            int nameIndex = addStringConstant(chunk, "read");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
         }
         case AST_ASSIGN: {
@@ -1029,7 +1070,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (return_slot != -1) {
                     writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                    // The OP_POP instruction that was here has been removed.
                 } else {
                     fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
                     compiler_had_error = true;
@@ -1071,7 +1111,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // 2. Setup loop context for handling 'break'
-            startLoop(-1); // Start address is not needed for FOR loop's break handling
+            startLoop(-1);
 
             int loopStart = chunk->count;
 
@@ -1116,10 +1156,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
 
-            // The value from the increment/decrement is still on the stack.
-            // Pop it to prevent stack overflow.
-            //writeBytecodeChunk(chunk, OP_POP, line);
-
             // 6. Jump back to the top of the loop to re-evaluate the condition
             writeBytecodeChunk(chunk, OP_JUMP, line);
             int backward_jump_offset = loopStart - (chunk->count + 2);
@@ -1160,9 +1196,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             const char* functionName = NULL;
             bool isCallQualified = false;
 
-            if (node->left &&
-                node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
+            // Determine functionName and isCallQualified (same as in compileRValue's AST_PROCEDURE_CALL block)
+            if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
                 isCallQualified = true;
@@ -1170,101 +1205,94 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 functionName = node->token->value;
                 isCallQualified = false;
             } else {
-                fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
+                fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (statement).\n", line);
                 compiler_had_error = true;
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
-                break;
+                return; // Stop compilation of this statement
             }
 
-            Symbol* func_symbol = functionName ? lookupSymbolIn(procedure_table, functionName) : NULL;
-            
-            // Special handling for built-ins that take type identifiers instead of values.
-            if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
-                if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
-                    AST* type_arg_node = node->children[0];
-                    int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)typeNameIndex, line);
-                } else {
-                    fprintf(stderr, "L%d: Compiler error: Argument to '%s' must be a single type identifier.\n", line, functionName);
-                    compiler_had_error = true;
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
-                }
-            } else { // Standard argument compilation for other built-ins and user-defined functions
-                if (node->child_count > 0 && node->children) {
-                    for (int i = 0; i < node->child_count; i++) {
-                        AST* arg_node = node->children[i];
-                        if (!arg_node) continue;
-                        
-                        bool is_var_param = false;
-                        
-                        if (functionName && (strcasecmp(functionName, "new") == 0 || strcasecmp(functionName, "dispose") == 0 ||
-                                             strcasecmp(functionName, "assign") == 0 || strcasecmp(functionName, "reset") == 0 ||
-                                             strcasecmp(functionName, "rewrite") == 0 || strcasecmp(functionName, "close") == 0 ||
-                                             strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0 ||
-                                             strcasecmp(functionName, "getmousestate") == 0 ||
-                                             strcasecmp(functionName, "mstreamloadfromfile") == 0 || strcasecmp(functionName, "mstreamsavetofile") == 0 ||
-                                             strcasecmp(functionName, "mstreamfree") == 0 ||
-                                             strcasecmp(functionName, "gettextsize") == 0 ||
-                                             strcasecmp(functionName, "updatetexture") == 0 ))
-                        {
-                            if (strcasecmp(functionName, "updatetexture") == 0 && i == 0) {
-                                // First arg is TextureID (RValue)
-                            } else {
-                                is_var_param = true;
-                            }
-                        }
-                        else if ((strcasecmp(functionName, "read") == 0 || strcasecmp(functionName, "readln") == 0) &&
-                                (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) {
-                            is_var_param = true;
-                        }
-                        else if (func_symbol && func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                            AST* param_node = func_symbol->type_def->children[i];
-                            if (param_node && param_node->by_ref) {
-                                is_var_param = true;
-                            }
-                        }
+            // Compile arguments. Pass L-values for VAR parameters, R-values otherwise.
+            for (int i = 0; i < node->child_count; i++) {
+                AST* arg_node = node->children[i];
+                if (!arg_node) continue;
+                
+                bool is_var_param = false;
+                
+                // Determine if argument is a VAR parameter for built-ins or user-defined routines
+                // Note: The main.c is where `registerBuiltinFunction` sets `AST_PROCEDURE_DECL` or `AST_FUNCTION_DECL`.
+                // The `Symbol` lookup is crucial here to get `by_ref` for user-defined routines.
+                Symbol* func_symbol_for_params_check = NULL;
+                char lookup_name_for_params_check[MAX_SYMBOL_LENGTH * 2 + 2];
 
-                        if (is_var_param) {
-                            compileLValue(arg_node, chunk, getLine(arg_node));
-                        } else {
-                            compileRValue(arg_node, chunk, getLine(arg_node));
-                        }
+                if (isCallQualified) {
+                    char unit_name_lower[MAX_SYMBOL_LENGTH], func_name_lower[MAX_SYMBOL_LENGTH];
+                    strncpy(unit_name_lower, node->left->token->value, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
+                    strncpy(func_name_lower, functionName, sizeof(func_name_lower)-1); func_name_lower[sizeof(func_name_lower)-1] = '\0';
+                    toLowerString(unit_name_lower); toLowerString(func_name_lower);
+                    snprintf(lookup_name_for_params_check, sizeof(lookup_name_for_params_check), "%s.%s", unit_name_lower, func_name_lower);
+                    func_symbol_for_params_check = lookupSymbolIn(procedure_table, lookup_name_for_params_check);
+                } else {
+                    func_symbol_for_params_check = lookupSymbolIn(procedure_table, functionName);
+                }
+
+                // Check for VAR params for well-known built-ins
+                // Guard each strcasecmp call with a functionName NULL check.
+                if (functionName && (
+                    strcasecmp(functionName, "new") == 0 ||
+                    strcasecmp(functionName, "dispose") == 0 ||
+                    strcasecmp(functionName, "assign") == 0 || strcasecmp(functionName, "reset") == 0 ||
+                    strcasecmp(functionName, "rewrite") == 0 || strcasecmp(functionName, "close") == 0 ||
+                    strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0 ||
+                    strcasecmp(functionName, "getmousestate") == 0 ||
+                    strcasecmp(functionName, "mstreamloadfromfile") == 0 || strcasecmp(functionName, "mstreamsavetofile") == 0 ||
+                    strcasecmp(functionName, "mstreamfree") == 0 ||
+                    strcasecmp(functionName, "gettextsize") == 0 ||
+                    strcasecmp(functionName, "updatetexture") == 0 // UpdateTexture second param is array (LValue)
+                    ))
+                {
+                    if (strcasecmp(functionName, "updatetexture") == 0 && i == 0) { is_var_param = false; }
+                    else { is_var_param = true; } // Most other listed built-ins take LValues
+                }
+                // Check for VAR params for read/readln (unless it's the file variable)
+                else if ((functionName && (strcasecmp(functionName, "read") == 0 || strcasecmp(functionName, "readln") == 0)) &&
+                         (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) {
+                    is_var_param = true;
+                }
+                // For user-defined functions/procedures, check the 'by_ref' flag from their symbol's type_def
+                else if (func_symbol_for_params_check && func_symbol_for_params_check->type_def &&
+                         i < func_symbol_for_params_check->type_def->child_count) {
+                    AST* param_node_def = func_symbol_for_params_check->type_def->children[i];
+                    if (param_node_def && param_node_def->by_ref) {
+                        is_var_param = true;
                     }
+                }
+
+                if (is_var_param) {
+                    compileLValue(arg_node, chunk, getLine(arg_node));
+                } else {
+                    compileRValue(arg_node, chunk, getLine(arg_node));
                 }
             }
-            
-            // Emit the CALL instruction
-            if (isBuiltin(functionName)) {
-                BuiltinRoutineType type = getBuiltinType(functionName);
-                if (type == BUILTIN_TYPE_PROCEDURE || type == BUILTIN_TYPE_FUNCTION) {
-                    char normalized_name[MAX_SYMBOL_LENGTH];
-                    strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
-                    normalized_name[sizeof(normalized_name) - 1] = '\0';
-                    toLowerString(normalized_name);
-                    int nameIndex = addStringConstant(chunk, normalized_name);
-                    
-                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-                    
-                    // If a function is called as a statement, pop its return value
-                    if (type == BUILTIN_TYPE_FUNCTION) {
-                        writeBytecodeChunk(chunk, OP_POP, line);
-                    }
-                } else {
-                    fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in procedure or function.\n", line, functionName);
-                    compiler_had_error = true;
-                    for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+
+            // Emit the CALL instruction (built-in or user-defined)
+            BuiltinRoutineType builtin_type = getBuiltinType(functionName);
+
+            if (builtin_type != BUILTIN_TYPE_NONE) { // It's a built-in
+                char normalized_name[MAX_SYMBOL_LENGTH];
+                strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
+                normalized_name[sizeof(normalized_name) - 1] = '\0';
+                toLowerString(normalized_name);
+                int nameIndex = addStringConstant(chunk, normalized_name);
+                
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                
+                if (builtin_type == BUILTIN_TYPE_FUNCTION) { // If it's a built-in function called as a statement
+                    writeBytecodeChunk(chunk, OP_POP, line); // Pop its return value
                 }
-            } else { // User-defined function/procedure call
+            } else { // It's a user-defined procedure or function.
                 char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
-                // Setup lookup_name and original_display_name (copied from existing logic)
                 if (isCallQualified) {
                     snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
                     char unit_name_lower[MAX_SYMBOL_LENGTH], func_name_lower[MAX_SYMBOL_LENGTH];
@@ -1278,7 +1306,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     toLowerString(lookup_name);
                 }
                 
-                func_symbol = lookupSymbolIn(procedure_table, lookup_name);
+                Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
 
                 if (func_symbol) {
                     if (!func_symbol->is_defined) { // Forward declaration, needs backpatching
@@ -1296,16 +1324,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         func_symbol->patches[func_symbol->patch_count] = chunk->count + 1; // Store offset AFTER opcode, before 2-byte operand
                         func_symbol->patch_count++;
                         
-                        emitShort(chunk, 0xFFFF, line); // Emit 0xFFFF placeholder as requested by external analysis
+                        emitShort(chunk, 0xFFFF, line); // Emit 0xFFFF placeholder for the address
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, line); // Emit arity
                         
-                        if (func_symbol->type != TYPE_VOID) { // If it's a function, pop its result if used as statement
+                        if (func_symbol->type != TYPE_VOID) { // If it's a function, pop its result (as it's a statement context)
                             writeBytecodeChunk(chunk, OP_POP, line);
                         }
                     } else { // Already defined function/procedure
                         if (func_symbol->type == TYPE_VOID) { // Procedure used as function
                             fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                             compiler_had_error = true;
+                            // Clean up stack: pop arguments already pushed, then push a dummy nil.
                             for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                             writeBytecodeChunk(chunk, OP_CONSTANT, line);
                             writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
@@ -1324,8 +1353,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         }
                     }
                 } else { // Symbol not found at all
-                    fprintf(stderr, "L%d: Compiler Error: Undefined function '%s'.\n", line, original_display_name);
+                    fprintf(stderr, "L%d: Compiler Error: Undefined procedure/function '%s'.\n", line, original_display_name);
                     compiler_had_error = true;
+                    // Clean up stack: pop arguments already pushed, then push a dummy nil.
                     for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
@@ -1341,9 +1371,25 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             break;
         }
-        default: {
-            // This case should now only be hit for unhandled statement types, not expressions.
-            fprintf(stderr, "L%d: Compiler WARNING: Unhandled AST node type %s in compileStatement's default case.\n", line, astTypeToString(node->type));
+        default: { // This default case should only be for expressions used as statements (e.g., `1 + 2;`).
+                   // We verify it's an expression type, compile it, and pop its result.
+                   // If it's NOT an expression type, then it's an unhandled/invalid statement node.
+                   
+                   // List of ASTNodeTypes that can typically be compiled as RValue and popped.
+                   if (node->type == AST_BINARY_OP || node->type == AST_UNARY_OP ||
+                       node->type == AST_NUMBER || node->type == AST_STRING ||
+                       node->type == AST_BOOLEAN || node->type == AST_NIL ||
+                       node->type == AST_VARIABLE || node->type == AST_FIELD_ACCESS ||
+                       node->type == AST_ARRAY_ACCESS || node->type == AST_DEREFERENCE ||
+                       node->type == AST_SET || node->type == AST_ARRAY_LITERAL ||
+                       node->type == AST_FORMATTED_EXPR) {
+                       
+                       compileRValue(node, chunk, line);
+                       writeBytecodeChunk(chunk, OP_POP, line); // Discard the result as it's a statement
+                   } else {
+                       fprintf(stderr, "L%d: Compiler ERROR: Unhandled or invalid AST node type %s used as a statement (expected an expression or explicit statement type).\n", line, astTypeToString(node->type));
+                       compiler_had_error = true;
+                   }
             break;
         }
     }
@@ -1427,7 +1473,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            // <<<< ADD THIS DEBUG PRINT >>>>
             fprintf(stderr, "[DEBUG SET] Finished building set. Final size=%d, capacity=%d. Adding to chunk.\n",
                     set_const_val.set_val.set_size, set_const_val.max_length);
             fflush(stderr);
@@ -1501,7 +1546,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             int local_slot = -1;
             bool is_ref = false;
             if (current_function_compiler) {
-                // Check if it's an assignment to the function name itself
+                // Check if it's an assignment to the function name itself (for result variable)
                 if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
                     local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 } else {
@@ -1523,18 +1568,30 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 // Check if it's a compile-time constant first.
                 Value* const_val_ptr = findCompilerConstant(varName);
                 if (const_val_ptr) {
-                    // <<<< FIX for compile-time constant >>>>
-                    // Pass the pointer to the constant value directly.
                     int constIndex = addConstantToChunk(chunk, const_val_ptr);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
                 } else {
-                    // <<<< FIX for global variable >>>>
-                    // It's a global variable, so add its name to the constants
-                    // using the new helper and emit OP_GET_GLOBAL.
-                    int nameIndex = addStringConstant(chunk, varName);
-                    writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    // It's not a local variable or a compile-time constant.
+                    // Now, check if it's a procedure/function from the global procedure_table.
+                    Symbol* proc_sym_check = lookupSymbolIn(procedure_table, varName);
+                    
+                    if (proc_sym_check && proc_sym_check->type == TYPE_VOID) {
+                        // This AST_VARIABLE represents a PROCEDURE (returns VOID) used in an R-value context.
+                        // This is a type error in Pascal.
+                        fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function (in an expression).\n", line, varName);
+                        compiler_had_error = true;
+                        // Push a dummy nil value to maintain stack balance and allow compilation to continue.
+                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                        writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                    } else {
+                        // Otherwise, assume it's a global variable.
+                        // If it's a function, it should have been parsed as AST_PROCEDURE_CALL and handled by that case.
+                        // This is for simple global variable access.
+                        int nameIndex = addStringConstant(chunk, varName);
+                        writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    }
                 }
             }
             break;
