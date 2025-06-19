@@ -41,6 +41,9 @@ extern Symbol *current_function_symbol;
 extern HashTable *procedure_table; // Procedure table is now a HashTable
 extern TypeEntry *type_table;      // TypeEntry definition comes from types.h
 
+// Global context for the compiler to know which unit it's in.
+extern const char* g_current_unit_compilation_context;
+
 // --- CRT State Variables ---
 extern int gCurrentTextColor;
 extern int gCurrentTextBackground;

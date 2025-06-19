@@ -29,6 +29,9 @@ HashTable *procedure_table = NULL; // Initialized to NULL.
 // This remains a linked list of TypeEntry structs.
 TypeEntry *type_table = NULL; // Initialized to NULL.
 
+// Global context for the compiler to know which unit it's in.
+const char* g_current_unit_compilation_context = NULL;
+
 
 // --- CRT State Variable Definitions & Defaults ---
 // These variables hold the current state for console/text rendering (colors, bold).

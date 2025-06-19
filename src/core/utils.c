@@ -1348,7 +1348,34 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                     if (!existing_unqualified_alias) {
                         DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias for routine '%s' (from '%s') using its implementation AST to procedure_table.\n",
                                     unqualified_name_original_case, qualified_name_lower);
-                        addProcedure(qualified_proc_symbol->type_def, NULL);
+                        Symbol* alias_sym = (Symbol*)malloc(sizeof(Symbol));
+                        if (!alias_sym) {
+                            fprintf(stderr, "Memory allocation error for alias symbol\\n");
+                            EXIT_FAILURE_HANDLER();
+                        }
+                        alias_sym->name = strdup(unqualified_name_lower);
+                        if (!alias_sym->name) {
+                            fprintf(stderr, "Memory allocation error for alias symbol name\\n");
+                            free(alias_sym);
+                            EXIT_FAILURE_HANDLER();
+                        }
+                        alias_sym->alias_for = qualified_proc_symbol; // Link to the real symbol!
+                        alias_sym->type_def = qualified_proc_symbol->type_def; // Share the AST pointer
+                        alias_sym->type = qualified_proc_symbol->type;
+                        alias_sym->is_alias = true; // Mark it as an alias
+                        alias_sym->value = NULL;
+                        alias_sym->is_const = false;
+                        alias_sym->is_local_var = false;
+                        alias_sym->next = NULL;
+                        // Initialize other fields to safe defaults
+                        alias_sym->is_defined = false;
+                        alias_sym->bytecode_address = -1;
+                        alias_sym->arity = 0;
+                        alias_sym->locals_count = 0;
+                        alias_sym->patches = NULL;
+                        alias_sym->patch_count = 0;
+
+                        hashTableInsert(procedure_table, alias_sym);
                     } else {
                         DEBUG_PRINT("[DEBUG] linkUnit: Unqualified routine '%s' already exists in procedure_table. Skipping duplicate alias add from unit '%s'.\n",
                                     unqualified_name_original_case, unit_name_original_case);

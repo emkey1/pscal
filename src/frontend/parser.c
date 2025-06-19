@@ -808,21 +808,68 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
     eat(main_parser, TOKEN_SEMICOLON);
 
     AST *uses_clause = NULL;
-    List *unit_list = NULL;
 
     if (main_parser->current_token && main_parser->current_token->type == TOKEN_USES) {
         eat(main_parser, TOKEN_USES);
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
-        unit_list = createList();
 
         while (main_parser->current_token && main_parser->current_token->type == TOKEN_IDENTIFIER) {
-            char* temp_unit_name_original_case = strdup(main_parser->current_token->value);
-            if (!temp_unit_name_original_case) { /* Malloc error */ }
+            char* unit_name_str = strdup(main_parser->current_token->value);
+            if (!unit_name_str) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
 
-            listAppend(unit_list, temp_unit_name_original_case);
-            free(temp_unit_name_original_case);
+            // Find and read the unit source file
+            char *unit_file_path = findUnitFile(unit_name_str);
+            if (!unit_file_path) {
+                fprintf(stderr, "Error: Unit file for '%s' not found.\\n", unit_name_str);
+                free(unit_name_str);
+                EXIT_FAILURE_HANDLER();
+            }
 
-            eat(main_parser, TOKEN_IDENTIFIER);
+            char* unit_source_buffer = NULL;
+            FILE *unit_file = fopen(unit_file_path, "r");
+            if(unit_file) {
+                fseek(unit_file, 0, SEEK_END);
+                long fsize = ftell(unit_file);
+                rewind(unit_file);
+                unit_source_buffer = malloc(fsize + 1);
+                if (!unit_source_buffer) { fclose(unit_file); free(unit_file_path); free(unit_name_str); EXIT_FAILURE_HANDLER(); }
+                fread(unit_source_buffer, 1, fsize, unit_file);
+                unit_source_buffer[fsize] = '\0';
+                fclose(unit_file);
+            } else {
+                fprintf(stderr, "Error: Could not open unit file '%s' at path '%s'.\\n", unit_name_str, unit_file_path);
+                free(unit_file_path);
+                free(unit_name_str);
+                EXIT_FAILURE_HANDLER();
+            }
+            free(unit_file_path);
+
+            // Create a new parser for the unit source
+            Lexer nested_lexer;
+            initLexer(&nested_lexer, unit_source_buffer);
+            Parser nested_parser_instance;
+            nested_parser_instance.lexer = &nested_lexer;
+            nested_parser_instance.current_token = getNextToken(&nested_lexer);
+            
+            // Parse the unit, which returns its full AST
+            AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, unit_name_str, chunk);
+            
+            // Cleanup the temporary parser and buffers
+            if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
+            if (unit_source_buffer) free(unit_source_buffer);
+
+            if (parsed_unit_ast) {
+                // Link the unit's interface into the main program's scope
+                linkUnit(parsed_unit_ast, 1);
+                
+                // Attach the parsed unit's AST as a child of the 'uses' clause.
+                // DO NOT compile or free it here.
+                addChild(uses_clause, parsed_unit_ast);
+            }
+            
+            free(unit_name_str);
+            eat(main_parser, TOKEN_IDENTIFIER); // Consume the unit name from the main source
+
             if (main_parser->current_token && main_parser->current_token->type == TOKEN_COMMA) {
                 eat(main_parser, TOKEN_COMMA);
             } else {
@@ -830,65 +877,12 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
             }
         }
         eat(main_parser, TOKEN_SEMICOLON);
-
-        if (uses_clause) {
-            uses_clause->unit_list = unit_list;
-        }
-
-        if (unit_list) {
-            for (int i = 0; i < listSize(unit_list); i++) {
-                char *used_unit_name_str_from_list = listGet(unit_list, i);
-                
-                char lower_used_unit_name[MAX_SYMBOL_LENGTH];
-                strncpy(lower_used_unit_name, used_unit_name_str_from_list, MAX_SYMBOL_LENGTH - 1);
-                lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
-                for(int k=0; lower_used_unit_name[k]; k++) {
-                    lower_used_unit_name[k] = tolower((unsigned char)lower_used_unit_name[k]);
-                }
-
-                char *unit_file_path = findUnitFile(lower_used_unit_name);
-                if (!unit_file_path) { /* error handling */ }
-                
-                char* unit_source_buffer = NULL;
-                FILE *unit_file = fopen(unit_file_path, "r");
-                if(unit_file) {
-                    // ... (file reading logic) ...
-                    fseek(unit_file, 0, SEEK_END);
-                    long fsize = ftell(unit_file);
-                    rewind(unit_file);
-                    unit_source_buffer = malloc(fsize + 1);
-                    if (!unit_source_buffer) { fclose(unit_file); free(unit_file_path); EXIT_FAILURE_HANDLER(); }
-                    fread(unit_source_buffer, 1, fsize, unit_file);
-                    unit_source_buffer[fsize] = '\0';
-                    fclose(unit_file);
-                } else { /* error handling */ }
-                free(unit_file_path);
-
-                Lexer nested_lexer;
-                initLexer(&nested_lexer, unit_source_buffer);
-                Parser nested_parser_instance;
-                nested_parser_instance.lexer = &nested_lexer;
-                nested_parser_instance.current_token = getNextToken(&nested_lexer);
-                
-                // --- MODIFICATION: Pass the chunk recursively ---
-                AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
-                
-                if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
-                if (unit_source_buffer) free(unit_source_buffer);
-
-                if (parsed_unit_ast) {
-                    linkUnit(parsed_unit_ast, 1);
-                    // --- MODIFICATION: Compile the implementation part ---
-                    compileUnitImplementation(parsed_unit_ast, chunk);
-                    // The temporary AST for the unit is no longer needed after linking and compiling
-                    freeAST(parsed_unit_ast);
-                }
-            }
-        }
     }
 
+    // Now, parse the main program block
     AST *block_node = block(main_parser);
 
+    // Assemble the final program AST
     AST *programNode = newASTNode(AST_PROGRAM, copiedProgToken);
     if (!programNode) { /* Malloc error, cleanup... */ }
 

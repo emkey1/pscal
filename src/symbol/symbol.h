@@ -36,6 +36,8 @@ struct Symbol_s {
     
     int* patches;       // Dynamic array of bytecode offsets to patch.
     int patch_count;    // The number of patches in the array.
+    
+    struct Symbol_s *alias_for; // Points to the symbol this is an alias of
 };
 typedef struct Symbol_s Symbol;
 
