@@ -728,6 +728,16 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
+    
+    // Go back and patch all forward references to this function.
+    for (int i = 0; i < proc_symbol->patch_count; i++) {
+        int patch_location = proc_symbol->patches[i];
+        patchShort(chunk, patch_location, (uint16_t)func_bytecode_start_address);
+    }
+
+    // Free and reset the patch list now that it's been used.
+    if (proc_symbol->patches) free(proc_symbol->patches);
+    proc_symbol->patches = NULL;
 
     // --- DIAGNOSTIC PRINT 2: Before patching loop ---
     DEBUG_PRINT("[DIAG CFN] %s('%s', L%d) - Before patch loop. Target addr: %d. Patches: %p (Count: %d)\n",
@@ -1170,11 +1180,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
-            const char* functionName = NULL;
-            if (node->token && node->token->value) {
-                functionName = node->token->value;
-            } else {
-                fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (statement).\n", line);
+            const char* functionName = node->token->value;
+            if (!functionName) {
+                fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL.\\n", line);
                 compiler_had_error = true;
                 break;
             }
@@ -1184,37 +1192,81 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
 
-            // Determine if it's a built-in or user-defined call and emit bytecode
+            // Check if it's a built-in C function first.
             if (isBuiltin(functionName)) {
                 BuiltinRoutineType type = getBuiltinType(functionName);
                 int nameIndex = addStringConstant(chunk, functionName);
-                
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-                
-                // If a function was called as a statement, its return value is unused and must be popped.
                 if (type == BUILTIN_TYPE_FUNCTION) {
-                    writeBytecodeChunk(chunk, OP_POP, line);
+                    writeBytecodeChunk(chunk, OP_POP, line); // Pop return value if called as a statement
                 }
             } else {
-                Symbol* func_symbol = lookupSymbolIn(procedure_table, functionName);
+                // It's a user-defined routine (from the main program or a unit).
+                Symbol* func_symbol = NULL;
+                char qualified_name_buffer[MAX_SYMBOL_LENGTH * 2 + 2];
+
+                // If we are compiling inside a unit, first try the qualified name "unit.proc"
+                if (g_current_unit_compilation_context) {
+                    snprintf(qualified_name_buffer, sizeof(qualified_name_buffer), "%s.%s", g_current_unit_compilation_context, functionName);
+                    toLowerString(qualified_name_buffer);
+                    func_symbol = lookupSymbolIn(procedure_table, qualified_name_buffer);
+                }
+
+                // If not found (or not in a unit), try the simple name "proc"
+                if (!func_symbol) {
+                    func_symbol = lookupSymbolIn(procedure_table, functionName);
+                }
+
+                // If we found a symbol, check if it's an alias and resolve it.
+                if (func_symbol && func_symbol->alias_for) {
+                    func_symbol = func_symbol->alias_for;
+                }
+
                 if (func_symbol) {
-                     // Handle alias resolution
-                    if (func_symbol->alias_for) {
-                        func_symbol = func_symbol->alias_for;
+                    // Check for forward declaration and patch if needed
+                    if (!func_symbol->is_defined) {
+                        if (func_symbol->patch_count == 0) {
+                            func_symbol->patches = (int*)malloc(sizeof(int));
+                        } else {
+                            func_symbol->patches = (int*)realloc(func_symbol->patches, sizeof(int) * (func_symbol->patch_count + 1));
+                        }
+                        if (!func_symbol->patches) {
+                             fprintf(stderr, "L%d: Compiler error: Memory allocation for patches failed.\\n", line);
+                             compiler_had_error = true;
+                             break;
+                        }
+                        // The +1 points to the start of the 2-byte operand for the jump address
+                        func_symbol->patches[func_symbol->patch_count] = chunk->count + 1;
+                        func_symbol->patch_count++;
                     }
 
-                    writeBytecodeChunk(chunk, OP_CALL, line);
-                    emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    if (!func_symbol->is_defined) {
+                        // Forward declaration: record this call site for later patching.
+                        writeBytecodeChunk(chunk, OP_CALL, line);
 
-                    // If it's a function, pop its return value from the stack.
+                        // Add current location to the symbol's patch list
+                        func_symbol->patch_count++;
+                        func_symbol->patches = (int*)realloc(func_symbol->patches, sizeof(int) * func_symbol->patch_count);
+                        if (!func_symbol->patches) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+                        func_symbol->patches[func_symbol->patch_count - 1] = chunk->count; // Store location of the address operand
+
+                        emitShort(chunk, 0xFFFF, line); // Emit placeholder address
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, line); // Arity
+                    } else {
+                        // Already defined: emit call with the known address.
+                        writeBytecodeChunk(chunk, OP_CALL, line);
+                        emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    }
+
+                    // If a function is called as a statement, its return value must be popped.
                     if (func_symbol->type != TYPE_VOID) {
                         writeBytecodeChunk(chunk, OP_POP, line);
                     }
                 } else {
-                    fprintf(stderr, "L%d: Compiler Error: Undefined procedure/function '%s'.\n", line, functionName);
+                    fprintf(stderr, "L%d: Compiler Error: Undefined procedure/function '%s'.\\n", line, functionName);
                     compiler_had_error = true;
                 }
             }
@@ -1250,21 +1302,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             break;
         }
-        default: { // This default case should only be for expressions used as statements (e.g., `1 + 2;`).
-                   // We verify it's an expression type, compile it, and pop its result.
-                   // If it's NOT an expression type, then it's an unhandled/invalid statement node.
-                   
-                   // List of ASTNodeTypes that can typically be compiled as RValue and popped.
-            if (node->type == AST_BINARY_OP || node->type == AST_UNARY_OP ||
-                          node->type == AST_NUMBER || node->type == AST_STRING ||
-                          node->type == AST_BOOLEAN || node->type == AST_NIL) {
-                          
-                          compileRValue(node, chunk, line);
-                          writeBytecodeChunk(chunk, OP_POP, line); // Discard the result as it's a statement
-                       } else {
-                          fprintf(stderr, "L%d: Compiler ERROR: Unhandled or invalid AST node type %s used as a statement.\n", line, astTypeToString(node->type));
-                          compiler_had_error = true;
-                       }
+        default: {
+             if (node->type == AST_BINARY_OP || node->type == AST_UNARY_OP ||
+                 node->type == AST_NUMBER    || node->type == AST_STRING ||
+                 node->type == AST_BOOLEAN   || node->type == AST_NIL) {
+                compileRValue(node, chunk, line);
+                writeBytecodeChunk(chunk, OP_POP, line);
+             } else {
+                fprintf(stderr, "L%d: Compiler ERROR: Unhandled node type %s in compileStatement.\\n", line, astTypeToString(node->type));
+                compiler_had_error = true;
+             }
             break;
         }
     }
