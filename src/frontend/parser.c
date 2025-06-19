@@ -606,128 +606,104 @@ void errorParser(Parser *parser, const char *msg) {
 }
 
 void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc) {
-    // Create the name for the symbol table. This might involve mangling
-    // with unit_context_name_param_for_addproc if it's not NULL.
-    // For simplicity, let's assume for now the name is directly from the token,
-    // and unit qualification is handled by lookup.
-    // You will need to implement proper name construction here.
+    if (!proc_decl_ast_original || !proc_decl_ast_original->token) {
+        fprintf(stderr, "Internal error: addProcedure called with invalid AST node.\n");
+        return;
+    }
 
+    // Determine if the AST node we're processing has a body, which means it's an implementation.
+    bool has_body = false;
+    if (proc_decl_ast_original->type == AST_PROCEDURE_DECL && proc_decl_ast_original->right) {
+        has_body = true; // Procedures store their body block in ->right
+    } else if (proc_decl_ast_original->type == AST_FUNCTION_DECL && proc_decl_ast_original->extra) {
+        has_body = true; // Functions store their body block in ->extra
+    }
+
+    // Create the fully qualified, lowercase name for hash table lookup
     char *proc_name_original = proc_decl_ast_original->token->value;
-    char *name_for_table = strdup(proc_name_original); // Start with a copy
+    char *name_for_table = strdup(proc_name_original);
     if (!name_for_table) {
         fprintf(stderr, "Memory allocation error for name_for_table in addProcedure\n");
         EXIT_FAILURE_HANDLER();
     }
-    // Convert name_for_table to lowercase for consistent lookup
-    for (int i = 0; name_for_table[i]; i++) {
-        name_for_table[i] = tolower((unsigned char)name_for_table[i]);
-    }
+    toLowerString(name_for_table);
 
-    // If unit_context_name_param_for_addproc is provided, prepend it: "unit.proc"
     if (unit_context_name_param_for_addproc && unit_context_name_param_for_addproc[0] != '\0') {
-        // Dynamically create "unit.proc"
         size_t unit_len = strlen(unit_context_name_param_for_addproc);
         size_t proc_len = strlen(name_for_table);
         size_t required_size = unit_len + 1 + proc_len + 1;
-        char* mangled_name = malloc(required_size); // Allocate exact required size
-          
+        char* mangled_name = malloc(required_size);
         if (!mangled_name) {
             fprintf(stderr, "Malloc failed for mangled_name in addProcedure\n");
             free(name_for_table);
             EXIT_FAILURE_HANDLER();
         }
-        int chars_written = snprintf(mangled_name, required_size, "%s.%s",
-                                             unit_context_name_param_for_addproc, name_for_table);
-
-                // Check for snprintf errors or truncation.
-                // snprintf returns the number of characters that *would have been written* if enough space
-                // had been available, *excluding* the null terminator.
-                // So, if chars_written is negative (error) or >= required_size (truncation would have occurred
-                // if buffer was smaller, though here required_size should be exact), it's an issue.
-        if (chars_written < 0 || (size_t)chars_written >= required_size) {
-            fprintf(stderr, "Error or truncation occurred with snprintf in addProcedure for mangled_name. Chars written: %d, Buffer size: %zu\n",
-                    chars_written, required_size);
-            free(mangled_name); // Free the buffer allocated for mangled_name
-            free(name_for_table); // Free the original name_for_table
-            EXIT_FAILURE_HANDLER(); // Or handle error more gracefully
-        }
-        free(name_for_table); // Free the previously strdup'd name
-        name_for_table = mangled_name; // Use the new mangled name
+        snprintf(mangled_name, required_size, "%s.%s", unit_context_name_param_for_addproc, name_for_table);
+        free(name_for_table);
+        name_for_table = mangled_name;
     }
 
     Symbol* existing_sym = hashTableLookup(procedure_table, name_for_table);
     if (existing_sym) {
-        // An entry from the interface already exists. Update it with the implementation's AST.
+        // Symbol exists. Update it with the new (presumably more complete) AST.
         #ifdef DEBUG
         fprintf(stderr, "[DEBUG addProcedure] Routine '%s' already exists. Updating definition.\n", name_for_table);
         #endif
 
-        // Free the old, incomplete AST from the interface declaration.
         if (existing_sym->type_def) {
             freeAST(existing_sym->type_def);
         }
-
-        // Replace it with a deep copy of the new, complete AST from the implementation.
         existing_sym->type_def = copyAST(proc_decl_ast_original);
 
-        // Also update the type in case it's a function with a forward declaration.
+        if (has_body) {
+            existing_sym->is_defined = true;
+        }
+
         if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
             existing_sym->type = proc_decl_ast_original->var_type;
         }
 
-        // The update is complete. Free the constructed name and return.
         free(name_for_table);
         return;
     }
 
-
-    // THIS IS THE CRITICAL CHANGE - ALLOCATE A Symbol, NOT A Procedure
-    Symbol *sym = (Symbol *)malloc(sizeof(Symbol)); // <<< THIS SHOULD BE sizeof(Symbol)
+    // If symbol does not exist, create a new one.
+    Symbol *sym = (Symbol *)malloc(sizeof(Symbol));
     if (!sym) {
         fprintf(stderr, "Memory allocation error in addProcedure for Symbol struct\n");
         free(name_for_table);
         EXIT_FAILURE_HANDLER();
     }
 
-    sym->name = name_for_table; // name_for_table is already a strdup'd and potentially mangled copy
-
-    // Store a DEEP COPY of the AST declaration node
+    sym->name = name_for_table;
     sym->type_def = copyAST(proc_decl_ast_original);
-    if (!sym->type_def && proc_decl_ast_original) { // If copyAST failed but original AST existed
-        fprintf(stderr, "Critical Error: copyAST failed for procedure '%s'. Heap corruption likely.\n", sym->name);
-        if (sym->name) free(sym->name);
+    if (!sym->type_def && proc_decl_ast_original) {
+        fprintf(stderr, "Critical Error: copyAST failed for procedure '%s'.\n", sym->name);
+        free(sym->name);
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
 
-    // Determine the symbol's type based on the original AST declaration node's var_type
     if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
-        // For functions, 'proc_decl_ast_original->var_type' should have been set
-        // in registerBuiltinFunction to the function's actual return type.
-        if (proc_decl_ast_original->var_type != TYPE_VOID) {
-            sym->type = proc_decl_ast_original->var_type;
-        } else {
-            // This case means registerBuiltinFunction set dummy->var_type to VOID for an AST_FUNCTION_DECL,
-            // or it was corrupted. This implies an issue in registerBuiltinFunction's setup or heap corruption.
-            fprintf(stderr, "Warning: Function '%s' (AST type: %s) has an effective VOID return type based on its declaration's var_type. Check registerBuiltinFunction setup.\n",
-                    sym->name, astTypeToString(proc_decl_ast_original->type));
-            sym->type = TYPE_VOID; // Fallback, but this indicates a setup problem.
-        }
-    } else { // AST_PROCEDURE_DECL
+        sym->type = proc_decl_ast_original->var_type;
+    } else {
         sym->type = TYPE_VOID;
     }
 
-    sym->value = NULL; // Procedures/functions don't have a 'value' in the same way variables do
+    sym->value = NULL;
     sym->is_const = false;
     sym->is_alias = false;
     sym->is_local_var = false;
     sym->next = NULL;
-    // Initialize is_defined to false for declarations; will be set to true when implementation is compiled.
-    // Built-ins registered in main.c will have this implicitly set later or handled separately if needed.
-    sym->is_defined = false; // For built-ins and user procedures parsed with body, it is defined.
-    sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
-    // Calculate arity (number of parameters) from the AST node's children (parameter declarations).
-    // Each direct child of proc_decl_ast_original should be an AST_VAR_DECL representing a parameter group.
+    sym->patches = NULL;
+    sym->patch_count = 0;
+    sym->bytecode_address = -1;
+    
+    // ** THIS IS THE FIX **
+    // Set the is_defined flag based on whether a body was present during creation.
+    sym->is_defined = has_body;
+
+    // Calculate arity
     sym->arity = 0;
     if (proc_decl_ast_original->children) {
         for (int i = 0; i < proc_decl_ast_original->child_count; i++) {
@@ -736,30 +712,26 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
             }
         }
     }
-    sym->locals_count = 0;      // Will be updated later.
-    sym->patches = NULL;        // Initialize patches to NULL
-    sym->patch_count = 0;       // Initialize patch_count to 0
+    sym->locals_count = 0;
 
     if (procedure_table) {
         hashTableInsert(procedure_table, sym);
     } else {
-        // This should not happen if main initializes procedure_table
         fprintf(stderr, "CRITICAL Error: procedure_table hash table not initialized before addProcedure call.\n");
-        // Proper cleanup if not inserting
         if (sym->name) free(sym->name);
         if (sym->type_def) freeAST(sym->type_def);
         free(sym);
         EXIT_FAILURE_HANDLER();
     }
-    
-    // Optional Debug Print
+
     #ifdef DEBUG
     if (dumpExec) {
-        fprintf(stderr, "[DEBUG parser.c addProcedure] Added routine '%s' to procedure_table. Copied AST node at %p. Symbol type: %s\n",
-                sym->name, (void*)sym->type_def, varTypeToString(sym->type));
+        fprintf(stderr, "[DEBUG parser.c addProcedure] Added routine '%s' to procedure_table. Defined: %s. Copied AST node at %p. Symbol type: %s\n",
+                sym->name, sym->is_defined ? "yes" : "no", (void*)sym->type_def, varTypeToString(sym->type));
     }
     #endif
 }
+
 void insertType(const char *name, AST *typeAST) {
     TypeEntry *entry = malloc(sizeof(TypeEntry));
     entry->name = strdup(name);
@@ -861,6 +833,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
             if (parsed_unit_ast) {
                 // Link the unit's interface into the main program's scope
                 linkUnit(parsed_unit_ast, 1);
+                
+                compileUnitImplementation(parsed_unit_ast, chunk);
                 
                 // Attach the parsed unit's AST as a child of the 'uses' clause.
                 // DO NOT compile or free it here.

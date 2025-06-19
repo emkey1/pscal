@@ -34,10 +34,10 @@ struct Symbol_s {
     // bool is_host_function;    // Could add later if OP_CALL_HOST uses this table too
     // HostFunctionID host_id;   // Corresponding host function ID
     
+    struct Symbol_s *alias_for; // Points to the symbol this is an alias of
+    
     int* patches;       // Dynamic array of bytecode offsets to patch.
     int patch_count;    // The number of patches in the array.
-    
-    struct Symbol_s *alias_for; // Points to the symbol this is an alias of
 };
 typedef struct Symbol_s Symbol;
 

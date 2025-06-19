@@ -71,11 +71,12 @@ typedef enum {
     OP_WRITE,         // Specific opcode for Write
     OP_CALL_HOST,
 
-    OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
-    OP_CALL,          // For user-defined procedure/function calls, Operands: 2-byte address, 1-byte arg count
-    OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
-    OP_FORMAT_VALUE   // Format the value on top of the stack. Operands: width (byte), precision (byte)
-    
+    OP_POP,            // Pop the top value from the stack (e.g., after an expression statement)
+    OP_CALL,           // For user-defined procedure/function calls, Operands: 2-byte address, 1-byte arg count
+    OP_HALT,           // Stop the VM (though OP_RETURN from main might suffice)
+    OP_FORMAT_VALUE,   // Format the value on top of the stack. Operands: width (byte), precision (byte)
+    OP_CALL_UNRESOLVED // NEW: Call to a forward-declared routine. Operands: const_idx_name (1 byte), arg_count (1 byte)
+        
 } OpCode;
 
 // --- Bytecode Chunk Structure ---

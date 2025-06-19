@@ -20,6 +20,7 @@ void resetCompilerConstants(void);
 void addCompilerConstant(const char* name_original_case, const Value* value, int line);
 Value* findCompilerConstant(const char* name_original_case);
 Value evaluateCompileTimeValue(AST* node); // For parser to evaluate const expressions
+void backpatchBytecode(BytecodeChunk* chunk, HashTable* procedureTable);
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk);
 void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk);

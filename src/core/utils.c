@@ -1372,8 +1372,6 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                         alias_sym->bytecode_address = -1;
                         alias_sym->arity = 0;
                         alias_sym->locals_count = 0;
-                        alias_sym->patches = NULL;
-                        alias_sym->patch_count = 0;
 
                         hashTableInsert(procedure_table, alias_sym);
                     } else {

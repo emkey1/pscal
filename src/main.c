@@ -151,9 +151,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("screencols", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("screenrows", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("dec",       AST_PROCEDURE_DECL, NULL);
-    // REMOVE these conflicting TextColor/TextBackground registrations.
-    // registerBuiltinFunction("textcolor", AST_PROCEDURE_DECL, NULL); // REMOVED
-    // registerBuiltinFunction("textbackground", AST_PROCEDURE_DECL, NULL); // REMOVED
     registerBuiltinFunction("textcolore", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("textbackgrounde", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("new",       AST_PROCEDURE_DECL, NULL);
@@ -283,6 +280,11 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
             }
             bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
+      
+            // --- ADDED: Perform backpatching after all compilation is done ---
+            if (compilation_ok_for_vm) {
+                backpatchBytecode(&chunk, procedure_table);
+            }
             
             if (compilation_ok_for_vm) {
                 fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);

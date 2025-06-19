@@ -186,6 +186,19 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_SHL:      printf("OP_SHL\n"); return offset + 1;
         case OP_SHR:      printf("OP_SHR\n"); return offset + 1;
             
+        case OP_CALL_UNRESOLVED: {
+            uint16_t name_idx = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            uint8_t arg_count = chunk->code[offset + 3];
+            printf("%-16s NameIdx:%-3d ", "OP_CALL_UNRESOLVED", name_idx);
+            if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
+                printf("'%s' ", chunk->constants[name_idx].s_val);
+            } else {
+                printf("INVALID_NAME_IDX ");
+            }
+            printf("(%d args)\n", arg_count);
+            return offset + 4; // 1 (opcode) + 2 (name_idx) + 1 (arity)
+        }
+            
         case OP_GET_GLOBAL_ADDRESS: {
             uint8_t name_index = chunk->code[offset + 1];
             printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));

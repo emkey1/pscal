@@ -918,6 +918,10 @@ comparison_error_label:
                 freeValue(&b_val);
                 break;
             }
+            case OP_CALL_UNRESOLVED: {
+                runtimeError(vm, "VM Error: Encountered an unresolved procedure call. Backpatching may have failed.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
             case OP_GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
