@@ -1377,7 +1377,48 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_FIELD_ACCESS:
         case AST_ARRAY_ACCESS: {
-            compileLValue(node, chunk, line);
+            AST* base = node->left;
+            int line = getLine(node);
+
+            // Check if the base of the access is a known compile-time constant string.
+            if (base && base->type == AST_VARIABLE && base->token) {
+                Value* const_val = findCompilerConstant(base->token->value);
+                if (const_val && const_val->type == TYPE_STRING) {
+                    // --- Path for Constant String ---
+                    // It's a constant string like AsciiPalette['...'].
+
+                    // 1. Push the constant string itself onto the stack.
+                    int string_const_idx = addConstantToChunk(chunk, const_val);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)string_const_idx, line);
+
+                    // 2. Compile the index expression, which pushes the index onto the stack.
+                    // This handles the (iter MOD PaletteLen) + 1 part.
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+
+                    // 3. Emit our new opcode to perform the indexing at runtime.
+                    writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line);
+                    break; // End of constant string path
+                }
+            }
+
+            // --- Path for Variable Array/String ---
+            // If it's not a known constant, treat it as a variable.
+            // This path handles indexing into variable arrays and strings.
+            
+            // 1. Get the address of the base variable.
+            compileLValue(base, chunk, getLine(base));
+
+            // 2. Compile all index expressions.
+            for (int i = 0; i < node->child_count; i++) {
+                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+            }
+            
+            // 3. Get the address of the specific element.
+            writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+            
+            // 4. Get the value from that address and push it onto the stack.
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
             break;
         }

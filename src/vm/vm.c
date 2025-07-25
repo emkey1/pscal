@@ -584,12 +584,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Not enough values on stack to swap.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                Value a = pop(vm);
-                Value b = pop(vm);
-                push(vm, a);
-                push(vm, b);
-                freeValue(&a);
-                freeValue(&b);
+                // Perform an in-place swap of the top two Value structs on the stack.
+                Value temp = vm->stackTop[-1];
+                vm->stackTop[-1] = vm->stackTop[-2];
+                vm->stackTop[-2] = temp;
                 break;
             }
             case OP_DUP: {
@@ -1166,6 +1164,44 @@ comparison_error_label:
                     push(vm, makeCopyOfValue(target_lvalue_ptr));
                 }
                 freeValue(&pointer_val);
+                break;
+            }
+                
+            case OP_GET_CHAR_FROM_STRING: {
+                // Pops: [index], [string]
+                // Pushes: [char]
+                Value index_val = pop(vm);
+                Value string_val = pop(vm);
+
+                if (string_val.type != TYPE_STRING) {
+                    runtimeError(vm, "VM Error: Base for character index is not a string.");
+                    freeValue(&index_val); freeValue(&string_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (index_val.type != TYPE_INTEGER) {
+                    runtimeError(vm, "VM Error: String index must be an integer.");
+                    freeValue(&index_val); freeValue(&string_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                long long pscal_index = index_val.i_val;
+                const char* str = string_val.s_val ? string_val.s_val : "";
+                size_t len = strlen(str);
+
+                // Pascal strings are 1-based, so we check bounds from 1 to len.
+                if (pscal_index < 1 || (size_t)pscal_index > len) {
+                    runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                    freeValue(&index_val); freeValue(&string_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Get the character and push it back on the stack as a CHAR value.
+                char result_char = str[pscal_index - 1]; // Convert to 0-based index for C.
+                push(vm, makeChar(result_char));
+
+                // Clean up the popped string and index values.
+                freeValue(&index_val);
+                freeValue(&string_val);
                 break;
             }
 

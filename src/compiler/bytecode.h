@@ -58,6 +58,8 @@ typedef enum {
     OP_GET_INDIRECT,
     
     OP_IN, // For set membership
+    
+    OP_GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
 
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
