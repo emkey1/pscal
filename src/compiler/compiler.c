@@ -1337,6 +1337,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
             
+            if (strcasecmp(varName, "break_requested") == 0) {
+                // This is a special host-provided variable.
+                // Instead of treating it as a global, we call a host function.
+                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
+                break; // We are done compiling this node.
+            }
+            
             if (local_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
