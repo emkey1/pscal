@@ -668,12 +668,12 @@ Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First arg to Assign must be a file variable."); return makeVoid(); }
     if (fileNameVal->type != TYPE_STRING) { runtimeError(vm, "Second arg to Assign must be a string."); return makeVoid(); }
     
-    // Free the old filename if it exists
+    // Free the old filename if one is already assigned.
     if (fileVarLValue->filename) {
         free(fileVarLValue->filename);
     }
     
-    // Duplicate the new filename string
+    // Duplicate the new filename string.
     fileVarLValue->filename = fileNameVal->s_val ? strdup(fileNameVal->s_val) : NULL;
 
     return makeVoid();
@@ -2844,6 +2844,29 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         Token* retTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0); // Placeholder return type
         AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    } else if (strcasecmp(name, "inc") == 0 || strcasecmp(name, "dec") == 0) {
+        dummy->child_capacity = 2;
+        dummy->children = malloc(sizeof(AST*) * 2);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        // First parameter is VAR
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, TYPE_INTEGER); // It can be any ordinal, INTEGER is fine for the dummy AST
+        p1->by_ref = 1; // Mark as VAR parameter
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_var_to_modify", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1);
+        freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        // Optional second parameter (value)
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p2, TYPE_INTEGER);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_amount", 0, 0);
+        AST* v2 = newASTNode(AST_VARIABLE, pn2);
+        freeToken(pn2);
+        addChild(p2, v2);
+        dummy->children[1] = p2;
+        dummy->child_count = 2; // Define with max number of params
+        dummy->var_type = TYPE_VOID;
     }
     // --- Procedures (TYPE_VOID return type) ---
     // Most procedures listed in the original long if/else chain don't strictly need

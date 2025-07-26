@@ -1267,10 +1267,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            // <<<< ADD THIS DEBUG PRINT >>>>
+#ifdef DEBUG
             fprintf(stderr, "[DEBUG SET] Finished building set. Final size=%d, capacity=%d. Adding to chunk.\n",
                     set_const_val.set_val.set_size, set_const_val.max_length);
             fflush(stderr);
+#endif
             // Pass the address of the fully constructed set Value.
             int constIndex = addConstantToChunk(chunk, &set_const_val);
             // Now that a deep copy is in the chunk, free our temporary set value.

@@ -21,12 +21,13 @@
 #include "backend_ast/builtin.h"
 #include "backend_ast/audio.h"
 
-// --- VM Helper Functions ---
+#define MAX_WRITELN_ARGS_VM 32  
 
 static const int pscalToAnsiBase[8] = {
     0, 4, 2, 6, 1, 5, 3, 7
 };
 
+// --- VM Helper Functions ---
 // Helper function to map 0-15 to ANSI FG codes
 static int map16FgColorToAnsi(int pscalColorCode, bool isBold) {
     int basePscalColor = pscalColorCode % 8;
@@ -735,6 +736,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;
+                } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
+                    char char_val;
+                    const char* str_val;
+
+                    if (IS_CHAR(a_val)) {
+                        char_val = AS_CHAR(a_val);
+                        str_val = AS_STRING(b_val);
+                    } else {
+                        char_val = AS_CHAR(b_val);
+                        str_val = AS_STRING(a_val);
+                    }
+
+                    if (strlen(str_val) == 1 && str_val[0] == char_val) {
+                        result_val = makeBoolean(instruction_val == OP_EQUAL);
+                    } else {
+                        result_val = makeBoolean(instruction_val != OP_EQUAL);
+                    }
+                    comparison_succeeded = true;
                 }
                 // String comparison
                 else if (IS_STRING(a_val) && IS_STRING(b_val)) {
@@ -1364,6 +1383,11 @@ comparison_error_label:
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                } else if (sym->type == TYPE_STRING && value_from_stack.type == TYPE_CHAR) {
+                    char char_buf[2];
+                    char_buf[0] = value_from_stack.c_val;
+                    char_buf[1] = '\0';
+                    value_to_assign = makeString(char_buf);
                 } else if (sym->type == TYPE_REAL && value_from_stack.type == TYPE_INTEGER) {
                     value_to_assign = makeReal((double)value_from_stack.i_val);
                 } else if (sym->type == TYPE_INTEGER && value_from_stack.type == TYPE_REAL) {
@@ -1393,12 +1417,57 @@ comparison_error_label:
             case OP_SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                freeValue(&frame->slots[slot]);
-                Value value_to_set = pop(vm);
-                frame->slots[slot] = makeCopyOfValue(&value_to_set);
-                freeValue(&value_to_set);
+                Value* target_slot = &frame->slots[slot];
+                Value value_from_stack = pop(vm);
+
+                VarType original_target_type = target_slot->type; // Preserve the variable's real type
+
+                // Free the old contents of the target slot before assigning the new value.
+                freeValue(target_slot);
+
+                // Assign the new value, coercing the type if necessary.
+                switch (original_target_type) {
+                    case TYPE_INTEGER:
+                        if (value_from_stack.type == TYPE_REAL) {
+                            target_slot->i_val = (long long)value_from_stack.r_val; // Truncate real
+                        } else {
+                            target_slot->i_val = value_from_stack.i_val; // Works for int, bool, byte, word
+                        }
+                        break;
+                    case TYPE_REAL:
+                        if (value_from_stack.type == TYPE_INTEGER) {
+                            target_slot->r_val = (double)value_from_stack.i_val; // Promote integer
+                        } else {
+                            target_slot->r_val = value_from_stack.r_val;
+                        }
+                        break;
+                    case TYPE_STRING:
+                        if (value_from_stack.type == TYPE_CHAR) {
+                            char char_buf[2];
+                            char_buf[0] = value_from_stack.c_val;
+                            char_buf[1] = '\0';
+                            // makeString allocates new memory, which is what we want.
+                            *target_slot = makeString(char_buf);
+                        } else {
+                            // For string-to-string, do a full deep copy.
+                            *target_slot = makeCopyOfValue(&value_from_stack);
+                        }
+                        break;
+                    default:
+                        // For other types (char, bool, record, array, pointer, etc.),
+                        // a direct deep copy is appropriate.
+                        *target_slot = makeCopyOfValue(&value_from_stack);
+                        break;
+                }
+
+                // **Crucially, restore the original type.** This prevents type corruption.
+                target_slot->type = original_target_type;
+
+                // Free the temporary value that was popped from the stack.
+                freeValue(&value_from_stack);
                 break;
             }
+
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
@@ -1424,131 +1493,87 @@ comparison_error_label:
                 vm->ip += (int16_t)offset;
                 break;
             }
-            case OP_WRITE_LN: {
-                #define MAX_WRITELN_ARGS_VM 32
+            case OP_WRITE_LN:
+            case OP_WRITE: {
                 uint8_t argCount = READ_BYTE();
-                Value args_for_writeln[MAX_WRITELN_ARGS_VM];
-
                 if (argCount > MAX_WRITELN_ARGS_VM) {
-                    runtimeError(vm, "VM Error: Too many arguments for OP_WRITE_LN (max %d).", MAX_WRITELN_ARGS_VM);
+                    runtimeError(vm, "VM Error: Too many arguments for WRITE/WRITELN (max %d).", MAX_WRITELN_ARGS_VM);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                for (int i = 0; i < argCount; i++) {
-                    if (vm->stackTop == vm->stack) { }
-                    args_for_writeln[argCount - 1 - i] = pop(vm);
+                FILE *output_stream = stdout;
+                int start_index = 0;
+                
+                // Check if the first argument is a file variable.
+                if (argCount > 0 && vm->stackTop[-argCount].type == TYPE_FILE) {
+                    Value fileVal = vm->stackTop[-argCount];
+                    if (fileVal.f_val != NULL) {
+                        output_stream = fileVal.f_val;
+                        start_index = 1; // Start processing printable args from the next one.
+                    } else {
+                        runtimeError(vm, "File not open for writing.");
+                        // Pop all arguments off the stack before returning.
+                        for (int i = 0; i < argCount; i++) { freeValue(&vm->stackTop[-i-1]); }
+                        vm->stackTop -= argCount;
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                }
+
+                Value args_to_print[MAX_WRITELN_ARGS_VM];
+                int print_arg_count = argCount - start_index;
+
+                // Pop the printable arguments into a temporary array.
+                for (int i = 0; i < print_arg_count; i++) {
+                    args_to_print[print_arg_count - 1 - i] = pop(vm);
+                }
+                // If there was a file argument, pop it now.
+                if (start_index > 0) {
+                    Value file_arg = pop(vm);
+                    freeValue(&file_arg);
+                }
+
+                // Apply console colors only if writing to stdout.
+                if (output_stream == stdout) {
+                    // (Your existing color logic is preserved here)
+                    char escape_sequence[64] = "\x1B[";
+                    char code_str[64];
+                    bool first_attr = true;
+                    if (gCurrentColorIsExt) {
+                        snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
+                    } else {
+                        if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                        snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
+                    }
+                    if (!first_attr) strcat(escape_sequence, ";");
+                    strcat(escape_sequence, code_str);
+                    strcat(escape_sequence, ";");
+                    if (gCurrentBgIsExt) {
+                        snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
+                    } else {
+                        snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
+                    }
+                    strcat(escape_sequence, code_str);
+                    strcat(escape_sequence, "m");
+                    fprintf(output_stream, "%s", escape_sequence);
                 }
                 
-                char escape_sequence[64] = "\x1B[";
-                char code_str[64];
-                bool first_attr = true;
-
-                if (gCurrentColorIsExt) {
-                    snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-                } else {
-                    if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-                    snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
-                }
-                if (!first_attr) strcat(escape_sequence, ";");
-                strcat(escape_sequence, code_str);
-
-                strcat(escape_sequence, ";");
-                if (gCurrentBgIsExt) {
-                    snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-                } else {
-                    snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
-                }
-                strcat(escape_sequence, code_str);
-                strcat(escape_sequence, "m");
-                printf("%s", escape_sequence);
-
-                for (int i = 0; i < argCount; i++) {
-                    Value val = args_for_writeln[i];
-
-                    if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
-                        fprintf(stdout, "%lld", val.i_val);
-                    } else if (val.type == TYPE_REAL) {
-                        fprintf(stdout, "%f", val.r_val);
-                    } else if (val.type == TYPE_BOOLEAN) {
-                        fprintf(stdout, "%s", (val.i_val != 0) ? "TRUE" : "FALSE");
-                    } else if (val.type == TYPE_STRING) {
-                        fprintf(stdout, "%s", val.s_val ? val.s_val : "");
-                    } else if (val.type == TYPE_CHAR) {
-                        fputc(val.c_val, stdout);
-                    } else if (val.type == TYPE_ENUM) {
-                        fprintf(stdout, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "?");
-                    }
-                    else if (val.type == TYPE_NIL) {
-                        fprintf(stdout, "NIL");
-                    }
-                    else if (val.type != TYPE_FILE && val.type != TYPE_MEMORYSTREAM && val.type != TYPE_POINTER && val.type != TYPE_RECORD && val.type != TYPE_ARRAY && val.type != TYPE_SET) {
-                         fprintf(stdout, "<VM_PRINT_TYPE_%s>", varTypeToString(val.type));
-                    }
-                    
+                // Print the arguments to the correct stream.
+                for (int i = 0; i < print_arg_count; i++) {
+                    Value val = args_to_print[i];
+                    printValueToStream(val, output_stream); // Use a helper to abstract the printing logic
                     freeValue(&val);
                 }
-                
-                printf("\x1B[0m");
-                printf("\n");
-                fflush(stdout);
-                break;
-            }
-            case OP_WRITE: {
-                uint8_t argCount = READ_BYTE();
-                Value args_for_write[MAX_WRITELN_ARGS_VM];
 
-                if (argCount > MAX_WRITELN_ARGS_VM) { }
-
-                for (int i = 0; i < argCount; i++) {
-                    if (vm->stackTop == vm->stack) { }
-                    args_for_write[argCount - 1 - i] = pop(vm);
-                }
-
-                char escape_sequence[64] = "\x1B[";
-                char code_str[64];
-                bool first_attr = true;
-
-                if (gCurrentColorIsExt) {
-                    snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-                } else {
-                    if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-                    snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
-                }
-                if (!first_attr) strcat(escape_sequence, ";");
-                strcat(escape_sequence, code_str);
-
-                strcat(escape_sequence, ";");
-                if (gCurrentBgIsExt) {
-                    snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-                } else {
-                    snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
-                }
-                strcat(escape_sequence, code_str);
-                strcat(escape_sequence, "m");
-                printf("%s", escape_sequence);
-
-                for (int i = 0; i < argCount; i++) {
-                    Value val = args_for_write[i];
-                    if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
-                        fprintf(stdout, "%lld", val.i_val);
-                    } else if (val.type == TYPE_REAL) {
-                        fprintf(stdout, "%f", val.r_val);
-                    } else if (val.type == TYPE_BOOLEAN) {
-                        fprintf(stdout, "%s", (val.i_val != 0) ? "TRUE" : "FALSE");
-                    } else if (val.type == TYPE_STRING) {
-                        fprintf(stdout, "%s", val.s_val ? val.s_val : "");
-                    } else if (val.type == TYPE_CHAR) {
-                        fputc(val.c_val, stdout);
-                    } else if (val.type == TYPE_ENUM) {
-                        fprintf(stdout, "%s", val.enum_val.enum_name ? val.enum_val.enum_name : "?");
-                    } else if (val.type == TYPE_NIL) {
-                        fprintf(stdout, "NIL");
-                    }
-                    freeValue(&val);
+                if (instruction_val == OP_WRITE_LN) {
+                    fprintf(output_stream, "\n");
                 }
                 
-                printf("\x1B[0m");
-                fflush(stdout);
+                // Reset console colors if they were applied.
+                if (output_stream == stdout) {
+                    fprintf(output_stream, "\x1B[0m");
+                }
+                
+                fflush(output_stream);
                 break;
             }
             case OP_POP: {

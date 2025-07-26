@@ -1627,7 +1627,7 @@ void printValueToStream(Value v, FILE *stream) {
             break;
         case TYPE_STRING:
             if (v.s_val) {
-                fprintf(stream, "\"%s\"", v.s_val); // Adding quotes for clarity
+                fprintf(stream, "%s", v.s_val);
             } else {
                 fprintf(stream, "(null string)");
             }
