@@ -1349,6 +1349,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
             
+            if (strcasecmp(varName, "break_requested") == 0) {
+                // This is a special host-provided variable.
+                // Instead of treating it as a global, we call a host function.
+                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
+                break; // We are done compiling this node.
+            }
+            
             if (local_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
@@ -1377,48 +1385,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_FIELD_ACCESS:
         case AST_ARRAY_ACCESS: {
-            AST* base = node->left;
-            int line = getLine(node);
-
-            // Check if the base of the access is a known compile-time constant string.
-            if (base && base->type == AST_VARIABLE && base->token) {
-                Value* const_val = findCompilerConstant(base->token->value);
-                if (const_val && const_val->type == TYPE_STRING) {
-                    // --- Path for Constant String ---
-                    // It's a constant string like AsciiPalette['...'].
-
-                    // 1. Push the constant string itself onto the stack.
-                    int string_const_idx = addConstantToChunk(chunk, const_val);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)string_const_idx, line);
-
-                    // 2. Compile the index expression, which pushes the index onto the stack.
-                    // This handles the (iter MOD PaletteLen) + 1 part.
-                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
-
-                    // 3. Emit our new opcode to perform the indexing at runtime.
-                    writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line);
-                    break; // End of constant string path
-                }
-            }
-
-            // --- Path for Variable Array/String ---
-            // If it's not a known constant, treat it as a variable.
-            // This path handles indexing into variable arrays and strings.
-            
-            // 1. Get the address of the base variable.
-            compileLValue(base, chunk, getLine(base));
-
-            // 2. Compile all index expressions.
-            for (int i = 0; i < node->child_count; i++) {
-                compileRValue(node->children[i], chunk, getLine(node->children[i]));
-            }
-            
-            // 3. Get the address of the specific element.
-            writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
-            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-            
-            // 4. Get the value from that address and push it onto the stack.
+            // For any R-Value that is an array access or field access,
+            // the logic is the same:
+            // 1. Compile the L-Value to get the final address of the element/field on the stack.
+            // 2. Use OP_GET_INDIRECT to fetch the value at that address.
+            compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
             break;
         }
