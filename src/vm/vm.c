@@ -814,10 +814,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     comparison_succeeded = true;
                 }
                 // Boolean comparison
-                else if ((IS_BOOLEAN(a_val) && (IS_BOOLEAN(b_val) || IS_INTEGER(b_val))) ||
-                         (IS_INTEGER(a_val) && IS_BOOLEAN(b_val))) {
-                    bool ba = IS_BOOLEAN(a_val) ? AS_BOOLEAN(a_val) : (AS_INTEGER(a_val) != 0);
-                    bool bb = IS_BOOLEAN(b_val) ? AS_BOOLEAN(b_val) : (AS_INTEGER(b_val) != 0);
+                else if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
+                    bool ba = AS_BOOLEAN(a_val);
+                    bool bb = AS_BOOLEAN(b_val);
                     switch (instruction_val) {
                         case OP_EQUAL:         result_val = makeBoolean(ba == bb); break;
                         case OP_NOT_EQUAL:     result_val = makeBoolean(ba != bb); break;
@@ -826,7 +825,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         case OP_LESS:          result_val = makeBoolean(ba < bb);  break;
                         case OP_LESS_EQUAL:    result_val = makeBoolean(ba <= bb); break;
                         default:
-                            runtimeError(vm, "VM Error: Unexpected boolean/integer comparison opcode %d.", instruction_val);
+                            runtimeError(vm, "VM Error: Unexpected boolean comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;

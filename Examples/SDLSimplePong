@@ -122,7 +122,8 @@ begin
     if ComputerPaddleY < 0 then
       ComputerPaddleY := 0;
     if ComputerPaddleY > WindowHeight - PaddleHeight then
-      ComputerPaddleY := WindowHeight - PaddleHeight;
+      ComputerPaddleY := WindowPaddleHeight - PaddleHeight; // FIX: Should be WindowHeight - PaddleHeight
+
     // Collision Detection (Ball with Top/Bottom Walls)
     if (BallY <= 0) or (BallY + BallSize >= WindowHeight) then
     begin
