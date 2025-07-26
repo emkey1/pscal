@@ -668,7 +668,12 @@ Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First arg to Assign must be a file variable."); return makeVoid(); }
     if (fileNameVal->type != TYPE_STRING) { runtimeError(vm, "Second arg to Assign must be a string."); return makeVoid(); }
     
-    if (fileVarLValue->filename) free(fileVarLValue->filename);
+    // Free the old filename if it exists
+    if (fileVarLValue->filename) {
+        free(fileVarLValue->filename);
+    }
+    
+    // Duplicate the new filename string
     fileVarLValue->filename = fileNameVal->s_val ? strdup(fileNameVal->s_val) : NULL;
 
     return makeVoid();
