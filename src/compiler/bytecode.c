@@ -80,6 +80,7 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
             if (existing->type == TYPE_INTEGER && existing->i_val == value->i_val) return i;
             if (existing->type == TYPE_REAL && existing->r_val == value->r_val) return i;
             if (existing->type == TYPE_STRING && existing->s_val && value->s_val && strcmp(existing->s_val, value->s_val) == 0) return i;
+            if (existing->type == TYPE_CHAR && existing->c_val == value->c_val) return i;
         }
     }
 

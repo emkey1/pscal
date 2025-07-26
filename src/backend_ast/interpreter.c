@@ -2679,7 +2679,7 @@ Value makeCopyOfValue(const Value *src) {
             if (src->set_val.set_size > 0 && src->set_val.set_values != NULL) {
                 size_t array_size_bytes = sizeof(long long) * src->set_val.set_size;
                 v.set_val.set_values = malloc(array_size_bytes);
-                if (!v.set_val.set_values) { 
+                if (!v.set_val.set_values) {
                     freeValue(&v);
                     fprintf(stderr,
                             "Memory allocation failed in makeCopyOfValue (set)\n");

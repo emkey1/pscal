@@ -1524,28 +1524,34 @@ Value executeBuiltinAssign(AST *node) {
     return makeVoid(); // Return void value
 }
 
-
-Value executeBuiltinClose(AST *node) { // Return Value
-    if (node->child_count != 1) { /* ... error handling ... */ }
-    Value fileVal = eval(node->children[0]);
-    if (fileVal.type != TYPE_FILE) { /* ... error handling ... */ }
-    if (!fileVal.f_val) { /* ... error handling ... */ }
-
-    // Existing core logic
-    fclose(fileVal.f_val);
-    const char *fileVarName = node->children[0]->token->value;
-    Symbol *sym = lookupSymbol(fileVarName);
-    // Make robust: Check if sym and sym->value exist before dereferencing
-    if (sym && sym->value && sym->value->filename) {
-        free(sym->value->filename);
-        sym->value->filename = NULL;
-        // Also nullify the FILE* pointer in the symbol table
-        sym->value->f_val = NULL;
+Value executeBuiltinClose(AST *node) {
+    if (node->child_count != 1) {
+        fprintf(stderr, "Runtime error: Close expects 1 argument.\n");
+        EXIT_FAILURE_HANDLER();
     }
-     // --- ADDED ---
-     freeValue(&fileVal); // Free value returned by eval
+    Value fileVal = eval(node->children[0]);
+    if (fileVal.type != TYPE_FILE) {
+        fprintf(stderr, "Runtime error: Argument to Close must be a file variable.\n");
+        freeValue(&fileVal);
+        EXIT_FAILURE_HANDLER();
+    }
 
-    return makeVoid(); // Return void value
+    // Only close if the file handle is actually open
+    if (fileVal.f_val != NULL) {
+        fclose(fileVal.f_val);
+
+        // Find the symbol in the symbol table to nullify its file handle
+        const char *fileVarName = node->children[0]->token->value;
+        Symbol *sym = lookupSymbol(fileVarName);
+        if (sym && sym->value && sym->value->type == TYPE_FILE) {
+            sym->value->f_val = NULL; // Set the file handle to NULL
+        }
+    }
+    
+    // Free the temporary Value struct returned by eval
+    freeValue(&fileVal);
+
+    return makeVoid();
 }
 
 Value executeBuiltinReset(AST *node) {

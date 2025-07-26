@@ -1636,12 +1636,36 @@ comparison_error_label:
                       return INTERPRET_RUNTIME_ERROR;
                   }
                   frame->function_symbol = proc_symbol;
-                  frame->locals_count = proc_symbol->locals_count;
+                  int locals_pushed = 0;
+                  AST* decl_ast = proc_symbol->type_def;
+                  if (decl_ast) {
+                    AST* blockNode = (decl_ast->type == AST_PROCEDURE_DECL) ? decl_ast->right : decl_ast->extra;
+                    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+                        AST* decls_compound = blockNode->children[0];
+                        if (decls_compound && decls_compound->type == AST_COMPOUND) {
+                            for (int i = 0; i < decls_compound->child_count; i++) {
+                                AST* decl_group = decls_compound->children[i];
+                                if (decl_group && decl_group->type == AST_VAR_DECL) {
+                                    for (int j = 0; j < decl_group->child_count; j++) {
+                                        push(vm, makeValueForType(decl_group->var_type, decl_group->right, NULL));
+                                        locals_pushed++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Initialize function result variable
+                    if (decl_ast->type == AST_FUNCTION_DECL) {
+                        push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
+                        locals_pushed++;
+                    }
+                }
 
-                  for (int i = 0; i < frame->locals_count; i++) {
-                      push(vm, makeNil());
-                  }
-                  
+                if (locals_pushed != proc_symbol->locals_count) {
+                    runtimeError(vm, "Internal VM Error: Mismatch in local variable count during call frame setup for %s. Expected %d, pushed %d.",
+                                 proc_symbol->name, proc_symbol->locals_count, locals_pushed);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                   vm->ip = vm->chunk->code + target_address;
                   break;
             }
