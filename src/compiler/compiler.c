@@ -16,6 +16,7 @@
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
 
 static bool compiler_had_error = false;
+static const char* current_compilation_unit_name = NULL;
 
 typedef struct {
     char* name;
@@ -1150,27 +1151,40 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_PROCEDURE_CALL: {
             const char* calleeName = node->token->value;
-            Symbol* proc_symbol = lookupSymbolIn(procedure_table, calleeName);
-            // Add a flag to identify read/readln calls
+            
+            // --- NEW, MORE ROBUST LOOKUP LOGIC ---
+            Symbol* proc_symbol = NULL;
+            char callee_lower[MAX_SYMBOL_LENGTH];
+            strncpy(callee_lower, calleeName, sizeof(callee_lower) - 1);
+            callee_lower[sizeof(callee_lower) - 1] = '\0';
+            toLowerString(callee_lower);
+
+            // First, try direct (unqualified) lookup
+            proc_symbol = lookupSymbolIn(procedure_table, callee_lower);
+
+            // If it fails and we are inside a unit, try a qualified lookup
+            if (!proc_symbol && current_compilation_unit_name) {
+                char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
+                snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, callee_lower);
+                toLowerString(qualified_name_lower); // Ensure unit name part is also lower
+                proc_symbol = lookupSymbolIn(procedure_table, qualified_name_lower);
+            }
+            // --- END NEW LOOKUP ---
+
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
 
-
-            // Compile arguments first
+            // (Argument compilation logic remains the same...)
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
                 bool is_var_param = false;
-
-                // For read/readln, any argument that is NOT a file variable is a VAR param.
                 if (is_read_proc && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) {
                     is_var_param = true;
                 }
-                // For new, dispose, assign, reset, rewrite, and close, ONLY the FIRST argument is a VAR param.
                 else if (i == 0 && calleeName && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 ||
                                                   strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 ||
                                                   strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0)) {
                     is_var_param = true;
                 }
-                // For user-defined procedures, check the 'by_ref' flag from the AST.
                 else if (proc_symbol && proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
                     AST* param_node = proc_symbol->type_def->children[i];
                     if (param_node && param_node->by_ref) {
@@ -1185,7 +1199,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
+
             if (isBuiltin(calleeName)) {
+                // (This part for built-ins remains the same...)
                 char normalized_name[MAX_SYMBOL_LENGTH];
                 strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
                 normalized_name[sizeof(normalized_name) - 1] = '\0';
@@ -1194,25 +1210,39 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
                 writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-                
-                // If a function is called as a statement, pop its return value
                 if (getBuiltinType(calleeName) == BUILTIN_TYPE_FUNCTION) {
                     writeBytecodeChunk(chunk, OP_POP, line);
                 }
-            } else {
-                if (proc_symbol && proc_symbol->is_defined) {
-                    writeBytecodeChunk(chunk, OP_CALL, line);
+            } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
+                int nameIndex = addStringConstant(chunk, calleeName);
+                writeBytecodeChunk(chunk, OP_CALL, line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line); // NEW: Emit name index
+
+                if (proc_symbol->is_defined) {
+                    // Already defined, emit its address directly
                     emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-                    
-                    // If it's a user function, pop its result
-                    if (proc_symbol->type != TYPE_VOID) {
-                        writeBytecodeChunk(chunk, OP_POP, line);
-                    }
                 } else {
-                    fprintf(stderr, "L%d: Compiler Error: Undefined or forward-declared procedure '%s'.\n", line, calleeName);
-                    compiler_had_error = true;
+                    // Forward-declared, needs patching
+                    if (proc_symbol->patch_count == 0) {
+                        proc_symbol->patches = malloc(sizeof(int));
+                    } else {
+                        proc_symbol->patches = realloc(proc_symbol->patches, sizeof(int) * (proc_symbol->patch_count + 1));
+                    }
+                    if (!proc_symbol->patches) {
+                        fprintf(stderr, "L%d: Compiler fatal error: malloc/realloc failed for patch list.\n", line);
+                        exit(1);
+                    }
+                    proc_symbol->patches[proc_symbol->patch_count++] = chunk->count; // Store offset for the address
+                    emitShort(chunk, 0xFFFF, line); // Emit placeholder address
                 }
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+
+                if (proc_symbol->type != TYPE_VOID) {
+                    writeBytecodeChunk(chunk, OP_POP, line);
+                }
+            } else { // proc_symbol is NULL
+                fprintf(stderr, "L%d: Compiler Error: Undefined procedure or function '%s'.\n", line, calleeName);
+                compiler_had_error = true;
             }
             break;
         }
@@ -1716,7 +1746,6 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
     if (!unit_ast || unit_ast->type != AST_UNIT) {
         return;
     }
-    // The implementation block is stored in the 'extra' child of the AST_UNIT node
     AST* impl_block = unit_ast->extra;
     if (!impl_block || impl_block->type != AST_COMPOUND) {
         return;
@@ -1728,14 +1757,16 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
     fflush(stderr);
     #endif
 
-    // The implementation block is a compound node containing procedure/function declarations.
-    // We must iterate through them and compile each one individually.
+    // Set the compilation context for qualified lookups
+    current_compilation_unit_name = unit_ast->token ? unit_ast->token->value : NULL;
+
     for (int i = 0; i < impl_block->child_count; i++) {
         AST* decl_node = impl_block->children[i];
         if (decl_node && (decl_node->type == AST_PROCEDURE_DECL || decl_node->type == AST_FUNCTION_DECL)) {
-            // This call will create a jump over the body, compile the body,
-            // and patch the jump, correctly adding the function's bytecode.
             compileNode(decl_node, outputChunk, getLine(decl_node));
         }
     }
+
+    // Reset the context after finishing the unit
+    current_compilation_unit_name = NULL;
 }

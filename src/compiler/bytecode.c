@@ -362,24 +362,29 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             return offset + 2;
         }
         case OP_CALL: {
-                   // Operands: 2-byte address, 1-byte arity
-                   if (offset + 3 >= chunk->count) { // Check for 3 operand bytes
-                       printf("OP_CALL (operands out of bounds)\n");
-                       return offset + 1; // Advance by 1 for the opcode itself
-                   }
-                   uint16_t address = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-                   uint8_t declared_arity = chunk->code[offset + 3];
-                   const char* targetProcName = findProcedureNameByAddress(procedureTable, address);
+            // New format: name_idx (1), address (2), arity (1) -> 5 bytes total
+            if (offset + 4 >= chunk->count) {
+                printf("OP_CALL (operands out of bounds)\n");
+                return offset + 1;
+            }
+            uint8_t name_index = chunk->code[offset + 1];
+            uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
+            uint8_t declared_arity = chunk->code[offset + 4];
+            
+            const char* targetProcName = NULL;
+            if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
+                targetProcName = chunk->constants[name_index].s_val;
+            }
 
-                   printf("%-16s %04X", "OP_CALL", address);
-                   if (targetProcName) {
-                       printf(" (%s)", targetProcName);
-                   } else {
-                       printf(" (Unknown@%04X)", address);
-                   }
-                   printf(" (%d args)\n", declared_arity);
-                   return offset + 4; // Opcode (1) + Address (2) + Arity (1)
-               }
+            printf("%-16s %04X", "OP_CALL", address);
+            if (targetProcName) {
+                printf(" (%s)", targetProcName);
+            } else {
+                printf(" (InvalidNameIdx:%d)", name_index);
+            }
+            printf(" (%d args)\n", declared_arity);
+            return offset + 5; // Opcode (1) + NameIdx (1) + Address (2) + Arity (1)
+        }
         case OP_POP:
             printf("OP_POP\n");
             return offset + 1;

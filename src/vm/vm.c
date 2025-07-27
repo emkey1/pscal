@@ -1633,74 +1633,77 @@ comparison_error_label:
                 break;
             }
             case OP_CALL: {
-                  if (vm->frameCount >= VM_CALL_STACK_MAX) {
-                      runtimeError(vm, "VM Error: Call stack overflow.");
-                      return INTERPRET_RUNTIME_ERROR;
-                  }
-
-                  uint16_t target_address = READ_SHORT(vm);
-                  uint8_t declared_arity = READ_BYTE();
-
-                  if (vm->stackTop - vm->stack < declared_arity) {
-                      runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %d, have %ld.",
-                                   declared_arity, (long)(vm->stackTop - vm->stack));
-                      return INTERPRET_RUNTIME_ERROR;
-                  }
-
-                  CallFrame* frame = &vm->frames[vm->frameCount++];
-                  frame->return_address = vm->ip;
-                  frame->slots = vm->stackTop - declared_arity;
-
-                  Symbol* proc_symbol = NULL;
-                  if(vm->procedureTable) {
-                      for (int i = 0; i < HASHTABLE_SIZE; i++) {
-                          for (Symbol* s = vm->procedureTable->buckets[i]; s; s = s->next) {
-                              if (s->is_defined && s->bytecode_address == target_address) {
-                                  proc_symbol = s;
-                                  break;
-                              }
-                          }
-                          if (proc_symbol) break;
-                      }
-                  }
-                  if (!proc_symbol) {
-                      runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
-                      vm->frameCount--;
-                      return INTERPRET_RUNTIME_ERROR;
-                  }
-                  frame->function_symbol = proc_symbol;
-                  int locals_pushed = 0;
-                  AST* decl_ast = proc_symbol->type_def;
-                  if (decl_ast) {
-                    AST* blockNode = (decl_ast->type == AST_PROCEDURE_DECL) ? decl_ast->right : decl_ast->extra;
-                    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
-                        AST* decls_compound = blockNode->children[0];
-                        if (decls_compound && decls_compound->type == AST_COMPOUND) {
-                            for (int i = 0; i < decls_compound->child_count; i++) {
-                                AST* decl_group = decls_compound->children[i];
-                                if (decl_group && decl_group->type == AST_VAR_DECL) {
-                                    for (int j = 0; j < decl_group->child_count; j++) {
-                                        push(vm, makeValueForType(decl_group->var_type, decl_group->right, NULL));
-                                        locals_pushed++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Initialize function result variable
-                    if (decl_ast->type == AST_FUNCTION_DECL) {
-                        push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
-                        locals_pushed++;
-                    }
-                }
-
-                if (locals_pushed != proc_symbol->locals_count) {
-                    runtimeError(vm, "Internal VM Error: Mismatch in local variable count during call frame setup for %s. Expected %d, pushed %d.",
-                                 proc_symbol->name, proc_symbol->locals_count, locals_pushed);
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                  vm->ip = vm->chunk->code + target_address;
-                  break;
+                
+                // New format: name_idx (1), address (2), arity (1)
+                uint8_t name_idx_ignored = READ_BYTE(); // Read and discard the name index
+                (void)name_idx_ignored; // Suppress unused variable warning
+                uint16_t target_address = READ_SHORT(vm);
+                uint8_t declared_arity = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < declared_arity) {
+                    runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %d, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity;
+
+                Symbol* proc_symbol = NULL;
+                if(vm->procedureTable) {
+                    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+                        for (Symbol* s = vm->procedureTable->buckets[i]; s; s = s->next) {
+                            if (s->is_defined && s->bytecode_address == target_address) {
+                                proc_symbol = s;
+                                break;
+                            }
+                        }
+                        if (proc_symbol) break;
+                    }
+                }
+                if (!proc_symbol) {
+                    runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
+                    vm->frameCount--;
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame->function_symbol = proc_symbol;
+                int locals_pushed = 0;
+                AST* decl_ast = proc_symbol->type_def;
+                if (decl_ast) {
+                  AST* blockNode = (decl_ast->type == AST_PROCEDURE_DECL) ? decl_ast->right : decl_ast->extra;
+                  if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+                      AST* decls_compound = blockNode->children[0];
+                      if (decls_compound && decls_compound->type == AST_COMPOUND) {
+                          for (int i = 0; i < decls_compound->child_count; i++) {
+                              AST* decl_group = decls_compound->children[i];
+                              if (decl_group && decl_group->type == AST_VAR_DECL) {
+                                  for (int j = 0; j < decl_group->child_count; j++) {
+                                      push(vm, makeValueForType(decl_group->var_type, decl_group->right, NULL));
+                                      locals_pushed++;
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  // Initialize function result variable
+                  if (decl_ast->type == AST_FUNCTION_DECL) {
+                      push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
+                      locals_pushed++;
+                  }
+              }
+
+              if (locals_pushed != proc_symbol->locals_count) {
+                  runtimeError(vm, "Internal VM Error: Mismatch in local variable count during call frame setup for %s. Expected %d, pushed %d.",
+                               proc_symbol->name, proc_symbol->locals_count, locals_pushed);
+                  return INTERPRET_RUNTIME_ERROR;
+              }
+                vm->ip = vm->chunk->code + target_address;
+                break;
             }
             case OP_HALT:
                 return INTERPRET_OK;
