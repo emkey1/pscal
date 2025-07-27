@@ -1410,12 +1410,19 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                     Symbol* existing_unqualified_alias = hashTableLookup(procedure_table, unqualified_name_lower);
 
                     if (!existing_unqualified_alias) {
-                        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias for routine '%s' (from '%s') using its implementation AST to procedure_table.\n",
+                        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias for routine '%s' (from '%s').\n",
                                     unqualified_name_original_case, qualified_name_lower);
-                        // Call addProcedure with the *implementation AST* (from the qualified symbol)
-                        // and NULL context (to use the unqualified name from the AST token itself).
-                        // addProcedure will make a new copy of qualified_proc_symbol->type_def.
-                        addProcedure(qualified_proc_symbol->type_def, NULL);
+                        
+                        // Create a NEW, lightweight alias symbol
+                        Symbol* alias_sym = (Symbol*)calloc(1, sizeof(Symbol)); // Use calloc to zero-out
+                        if (!alias_sym) { /* error */ EXIT_FAILURE_HANDLER(); }
+
+                        alias_sym->name = strdup(unqualified_name_lower); // The alias has its own name
+                        alias_sym->is_alias = true;
+                        alias_sym->real_symbol = qualified_proc_symbol; // <<<< POINT TO THE REAL SYMBOL
+                        
+                        // Insert this new alias symbol into the procedure table.
+                        hashTableInsert(procedure_table, alias_sym);
                     } else {
                         // This might happen if a built-in has the same name or due to other linking complexities.
                         // Or if the user explicitly qualified a call to a routine that also matches an unqualified one.

@@ -273,6 +273,10 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
             
             if (compilation_ok_for_vm) {
+                finalizeBytecode(&chunk); // Perform the final back-patching pass
+            }
+            
+            if (compilation_ok_for_vm) {
                 fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);

@@ -24,4 +24,6 @@ Value evaluateCompileTimeValue(AST* node); // For parser to evaluate const expre
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk);
 void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk);
 
+void finalizeBytecode(BytecodeChunk* chunk);
+
 #endif // PSCAL_COMPILER_H

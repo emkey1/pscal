@@ -699,27 +699,34 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     
     int func_bytecode_start_address = chunk->count;
 
-    Symbol* proc_symbol = lookupSymbolIn(procedure_table, func_name);
+    Symbol* proc_symbol = NULL;
+    char name_for_lookup[MAX_SYMBOL_LENGTH * 2 + 2];
+
+    if (current_compilation_unit_name) {
+        // We are inside a unit, so the symbol in the table has a qualified name.
+        snprintf(name_for_lookup, sizeof(name_for_lookup), "%s.%s", current_compilation_unit_name, func_name);
+        toLowerString(name_for_lookup); // The table uses lowercase keys.
+    } else {
+        // Not in a unit (e.g., main program block), use the unqualified name.
+        strncpy(name_for_lookup, func_name, sizeof(name_for_lookup) - 1);
+        name_for_lookup[sizeof(name_for_lookup) - 1] = '\0';
+        toLowerString(name_for_lookup);
+    }
+    
+    proc_symbol = lookupSymbolIn(procedure_table, name_for_lookup);
+
     if (!proc_symbol) {
+        // This can happen if a procedure is in the implementation but not the interface.
+        // For now, we'll treat it as an error, though some compilers might just make it a private procedure.
+        fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
+        compiler_had_error = true; // Set error flag
         current_function_compiler = NULL;
         return;
     }
+
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
 
-    // --- NEW: Perform patching for forward calls ---
-    if (proc_symbol->patch_count > 0) {
-        for (int i = 0; i < proc_symbol->patch_count; i++) {
-            int patch_offset = proc_symbol->patches[i];
-            patchShort(chunk, patch_offset, (uint16_t)func_bytecode_start_address);
-        }
-        // Free the patch list as it's no longer needed.
-        free(proc_symbol->patches);
-        proc_symbol->patches = NULL;
-        proc_symbol->patch_count = 0;
-    }
-    // --- END of NEW code ---
-    
     int return_value_slot = -1;
 
     // Step 1: Add parameters to the local scope FIRST.
@@ -1153,23 +1160,30 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             const char* calleeName = node->token->value;
             
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
-            Symbol* proc_symbol = NULL;
+            Symbol* proc_symbol_lookup = NULL;
             char callee_lower[MAX_SYMBOL_LENGTH];
             strncpy(callee_lower, calleeName, sizeof(callee_lower) - 1);
             callee_lower[sizeof(callee_lower) - 1] = '\0';
             toLowerString(callee_lower);
 
             // First, try direct (unqualified) lookup
-            proc_symbol = lookupSymbolIn(procedure_table, callee_lower);
+            proc_symbol_lookup = lookupSymbolIn(procedure_table, callee_lower);
 
             // If it fails and we are inside a unit, try a qualified lookup
-            if (!proc_symbol && current_compilation_unit_name) {
+            if (!proc_symbol_lookup && current_compilation_unit_name) {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, callee_lower);
-                toLowerString(qualified_name_lower); // Ensure unit name part is also lower
-                proc_symbol = lookupSymbolIn(procedure_table, qualified_name_lower);
+                toLowerString(qualified_name_lower);
+                proc_symbol_lookup = lookupSymbolIn(procedure_table, qualified_name_lower);
             }
-            // --- END NEW LOOKUP ---
+            
+            // This is the variable that will hold the symbol we actually work with.
+            Symbol* proc_symbol = proc_symbol_lookup;
+
+            // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
+            if (proc_symbol && proc_symbol->is_alias) {
+                proc_symbol = proc_symbol->real_symbol;
+            }
 
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
 
@@ -1180,9 +1194,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (is_read_proc && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) {
                     is_var_param = true;
                 }
-                else if (i == 0 && calleeName && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 ||
-                                                  strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 ||
-                                                  strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0)) {
+                else if (calleeName && (
+                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0)) ||
+                    (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
+                    (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
+                    (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR
+                )) {
                     is_var_param = true;
                 }
                 else if (proc_symbol && proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
@@ -1216,31 +1233,19 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
                 int nameIndex = addStringConstant(chunk, calleeName);
                 writeBytecodeChunk(chunk, OP_CALL, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line); // NEW: Emit name index
+                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
 
                 if (proc_symbol->is_defined) {
-                    // Already defined, emit its address directly
                     emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
                 } else {
-                    // Forward-declared, needs patching
-                    if (proc_symbol->patch_count == 0) {
-                        proc_symbol->patches = malloc(sizeof(int));
-                    } else {
-                        proc_symbol->patches = realloc(proc_symbol->patches, sizeof(int) * (proc_symbol->patch_count + 1));
-                    }
-                    if (!proc_symbol->patches) {
-                        fprintf(stderr, "L%d: Compiler fatal error: malloc/realloc failed for patch list.\n", line);
-                        exit(1);
-                    }
-                    proc_symbol->patches[proc_symbol->patch_count++] = chunk->count; // Store offset for the address
-                    emitShort(chunk, 0xFFFF, line); // Emit placeholder address
+                    emitShort(chunk, 0xFFFF, line);
                 }
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
 
                 if (proc_symbol->type != TYPE_VOID) {
                     writeBytecodeChunk(chunk, OP_POP, line);
                 }
-            } else { // proc_symbol is NULL
+            } else {
                 fprintf(stderr, "L%d: Compiler Error: Undefined procedure or function '%s'.\n", line, calleeName);
                 compiler_had_error = true;
             }
@@ -1615,8 +1620,28 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
             
-            // --- Argument Compilation (Handles VAR parameters) ---
-            Symbol* func_symbol_for_params = functionName ? lookupSymbolIn(procedure_table, functionName) : NULL;
+            // --- NEW, MORE ROBUST LOOKUP LOGIC ---
+            Symbol* func_symbol_lookup = NULL;
+            char func_name_lower[MAX_SYMBOL_LENGTH];
+            strncpy(func_name_lower, functionName, sizeof(func_name_lower) - 1);
+            func_name_lower[sizeof(func_name_lower) - 1] = '\0';
+            toLowerString(func_name_lower);
+
+            func_symbol_lookup = lookupSymbolIn(procedure_table, func_name_lower);
+            
+            if (!func_symbol_lookup && current_compilation_unit_name) {
+                char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
+                snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, func_name_lower);
+                toLowerString(qualified_name_lower);
+                func_symbol_lookup = lookupSymbolIn(procedure_table, qualified_name_lower);
+            }
+            
+            Symbol* func_symbol = func_symbol_lookup;
+
+            // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
+            if (func_symbol && func_symbol->is_alias) {
+                func_symbol = func_symbol->real_symbol;
+            }
             
             if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
@@ -1634,8 +1659,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     if (!arg_node) continue;
                     
                     bool is_var_param = false;
-                    if (func_symbol_for_params && func_symbol_for_params->type_def && i < func_symbol_for_params->type_def->child_count) {
-                        AST* param_node = func_symbol_for_params->type_def->children[i];
+                    if (func_symbol && func_symbol->type_def && i < func_symbol->type_def->child_count) {
+                        AST* param_node = func_symbol->type_def->children[i];
                         if (param_node && param_node->by_ref) {
                             is_var_param = true;
                         }
@@ -1669,28 +1694,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                      fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context.\n", line, functionName);
                     compiler_had_error = true;
-                    for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                    for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 }
-            } else { // User-defined function call
-                char lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
+            } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
                 if (isCallQualified) {
                     snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
-                    char unit_name_lower[MAX_SYMBOL_LENGTH], func_name_lower[MAX_SYMBOL_LENGTH];
-                    strncpy(unit_name_lower, node->left->token->value, sizeof(unit_name_lower)-1); unit_name_lower[sizeof(unit_name_lower)-1] = '\0';
-                    strncpy(func_name_lower, functionName, sizeof(func_name_lower)-1); func_name_lower[sizeof(func_name_lower)-1] = '\0';
-                    toLowerString(unit_name_lower); toLowerString(func_name_lower);
-                    snprintf(lookup_name, sizeof(lookup_name), "%s.%s", unit_name_lower, func_name_lower);
                 } else {
                     strncpy(original_display_name, functionName, sizeof(original_display_name)-1); original_display_name[sizeof(original_display_name)-1] = '\0';
-                    strncpy(lookup_name, functionName, sizeof(lookup_name)-1); lookup_name[sizeof(lookup_name)-1] = '\0';
-                    toLowerString(lookup_name);
                 }
                 
-                Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
-
                 if (func_symbol) {
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
@@ -1705,20 +1720,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
                         writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                     } else {
+                        int nameIndex = addStringConstant(chunk, functionName);
                         writeBytecodeChunk(chunk, OP_CALL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+
                         if (func_symbol->is_defined) {
                             emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
                         } else {
-                            if (func_symbol->patch_count == 0) {
-                                func_symbol->patches = malloc(sizeof(int));
-                            } else {
-                                func_symbol->patches = realloc(func_symbol->patches, sizeof(int) * (func_symbol->patch_count + 1));
-                            }
-                            if (!func_symbol->patches) {
-                                fprintf(stderr, "L%d: Compiler fatal error: malloc/realloc failed for patch list.\n", line);
-                                exit(1);
-                            }
-                            func_symbol->patches[func_symbol->patch_count++] = chunk->count;
                             emitShort(chunk, 0xFFFF, line);
                         }
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
@@ -1769,4 +1777,98 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
 
     // Reset the context after finishing the unit
     current_compilation_unit_name = NULL;
+}
+
+void finalizeBytecode(BytecodeChunk* chunk) {
+    #ifdef DEBUG
+    fprintf(stderr, "[Compiler DEBUG] Starting final bytecode back-patching pass...\n");
+    #endif
+
+    if (!procedure_table || !chunk || !chunk->code) return;
+
+    // Iterate through the entire bytecode stream, instruction by instruction.
+    for (int offset = 0; offset < chunk->count; ) {
+        uint8_t opcode = chunk->code[offset];
+
+        if (opcode == OP_CALL) {
+            // Format: OP_CALL (1), name_idx (1), address (2), arity (1)
+            if (offset + 4 >= chunk->count) {
+                fprintf(stderr, "Compiler Error: Malformed OP_CALL instruction at offset %d.\n", offset);
+                compiler_had_error = true;
+                break; // Stop processing
+            }
+
+            uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
+
+            // Check if this is a placeholder that needs patching.
+            if (address == 0xFFFF) {
+                uint8_t name_index = chunk->code[offset + 1];
+                if (name_index >= chunk->constants_count) {
+                    fprintf(stderr, "Compiler Error: Invalid name index in OP_CALL at offset %d.\n", offset);
+                    compiler_had_error = true;
+                    offset += 5;
+                    continue;
+                }
+
+                Value name_val = chunk->constants[name_index];
+                if (name_val.type != TYPE_STRING) {
+                    fprintf(stderr, "Compiler Error: Constant at index %d is not a string for OP_CALL.\n", name_index);
+                    compiler_had_error = true;
+                    offset += 5;
+                    continue;
+                }
+
+                const char* proc_name = name_val.s_val;
+                
+                // We need to look up the real symbol, following any aliases.
+                Symbol* symbol_to_patch = lookupSymbolIn(procedure_table, proc_name);
+                if (symbol_to_patch && symbol_to_patch->is_alias) {
+                    symbol_to_patch = symbol_to_patch->real_symbol;
+                }
+
+                if (symbol_to_patch && symbol_to_patch->is_defined) {
+                    #ifdef DEBUG
+                    fprintf(stderr, "[Compiler DEBUG]   Patching call to '%s' at offset %d with final address %04X\n",
+                            proc_name, offset, symbol_to_patch->bytecode_address);
+                    #endif
+                    // Patch the address in place. The patch offset is offset + 2.
+                    patchShort(chunk, offset + 2, (uint16_t)symbol_to_patch->bytecode_address);
+                } else {
+                    fprintf(stderr, "Compiler Error: Procedure '%s' was called but never defined.\n", proc_name);
+                    compiler_had_error = true;
+                }
+            }
+            // Advance past this OP_CALL instruction.
+            offset += 5;
+        } else {
+            // If it's not an OP_CALL, we need to advance past it. We can use a simplified
+            // version of the disassembler's logic to find the next instruction.
+            switch (opcode) {
+                case OP_CONSTANT:
+                case OP_GET_GLOBAL:
+                case OP_SET_GLOBAL:
+                case OP_GET_LOCAL:
+                case OP_SET_LOCAL:
+                case OP_GET_GLOBAL_ADDRESS:
+                case OP_GET_LOCAL_ADDRESS:
+                case OP_GET_FIELD_ADDRESS:
+                case OP_GET_ELEMENT_ADDRESS:
+                case OP_GET_CHAR_ADDRESS:
+                case OP_WRITE:
+                case OP_WRITE_LN:
+                    offset += 2;
+                    break;
+                case OP_JUMP:
+                case OP_JUMP_IF_FALSE:
+                case OP_CALL_BUILTIN:
+                case OP_FORMAT_VALUE:
+                    offset += 3;
+                    break;
+                // Add other multi-byte opcodes here if they exist
+                default:
+                    offset += 1; // All other opcodes are 1 byte.
+                    break;
+            }
+        }
+    }
 }
