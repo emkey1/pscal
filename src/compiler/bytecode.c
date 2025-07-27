@@ -231,13 +231,25 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_DUP: printf("OP_DUP\n"); return offset + 1;
         case OP_JUMP_IF_FALSE: {
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
-            printf("%-16s %4d (to %04X)\n", "OP_JUMP_IF_FALSE", jump_operand, offset + 3 + jump_operand);
+            int target_addr = offset + 3 + (int16_t)jump_operand;
+            const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
+            printf("%-16s %4d (to %04X)", "OP_JUMP_IF_FALSE", (int16_t)jump_operand, target_addr);
+            if (targetName) {
+                printf(" -> %s", targetName);
+            }
+            printf("\n");
             return offset + 3;
         }
         case OP_JUMP: {
             uint16_t jump_operand_uint = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
             int16_t jump_operand_sint = (int16_t)jump_operand_uint; // Cast to signed
-            printf("%-16s %4d (to %04X)\n", "OP_JUMP", jump_operand_sint, offset + 3 + jump_operand_sint);
+            int target_addr = offset + 3 + jump_operand_sint;
+            const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
+            printf("%-16s %4d (to %04X)", "OP_JUMP", jump_operand_sint, target_addr);
+            if (targetName) {
+                printf(" -> %s", targetName);
+            }
+            printf("\n");
             return offset + 3;
         }
         case OP_DEFINE_GLOBAL: {

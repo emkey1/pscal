@@ -265,16 +265,47 @@ Value evaluateCompileTimeValue(AST* node) {
             return makeBoolean(node->i_val);
         case AST_NIL:
             return makeNil();
-        case AST_VARIABLE: // Reference to another constant
+        case AST_VARIABLE: // Reference to another constant or an enum
             if (node->token && node->token->value) {
+                // First, check if it's a defined compile-time constant
                 Value* const_val_ptr = findCompilerConstant(node->token->value);
                 if (const_val_ptr) {
                     return makeCopyOfValue(const_val_ptr); // Return a copy
-                } else {
-                    return makeVoid();
                 }
+
+                // If not, check the global symbol table for enums
+                Symbol* sym = lookupGlobalSymbol(node->token->value);
+                if (sym && sym->type == TYPE_ENUM && sym->value) {
+                    return makeCopyOfValue(sym->value);
+                }
+                
+                return makeVoid();
             }
             break;
+        case AST_PROCEDURE_CALL: {
+            if (node->token && isBuiltin(node->token->value)) {
+                const char* funcName = node->token->value;
+                if ((strcasecmp(funcName, "low") == 0 || strcasecmp(funcName, "high") == 0) &&
+                    node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
+                    
+                    const char* typeName = node->children[0]->token->value;
+                    AST* typeDef = lookupType(typeName);
+
+                    if (typeDef) {
+                        if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
+                        
+                        if (typeDef->type == AST_ENUM_TYPE) {
+                            if (strcasecmp(funcName, "low") == 0) {
+                                return makeEnum(typeName, 0);
+                            } else { // high
+                                return makeEnum(typeName, typeDef->child_count > 0 ? typeDef->child_count - 1 : 0);
+                            }
+                        }
+                    }
+                }
+            }
+            break; // Fall through to makeVoid if not a recognized compile-time function
+        }
         case AST_BINARY_OP:
             if (node->left && node->right && node->token) {
                 Value left_val = evaluateCompileTimeValue(node->left);
@@ -330,7 +361,6 @@ Value evaluateCompileTimeValue(AST* node) {
     }
     return makeVoid();
 }
-
 
 // Reset for each compilation
 void resetCompilerConstants(void) {
@@ -502,7 +532,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
-                // Pass 2: Compile routines from the declaration block. <<<< THIS WAS MISSING
+                // Pass 2: Compile routines from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (decl_child && (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL)) {
@@ -675,10 +705,23 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
+
+    // --- NEW: Perform patching for forward calls ---
+    if (proc_symbol->patch_count > 0) {
+        for (int i = 0; i < proc_symbol->patch_count; i++) {
+            int patch_offset = proc_symbol->patches[i];
+            patchShort(chunk, patch_offset, (uint16_t)func_bytecode_start_address);
+        }
+        // Free the patch list as it's no longer needed.
+        free(proc_symbol->patches);
+        proc_symbol->patches = NULL;
+        proc_symbol->patch_count = 0;
+    }
+    // --- END of NEW code ---
     
     int return_value_slot = -1;
 
-    // Step 1: Add parameters to the local scope FIRST. They will occupy slots 0, 1, ...
+    // Step 1: Add parameters to the local scope FIRST.
     if (func_decl_node->children) {
         for (int i = 0; i < func_decl_node->child_count; i++) {
             AST* param_group_node = func_decl_node->children[i];
@@ -698,7 +741,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     // Step 2: If it's a function, add its name as a local variable for the return value.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         addLocal(&fc, func_name, line, false);
-        return_value_slot = fc.local_count - 1; // Its index is the last one added.
+        return_value_slot = fc.local_count - 1;
     }
     
     // Step 3: Add all other local variables.
@@ -1222,7 +1265,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
     switch (node->type) {
         case AST_SET: {
-            // Create a temporary Value struct to build the set constant.
             Value set_const_val;
             memset(&set_const_val, 0, sizeof(Value));
             set_const_val.type = TYPE_SET;
@@ -1230,21 +1272,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             set_const_val.set_val.set_size = 0;
             set_const_val.set_val.set_values = NULL;
 
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG SET] Initialized set_const_val at %p. size=%d, capacity=%d\n",
-                    (void*)&set_const_val, set_const_val.set_val.set_size, set_const_val.max_length);
-            fflush(stderr);
-#endif
-
             for (int i = 0; i < node->child_count; i++) {
                 AST* member = node->children[i];
                 if (member->type == AST_SUBRANGE) {
                     Value start_val = evaluateCompileTimeValue(member->left);
                     Value end_val = evaluateCompileTimeValue(member->right);
-                    if ((start_val.type == TYPE_INTEGER || start_val.type == TYPE_CHAR) &&
-                        (end_val.type == TYPE_INTEGER || end_val.type == TYPE_CHAR)) {
-                        long long start_ord = (start_val.type == TYPE_INTEGER) ? start_val.i_val : start_val.c_val;
-                        long long end_ord = (end_val.type == TYPE_INTEGER) ? end_val.i_val : end_val.c_val;
+                    
+                    bool start_ok = (start_val.type == TYPE_INTEGER || start_val.type == TYPE_CHAR || start_val.type == TYPE_ENUM);
+                    bool end_ok = (end_val.type == TYPE_INTEGER || end_val.type == TYPE_CHAR || end_val.type == TYPE_ENUM);
+
+                    if (start_ok && end_ok) {
+                        long long start_ord = (start_val.type == TYPE_ENUM) ? start_val.enum_val.ordinal : ((start_val.type == TYPE_INTEGER) ? start_val.i_val : start_val.c_val);
+                        long long end_ord = (end_val.type == TYPE_ENUM) ? end_val.enum_val.ordinal : ((end_val.type == TYPE_INTEGER) ? end_val.i_val : end_val.c_val);
+                        
                         for (long long j = start_ord; j <= end_ord; j++) {
                            addOrdinalToSetValue(&set_const_val, j);
                         }
@@ -1256,8 +1296,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     freeValue(&end_val);
                 } else {
                     Value elem_val = evaluateCompileTimeValue(member);
-                    if (elem_val.type == TYPE_INTEGER || elem_val.type == TYPE_CHAR) {
-                        long long ord = (elem_val.type == TYPE_INTEGER) ? elem_val.i_val : elem_val.c_val;
+                    if (elem_val.type == TYPE_INTEGER || elem_val.type == TYPE_CHAR || elem_val.type == TYPE_ENUM) {
+                        long long ord = (elem_val.type == TYPE_ENUM) ? elem_val.enum_val.ordinal : ((elem_val.type == TYPE_INTEGER) ? elem_val.i_val : elem_val.c_val);
                         addOrdinalToSetValue(&set_const_val, ord);
                     } else {
                         fprintf(stderr, "L%d: Compiler error: Set elements must be constant ordinal types.\n", getLine(member));
@@ -1267,14 +1307,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-#ifdef DEBUG
-            fprintf(stderr, "[DEBUG SET] Finished building set. Final size=%d, capacity=%d. Adding to chunk.\n",
-                    set_const_val.set_val.set_size, set_const_val.max_length);
-            fflush(stderr);
-#endif
-            // Pass the address of the fully constructed set Value.
             int constIndex = addConstantToChunk(chunk, &set_const_val);
-            // Now that a deep copy is in the chunk, free our temporary set value.
             freeValue(&set_const_val);
 
             writeBytecodeChunk(chunk, OP_CONSTANT, line);
@@ -1548,18 +1581,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
                 compiler_had_error = true;
                 writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                // Use the new helper to add a nil constant.
                 writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 break;
             }
-
-            Symbol* func_symbol = functionName ? lookupSymbolIn(procedure_table, functionName) : NULL;
             
-            // Special handling for built-ins that take type identifiers instead of values.
+            // --- Argument Compilation (Handles VAR parameters) ---
+            Symbol* func_symbol_for_params = functionName ? lookupSymbolIn(procedure_table, functionName) : NULL;
+            
             if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
-                    // Push the *name* of the type as a string constant.
                     int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
                     writeBytecodeChunk(chunk, (uint8_t)typeNameIndex, line);
@@ -1568,33 +1599,26 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compiler_had_error = true;
                 }
             } else {
-                if (node->child_count > 0 && node->children) {
-                    for (int i = 0; i < node->child_count; i++) {
-                        AST* arg_node = node->children[i];
-                        if (!arg_node) continue;
-                        
-                        bool is_var_param = false;
-                        
-                        if (functionName && (strcasecmp(functionName, "new") == 0 || strcasecmp(functionName, "dispose") == 0)) {
+                for (int i = 0; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    if (!arg_node) continue;
+                    
+                    bool is_var_param = false;
+                    if (func_symbol_for_params && func_symbol_for_params->type_def && i < func_symbol_for_params->type_def->child_count) {
+                        AST* param_node = func_symbol_for_params->type_def->children[i];
+                        if (param_node && param_node->by_ref) {
                             is_var_param = true;
                         }
-                        else if (func_symbol && func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                            AST* param_node = func_symbol->type_def->children[i];
-                            if (param_node && param_node->by_ref) {
-                                is_var_param = true;
-                            }
-                        }
+                    }
 
-                        if (is_var_param) {
-                            compileLValue(arg_node, chunk, getLine(arg_node));
-                        } else {
-                            compileRValue(arg_node, chunk, getLine(arg_node));
-                        }
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileRValue(arg_node, chunk, getLine(arg_node));
                     }
                 }
-            // --- ADDED THIS BRACE ---
             }
-            
+
             if (isBuiltin(functionName)) {
                 BuiltinRoutineType type = getBuiltinType(functionName);
                 if (type == BUILTIN_TYPE_PROCEDURE) {
@@ -1602,7 +1626,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compiler_had_error = true;
                     for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    // Use the new helper to add a nil constant.
                     writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                 } else if (type == BUILTIN_TYPE_FUNCTION) {
                     char normalized_name[MAX_SYMBOL_LENGTH];
@@ -1635,30 +1658,43 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     strncpy(lookup_name, functionName, sizeof(lookup_name)-1); lookup_name[sizeof(lookup_name)-1] = '\0';
                     toLowerString(lookup_name);
                 }
+                
+                Symbol* func_symbol = lookupSymbolIn(procedure_table, lookup_name);
 
-                if (func_symbol && func_symbol->is_defined) {
+                if (func_symbol) {
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                         compiler_had_error = true;
                         for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         writeBytecodeChunk(chunk, OP_CONSTANT, line);
                         writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                    } else if (func_symbol->arity != node->child_count) {
+                        fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n", line, original_display_name, func_symbol->arity, node->child_count);
+                        compiler_had_error = true;
+                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                        writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
                     } else {
-                        if (func_symbol->arity != node->child_count) {
-                            fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n", line, original_display_name, func_symbol->arity, node->child_count);
-                            compiler_had_error = true;
-                            for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                            writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
-                        } else {
-                            writeBytecodeChunk(chunk, OP_CALL, line);
+                        writeBytecodeChunk(chunk, OP_CALL, line);
+                        if (func_symbol->is_defined) {
                             emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
-                            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                        } else {
+                            if (func_symbol->patch_count == 0) {
+                                func_symbol->patches = malloc(sizeof(int));
+                            } else {
+                                func_symbol->patches = realloc(func_symbol->patches, sizeof(int) * (func_symbol->patch_count + 1));
+                            }
+                            if (!func_symbol->patches) {
+                                fprintf(stderr, "L%d: Compiler fatal error: malloc/realloc failed for patch list.\n", line);
+                                exit(1);
+                            }
+                            func_symbol->patches[func_symbol->patch_count++] = chunk->count;
+                            emitShort(chunk, 0xFFFF, line);
                         }
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                     }
                 } else {
-                     if (func_symbol && !func_symbol->is_defined) fprintf(stderr, "L%d: Compiler Error: Function '%s' is forward declared.\n", line, original_display_name);
-                     else fprintf(stderr, "L%d: Compiler Error: Undefined function '%s'.\n", line, original_display_name);
+                     fprintf(stderr, "L%d: Compiler Error: Undefined function '%s'.\n", line, original_display_name);
                      compiler_had_error = true;
                      for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                      writeBytecodeChunk(chunk, OP_CONSTANT, line);

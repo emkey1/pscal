@@ -1,6 +1,6 @@
 program ComprehensiveTypeTest;
 
-uses CRT; // For WriteLn, Write, etc.
+//uses CRT; // For WriteLn, Write, etc.
 
 const
   TOLERANCE = 0.0001;

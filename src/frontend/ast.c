@@ -312,6 +312,14 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
      if (!varName) return NULL;
      AST* foundDecl = NULL;
 
+     // First, check for the identifier in the global symbol table. This will find enums.
+     Symbol* sym = lookupGlobalSymbol(varName);
+     if (sym) {
+         // If a symbol is found, return its type definition AST node.
+         // For enums, this correctly points back to the AST_ENUM_TYPE node.
+         return sym->type_def;
+     }
+
      if (currentScopeNode && currentScopeNode != globalProgramNode) {
          foundDecl = findDeclarationInScope(varName, currentScopeNode);
      }

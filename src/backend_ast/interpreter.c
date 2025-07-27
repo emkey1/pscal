@@ -1136,6 +1136,11 @@ Value eval(AST *node) {
 #endif
             return makeString(node->token->value);
         case AST_VARIABLE: {
+            if (node->token && node->token->value && strcasecmp(node->token->value, "break_requested") == 0) {
+                // This is a "magic" variable that reads directly from the C global.
+                // This bypasses the symbol table lookup entirely for this specific variable.
+                return makeBoolean(break_requested != 0);
+            }
             Symbol *sym = lookupSymbol(node->token->value);
             if (!sym || !sym->value) {
                 fprintf(stderr, "Runtime error: variable '%s' not declared or uninitialized.\n", node->token->value);
