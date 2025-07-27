@@ -418,7 +418,11 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                      node->var_type = TYPE_BOOLEAN;
                  }
                  else if (op == TOKEN_AND || op == TOKEN_OR ) {
-                      node->var_type = TYPE_BOOLEAN;
+                     if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
+                         node->var_type = TYPE_INTEGER;
+                     } else {
+                         node->var_type = TYPE_BOOLEAN; // Default to boolean for mixed or boolean types
+                     }
                  }
                  else if (op == TOKEN_SLASH) {
                      node->var_type = TYPE_REAL;

@@ -2703,7 +2703,6 @@ Value makeCopyOfValue(const Value *src) {
 
     return v;
 }
-
 Value* resolveLValueToPtr(AST* lvalueNode) {
     if (!lvalueNode) {
         fprintf(stderr, "Runtime error: Cannot resolve NULL lvalue node.\n");

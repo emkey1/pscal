@@ -1503,7 +1503,7 @@ comparison_error_label:
 
                 FILE *output_stream = stdout;
                 int start_index = 0;
-                
+                            
                 // Check if the first argument is a file variable.
                 if (argCount > 0 && vm->stackTop[-argCount].type == TYPE_FILE) {
                     Value fileVal = vm->stackTop[-argCount];
@@ -1532,31 +1532,39 @@ comparison_error_label:
                     freeValue(&file_arg);
                 }
 
-                // Apply console colors only if writing to stdout.
+                bool color_was_applied = false; // Flag to track if we change the color
+
+                // Apply console colors only if writing to stdout and colors are not default.
                 if (output_stream == stdout) {
-                    // (Your existing color logic is preserved here)
-                    char escape_sequence[64] = "\x1B[";
-                    char code_str[64];
-                    bool first_attr = true;
-                    if (gCurrentColorIsExt) {
-                        snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-                    } else {
-                        if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-                        snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
+                    // Check if the current color settings are the default ones.
+                    bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
+                                             !gCurrentTextBold && !gCurrentColorIsExt && !gCurrentBgIsExt);
+
+                    if (!is_default_state) {
+                        color_was_applied = true; // Mark that we're applying custom colors.
+                        char escape_sequence[64] = "\x1B[";
+                        char code_str[64];
+                        bool first_attr = true;
+                        if (gCurrentColorIsExt) {
+                            snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
+                        } else {
+                            if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                            snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
+                        }
+                        if (!first_attr) strcat(escape_sequence, ";");
+                        strcat(escape_sequence, code_str);
+                        strcat(escape_sequence, ";");
+                        if (gCurrentBgIsExt) {
+                            snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
+                        } else {
+                            snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
+                        }
+                        strcat(escape_sequence, code_str);
+                        strcat(escape_sequence, "m");
+                        fprintf(output_stream, "%s", escape_sequence);
                     }
-                    if (!first_attr) strcat(escape_sequence, ";");
-                    strcat(escape_sequence, code_str);
-                    strcat(escape_sequence, ";");
-                    if (gCurrentBgIsExt) {
-                        snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-                    } else {
-                        snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
-                    }
-                    strcat(escape_sequence, code_str);
-                    strcat(escape_sequence, "m");
-                    fprintf(output_stream, "%s", escape_sequence);
                 }
-                
+                            
                 // Print the arguments to the correct stream.
                 for (int i = 0; i < print_arg_count; i++) {
                     Value val = args_to_print[i];
@@ -1567,12 +1575,12 @@ comparison_error_label:
                 if (instruction_val == OP_WRITE_LN) {
                     fprintf(output_stream, "\n");
                 }
-                
-                // Reset console colors if they were applied.
-                if (output_stream == stdout) {
+                            
+                // Reset console colors only if they were applied in this call.
+                if (color_was_applied) {
                     fprintf(output_stream, "\x1B[0m");
                 }
-                
+                            
                 fflush(output_stream);
                 break;
             }

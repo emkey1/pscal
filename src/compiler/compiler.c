@@ -1409,35 +1409,43 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_BINARY_OP: {
             if (node_token && node_token->type == TOKEN_AND) {
-                // Correct short-circuit for: A AND B
-                // If A is false, the expression is false.
-                // If A is true, the expression's value is the value of B.
-                compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
-                int jump_if_false = chunk->count;
-                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
-                emitShort(chunk, 0xFFFF, line);
+                // Check annotated type to decide between bitwise and logical AND
+                if (node->left && node->left->var_type == TYPE_INTEGER) {
+                    // Bitwise AND for integers
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    compileRValue(node->right, chunk, getLine(node->right));
+                    writeBytecodeChunk(chunk, OP_AND, line);
+                } else {
+                    // Logical AND for booleans (with short-circuiting)
+                    compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
+                    int jump_if_false = chunk->count;
+                    writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
+                    emitShort(chunk, 0xFFFF, line);
 
-                // If we get here, A was true and was popped. The stack is empty.
-                // The result of the whole expression is now the result of B.
-                compileRValue(node->right, chunk, getLine(node->right)); // stack: [B]
-                int jump_over_false_case = chunk->count;
-                writeBytecodeChunk(chunk, OP_JUMP, line);
-                emitShort(chunk, 0xFFFF, line);
+                    // If A was true, result is B.
+                    compileRValue(node->right, chunk, getLine(node->right)); // stack: [B]
+                    int jump_over_false_case = chunk->count;
+                    writeBytecodeChunk(chunk, OP_JUMP, line);
+                    emitShort(chunk, 0xFFFF, line);
 
-                // This is where we land if A was false. The stack is empty.
-                // We must push 'false' onto the stack as the expression's result.
-                patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
-                int false_const_idx = addBooleanConstant(chunk, false);
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)false_const_idx, line); // stack: [false]
+                    // If A was false, jump here and push 'false' as the result.
+                    patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
+                    int false_const_idx = addBooleanConstant(chunk, false);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)false_const_idx, line); // stack: [false]
 
-                // The end for both paths.
-                patchShort(chunk, jump_over_false_case + 1, chunk->count - (jump_over_false_case + 3));
-
+                    // End of the expression for both paths.
+                    patchShort(chunk, jump_over_false_case + 1, chunk->count - (jump_over_false_case + 3));
+                }
             } else if (node_token && node_token->type == TOKEN_OR) {
-                // Correct short-circuit for: A OR B
-                // If A is true, the expression is true.
-                // If A is false, the expression's value is the value of B.
+                // Check annotated type for bitwise vs. logical OR
+                if (node->left && node->left->var_type == TYPE_INTEGER) {
+                    // Bitwise OR for integers
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    compileRValue(node->right, chunk, getLine(node->right));
+                    writeBytecodeChunk(chunk, OP_OR, line);
+                } else {
+                    // Logical OR for booleans (with short-circuiting)
                 compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
                 int jump_if_false = chunk->count;
                 writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
@@ -1458,6 +1466,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                 // The end for both paths.
                 patchShort(chunk, jump_to_end + 1, chunk->count - (jump_to_end + 3));
+                }
             }
             else { // Original logic for all other operators
                 compileRValue(node->left, chunk, getLine(node->left));
