@@ -114,7 +114,7 @@ cmake ..
 make
 ```
 
-Binaries will be in ../bin
+Binaries will be in ../build/bin
 
 You will also need to do something similar to the following to get units and the code in Examples/ and Tests/ to work...
 
