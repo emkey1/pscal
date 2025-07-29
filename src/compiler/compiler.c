@@ -1461,10 +1461,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_FIELD_ACCESS:
         case AST_ARRAY_ACCESS: {
-            // For any R-Value that is an array access or field access,
-            // the logic is the same:
-            // 1. Compile the L-Value to get the final address of the element/field on the stack.
-            // 2. Use OP_GET_INDIRECT to fetch the value at that address.
+            if (node->left && (node->left->var_type == TYPE_STRING || node->left->var_type == TYPE_CHAR)) {
+                // This is an R-Value access like `c := s[i]` or `c2 := c1[1]`.
+                compileRValue(node->left, chunk, getLine(node->left));      // Push the string/char value
+                compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index value
+                writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Pops both, pushes the character
+                break; // Exit case
+            }
             compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
             break;
