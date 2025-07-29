@@ -21,7 +21,7 @@
 #include "backend_ast/builtin.h"
 #include "backend_ast/audio.h"
 
-#define MAX_WRITELN_ARGS_VM 32  
+#define MAX_WRITELN_ARGS_VM 32
 
 static const int pscalToAnsiBase[8] = {
     0, 4, 2, 6, 1, 5, 3, 7
@@ -68,7 +68,7 @@ void vm_dump_stack_info(VM* vm) {
 
     fprintf(stderr, "[VM_DEBUG] Offset: %04ld, Line: %4d, Stack Size: %ld, Frame Count: %d\n",
             current_offset, line, vm->stackTop - vm->stack, vm->frameCount);
-    
+
     // Disassemble and print the current instruction
     if (current_offset < vm->chunk->count) {
         disassembleInstruction(vm->chunk, current_offset, vm->procedureTable);
@@ -93,7 +93,7 @@ static bool vmSetContains(const Value* setVal, const Value* itemVal) {
 
     long long item_ord;
     bool item_is_ordinal = false;
-    
+
     // Get ordinal value of the item
     switch (itemVal->type) {
         case TYPE_INTEGER:
@@ -224,11 +224,11 @@ static Value pop(VM* vm) {
     }
     vm->stackTop--;
     Value result = *vm->stackTop; // Make a copy of the value to return.
-    
+
     // Overwrite the just-popped slot with a safe NIL value to invalidate it
     // and prevent dangling pointers if the returned copy's contents are freed.
     *vm->stackTop = makeNil();
-    
+
     return result; // Return the copy, which the caller is now responsible for.
 }
 
@@ -268,7 +268,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->ip = NULL;
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
     vm->procedureTable = NULL;
-    
+
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
@@ -315,7 +315,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     sym->name = strdup(name);
     if (!sym->name) { /* ... */ free(sym); return NULL; }
     toLowerString(sym->name);
-    
+
     sym->type = type;
     sym->type_def = type_def_for_value_init; // Store the provided type definition AST
     sym->value = (Value*)malloc(sizeof(Value));
@@ -323,7 +323,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
 
     // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
     *(sym->value) = makeValueForType(type, type_def_for_value_init, sym);
-    
+
     sym->is_alias = false;
     sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
                            // If VM needs to know about them, another mechanism or flag is needed.
@@ -338,7 +338,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     vm->chunk = chunk;
     vm->ip = vm->chunk->code;
-    
+
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
@@ -353,7 +353,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         printf("------------------------\n");
     }
     #endif
-    
+
 #define BINARY_OP(op_char_for_error_msg, current_instruction_code) \
     do { \
         Value b_val_popped = pop(vm); \
@@ -464,7 +464,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
-/*        #ifdef DEBUG
+/* #ifdef DEBUG
         if (dumpExec) {
             fprintf(stderr,"VM Stack: ");
             for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
@@ -498,7 +498,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
                     freeValue(slot);
                 }
-                
+
                 // 3. Restore VM state (IP and stackTop).
                 vm->ip = currentFrame->return_address;
                 vm->stackTop = currentFrame->slots;
@@ -530,6 +530,42 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makeCopyOfValue(&constant));
                 break;
             }
+            case OP_GET_CHAR_ADDRESS: {
+                Value index_val = pop(vm);
+                Value* string_ptr_val = vm->stackTop - 1; // Peek at the string pointer
+
+                if (string_ptr_val->type != TYPE_POINTER || !string_ptr_val->ptr_val || ((Value*)string_ptr_val->ptr_val)->type != TYPE_STRING) {
+                    runtimeError(vm, "VM Error: Base for character index is not a pointer to a string.");
+                    freeValue(&index_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (index_val.type != TYPE_INTEGER) {
+                    runtimeError(vm, "VM Error: String index must be an integer.");
+                    freeValue(&index_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                long long pscal_index = index_val.i_val;
+                freeValue(&index_val);
+
+                Value* string_val = (Value*)string_ptr_val->ptr_val;
+                const char* str = string_val->s_val ? string_val->s_val : "";
+                size_t len = strlen(str);
+
+                if (pscal_index < 1 || (size_t)pscal_index > len) {
+                    runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Pop the old string address pointer from the stack
+                Value popped_string_ptr = pop(vm);
+                freeValue(&popped_string_ptr);
+
+                // Push a new pointer directly to the character's memory location
+                // We use a special marker in base_type_node to identify this as a char pointer
+                push(vm, makePointer(&string_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
+                break;
+            }
             case OP_GET_GLOBAL_ADDRESS: {
                 Value varNameVal = READ_CONSTANT();
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { return INTERPRET_RUNTIME_ERROR; }
@@ -551,7 +587,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_SUBTRACT: BINARY_OP("-", instruction_val); break;
             case OP_MULTIPLY: BINARY_OP("*", instruction_val); break;
             case OP_DIVIDE:   BINARY_OP("/", instruction_val); break;
-            
+
             case OP_NEGATE: {
                 Value val_popped = pop(vm);
                 Value result_val;
@@ -922,7 +958,7 @@ comparison_error_label:
                         case OP_LESS_EQUAL:    op_str = "<="; break;
                         default: op_str = "unknown_comparison_op_code"; break;
                     }
-                    
+
                     runtimeError(vm, "Runtime Error: Operands not comparable for operator '%s'. Left operand: %s, Right operand: %s.",
                                                  op_str,
                                                  varTypeToString(a_val.type),
@@ -969,13 +1005,13 @@ comparison_error_label:
                     }
                     current = current->next;
                 }
-                
+
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
             }
             case OP_GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
-                
+
                 if (dimension_count == 1) {
                     Value* base_ptr = vm->stackTop - 1;
                     if (base_ptr->type == TYPE_POINTER) {
@@ -1005,7 +1041,7 @@ comparison_error_label:
                         }
                     }
                 }
-                
+
                 int* indices = malloc(sizeof(int) * dimension_count);
                 if (!indices) { runtimeError(vm, "VM Error: Malloc failed for array indices."); return INTERPRET_RUNTIME_ERROR; }
 
@@ -1025,7 +1061,7 @@ comparison_error_label:
                     free(indices);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                
+
                 Value* array_val_ptr = (Value*)pointer_to_array_val->ptr_val;
                 if (array_val_ptr->type != TYPE_ARRAY) {
                     runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
@@ -1035,7 +1071,7 @@ comparison_error_label:
 
                 int offset = computeFlatOffset(array_val_ptr, indices);
                 free(indices);
-                
+
                 int total_size = calculateArrayTotalSize(array_val_ptr);
                 if (offset < 0 || offset >= total_size) {
                     runtimeError(vm, "VM Error: Array element index out of bounds.");
@@ -1044,7 +1080,7 @@ comparison_error_label:
 
                 Value popped_array_pointer_val = pop(vm);
                 freeValue(&popped_array_pointer_val);
-                
+
                 push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
                 break;
             }
@@ -1059,7 +1095,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (pointer_to_lvalue.base_type_node == (AST*)0xDEADBEEF) {
+                if (pointer_to_lvalue.base_type_node == (AST*)0xDEADBEEF) { // Check for our special char pointer
                     char* char_target_addr = (char*)pointer_to_lvalue.ptr_val;
                     if (char_target_addr == NULL) {
                         runtimeError(vm, "VM Error: Attempting to assign to a NULL character address.");
@@ -1085,7 +1121,7 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                } else {
+                } else { // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
                         runtimeError(vm, "VM Error: SET_INDIRECT called with a nil LValue pointer.");
@@ -1093,7 +1129,8 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    
+
+                    // (Your existing logic for handling fixed-length strings, pointers, reals, etc. goes here)
                     if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
                         if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
                             strncpy(target_lvalue_ptr->s_val, value_to_set.s_val, target_lvalue_ptr->max_length);
@@ -1102,7 +1139,7 @@ comparison_error_label:
                             target_lvalue_ptr->s_val[0] = value_to_set.c_val;
                             target_lvalue_ptr->s_val[1] = '\0';
                         } else {
-                            runtimeError(vm, "Type mismatch: Cannot assign multi-character or null string to a CHAR variable.");
+                            runtimeError(vm, "Type mismatch: Cannot assign this type to a fixed-length string.");
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_POINTER && (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
@@ -1146,19 +1183,19 @@ comparison_error_label:
             case OP_IN: {
                 Value set_val = pop(vm);
                 Value item_val = pop(vm);
-                    
+
                 if (set_val.type != TYPE_SET) {
                     runtimeError(vm, "Right operand of IN must be a set.");
                     freeValue(&item_val);
                     freeValue(&set_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                    
+
                 bool result = vmSetContains(&set_val, &item_val);
-                    
+
                 freeValue(&item_val);
                 freeValue(&set_val);
-                
+
                 push(vm, makeBoolean(result));
                 break;
             }
@@ -1169,7 +1206,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: GET_INDIRECT requires an address on the stack.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                
+
                 if (pointer_val.base_type_node == (AST*)0xDEADBEEF) {
                     char* char_target_addr = (char*)pointer_val.ptr_val;
                     if (char_target_addr == NULL) {
@@ -1189,7 +1226,7 @@ comparison_error_label:
                 freeValue(&pointer_val);
                 break;
             }
-                
+
             case OP_GET_CHAR_FROM_STRING: {
                 // Pops: [index], [string]
                 // Pushes: [char]
@@ -1274,12 +1311,10 @@ comparison_error_label:
                     }
 
                     Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
-                   
-                    // --- FIX START ---
+
                     free(lower_bounds); // Free the dynamically allocated array for lower bounds
                     free(upper_bounds); // Free the dynamically allocated array for upper bounds
-                    // --- FIX END ---
-                   
+
                     Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                     if (sym == NULL) {
                         sym = (Symbol*)malloc(sizeof(Symbol));
@@ -1293,7 +1328,7 @@ comparison_error_label:
                             free(sym); freeValue(&array_val); return INTERPRET_RUNTIME_ERROR;
                         }
                         toLowerString(sym->name);
-                        
+
                         sym->type = declaredType;
                         sym->type_def = NULL;
                         sym->value = (Value*)malloc(sizeof(Value));
@@ -1301,7 +1336,7 @@ comparison_error_label:
                              runtimeError(vm, "VM Error: Malloc failed for Value struct for global array '%s'.", varNameVal.s_val);
                              free(sym->name); free(sym); freeValue(&array_val); return INTERPRET_RUNTIME_ERROR;
                         }
-                        
+
                         *(sym->value) = array_val;
 
                         sym->is_alias = false;
@@ -1379,7 +1414,7 @@ comparison_error_label:
 
                 // Get the new value from the top of the stack.
                 Value value_from_stack = pop(vm);
-                
+
                 // Create a temporary value holder for potential type coercion.
                 Value value_to_assign;
                 bool assigned_newly_created_value = false;
@@ -1415,7 +1450,7 @@ comparison_error_label:
                 }
                 // Always free the original value that was popped from the stack.
                 freeValue(&value_from_stack);
-                
+
                 break;
             }
             case OP_GET_LOCAL: {
@@ -1513,7 +1548,7 @@ comparison_error_label:
 
                 FILE *output_stream = stdout;
                 int start_index = 0;
-                            
+
                 // Check if the first argument is a file variable.
                 if (argCount > 0 && vm->stackTop[-argCount].type == TYPE_FILE) {
                     Value fileVal = vm->stackTop[-argCount];
@@ -1574,7 +1609,7 @@ comparison_error_label:
                         fprintf(output_stream, "%s", escape_sequence);
                     }
                 }
-                            
+
                 // Print the arguments to the correct stream.
                 for (int i = 0; i < print_arg_count; i++) {
                     Value val = args_to_print[i];
@@ -1585,12 +1620,12 @@ comparison_error_label:
                 if (instruction_val == OP_WRITE_LN) {
                     fprintf(output_stream, "\n");
                 }
-                            
+
                 // Reset console colors only if they were applied in this call.
                 if (color_was_applied) {
                     fprintf(output_stream, "\x1B[0m");
                 }
-                            
+
                 fflush(output_stream);
                 break;
             }
@@ -1610,18 +1645,18 @@ comparison_error_label:
 
                 Value* args = vm->stackTop - arg_count;
                 const char* builtin_name_original_case = AS_STRING(vm->chunk->constants[name_const_idx]);
-                
+
                 // Convert builtin_name to lowercase for lookup in the dispatch table
                 char builtin_name_lower[MAX_ID_LENGTH + 1]; // Use a buffer large enough for builtin names
                 strncpy(builtin_name_lower, builtin_name_original_case, MAX_ID_LENGTH);
                 builtin_name_lower[MAX_ID_LENGTH] = '\0'; // Ensure null termination
                 toLowerString(builtin_name_lower); // toLowerString is in utils.h/c
-                
+
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
                     Value result = handler(vm, arg_count, args);
-                    
+
                     for (int i = 0; i < arg_count; i++) {
                         freeValue(&args[i]);
                     }
@@ -1647,7 +1682,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                
+
                 // New format: name_idx (1), address (2), arity (1)
                 uint8_t name_idx_ignored = READ_BYTE(); // Read and discard the name index
                 (void)name_idx_ignored; // Suppress unused variable warning
@@ -1759,11 +1794,11 @@ comparison_error_label:
                 }
 
                 freeValue(&raw_val);
-                
+
                 push(vm, makeString(buf));
                 break;
             }
-  
+
             default:
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;

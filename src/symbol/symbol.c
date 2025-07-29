@@ -718,14 +718,12 @@ void updateSymbol(const char *name, Value val) {
                 sym->value->i_val = val.i_val; // Boolean (0/1) to Word
             }
             break;
-            
-            
         case TYPE_STRING: {
             // Free existing string data in the target symbol's value (already done by freeValue(sym->value)).
             // Create and assign a new string based on the incoming value.
             const char* source_str = NULL;
             char char_buf[2]; // Buffer for potential Char to String conversion
-            
+
             // Get the source string pointer, handling incoming CHAR or STRING.
             if (val.type == TYPE_STRING) {
                 source_str = val.s_val;
@@ -736,28 +734,14 @@ void updateSymbol(const char *name, Value val) {
             }
             // Handle NULL source string defensively.
             if (!source_str) source_str = "";
-            
+
             // Handle fixed vs dynamic length string assignment.
             if (sym->value->max_length > 0) { // Target is a fixed-length string.
-                size_t source_len = strlen(source_str);
                 // Copy up to the maximum length of the target string.
-                size_t copy_len = (source_len > (size_t)sym->value->max_length) ? (size_t)sym->value->max_length : source_len;
-                
-                // Allocate memory for the fixed-length string (max_length + 1 for null terminator).
-                sym->value->s_val = malloc((size_t)sym->value->max_length + 1);
-                if (!sym->value->s_val) {
-                    fprintf(stderr, "FATAL: Memory allocation failed for fixed string assignment to '%s'.\n", name);
-                    // Free incoming value 'val' (especially if it's a String/Record/Array/Set/Enum etc.)
-                    freeValue(&val);
-                    EXIT_FAILURE_HANDLER();
-                }
-                // Copy the source string content into the allocated buffer.
-                strncpy(sym->value->s_val, source_str, copy_len);
-                // Ensure null termination at the end of the copied content.
-                sym->value->s_val[copy_len] = '\0';
-                
-                // The buffer is already null-terminated at max_length + 1.
-                
+                strncpy(sym->value->s_val, source_str, sym->value->max_length);
+                // Ensure null termination at the boundary.
+                sym->value->s_val[sym->value->max_length] = '\0';
+
             } else { // Target is a dynamic string (max_length is -1).
                 // Create a duplicate of the source string.
                 sym->value->s_val = strdup(source_str);
