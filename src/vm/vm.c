@@ -389,7 +389,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 size_t len_b = strlen(s_b); \
                 size_t total_len = len_a + len_b; \
                 \
-                /* --- START OF MODIFIED SECTION (String Concatenation Fix) --- */ \
                 char* temp_concat_buffer = (char*)malloc(total_len + 1); \
                 if (!temp_concat_buffer) { \
                     runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
@@ -398,11 +397,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } \
                 memcpy(temp_concat_buffer, s_a, len_a); \
                 memcpy(temp_concat_buffer + len_a, s_b, len_b); \
-                temp_concat_buffer[total_len] = '\0'; /* Ensure null termination */ \
+                temp_concat_buffer[total_len] = '\0'; \
                 \
-                result_val = makeString(temp_concat_buffer); /* makeString will do strdup */ \
-                free(temp_concat_buffer); /* Free our temporary buffer */ \
-                /* --- END OF MODIFIED SECTION --- */ \
+                result_val = makeString(temp_concat_buffer); \
+                free(temp_concat_buffer); \
                 \
                 op_is_handled = true; \
             } \
@@ -1001,8 +999,9 @@ comparison_error_label:
                                 return INTERPRET_RUNTIME_ERROR;
                             }
 
+                            // Push a special pointer to the character's memory location
                             push(vm, makePointer(&base_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
-                            break;
+                            break; // Exit the case
                         }
                     }
                 }
@@ -1095,9 +1094,13 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     
-                    if (target_lvalue_ptr->type == TYPE_CHAR && value_to_set.type == TYPE_STRING) {
-                        if (value_to_set.s_val && strlen(value_to_set.s_val) == 1) {
-                            target_lvalue_ptr->c_val = value_to_set.s_val[0];
+                    if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
+                        if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                            strncpy(target_lvalue_ptr->s_val, value_to_set.s_val, target_lvalue_ptr->max_length);
+                            target_lvalue_ptr->s_val[target_lvalue_ptr->max_length] = '\0'; // Ensure null termination
+                        } else if (value_to_set.type == TYPE_CHAR) {
+                            target_lvalue_ptr->s_val[0] = value_to_set.c_val;
+                            target_lvalue_ptr->s_val[1] = '\0';
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign multi-character or null string to a CHAR variable.");
                         }
@@ -1364,46 +1367,53 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 if (!sym->value) {
+                    // This case is defensive; a defined global should always have a Value struct.
                     sym->value = (Value*)malloc(sizeof(Value));
                     if (!sym->value) {
                         runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                    // Initialize it to a default for its type to be safe.
                     *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
                 }
 
+                // Get the new value from the top of the stack.
                 Value value_from_stack = pop(vm);
+                
+                // Create a temporary value holder for potential type coercion.
                 Value value_to_assign;
+                bool assigned_newly_created_value = false;
 
-                if (sym->type == TYPE_CHAR && value_from_stack.type == TYPE_STRING) {
-                    if (value_from_stack.s_val && strlen(value_from_stack.s_val) == 1) {
-                        value_to_assign = makeChar(value_from_stack.s_val[0]);
-                    } else {
-                        runtimeError(vm, "Runtime Error: Cannot assign multi-character string or null string to CHAR variable '%s'.", sym->name);
-                        freeValue(&value_from_stack);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                } else if (sym->type == TYPE_STRING && value_from_stack.type == TYPE_CHAR) {
-                    char char_buf[2];
-                    char_buf[0] = value_from_stack.c_val;
-                    char_buf[1] = '\0';
-                    value_to_assign = makeString(char_buf);
+                // --- Perform Type Coercion if necessary ---
+                if (sym->type == value_from_stack.type) {
+                    // No coercion needed, assign directly.
+                    value_to_assign = value_from_stack;
                 } else if (sym->type == TYPE_REAL && value_from_stack.type == TYPE_INTEGER) {
                     value_to_assign = makeReal((double)value_from_stack.i_val);
-                } else if (sym->type == TYPE_INTEGER && value_from_stack.type == TYPE_REAL) {
-                    value_to_assign = makeInt((long long)value_from_stack.r_val);
+                    assigned_newly_created_value = true;
+                } else if (sym->type == TYPE_STRING && value_from_stack.type == TYPE_CHAR) {
+                    char char_buf[2] = { value_from_stack.c_val, '\0' };
+                    value_to_assign = makeString(char_buf);
+                    assigned_newly_created_value = true;
                 }
+                // Add other valid coercions here as needed (e.g., Integer to Byte/Word with checks)
                 else {
-                    value_to_assign = value_from_stack;
+                    runtimeError(vm, "Runtime Error: Type mismatch assigning %s to global variable '%s' of type %s.",
+                                 varTypeToString(value_from_stack.type), sym->name, varTypeToString(sym->type));
+                    freeValue(&value_from_stack);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
 
-                freeValue(sym->value);
-                *(sym->value) = makeCopyOfValue(&value_to_assign);
+                // --- Perform the Assignment Safely ---
+                freeValue(sym->value); // Free the old value's contents.
+                *(sym->value) = makeCopyOfValue(&value_to_assign); // Assign a deep copy of the new value.
 
-                if (value_to_assign.type != value_from_stack.type) {
+                // --- Cleanup ---
+                // If we created a new temporary value during coercion, free it.
+                if (assigned_newly_created_value) {
                     freeValue(&value_to_assign);
                 }
-
+                // Always free the original value that was popped from the stack.
                 freeValue(&value_from_stack);
                 
                 break;

@@ -584,7 +584,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)node->var_type, getLine(varNameNode)); // The overall type (e.g., TYPE_ARRAY)
 
-                        if (actual_type_def_node->type == AST_ARRAY_TYPE) {
+                        if (node->var_type == TYPE_ARRAY) {
                             // This block now correctly handles both inline and aliased arrays.
                             int dimension_count = actual_type_def_node->child_count;
                             if (dimension_count > 255) {
@@ -630,29 +630,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                             const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                             
-                            // <<<< FIX for Snippet 1 >>>>
                             writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
 
-                        } else if (actual_type_def_node->type == AST_VARIABLE && strcasecmp(actual_type_def_node->token->value, "string") == 0 && actual_type_def_node->right) {
-                            // Fixed-length string declaration
-                            AST* lenNode = actual_type_def_node->right;
-                            Value len_val = evaluateCompileTimeValue(lenNode);
-                            if (len_val.type == TYPE_INTEGER && len_val.i_val >= 0 && len_val.i_val <= 255) {
-                                writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, len_val.i_val), getLine(varNameNode)); // Length
-                            } else {
-                                fprintf(stderr, "L%d: Compiler error: String length must be a constant integer between 0 and 255.\n", getLine(varNameNode));
-                                compiler_had_error = true;
-                                writeBytecodeChunk(chunk, 0, getLine(varNameNode)); // Default length 0 or error sentinel
-                            }
-                            freeValue(&len_val);
-                            // Element type name (empty string for basic string type)
-                            writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, ""), getLine(varNameNode));
-
                         } else {
-                            // This handles simple types, records, and other non-array aliased types.
+                            // This now correctly handles ALL non-array types, including simple types,
+                            // records, dynamic strings, and fixed-length strings.
                             const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
-                            
-                            // <<<< FIX for Snippet 2 >>>>
                             writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, type_name), getLine(varNameNode));
                         }
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
@@ -1218,17 +1201,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
 
             if (isBuiltin(calleeName)) {
-                // (This part for built-ins remains the same...)
-                char normalized_name[MAX_SYMBOL_LENGTH];
-                strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
-                normalized_name[sizeof(normalized_name) - 1] = '\0';
-                toLowerString(normalized_name);
-                int nameIndex = addStringConstant(chunk, normalized_name);
-                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-                if (getBuiltinType(calleeName) == BUILTIN_TYPE_FUNCTION) {
-                    writeBytecodeChunk(chunk, OP_POP, line);
+                BuiltinRoutineType type = getBuiltinType(calleeName);
+                if (type == BUILTIN_TYPE_PROCEDURE || type == BUILTIN_TYPE_FUNCTION) {
+                    char normalized_name[MAX_SYMBOL_LENGTH];
+                    strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
+                    normalized_name[sizeof(normalized_name) - 1] = '\0';
+                    toLowerString(normalized_name);
+                    int nameIndex = addStringConstant(chunk, normalized_name);
+                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+
+                    // If it was a function, its return value is on the stack. Pop it.
+                    if (type == BUILTIN_TYPE_FUNCTION) {
+                        writeBytecodeChunk(chunk, OP_POP, line);
+                    }
+                } else {
+                    // This case handles if a name is in the isBuiltin list but not in getBuiltinType,
+                    // which would be an internal inconsistency.
+                    fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in procedure or function.\n", line, calleeName);
+                    compiler_had_error = true;
                 }
             } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
                 int nameIndex = addStringConstant(chunk, calleeName);
@@ -1242,6 +1234,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
 
+                // This logic for user-defined functions is already correct.
                 if (proc_symbol->type != TYPE_VOID) {
                     writeBytecodeChunk(chunk, OP_POP, line);
                 }
@@ -1786,16 +1779,15 @@ void finalizeBytecode(BytecodeChunk* chunk) {
 
     if (!procedure_table || !chunk || !chunk->code) return;
 
-    // Iterate through the entire bytecode stream, instruction by instruction.
     for (int offset = 0; offset < chunk->count; ) {
         uint8_t opcode = chunk->code[offset];
 
         if (opcode == OP_CALL) {
-            // Format: OP_CALL (1), name_idx (1), address (2), arity (1)
+            // Ensure we can read the full OP_CALL instruction
             if (offset + 4 >= chunk->count) {
                 fprintf(stderr, "Compiler Error: Malformed OP_CALL instruction at offset %d.\n", offset);
                 compiler_had_error = true;
-                break; // Stop processing
+                break;
             }
 
             uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
@@ -1804,9 +1796,9 @@ void finalizeBytecode(BytecodeChunk* chunk) {
             if (address == 0xFFFF) {
                 uint8_t name_index = chunk->code[offset + 1];
                 if (name_index >= chunk->constants_count) {
-                    fprintf(stderr, "Compiler Error: Invalid name index in OP_CALL at offset %d.\n", offset);
+                    fprintf(stderr, "Compiler Error: Invalid name index in OP_CALL at offset %d.\n", name_index);
                     compiler_had_error = true;
-                    offset += 5;
+                    offset += 5; // Skip this malformed instruction
                     continue;
                 }
 
@@ -1814,13 +1806,13 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 if (name_val.type != TYPE_STRING) {
                     fprintf(stderr, "Compiler Error: Constant at index %d is not a string for OP_CALL.\n", name_index);
                     compiler_had_error = true;
-                    offset += 5;
+                    offset += 5; // Skip
                     continue;
                 }
 
                 const char* proc_name = name_val.s_val;
                 
-                // We need to look up the real symbol, following any aliases.
+                // Look up the real symbol, following any aliases.
                 Symbol* symbol_to_patch = lookupSymbolIn(procedure_table, proc_name);
                 if (symbol_to_patch && symbol_to_patch->is_alias) {
                     symbol_to_patch = symbol_to_patch->real_symbol;
@@ -1838,37 +1830,10 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                     compiler_had_error = true;
                 }
             }
-            // Advance past this OP_CALL instruction.
-            offset += 5;
+            offset += 5; // Advance past the 5-byte OP_CALL instruction
         } else {
-            // If it's not an OP_CALL, we need to advance past it. We can use a simplified
-            // version of the disassembler's logic to find the next instruction.
-            switch (opcode) {
-                case OP_CONSTANT:
-                case OP_GET_GLOBAL:
-                case OP_SET_GLOBAL:
-                case OP_GET_LOCAL:
-                case OP_SET_LOCAL:
-                case OP_GET_GLOBAL_ADDRESS:
-                case OP_GET_LOCAL_ADDRESS:
-                case OP_GET_FIELD_ADDRESS:
-                case OP_GET_ELEMENT_ADDRESS:
-                case OP_GET_CHAR_ADDRESS:
-                case OP_WRITE:
-                case OP_WRITE_LN:
-                    offset += 2;
-                    break;
-                case OP_JUMP:
-                case OP_JUMP_IF_FALSE:
-                case OP_CALL_BUILTIN:
-                case OP_FORMAT_VALUE:
-                    offset += 3;
-                    break;
-                // Add other multi-byte opcodes here if they exist
-                default:
-                    offset += 1; // All other opcodes are 1 byte.
-                    break;
-            }
+            // For any other instruction, use the new helper to get the correct length and advance the offset.
+            offset += getInstructionLength(chunk, offset);
         }
     }
 }

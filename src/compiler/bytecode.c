@@ -132,6 +132,54 @@ static const char* findProcedureNameByAddress(HashTable* procedureTable, uint16_
     }
     return NULL;
 }
+// New helper function to get the length of an instruction at a given offset.
+int getInstructionLength(BytecodeChunk* chunk, int offset) {
+    uint8_t instruction = chunk->code[offset];
+    switch (instruction) {
+        case OP_CONSTANT:
+        case OP_GET_GLOBAL:
+        case OP_SET_GLOBAL:
+        case OP_GET_LOCAL:
+        case OP_SET_LOCAL:
+        case OP_GET_GLOBAL_ADDRESS:
+        case OP_GET_LOCAL_ADDRESS:
+        case OP_GET_FIELD_ADDRESS:
+        case OP_GET_ELEMENT_ADDRESS:
+        case OP_GET_CHAR_ADDRESS:
+        case OP_WRITE:
+        case OP_WRITE_LN:
+            return 2; // 1-byte opcode + 1-byte operand
+        case OP_JUMP:
+        case OP_JUMP_IF_FALSE:
+        case OP_CALL_BUILTIN:
+        case OP_FORMAT_VALUE:
+            return 3; // 1-byte opcode + 2-byte operand
+        case OP_CALL:
+            return 5; // 1-byte opcode + 1-byte name_idx + 2-byte addr + 1-byte arity
+        case OP_DEFINE_GLOBAL: {
+            // This instruction has a variable length.
+            int current_pos = offset + 1; // Position after the opcode
+            if (current_pos + 1 >= chunk->count) return 1; // Safeguard for incomplete instruction
+            
+            VarType declaredType = (VarType)chunk->code[offset + 2];
+            current_pos = offset + 3; // Position after the type byte
+
+            if (declaredType == TYPE_ARRAY) {
+                if (current_pos < chunk->count) {
+                    uint8_t dimension_count = chunk->code[current_pos++];
+                    current_pos += dimension_count * 2; // Skip over all the bounds indices
+                    current_pos += 2; // Skip element VarType and element type name index
+                }
+            } else {
+                // All other types (simple, record, string, etc.) have one more byte for the type name index.
+                current_pos++;
+            }
+            return (current_pos - offset); // Return the total calculated length
+        }
+        default:
+            return 1; // All other opcodes are 1 byte.
+    }
+}
 
 // This is the function declared in bytecode.h and called by disassembleBytecodeChunk
 // It was already non-static in your provided bytecode.c
@@ -224,7 +272,10 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_GET_INDIRECT: 
             printf("OP_GET_INDIRECT\n");
             return offset + 1;
-        case OP_GET_CHAR_FROM_STRING: // <<< ADD THIS
+        case OP_IN:
+            printf("OP_IN\n");
+            return offset + 1;
+        case OP_GET_CHAR_FROM_STRING:
             printf("OP_GET_CHAR_FROM_STRING\n");
             return offset + 1;
         case OP_SWAP: printf("OP_SWAP\n"); return offset + 1;

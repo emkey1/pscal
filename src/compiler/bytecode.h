@@ -13,7 +13,6 @@
 #include "symbol/symbol.h" // For HashTable definition
 
 // --- Opcode Definitions ---
-// We'll start with a very basic set for SimpleMath.p
 typedef enum {
     OP_RETURN,        // Return from current function/script (implicit at end of main block)
     OP_CONSTANT,      // Push a constant from the constant pool onto the stack
@@ -104,5 +103,6 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
+int getInstructionLength(BytecodeChunk* chunk, int offset);
 
 #endif // PSCAL_BYTECODE_H
