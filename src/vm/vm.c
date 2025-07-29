@@ -1207,13 +1207,14 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (pointer_val.base_type_node == (AST*)0xDEADBEEF) {
+                if (pointer_val.base_type_node == (AST*)0xDEADBEEF) { // Check for our special char pointer
                     char* char_target_addr = (char*)pointer_val.ptr_val;
                     if (char_target_addr == NULL) {
                         runtimeError(vm, "VM Error: Attempting to dereference a NULL character address.");
                         freeValue(&pointer_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                    // It's a character pointer, so create and push a CHAR Value.
                     push(vm, makeChar(*char_target_addr));
                 } else {
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
@@ -1415,40 +1416,35 @@ comparison_error_label:
                 // Get the new value from the top of the stack.
                 Value value_from_stack = pop(vm);
 
-                // Create a temporary value holder for potential type coercion.
-                Value value_to_assign;
-                bool assigned_newly_created_value = false;
+                if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
+                      // Target is a fixed-length string.
+                      const char* source_str = "";
+                      if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                          source_str = value_from_stack.s_val;
+                      } else if (value_from_stack.type == TYPE_CHAR) {
+                          // Allow assigning a single char by creating a temporary string
+                          char char_buf[2] = { value_from_stack.c_val, '\0' };
+                          strncpy(sym->value->s_val, char_buf, sym->value->max_length);
+                          // strncpy pads with nulls if source is shorter, but let's be explicit
+                          sym->value->s_val[sym->value->max_length] = '\0';
+                          // Skip the main strncpy below for this case
+                          goto end_set_global;
+                      } else {
+                          runtimeError(vm, "Type mismatch assigning to fixed-length string '%s'.", sym->name);
+                          // Fall through to free value_from_stack and break
+                      }
 
-                // --- Perform Type Coercion if necessary ---
-                if (sym->type == value_from_stack.type) {
-                    // No coercion needed, assign directly.
-                    value_to_assign = value_from_stack;
-                } else if (sym->type == TYPE_REAL && value_from_stack.type == TYPE_INTEGER) {
-                    value_to_assign = makeReal((double)value_from_stack.i_val);
-                    assigned_newly_created_value = true;
-                } else if (sym->type == TYPE_STRING && value_from_stack.type == TYPE_CHAR) {
-                    char char_buf[2] = { value_from_stack.c_val, '\0' };
-                    value_to_assign = makeString(char_buf);
-                    assigned_newly_created_value = true;
-                }
-                // Add other valid coercions here as needed (e.g., Integer to Byte/Word with checks)
-                else {
-                    runtimeError(vm, "Runtime Error: Type mismatch assigning %s to global variable '%s' of type %s.",
-                                 varTypeToString(value_from_stack.type), sym->name, varTypeToString(sym->type));
-                    freeValue(&value_from_stack);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                      if (value_from_stack.type == TYPE_STRING) {
+                         strncpy(sym->value->s_val, source_str, sym->value->max_length);
+                         sym->value->s_val[sym->value->max_length] = '\0'; // Ensure null termination
+                      }
+                  } else {
+                      // Original logic for dynamic strings and other types
+                      freeValue(sym->value);
+                      *(sym->value) = makeCopyOfValue(&value_from_stack);
+                  }
+              end_set_global:;
 
-                // --- Perform the Assignment Safely ---
-                freeValue(sym->value); // Free the old value's contents.
-                *(sym->value) = makeCopyOfValue(&value_to_assign); // Assign a deep copy of the new value.
-
-                // --- Cleanup ---
-                // If we created a new temporary value during coercion, free it.
-                if (assigned_newly_created_value) {
-                    freeValue(&value_to_assign);
-                }
-                // Always free the original value that was popped from the stack.
                 freeValue(&value_from_stack);
 
                 break;
@@ -1465,48 +1461,73 @@ comparison_error_label:
                 Value* target_slot = &frame->slots[slot];
                 Value value_from_stack = pop(vm);
 
-                VarType original_target_type = target_slot->type; // Preserve the variable's real type
+                // --- START MODIFICATION ---
+                // Check if the target is a fixed-length string BEFORE the switch
+                if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                    // This is a fixed-length string, handle it separately.
+                    const char* source_str = "";
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        // Handle char assignment
+                        char char_buf[2] = { value_from_stack.c_val, '\0' };
+                        strncpy(target_slot->s_val, char_buf, target_slot->max_length);
+                        target_slot->s_val[target_slot->max_length] = '\0';
+                        goto cleanup_set_local; // Jump to cleanup
+                    } else {
+                        runtimeError(vm, "Type mismatch assigning to local fixed-length string.");
+                        // Fall through to cleanup
+                    }
 
-                // Free the old contents of the target slot before assigning the new value.
-                freeValue(target_slot);
+                    if (value_from_stack.type == TYPE_STRING) {
+                       strncpy(target_slot->s_val, source_str, target_slot->max_length);
+                       target_slot->s_val[target_slot->max_length] = '\0'; // Ensure null termination
+                    }
+                } else {
+                    // --- This is your ORIGINAL logic for all other types ---
+                    VarType original_target_type = target_slot->type; // Preserve the variable's real type
 
-                // Assign the new value, coercing the type if necessary.
-                switch (original_target_type) {
-                    case TYPE_INTEGER:
-                        if (value_from_stack.type == TYPE_REAL) {
-                            target_slot->i_val = (long long)value_from_stack.r_val; // Truncate real
-                        } else {
-                            target_slot->i_val = value_from_stack.i_val; // Works for int, bool, byte, word
-                        }
-                        break;
-                    case TYPE_REAL:
-                        if (value_from_stack.type == TYPE_INTEGER) {
-                            target_slot->r_val = (double)value_from_stack.i_val; // Promote integer
-                        } else {
-                            target_slot->r_val = value_from_stack.r_val;
-                        }
-                        break;
-                    case TYPE_STRING:
-                        if (value_from_stack.type == TYPE_CHAR) {
-                            char char_buf[2];
-                            char_buf[0] = value_from_stack.c_val;
-                            char_buf[1] = '\0';
-                            // makeString allocates new memory, which is what we want.
-                            *target_slot = makeString(char_buf);
-                        } else {
-                            // For string-to-string, do a full deep copy.
+                    // Free the old contents of the target slot before assigning the new value.
+                    freeValue(target_slot);
+
+                    // Assign the new value, coercing the type if necessary.
+                    switch (original_target_type) {
+                        case TYPE_INTEGER:
+                            if (value_from_stack.type == TYPE_REAL) {
+                                target_slot->i_val = (long long)value_from_stack.r_val; // Truncate real
+                            } else {
+                                target_slot->i_val = value_from_stack.i_val; // Works for int, bool, byte, word
+                            }
+                            break;
+                        case TYPE_REAL:
+                            if (value_from_stack.type == TYPE_INTEGER) {
+                                target_slot->r_val = (double)value_from_stack.i_val; // Promote integer
+                            } else {
+                                target_slot->r_val = value_from_stack.r_val;
+                            }
+                            break;
+                        case TYPE_STRING: // This case now only handles DYNAMIC strings
+                            if (value_from_stack.type == TYPE_CHAR) {
+                                char char_buf[2];
+                                char_buf[0] = value_from_stack.c_val;
+                                char_buf[1] = '\0';
+                                // makeString allocates new memory, which is what we want.
+                                *target_slot = makeString(char_buf);
+                            } else {
+                                // For string-to-string, do a full deep copy.
+                                *target_slot = makeCopyOfValue(&value_from_stack);
+                            }
+                            break;
+                        default:
+                            // For other types (char, bool, record, array, pointer, etc.),
+                            // a direct deep copy is appropriate.
                             *target_slot = makeCopyOfValue(&value_from_stack);
-                        }
-                        break;
-                    default:
-                        // For other types (char, bool, record, array, pointer, etc.),
-                        // a direct deep copy is appropriate.
-                        *target_slot = makeCopyOfValue(&value_from_stack);
-                        break;
+                            break;
+                    }
+                    // **Crucially, restore the original type.** This prevents type corruption.
+                    target_slot->type = original_target_type;
                 }
-
-                // **Crucially, restore the original type.** This prevents type corruption.
-                target_slot->type = original_target_type;
+            cleanup_set_local:;
 
                 // Free the temporary value that was popped from the stack.
                 freeValue(&value_from_stack);

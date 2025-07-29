@@ -454,11 +454,12 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_ARRAY_ACCESS: {
             // Check if the base is a string for special handling
             if (node->left && node->left->var_type == TYPE_STRING) {
-                // For string[index], push the address of the string variable, then the index.
-                // The new OP_GET_CHAR_ADDRESS will then resolve to the char's address.
-                compileLValue(node->left, chunk, getLine(node->left)); // Push address of string variable (Value*)
-                compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the single index
-                writeBytecodeChunk(chunk, OP_GET_CHAR_ADDRESS, line); // New opcode for char address
+                // This is an R-Value access like `c := s[i]`.
+                // We need to compile the string and the index, then call the specialized opcode.
+                compileRValue(node->left, chunk, getLine(node->left));      // Push the string value
+                compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index value
+                writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Pops both, pushes the character
+                break; // We are done with this case
             } else {
                 // Standard array access: push array base address, then all indices.
                 compileLValue(node->left, chunk, getLine(node->left)); // Push address of array variable (Value*)
