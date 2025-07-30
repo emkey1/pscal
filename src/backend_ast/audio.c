@@ -6,9 +6,13 @@
 #include "utils.h" // For EXIT_FAILURE_HANDLER
 #include <stdio.h>
 #include <string.h> // For strdup
+#ifdef SDL
 #include <SDL2/SDL.h> // Need basic SDL for SDL_InitSubSystem, SDL_WasInit
+#endif
 #include "vm/vm.h" // <<< ADDED: For VM struct and runtimeError prototype
 
+
+#ifdef SDL
 // Define and initialize global variables from audio.h
 Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
 bool gSoundSystemInitialized = false;
@@ -412,3 +416,4 @@ Value vm_builtin_issoundplaying(VM* vm, int arg_count, Value* args) {
     int playing = Mix_Playing(-1);
     return makeBoolean(playing != 0);
 }
+#endif

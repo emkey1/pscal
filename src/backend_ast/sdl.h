@@ -4,6 +4,7 @@
 #ifndef PSCAL_SDL_H
 #define PSCAL_SDL_H
 
+#ifdef SDL
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_image.h>
@@ -116,4 +117,5 @@ Value vm_builtin_setrendertarget(struct VM_s* vm, int arg_count, Value* args);
 }
 #endif
 
+#endif
 #endif // PSCAL_SDL_H

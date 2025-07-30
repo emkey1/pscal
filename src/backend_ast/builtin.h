@@ -145,7 +145,7 @@ Value executeBuiltinDispose(AST *node);
 Value executeBuiltinRealToStr(AST *node);
 int getBuiltinIDForCompiler(const char *name);
 
-
+#ifdef SDL
 // Prototypes from sdl.c (via sdl.h)
 Value executeBuiltinInitGraph(AST *node);
 Value executeBuiltinCloseGraph(AST *node);
@@ -192,6 +192,7 @@ Value executeBuiltinLoadSound(AST *node);
 Value executeBuiltinPlaySound(AST *node);
 Value executeBuiltinQuitSoundSystem(AST *node);
 Value executeBuiltinIsSoundPlaying(AST *node);
+#endif
 
 // Prototypes from builtin_network_api.c (via its .h)
 Value executeBuiltinAPISend(AST *node);

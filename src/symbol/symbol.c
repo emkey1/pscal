@@ -4,8 +4,6 @@
 //
 //  Created by Michael Miller on 3/25/25.
 //
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
 #include "frontend/lexer.h"
 #include "core/utils.h"
 #include "globals.h"

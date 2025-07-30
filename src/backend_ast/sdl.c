@@ -4,6 +4,7 @@
 //
 //  Created by Michael Miller on 5/7/25.
 //
+#ifdef SDL
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 // Include SDL_mixer header directly
@@ -2951,3 +2952,4 @@ Value vm_builtin_putpixel(VM* vm, int arg_count, Value* args) {
     
     return makeVoid();
 }
+#endif

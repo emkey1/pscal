@@ -7,6 +7,7 @@
 #ifndef PSCAL_AUDIO_H
 #define PSCAL_AUDIO_H
 
+#ifdef SDL
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include "types.h"
@@ -45,4 +46,5 @@ Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_issoundplaying(struct VM_s* vm, int arg_count, Value* args);
 
+#endif
 #endif // PSCAL_AUDIO_H

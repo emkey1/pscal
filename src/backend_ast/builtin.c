@@ -4,11 +4,11 @@
 #include "core/utils.h"
 #include "backend_ast/interpreter.h"
 #include "symbol/symbol.h"
+#ifdef SDL
 #include "backend_ast/sdl.h"
 #include "backend_ast/audio.h"
+#endif
 #include "globals.h"                  // Assuming globals.h is directly in src/
-#include "backend_ast/audio.h"
-#include "backend_ast/sdl.h"
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 
@@ -37,24 +37,35 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"api_send", vm_builtin_api_send},
     {"assign", vm_builtin_assign},
     {"chr", vm_builtin_chr},
+#ifdef SDL
     {"cleardevice", vm_builtin_cleardevice},
+#endif
     {"close", vm_builtin_close},
+#ifdef SDL
     {"closegraph", vm_builtin_closegraph},
+#endif
     {"copy", vm_builtin_copy},
     {"cos", vm_builtin_cos},
+#ifdef SDL
     {"createtargettexture", vm_builtin_createtargettexture}, // Moved
     {"createtexture", vm_builtin_createtexture}, // Moved
+#endif
     {"dec", vm_builtin_dec},
     {"delay", vm_builtin_delay},
+#ifdef SDL
     {"destroytexture", vm_builtin_destroytexture},
+#endif
     {"dispose", vm_builtin_dispose},
+#ifdef SDL
     {"drawcircle", vm_builtin_drawcircle}, // Moved
     {"drawline", vm_builtin_drawline}, // Moved
     {"drawpolygon", vm_builtin_drawpolygon}, // Moved
     {"drawrect", vm_builtin_drawrect}, // Moved
+#endif
     {"eof", vm_builtin_eof},
     {"exit", vm_builtin_exit},
     {"exp", vm_builtin_exp},
+#ifdef SDL
     {"fillcircle", vm_builtin_fillcircle},
     {"fillrect", vm_builtin_fillrect},
     {"getmaxx", vm_builtin_getmaxx},
@@ -64,20 +75,27 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"gettextsize", vm_builtin_gettextsize},
     {"getticks", vm_builtin_getticks},
     {"graphloop", vm_builtin_graphloop},
+#endif
     {"halt", vm_builtin_halt},
     {"high", vm_builtin_high},
     {"inc", vm_builtin_inc},
+#ifdef SDL
     {"initgraph", vm_builtin_initgraph},
     {"initsoundsystem", vm_builtin_initsoundsystem},
     {"inittextsystem", vm_builtin_inittextsystem},
+#endif
     {"inttostr", vm_builtin_inttostr},
     {"ioresult", vm_builtin_ioresult},
+#ifdef SDL
     {"issoundplaying", vm_builtin_issoundplaying}, // Moved
     {"keypressed", vm_builtin_keypressed},
+#endif
     {"length", vm_builtin_length},
     {"ln", vm_builtin_ln},
+#ifdef SDL
     {"loadimagetotexture", vm_builtin_loadimagetotexture}, // Moved
     {"loadsound", vm_builtin_loadsound},
+#endif
     {"low", vm_builtin_low},
     {"mstreamcreate", vm_builtin_mstreamcreate},
     {"mstreamfree", vm_builtin_mstreamfree},
@@ -85,34 +103,46 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"mstreamsavetofile", vm_builtin_mstreamsavetofile},
     {"new", vm_builtin_new},
     {"ord", vm_builtin_ord},
+#ifdef SDL
     {"outtextxy", vm_builtin_outtextxy}, // Moved
+#endif
     {"paramcount", vm_builtin_paramcount},
     {"paramstr", vm_builtin_paramstr},
+#ifdef SDL
     {"playsound", vm_builtin_playsound},
+#endif
     {"pos", vm_builtin_pos},
+#ifdef SDL
     {"putpixel", vm_builtin_putpixel},
+#endif
     {"quitrequested", vm_builtin_quitrequested},
+#ifdef SDL
     {"quitsoundsystem", vm_builtin_quitsoundsystem},
     {"quittextsystem", vm_builtin_quittextsystem},
+#endif
     {"random", vm_builtin_random},
     {"randomize", vm_builtin_randomize},
     {"readkey", vm_builtin_readkey},
     {"readln", vm_builtin_readln},
     {"real", vm_builtin_real},
     {"realtostr", vm_builtin_realtostr},
+#ifdef SDL
     {"rendercopy", vm_builtin_rendercopy}, // Moved
     {"rendercopyex", vm_builtin_rendercopyex}, // Moved
     {"rendercopyrect", vm_builtin_rendercopyrect},
     {"rendertexttotexture", vm_builtin_rendertexttotexture},
+#endif
     {"reset", vm_builtin_reset},
     {"rewrite", vm_builtin_rewrite},
     {"round", vm_builtin_round},
     {"screencols", vm_builtin_screencols},
     {"screenrows", vm_builtin_screenrows},
+#ifdef SDL
     {"setalphablend", vm_builtin_setalphablend},
     {"setcolor", vm_builtin_setcolor}, // Moved
     {"setrendertarget", vm_builtin_setrendertarget}, // Moved
     {"setrgbcolor", vm_builtin_setrgbcolor},
+#endif
     {"sin", vm_builtin_sin},
     {"sqr", vm_builtin_sqr},
     {"sqrt", vm_builtin_sqrt},
@@ -124,8 +154,10 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"textcolore", vm_builtin_textcolore},
     {"trunc", vm_builtin_trunc},
     {"upcase", vm_builtin_upcase},
+#ifdef SDL
     {"updatescreen", vm_builtin_updatescreen},
     {"waitkeyevent", vm_builtin_waitkeyevent}, // Moved
+#endif
     {"wherex", vm_builtin_wherex},
     {"wherey", vm_builtin_wherey},
 };
@@ -1100,24 +1132,35 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"api_send",  executeBuiltinAPISend},
     {"assign",    executeBuiltinAssign},
     {"chr",       executeBuiltinChr},
+#ifdef SDL
     {"cleardevice", executeBuiltinClearDevice},
+#endif
     {"close",     executeBuiltinClose},
+#ifdef SDL
     {"closegraph", executeBuiltinCloseGraph},
+#endif
     {"copy",      executeBuiltinCopy},
     {"cos",       executeBuiltinCos},
+#ifdef SDL
     {"createtargettexture", executeBuiltinCreateTargetTexture},
     {"createtexture", executeBuiltinCreateTexture},
+#endif
     {"dec",       executeBuiltinDec},
     {"delay",     executeBuiltinDelay},
+#ifdef SDL
     {"destroytexture", executeBuiltinDestroyTexture},
+#endif
     {"dispose",   executeBuiltinDispose},
+#ifdef SDL
     {"drawcircle", executeBuiltinDrawCircle},
     {"drawline", executeBuiltinDrawLine},
     {"drawpolygon", executeBuiltinDrawPolygon},
     {"drawrect",  executeBuiltinDrawRect},
+#endif
     {"eof",       executeBuiltinEOF},
     {"exit",      executeBuiltinExit},
     {"exp",       executeBuiltinExp},
+#ifdef SDL
     {"fillcircle", executeBuiltinFillCircle},
     {"fillrect",  executeBuiltinFillRect},
     {"getmaxx",   executeBuiltinGetMaxX},
@@ -1127,20 +1170,27 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"gettextsize", executeBuiltinGetTextSize},
     {"getticks", executeBuiltinGetTicks},
     {"graphloop", executeBuiltinGraphLoop},
+#endif
     {"halt",      executeBuiltinHalt},
     {"high",      executeBuiltinHigh},
     {"inc",       executeBuiltinInc},
+#ifdef SDL
     {"initgraph", executeBuiltinInitGraph},
     {"initsoundsystem", executeBuiltinInitSoundSystem},
     {"inittextsystem", executeBuiltinInitTextSystem},
+#endif
     {"inttostr",  executeBuiltinIntToStr},
     {"ioresult",  executeBuiltinIOResult},
+#ifdef SDL
     {"issoundplaying", executeBuiltinIsSoundPlaying},
+#endif
     {"keypressed", executeBuiltinKeyPressed},
     {"length",    executeBuiltinLength},
     {"ln",        executeBuiltinLn},
+#ifdef SDL
     {"loadimagetotexture", executeBuiltinLoadImageToTexture},
     {"loadsound", executeBuiltinLoadSound},
+#endif
     {"low",       executeBuiltinLow},
     {"mstreamcreate", executeBuiltinMstreamCreate},
     {"mstreamfree", executeBuiltinMstreamFree},
@@ -1148,33 +1198,43 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"mstreamsavetofile", executeBuiltinMstreamSaveToFile},
     {"new",       executeBuiltinNew},
     {"ord",       executeBuiltinOrd},
+#ifdef SDL
     {"outtextxy", executeBuiltinOutTextXY},
+#endif
     {"paramcount", executeBuiltinParamcount},
     {"paramstr",  executeBuiltinParamstr},
+#ifdef SDL
     {"playsound", executeBuiltinPlaySound},
+#endif
     {"pos",       executeBuiltinPos},
+#ifdef SDL
     {"putpixel",  executeBuiltinPutPixel},
     {"quitrequested", executeBuiltinQuitRequested},
     {"quitsoundsystem", executeBuiltinQuitSoundSystem},
     {"quittextsystem", executeBuiltinQuitTextSystem},
+#endif
     {"random",    executeBuiltinRandom},
     {"randomize", executeBuiltinRandomize},
     {"readkey",   executeBuiltinReadKey},
     {"real",      executeBuiltinReal},
     {"realtostr", executeBuiltinRealToStr},
+#ifdef SDL
     {"rendercopy", executeBuiltinRenderCopy},
     {"rendercopyex", executeBuiltinRenderCopyEx},
     {"rendercopyrect", executeBuiltinRenderCopyRect},
     {"rendertexttotexture", executeBuiltinRenderTextToTexture},
+#endif
     {"reset",     executeBuiltinReset},
     {"rewrite",   executeBuiltinRewrite},
     {"round",     executeBuiltinRound},
     {"screencols", executeBuiltinScreenCols},
     {"screenrows", executeBuiltinScreenRows},
+#ifdef SDL
     {"setalphablend", executeBuiltinSetAlphaBlend},
     {"setcolor",  executeBuiltinSetColor},
     {"setrendertarget",  executeBuiltinSetRenderTarget},
     {"setrgbcolor", executeBuiltinSetRGBColor},
+#endif
     {"sin",       executeBuiltinSin},
     {"sqr",       executeBuiltinSqr},
     {"sqrt",      executeBuiltinSqrt},
@@ -1186,9 +1246,11 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"textcolore", executeBuiltinTextColorE},
     {"trunc",     executeBuiltinTrunc},
     {"upcase",    executeBuiltinUpcase},
+#ifdef SDL
     {"updatescreen", executeBuiltinUpdateScreen},
     {"updatetexture", executeBuiltinUpdateTexture},
     {"waitkeyevent", executeBuiltinWaitKeyEvent},
+#endif
     {"wherex",    executeBuiltinWhereX},
     {"wherey",    executeBuiltinWhereY}
 };
@@ -2949,6 +3011,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setRight(dummy, retNode);
         dummy->var_type = TYPE_REAL;
     }
+#ifdef SDL
     // --- SDL/Graphics functions and procedures ---
     else if (strcasecmp(name, "loadimagetotexture") == 0) {
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*));
@@ -3028,6 +3091,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->child_count = 13;
         dummy->var_type = TYPE_VOID;
     }
+#endif
     else if (strcasecmp(name, "getticks") == 0) {
         dummy->child_count = 0;
         Token* retTok = newToken(TOKEN_IDENTIFIER, "cardinal_or_integer", 0, 0);
@@ -3053,6 +3117,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setRight(dummy, retNode);
         dummy->var_type = TYPE_STRING;
     }
+#ifdef SDL
     else if (strcasecmp(name, "rendertexttotexture") == 0) {
         dummy->type = AST_FUNCTION_DECL;
         dummy->child_capacity = 4;
@@ -3081,6 +3146,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setRight(dummy, retNode);
         dummy->var_type = TYPE_INTEGER;
     }
+#endif
     // --- Default / Unhandled ---
     else {
         if (dummy->type == AST_FUNCTION_DECL) {
