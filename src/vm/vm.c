@@ -1229,48 +1229,46 @@ comparison_error_label:
             }
 
             case OP_GET_CHAR_FROM_STRING: {
-                // --- START MODIFICATION for Bug 2 ---
-                Value index_val = pop(vm);
-                Value base_val = pop(vm); // Can be string or char
+                 Value index_val = pop(vm);
+                 Value base_val = pop(vm); // Can be string or char
 
-                if (index_val.type != TYPE_INTEGER) {
-                    runtimeError(vm, "VM Error: String/Char index must be an integer.");
-                    freeValue(&index_val); freeValue(&base_val);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                 if (index_val.type != TYPE_INTEGER) {
+                     runtimeError(vm, "VM Error: String/Char index must be an integer.");
+                     freeValue(&index_val); freeValue(&base_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
 
-                long long pscal_index = index_val.i_val;
-                char result_char;
+                 long long pscal_index = index_val.i_val;
+                 char result_char;
 
-                if (base_val.type == TYPE_STRING) {
-                    const char* str = base_val.s_val ? base_val.s_val : "";
-                    size_t len = strlen(str);
-                    if (pscal_index < 1 || (size_t)pscal_index > len) {
-                        runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
-                        freeValue(&index_val); freeValue(&base_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    result_char = str[pscal_index - 1];
-                } else if (base_val.type == TYPE_CHAR) {
-                    if (pscal_index != 1) {
-                        runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
-                        freeValue(&index_val); freeValue(&base_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    result_char = base_val.c_val;
-                } else {
-                    runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
-                    freeValue(&index_val); freeValue(&base_val);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                 if (base_val.type == TYPE_STRING) {
+                     const char* str = base_val.s_val ? base_val.s_val : "";
+                     size_t len = strlen(str);
+                     if (pscal_index < 1 || (size_t)pscal_index > len) {
+                         runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     result_char = str[pscal_index - 1];
+                 } else if (base_val.type == TYPE_CHAR) {
+                     if (pscal_index != 1) {
+                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     result_char = base_val.c_val;
+                 } else {
+                     runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
+                     freeValue(&index_val); freeValue(&base_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
 
-                push(vm, makeChar(result_char));
+                 push(vm, makeChar(result_char));
 
-                freeValue(&index_val);
-                freeValue(&base_val);
-                break;
-                // --- END MODIFICATION for Bug 2 ---
-            }
+                 freeValue(&index_val);
+                 freeValue(&base_val);
+                 break;
+             }
             case OP_DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 VarType declaredType = (VarType)READ_BYTE();
@@ -1408,21 +1406,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 if (!sym->value) {
-                    // This case is defensive; a defined global should always have a Value struct.
                     sym->value = (Value*)malloc(sizeof(Value));
                     if (!sym->value) {
                         runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    // Initialize it to a default for its type to be safe.
                     *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
                 }
 
-                // Get the new value from the top of the stack.
                 Value value_from_stack = pop(vm);
 
                 if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
-                    // Target is a fixed-length string.
+                    // This is the special case for fixed-length strings.
                     const char* source_str = "";
                     char char_buf[2] = {0};
 
@@ -1431,16 +1426,16 @@ comparison_error_label:
                     } else if (value_from_stack.type == TYPE_CHAR) {
                         char_buf[0] = value_from_stack.c_val;
                         source_str = char_buf;
-                    }
+                    } // No else needed; invalid types will be handled by the logic below if necessary.
                     
                     strncpy(sym->value->s_val, source_str, sym->value->max_length);
-                    sym->value->s_val[sym->value->max_length] = '\0'; // Ensure null termination
+                    sym->value->s_val[sym->value->max_length] = '\0'; // Ensure null termination.
+                
                 } else {
-                    // Original logic for dynamic strings and other types
+                    // This is the logic for all other types (dynamic strings, numbers, etc.)
                     freeValue(sym->value);
                     *(sym->value) = makeCopyOfValue(&value_from_stack);
                 }
-              end_set_global:;
 
                 freeValue(&value_from_stack);
 
@@ -1458,34 +1453,30 @@ comparison_error_label:
                 Value* target_slot = &frame->slots[slot];
                 Value value_from_stack = pop(vm);
 
-                // Check if the target is a fixed-length string.
+                // --- START CORRECTED LOGIC ---
                 if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                    // Special case: Assignment to a fixed-length string.
                     const char* source_str = "";
-                    char char_buf[2] = {0}; // Buffer for char-to-string conversion
+                    char char_buf[2] = {0};
 
-                    // Determine the source string based on the incoming value's type.
                     if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
                         source_str = value_from_stack.s_val;
                     } else if (value_from_stack.type == TYPE_CHAR) {
                         char_buf[0] = value_from_stack.c_val;
                         source_str = char_buf;
-                    } else {
-                        runtimeError(vm, "Type mismatch assigning to local fixed-length string.");
-                        // The goto will handle cleanup.
-                        goto cleanup_set_local;
                     }
                     
-                    // Copy and truncate the string into the fixed-length buffer.
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
-                    target_slot->s_val[target_slot->max_length] = '\0'; // Ensure null termination.
-                
-                } else {
-                    // This is the logic for all other types (dynamic strings, numbers, records, etc.).
-                    freeValue(target_slot); // Free the old value's contents.
-                    *target_slot = makeCopyOfValue(&value_from_stack); // Assign a deep copy of the new value.
-                }
+                    target_slot->s_val[target_slot->max_length] = '\0';
 
-            cleanup_set_local:
+                } else {
+                    // This is the logic for all other types, including dynamic strings,
+                    // numbers, records, etc., which requires a deep copy.
+                    freeValue(target_slot);
+                    *target_slot = makeCopyOfValue(&value_from_stack);
+                }
+                // --- END CORRECTED LOGIC ---
+
                 // Free the temporary value that was popped from the stack.
                 freeValue(&value_from_stack);
                 break;

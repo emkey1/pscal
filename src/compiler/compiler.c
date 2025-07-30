@@ -1461,13 +1461,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_FIELD_ACCESS:
         case AST_ARRAY_ACCESS: {
+            // This logic correctly distinguishes between accessing a string/char vs. a regular array.
             if (node->left && (node->left->var_type == TYPE_STRING || node->left->var_type == TYPE_CHAR)) {
-                // This is an R-Value access like `c := s[i]` or `c2 := c1[1]`.
-                compileRValue(node->left, chunk, getLine(node->left));      // Push the string/char value
-                compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index value
-                writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Pops both, pushes the character
-                break; // Exit case
+                compileRValue(node->left, chunk, getLine(node->left));      // Push the string or char
+                compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index
+                writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Use the specialized opcode
+                break;
             }
+            
+            // Default behavior for actual arrays
             compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
             break;
