@@ -829,23 +829,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // 1. Compile the main expression to be tested. Its value is now on the stack.
             compileRValue(node->left, chunk, line);
 
-            int else_jump = -1; // Jump from the end of the last unmatched branch check to the 'else' part or end.
-            
-            // List of jumps from each successful branch to the very end of the CASE statement.
             int *end_jumps = NULL;
             int end_jumps_count = 0;
+            int fallthrough_jump = -1;
 
-            // 2. Iterate through each CASE branch (e.g., '1: stmtA; 2,3: stmtB;')
+            // 2. Iterate through each CASE branch
             for (int i = 0; i < node->child_count; i++) {
                 AST* branch = node->children[i];
                 if (!branch || branch->type != AST_CASE_BRANCH) continue;
 
-                int next_branch_jump = -1; // Jumps to the start of the next branch's label checks.
-
-                // This is the beginning of the checks for the current branch.
-                // If a previous branch didn't match, it would have jumped here.
-                if (else_jump != -1) {
-                    patchShort(chunk, else_jump + 1, chunk->count - (else_jump + 3));
+                if (fallthrough_jump != -1) {
+                    patchShort(chunk, fallthrough_jump, chunk->count - (fallthrough_jump + 2));
+                    fallthrough_jump = -1;
                 }
 
                 AST* labels_node = branch->left;
@@ -860,81 +855,69 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 for (int j = 0; j < num_labels; j++) {
                     AST* label = labels_to_check[j];
                     
-                    // Duplicate the case value for comparison.
                     writeBytecodeChunk(chunk, OP_DUP, line);
                     
                     if (label->type == AST_SUBRANGE) {
-                        // For ranges like 'A'..'C', check if value is within bounds.
-                        // Stack: [case_val, case_val]
-                        compileRValue(label->left, chunk, getLine(label)); // Stack: [case_val, case_val, 'A']
-                        writeBytecodeChunk(chunk, OP_SWAP, line);           // Stack: [case_val, 'A', case_val]
-                        writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);  // Stack: [case_val, true/false]
+                        // Logic for range: (case_val >= lower) AND (case_val <= upper)
+                        // This is a more direct and correct translation.
                         
-                        int jump_if_lower = chunk->count;
-                        writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
+                        // Check lower bound
+                        writeBytecodeChunk(chunk, OP_DUP, line);                   // Stack: [case, case, case]
+                        compileRValue(label->left, chunk, getLine(label));      // Stack: [case, case, case, lower]
+                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, case, lower, case]
+                        writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);          // Stack: [case, case, bool1]
+
+                        // Check upper bound
+                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, bool1, case]
+                        compileRValue(label->right, chunk, getLine(label));     // Stack: [case, bool1, case, upper]
+                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, bool1, upper, case]
+                        writeBytecodeChunk(chunk, OP_LESS_EQUAL, line);           // Stack: [case, bool1, bool2]
                         
-                        // If we are here, it means case_val >= 'A' was true.
-                        writeBytecodeChunk(chunk, OP_DUP, line); // Stack: [case_val, case_val]
-                        compileRValue(label->right, chunk, getLine(label)); // Stack: [case_val, case_val, 'C']
-                        writeBytecodeChunk(chunk, OP_SWAP, line);            // Stack: [case_val, 'C', case_val]
-                        writeBytecodeChunk(chunk, OP_LESS_EQUAL, line);   // Stack: [case_val, true/false]
-                        
-                        patchShort(chunk, jump_if_lower + 1, chunk->count - (jump_if_lower + 3));
+                        // Combine the two boolean results
+                        writeBytecodeChunk(chunk, OP_AND, line);                    // Stack: [case, final_bool]
 
                     } else {
-                        // For single labels like 'A' or 5.
+                        // For single labels
                         compileRValue(label, chunk, getLine(label));
-                        writeBytecodeChunk(chunk, OP_EQUAL, line);
+                        writeBytecodeChunk(chunk, OP_EQUAL, line);                  // Stack: [case, bool]
                     }
                     
-                    // If the result of the comparison is true, jump to the branch body.
+                    // If the result is true, jump to the body.
                     int jump_to_body = chunk->count;
                     writeBytecodeChunk(chunk, OP_NOT, line);
                     writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
                     
-                    // If we fall through, the label didn't match.
-                    if (next_branch_jump != -1) {
-                       patchShort(chunk, next_branch_jump + 1, chunk->count - (next_branch_jump + 3));
-                    }
-                    next_branch_jump = chunk->count;
-                    writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
-                    
-                    // Patch the jump for a successful match to land here.
+                    // If we fall through, this label matched. Jump to the body.
                     patchShort(chunk, jump_to_body + 2, chunk->count - (jump_to_body + 4));
+
+                    // The branch body starts here.
+                    writeBytecodeChunk(chunk, OP_POP, line); // Pop the matched case value.
+                    compileStatement(branch->right, chunk, getLine(branch->right));
+                    
+                    // After body, jump to the end of the CASE.
+                    end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
+                    end_jumps[end_jumps_count++] = chunk->count;
+                    writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
+
+                    // If a label in a multi-label branch matches, we jump to the body.
+                    // The other labels for this branch are now irrelevant.
+                    goto next_branch;
                 }
                 
-                // This is the start of the body for the current branch.
-                writeBytecodeChunk(chunk, OP_POP, line); // Pop the matched case value.
-                compileStatement(branch->right, chunk, getLine(branch->right));
-                
-                // After executing the body, jump to the very end of the CASE statement.
-                end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
-                end_jumps[end_jumps_count++] = chunk->count;
-                writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
-                
-                // The next set of label checks will begin here.
-                if (next_branch_jump != -1) {
-                   patchShort(chunk, next_branch_jump + 1, chunk->count - (next_branch_jump + 3));
-                }
-                else_jump = next_branch_jump;
+            next_branch:;
             }
 
             // After all branches, if an 'else' exists, compile it.
+            if (fallthrough_jump != -1) {
+                patchShort(chunk, fallthrough_jump, chunk->count - (fallthrough_jump + 2));
+            }
+            writeBytecodeChunk(chunk, OP_POP, line); // Pop the case value if no branch was taken.
+            
             if (node->extra) {
-                if (else_jump != -1) {
-                    patchShort(chunk, else_jump + 1, chunk->count - (else_jump + 3));
-                }
-                 writeBytecodeChunk(chunk, OP_POP, line); // Pop the case value before else.
                 compileStatement(node->extra, chunk, getLine(node->extra));
-            } else {
-                if (else_jump != -1) {
-                    patchShort(chunk, else_jump + 1, chunk->count - (else_jump + 3));
-                }
-                // If no else, and no branches matched, we still need to pop the case value.
-                writeBytecodeChunk(chunk, OP_POP, line);
             }
             
-            // This is the end of the CASE. Patch all jumps from successful branches to here.
+            // End of the CASE. Patch all jumps from successful branches to here.
             for (int i = 0; i < end_jumps_count; i++) {
                 patchShort(chunk, end_jumps[i] + 1, chunk->count - (end_jumps[i] + 3));
             }

@@ -506,25 +506,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 // 4. Decrement frame count.
                 vm->frameCount--;
 
-                // --- FIX START ---
                 // Conditionally push the return value only if it's a function.
                 // Procedures return a dummy NIL, which should NOT be left on the stack.
-                // Check the function_symbol in the current CallFrame.
+                // We check the function_symbol in the current CallFrame, which was stored during OP_CALL.
                 if (currentFrame->function_symbol && currentFrame->function_symbol->type != TYPE_VOID) {
                     push(vm, returnValue); // Push the actual function result.
                 } else {
                     // This was a procedure return (function_symbol is NULL or its type is TYPE_VOID).
-                    // The dummy NIL (or any value) pushed by the compiler should not be pushed back
-                    // onto the stack, as the caller doesn't expect it. We've already popped it into `returnValue`.
-                    // So, we do nothing further with it besides freeing it in the next step.
+                    // The dummy NIL (or any value) pushed by the compiler has already been popped into `returnValue`.
+                    // We do NOT push it back onto the stack because the caller of a procedure doesn't expect a return value.
+                    // The temporary `returnValue` will be freed in the next step.
                 }
-                // --- FIX END ---
-
                 // 5. Free the temporary copy of the return value.
                 freeValue(&returnValue);
 
                 break;
             }
+
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT();
                 push(vm, makeCopyOfValue(&constant));
@@ -604,12 +602,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             }
             case OP_NOT: {
                 Value val_popped = pop(vm);
-                if (!IS_BOOLEAN(val_popped) && !IS_INTEGER(val_popped)) {
+                if (!IS_BOOLEAN(val_popped) && !IS_INTEGER(val_popped)) { // <<< FIX: Allow INTEGER
                     runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or integer.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                bool bool_val = IS_BOOLEAN(val_popped) ? AS_BOOLEAN(val_popped) : (AS_INTEGER(val_popped) != 0);
+                bool bool_val = IS_BOOLEAN(val_popped) ? AS_BOOLEAN(val_popped) : (AS_INTEGER(val_popped) != 0); // <<< FIX: Coerce INTEGER to BOOLEAN
                 push(vm, makeBoolean(!bool_val));
                 freeValue(&val_popped);
                 break;

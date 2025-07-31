@@ -170,15 +170,6 @@ Value executeBuiltinCloseGraph(AST *node) {
         fprintf(stderr, "Runtime error: CloseGraph expects 0 arguments.\n");
         EXIT_FAILURE_HANDLER();
     }
-
-    if (gSdlRenderer) {
-        SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
-    }
-    if (gSdlWindow) {
-        SDL_DestroyWindow(gSdlWindow);
-        gSdlWindow = NULL;
-    }
     
     // Destroy renderer and window if they exist
     if (gSdlRenderer) {

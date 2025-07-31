@@ -331,13 +331,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     freeProcedureTable();
     freeTypeTableASTNodes();
     freeTypeTable();
-    if (GlobalAST) {
-        freeAST(GlobalAST);
-        GlobalAST = NULL;
-    }
-#ifdef SDL
-    SdlCleanupAtExit();
-#endif
+
+    // --- FIX START: Move global symbol table cleanup here ---
     if (globalSymbols) {
         freeHashTable(globalSymbols);
         globalSymbols = NULL;
@@ -348,6 +343,16 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         inserted_global_names = NULL;
     }
 #endif
+    // --- FIX END ---
+
+    if (GlobalAST) {
+        freeAST(GlobalAST);
+        GlobalAST = NULL;
+    }
+#ifdef SDL
+    SdlCleanupAtExit();
+#endif
+    // The block that was here has been moved up.
 
     return overall_success_status ? EXIT_SUCCESS : EXIT_FAILURE;
 }
