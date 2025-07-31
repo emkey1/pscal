@@ -1641,10 +1641,14 @@ comparison_error_label:
                 if (handler) {
                     Value result = handler(vm, arg_count, args);
 
+                    // Pop arguments from the stack and free their contents
+                    // This is crucial to prevent stack corruption.
+                    vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
+                        // The actual Value structs are on the stack and will be overwritten,
+                        // but we need to free any heap data they point to (like strings).
                         freeValue(&args[i]);
                     }
-                    vm->stackTop -= arg_count;
 
                     if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
                         push(vm, result);
@@ -1653,10 +1657,11 @@ comparison_error_label:
                     }
                 } else {
                     runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
+                    // Cleanup stack even on error
+                    vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
                         freeValue(&args[i]);
                     }
-                    vm->stackTop -= arg_count;
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;

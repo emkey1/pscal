@@ -792,6 +792,8 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
         }
     }
 
+    // If there are no variables to read into, just consume the rest of the line.
+    // This check must happen BEFORE trying to read a line into a buffer.
     if (arg_count == var_start_index) {
         int c;
         while ((c = fgetc(input_stream)) != '\n' && c != EOF);
@@ -805,6 +807,7 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    // This block is now correctly placed after the line-consuming logic.
     char* buffer_ptr = line_buffer;
 
     for (int i = var_start_index; i < arg_count; i++) {
