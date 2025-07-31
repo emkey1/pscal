@@ -407,6 +407,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         } \
         \
         if (!op_is_handled) { \
+            /* Handle char/integer arithmetic for FOR loops and ordinal math */ \
+            if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
+                if (a_val_popped.type == TYPE_CHAR && IS_INTEGER(b_val_popped)) { \
+                    char result_char = (current_instruction_code == OP_ADD) ? \
+                                       (AS_CHAR(a_val_popped) + AS_INTEGER(b_val_popped)) : \
+                                       (AS_CHAR(a_val_popped) - AS_INTEGER(b_val_popped)); \
+                    result_val = makeChar(result_char); \
+                    op_is_handled = true; \
+                } else if (IS_INTEGER(a_val_popped) && b_val_popped.type == TYPE_CHAR && current_instruction_code == OP_ADD) { \
+                    /* Handle integer + char as well */ \
+                    char result_char = AS_INTEGER(a_val_popped) + AS_CHAR(b_val_popped); \
+                    result_val = makeChar(result_char); \
+                    op_is_handled = true; \
+                } \
+            } \
+        } \
+        \
+        if (!op_is_handled) { \
             if ((IS_INTEGER(a_val_popped) || IS_REAL(a_val_popped)) && \
                 (IS_INTEGER(b_val_popped) || IS_REAL(b_val_popped))) { \
                 \
