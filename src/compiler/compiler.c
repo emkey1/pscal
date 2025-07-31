@@ -454,11 +454,11 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_ARRAY_ACCESS: {
             // Check if the base is a string for special handling
             if (node->left && node->left->var_type == TYPE_STRING) {
-                // This is an R-Value access like `c := s[i]`.
-                // We need to compile the string and the index, then call the specialized opcode.
-                compileRValue(node->left, chunk, getLine(node->left));      // Push the string value
+                // This is an L-Value access for assignment, like s[i] := 'c'.
+                // We need the address of the string variable, then the index.
+                compileLValue(node->left, chunk, getLine(node->left));      // Push address of the string variable
                 compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index value
-                writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Pops both, pushes the character
+                writeBytecodeChunk(chunk, OP_GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
                 break; // We are done with this case
             } else {
                 // Standard array access: push array base address, then all indices.
@@ -1442,7 +1442,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
             break;
         }
-        case AST_FIELD_ACCESS:
+        case AST_FIELD_ACCESS: {
+            // Get the address of the field, then get the value at that address.
+            compileLValue(node, chunk, getLine(node));
+            writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+            break;
+        }
         case AST_ARRAY_ACCESS: {
             // This logic correctly distinguishes between accessing a string/char vs. a regular array.
             if (node->left && (node->left->var_type == TYPE_STRING || node->left->var_type == TYPE_CHAR)) {
@@ -1452,7 +1457,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
             
-            // Default behavior for actual arrays
+            // Default behavior for actual arrays: get address, then get value.
             compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
             break;

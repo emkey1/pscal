@@ -448,7 +448,13 @@ Value vm_builtin_textbackgrounde(VM* vm, int arg_count, Value* args) {
 
 Value vm_builtin_rewrite(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Rewrite requires 1 argument."); return makeVoid(); }
-    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Rewrite: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
+
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Rewrite must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
@@ -719,8 +725,13 @@ Value vm_builtin_dispose(VM* vm, int arg_count, Value* args) {
 Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "Assign requires 2 arguments."); return makeVoid(); }
 
-    Value* fileVarLValue = (Value*)args[0].ptr_val; // Arg 0 is an LValue (address)
-    Value* fileNameVal = &args[1];                  // Arg 1 is an RValue (string)
+    // Check if the first argument is a pointer (passed by VAR)
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Assign: First argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer to get the actual file variable
+    Value* fileNameVal = &args[1];                  // The second argument is the string value
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First arg to Assign must be a file variable."); return makeVoid(); }
     if (fileNameVal->type != TYPE_STRING) { runtimeError(vm, "Second arg to Assign must be a string."); return makeVoid(); }
@@ -736,7 +747,13 @@ Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
 
 Value vm_builtin_reset(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Reset requires 1 argument."); return makeVoid(); }
-    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Reset: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
+
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Reset must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
@@ -753,7 +770,13 @@ Value vm_builtin_reset(VM* vm, int arg_count, Value* args) {
 
 Value vm_builtin_close(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Close requires 1 argument."); return makeVoid(); }
-    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Close: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
+
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Close must be a file variable."); return makeVoid(); }
     if (fileVarLValue->f_val) {
         fclose(fileVarLValue->f_val);
@@ -765,7 +788,13 @@ Value vm_builtin_close(VM* vm, int arg_count, Value* args) {
 
 Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Eof requires 1 argument."); return makeBoolean(true); }
-    Value* fileVarLValue = (Value*)args[0].ptr_val;
+    
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Eof: Argument must be a VAR file parameter.");
+        return makeBoolean(true);
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
+
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Eof must be a file variable."); return makeBoolean(true); }
     if (!fileVarLValue->f_val) { return makeBoolean(true); } // File not open is considered EOF
     
@@ -781,19 +810,29 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
 
-    if (arg_count > 0 && args[0].type == TYPE_FILE) {
-        if (args[0].f_val) {
-            input_stream = args[0].f_val;
-            var_start_index = 1;
-        } else {
-            runtimeError(vm, "File not open for Readln.");
-            last_io_error = 1;
-            return makeVoid();
+    // Check if the first argument is a file variable (passed by value OR by reference).
+    if (arg_count > 0) {
+        Value* first_arg_ptr = &args[0];
+        // If it's a pointer (VAR param), dereference it once.
+        if (first_arg_ptr->type == TYPE_POINTER && first_arg_ptr->ptr_val) {
+            first_arg_ptr = (Value*)first_arg_ptr->ptr_val;
+        }
+
+        // Now, check if the resulting value is a FILE.
+        if (first_arg_ptr->type == TYPE_FILE) {
+            if (first_arg_ptr->f_val) {
+                input_stream = first_arg_ptr->f_val;
+                var_start_index = 1;
+            } else {
+                runtimeError(vm, "File not open for Readln.");
+                last_io_error = 1;
+                return makeVoid();
+            }
         }
     }
 
+
     // If there are no variables to read into, just consume the rest of the line.
-    // This check must happen BEFORE trying to read a line into a buffer.
     if (arg_count == var_start_index) {
         int c;
         while ((c = fgetc(input_stream)) != '\n' && c != EOF);
@@ -807,7 +846,6 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    // This block is now correctly placed after the line-consuming logic.
     char* buffer_ptr = line_buffer;
 
     for (int i = var_start_index; i < arg_count; i++) {

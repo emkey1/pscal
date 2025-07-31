@@ -1705,10 +1705,19 @@ comparison_error_label:
                     vm->frameCount--;
                     return INTERPRET_RUNTIME_ERROR;
                 }
+
                 frame->function_symbol = proc_symbol;
                 int locals_pushed = 0;
                 AST* decl_ast = proc_symbol->type_def;
                 if (decl_ast) {
+                  // CORRECTED ORDER: Initialize function result variable FIRST.
+                  // This ensures it gets the correct slot (the one right after the last parameter).
+                  if (decl_ast->type == AST_FUNCTION_DECL) {
+                      push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
+                      locals_pushed++;
+                  }
+                  
+                  // THEN, push all other declared local variables.
                   AST* blockNode = (decl_ast->type == AST_PROCEDURE_DECL) ? decl_ast->right : decl_ast->extra;
                   if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
                       AST* decls_compound = blockNode->children[0];
@@ -1724,18 +1733,13 @@ comparison_error_label:
                           }
                       }
                   }
-                  // Initialize function result variable
-                  if (decl_ast->type == AST_FUNCTION_DECL) {
-                      push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
-                      locals_pushed++;
-                  }
-              }
+                }
 
-              if (locals_pushed != proc_symbol->locals_count) {
+                if (locals_pushed != proc_symbol->locals_count) {
                   runtimeError(vm, "Internal VM Error: Mismatch in local variable count during call frame setup for %s. Expected %d, pushed %d.",
                                proc_symbol->name, proc_symbol->locals_count, locals_pushed);
                   return INTERPRET_RUNTIME_ERROR;
-              }
+                }
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }

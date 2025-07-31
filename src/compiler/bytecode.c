@@ -200,8 +200,6 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_CONSTANT: {
             uint8_t constant_index = chunk->code[offset + 1];
             printf("%-16s %4d '", "OP_CONSTANT", constant_index);
-
-            // This block should only READ and PRINT, not call addConstantToChunk
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
@@ -210,76 +208,30 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
                 case TYPE_NIL:     printf("nil"); break;
-                default: printf("Value type %s", varTypeToString(constantValue.type)); break;
+                default:           printf("Value type %s", varTypeToString(constantValue.type)); break;
             }
             printf("'\n");
             return offset + 2;
         }
-        case OP_ADD:      printf("OP_ADD\n"); return offset + 1;
-        case OP_SUBTRACT: printf("OP_SUBTRACT\n"); return offset + 1;
-        case OP_MULTIPLY: printf("OP_MULTIPLY\n"); return offset + 1;
-        case OP_DIVIDE:   printf("OP_DIVIDE\n"); return offset + 1;
-        case OP_NEGATE:   printf("OP_NEGATE\n"); return offset + 1;
-        case OP_NOT:      printf("OP_NOT\n"); return offset + 1;
-
+        case OP_ADD:           printf("OP_ADD\n"); return offset + 1;
+        case OP_SUBTRACT:      printf("OP_SUBTRACT\n"); return offset + 1;
+        case OP_MULTIPLY:      printf("OP_MULTIPLY\n"); return offset + 1;
+        case OP_DIVIDE:        printf("OP_DIVIDE\n"); return offset + 1;
+        case OP_NEGATE:        printf("OP_NEGATE\n"); return offset + 1;
+        case OP_NOT:           printf("OP_NOT\n"); return offset + 1;
         case OP_EQUAL:         printf("OP_EQUAL\n"); return offset + 1;
         case OP_NOT_EQUAL:     printf("OP_NOT_EQUAL\n"); return offset + 1;
         case OP_GREATER:       printf("OP_GREATER\n"); return offset + 1;
         case OP_GREATER_EQUAL: printf("OP_GREATER_EQUAL\n"); return offset + 1;
         case OP_LESS:          printf("OP_LESS\n"); return offset + 1;
         case OP_LESS_EQUAL:    printf("OP_LESS_EQUAL\n"); return offset + 1;
-        case OP_INT_DIV:  printf("OP_INT_DIV\n"); return offset + 1;
-        case OP_MOD:      printf("OP_MOD\n"); return offset + 1; 
-        case OP_AND:      printf("OP_AND\n"); return offset + 1;
-        case OP_OR:       printf("OP_OR\n"); return offset + 1;
-        case OP_SHL:      printf("OP_SHL\n"); return offset + 1;
-        case OP_SHR:      printf("OP_SHR\n"); return offset + 1;
-            
-        case OP_GET_GLOBAL_ADDRESS: {
-            uint8_t name_index = chunk->code[offset + 1];
-            printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));
-            return offset + 2;
-        }
-        case OP_GET_LOCAL_ADDRESS: {
-            uint8_t slot = chunk->code[offset + 1];
-            printf("%-16s %4d (slot)\n", "OP_GET_LOCAL_ADDRESS", slot);
-            return offset + 2;
-        }
+        case OP_INT_DIV:       printf("OP_INT_DIV\n"); return offset + 1;
+        case OP_MOD:           printf("OP_MOD\n"); return offset + 1;
+        case OP_AND:           printf("OP_AND\n"); return offset + 1;
+        case OP_OR:            printf("OP_OR\n"); return offset + 1;
+        case OP_SHL:           printf("OP_SHL\n"); return offset + 1;
+        case OP_SHR:           printf("OP_SHR\n"); return offset + 1;
 
-        case OP_GET_LOCAL: {
-            uint8_t slot = chunk->code[offset + 1];
-            printf("%-16s %4d (slot)\n", "OP_GET_LOCAL", slot);
-            return offset + 2;
-        }
-        case OP_SET_LOCAL: {
-            uint8_t slot = chunk->code[offset + 1];
-            printf("%-16s %4d (slot)\n", "OP_SET_LOCAL", slot);
-            return offset + 2;
-        }
-        case OP_GET_FIELD_ADDRESS: {
-            uint8_t const_idx = chunk->code[offset + 1];
-            printf("%-16s %4d '%s'\n", "OP_GET_FIELD_ADDRESS", const_idx, AS_STRING(chunk->constants[const_idx]));
-            return offset + 2;
-        }
-        case OP_GET_ELEMENT_ADDRESS: {
-            uint8_t dims = chunk->code[offset + 1];
-            printf("%-16s %4d (dims)\n", "OP_GET_ELEMENT_ADDRESS", dims);
-            return offset + 2;
-        }
-        case OP_SET_INDIRECT:
-            printf("OP_SET_INDIRECT\n");
-            return offset + 1;
-        case OP_GET_INDIRECT: 
-            printf("OP_GET_INDIRECT\n");
-            return offset + 1;
-        case OP_IN:
-            printf("OP_IN\n");
-            return offset + 1;
-        case OP_GET_CHAR_FROM_STRING:
-            printf("OP_GET_CHAR_FROM_STRING\n");
-            return offset + 1;
-        case OP_SWAP: printf("OP_SWAP\n"); return offset + 1;
-        case OP_DUP: printf("OP_DUP\n"); return offset + 1;
         case OP_JUMP_IF_FALSE: {
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
             int target_addr = offset + 3 + (int16_t)jump_operand;
@@ -293,7 +245,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case OP_JUMP: {
             uint16_t jump_operand_uint = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
-            int16_t jump_operand_sint = (int16_t)jump_operand_uint; // Cast to signed
+            int16_t jump_operand_sint = (int16_t)jump_operand_uint;
             int target_addr = offset + 3 + jump_operand_sint;
             const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
             printf("%-16s %4d (to %04X)", "OP_JUMP", jump_operand_sint, target_addr);
@@ -303,10 +255,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printf("\n");
             return offset + 3;
         }
+        case OP_SWAP: printf("OP_SWAP\n"); return offset + 1;
+        case OP_DUP:  printf("OP_DUP\n"); return offset + 1;
+
         case OP_DEFINE_GLOBAL: {
             uint8_t name_idx = chunk->code[offset + 1];
             VarType declaredType = (VarType)chunk->code[offset + 2];
-
             printf("%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL", name_idx);
             if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
                 printf("'%s' ", chunk->constants[name_idx].s_val);
@@ -314,7 +268,6 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 printf("INVALID_NAME_IDX ");
             }
             printf("Type:%s ", varTypeToString(declaredType));
-
             int current_offset = offset + 3;
             if (declaredType == TYPE_ARRAY) {
                 if (current_offset < chunk->count) {
@@ -327,14 +280,11 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                             printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val, (i == dimension_count - 1) ? "" : ", ");
                         }
                     }
-                    printf("] of "); // End of bounds part
+                    printf("] of ");
                     if (current_offset < chunk->count) {
-                        // Read and print the element's VarType enum
                         VarType elem_var_type = (VarType)chunk->code[current_offset++];
                         printf("%s ", varTypeToString(elem_var_type));
-
                         if (current_offset < chunk->count) {
-                            // Now read the element type name's constant index
                             uint8_t elem_name_idx = chunk->code[current_offset++];
                             if (elem_name_idx < chunk->constants_count && chunk->constants[elem_name_idx].type == TYPE_STRING) {
                                 printf("('%s')", chunk->constants[elem_name_idx].s_val);
@@ -345,11 +295,8 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             } else {
                 if (current_offset < chunk->count) {
                     uint8_t type_name_idx = chunk->code[current_offset++];
-                     if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
-                         printf("('%s')", chunk->constants[type_name_idx].s_val);
-                    } else if (type_name_idx == 0) {
-                        // This is expected for simple types like INTEGER, REAL, etc.
-                        // No extra output needed.
+                    if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
+                        printf("('%s')", chunk->constants[type_name_idx].s_val);
                     }
                 }
             }
@@ -358,37 +305,75 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case OP_GET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            printf("%-16s %4d '", "OP_GET_GLOBAL", name_index);
-            if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
-                printf("%s", chunk->constants[name_index].s_val);
-            } else {
-                printf("INVALID_NAME_INDEX");
-            }
-            printf("'\n");
+            printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 2;
         }
         case OP_SET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            printf("%-16s %4d '", "OP_SET_GLOBAL", name_index);
-            if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
-                printf("%s", chunk->constants[name_index].s_val);
-            } else {
-                printf("INVALID_NAME_INDEX");
-            }
-            printf("'\n");
+            printf("%-16s %4d '%s'\n", "OP_SET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 2;
         }
+        case OP_GET_GLOBAL_ADDRESS: {
+            uint8_t name_index = chunk->code[offset + 1];
+            printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));
+            return offset + 2;
+        }
+        case OP_GET_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_GET_LOCAL", slot);
+            return offset + 2;
+        }
+        case OP_SET_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_SET_LOCAL", slot);
+            return offset + 2;
+        }
+        case OP_GET_LOCAL_ADDRESS: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_GET_LOCAL_ADDRESS", slot);
+            return offset + 2;
+        }
+        case OP_GET_FIELD_ADDRESS: {
+            uint8_t const_idx = chunk->code[offset + 1];
+            printf("%-16s %4d '%s'\n", "OP_GET_FIELD_ADDRESS", const_idx, AS_STRING(chunk->constants[const_idx]));
+            return offset + 2;
+        }
+        case OP_GET_ELEMENT_ADDRESS: {
+            uint8_t dims = chunk->code[offset + 1];
+            printf("%-16s %4d (dims)\n", "OP_GET_ELEMENT_ADDRESS", dims);
+            return offset + 2;
+        }
+        case OP_GET_CHAR_ADDRESS:
+            printf("OP_GET_CHAR_ADDRESS\n"); // <-- ADDED MISSING CASE
+            return offset + 1;
+        case OP_SET_INDIRECT:
+            printf("OP_SET_INDIRECT\n");
+            return offset + 1;
+        case OP_GET_INDIRECT:
+            printf("OP_GET_INDIRECT\n");
+            return offset + 1;
+        case OP_IN:
+            printf("OP_IN\n");
+            return offset + 1;
+        case OP_GET_CHAR_FROM_STRING:
+            printf("OP_GET_CHAR_FROM_STRING\n");
+            return offset + 1;
+
         case OP_CALL_BUILTIN: {
             uint8_t name_index = chunk->code[offset + 1];
             uint8_t arg_count = chunk->code[offset + 2];
-            printf("%-16s %3d '%s' (%d args)\n", "OP_CALL_BUILTIN",
-                   name_index,
-                   (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING)
-                       ? chunk->constants[name_index].s_val
-                       : "INVALID_IDX",
-                   arg_count);
+            printf("%-16s %3d '%s' (%d args)\n", "OP_CALL_BUILTIN", name_index, AS_STRING(chunk->constants[name_index]), arg_count);
             return offset + 3;
         }
+        
+        // These are not currently used in your compiler but are in the enum
+        case OP_CALL_BUILTIN_PROC:
+             printf("%-16s (not fully impl.)\n", "OP_CALL_BUILTIN_PROC");
+             return offset + 3;
+        case OP_CALL_USER_PROC:
+             printf("%-16s (not fully impl.)\n", "OP_CALL_USER_PROC");
+             return offset + 3;
+
         case OP_WRITE_LN: {
             uint8_t arg_count = chunk->code[offset + 1];
             printf("%-16s %4d (args)\n", "OP_WRITE_LN", arg_count);
@@ -400,45 +385,21 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             return offset + 2;
         }
         case OP_CALL_HOST: {
-            if (offset + 1 >= chunk->count) {
-                 printf("OP_CALL_HOST (operand out of bounds)\n");
-                 return offset + 1;
-            }
             uint8_t host_fn_id_val = chunk->code[offset + 1];
-            // Since hostFunctionIDToString might not exist yet in your utils.c,
-            // we'll print the numeric ID. You can enhance this later.
-            // const char* host_name = hostFunctionIDToString((HostFunctionID)host_fn_id_val); // If you implement it
-            // For now:
             printf("%-16s %4d (ID: %d)\n", "OP_CALL_HOST", host_fn_id_val, host_fn_id_val);
             return offset + 2;
-        }
-        case OP_CALL: {
-            // New format: name_idx (1), address (2), arity (1) -> 5 bytes total
-            if (offset + 4 >= chunk->count) {
-                printf("OP_CALL (operands out of bounds)\n");
-                return offset + 1;
-            }
-            uint8_t name_index = chunk->code[offset + 1];
-            uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
-            uint8_t declared_arity = chunk->code[offset + 4];
-            
-            const char* targetProcName = NULL;
-            if (name_index < chunk->constants_count && chunk->constants[name_index].type == TYPE_STRING) {
-                targetProcName = chunk->constants[name_index].s_val;
-            }
-
-            printf("%-16s %04X", "OP_CALL", address);
-            if (targetProcName) {
-                printf(" (%s)", targetProcName);
-            } else {
-                printf(" (InvalidNameIdx:%d)", name_index);
-            }
-            printf(" (%d args)\n", declared_arity);
-            return offset + 5; // Opcode (1) + NameIdx (1) + Address (2) + Arity (1)
         }
         case OP_POP:
             printf("OP_POP\n");
             return offset + 1;
+        case OP_CALL: {
+            uint8_t name_index = chunk->code[offset + 1];
+            uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
+            uint8_t declared_arity = chunk->code[offset + 4];
+            const char* targetProcName = AS_STRING(chunk->constants[name_index]);
+            printf("%-16s %04X (%s) (%d args)\n", "OP_CALL", address, targetProcName, declared_arity);
+            return offset + 5;
+        }
         case OP_HALT:
             printf("OP_HALT\n");
             return offset + 1;
@@ -448,19 +409,14 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printf("%-16s width:%d prec:%d\n", "OP_FORMAT_VALUE", width, (int8_t)precision);
             return offset + 3;
         }
-        // These cases were missing but are not in the provided dump. Added for completeness.
-        case OP_CALL_BUILTIN_PROC: // This and USER_PROC might not be used yet
-             printf("%-16s (not fully impl.)\n", "OP_CALL_BUILTIN_PROC");
-             return offset + 3; // Placeholder for name_idx, arg_count
-        case OP_CALL_USER_PROC:
-             printf("%-16s (not fully impl.)\n", "OP_CALL_USER_PROC");
-             return offset + 3; // Placeholder for name_idx, arg_count
+        // NOTE: There is no OP_BREAK in your bytecode.h enum, so it cannot be disassembled.
+        // The AST_BREAK node is handled by the compiler generating jump instructions.
+
         default:
             printf("Unknown opcode %02X\n", instruction);
             return offset + 1;
     }
 }
-
 
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable) {
     printf("== Disassembly: %s ==\n", name);
