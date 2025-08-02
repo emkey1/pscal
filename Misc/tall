@@ -1,6 +1,6 @@
 #!/bin/bash
 #BIN="$HOME/.bin"          # all your executables live here
-BIN="$HOME/Dropbox/Pbuild/build/bin"          # all your executables live here
+BIN="$HOME/Dropbox/PBuild/build/bin"          # all your executables live here
 
 TESTS="$HOME/git/pscal/Tests"  # all your .p / .pas files live here
 

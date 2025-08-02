@@ -1333,102 +1333,6 @@ Value executeBuiltinQuitRequested(AST *node) {
     return makeBoolean(break_requested != 0);
 }
 
-// --- Implementation for SdlCleanupAtExit ---
-// This function is called at the end of the program to clean up SDL,
-// SDL_mixer, and SDL_ttf resources.
-// It cleans up global SDL/Audio/TTF state variables (gSdlWindow, gSdlRenderer, etc.)
-// and the underlying library resources.
-void OSdlCleanupAtExit(void) {
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] Running SdlCleanupAtExit (Final Program Exit Cleanup)...\n");
-    #endif
-
-    // --- Clean up SDL_ttf resources ---
-    if (gSdlFont) {
-        TTF_CloseFont(gSdlFont);
-        gSdlFont = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_CloseFont successful.\n");
-        #endif
-    }
-    if (gSdlTtfInitialized) {
-        TTF_Quit();
-        gSdlTtfInitialized = false;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_Quit successful.\n");
-        #endif
-    }
-
-    // --- Clean up SDL_mixer audio resources ---
-    // Halt any currently playing sound effects and music (good practice before cleanup)
-    // Only do this if the sound system was initialized by pscal at some point.
-    // However, SDL_Init(SDL_INIT_AUDIO) might have been called by SDL_Init(SDL_INIT_EVERYTHING)
-    // even if audioInitSystem wasn't. For safety, check if SDL_WasInit(SDL_INIT_AUDIO) is true.
-    // A simple check: if gSoundSystemInitialized was ever true, or if SDL_WasInit(SDL_INIT_AUDIO) is true.
-
-    // If audioQuitSystem might have already freed sounds, this loop is safe as it checks for NULL.
-    for (int i = 0; i < MAX_SOUNDS; ++i) {
-        if (gLoadedSounds[i] != NULL) {
-            Mix_FreeChunk(gLoadedSounds[i]);
-            gLoadedSounds[i] = NULL;
-            DEBUG_PRINT("[DEBUG AUDIO] SdlCleanupAtExit: Auto-freed sound chunk at index %d.\n", i);
-        }
-    }
-
-    // Close the audio device if it's still considered open by SDL_mixer
-    // Mix_QuerySpec returns 0 if not open, non-zero if open.
-    int open_freq, open_channels;
-    Uint16 open_format;
-    if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) {
-        Mix_CloseAudio();
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio successful.\n");
-        #endif
-    } else {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
-        #endif
-    }
-
-    // Quit SDL_mixer subsystems. This should be safe to call even if already called,
-    // but ideally, it's called only once.
-    // If audioQuitSystem is changed to NOT call Mix_Quit(), this is the sole place.
-    Mix_Quit(); // This cleans up all initialized formats (OGG, MP3, etc.)
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_Quit successful.\n");
-    #endif
-    // Reset our flag if audioQuitSystem didn't
-    gSoundSystemInitialized = false;
-
-
-    // --- Clean up core SDL video and timer resources ---
-    if (gSdlRenderer) {
-        SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
-        #endif
-    }
-    if (gSdlWindow) {
-        SDL_DestroyWindow(gSdlWindow);
-        gSdlWindow = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyWindow successful.\n");
-        #endif
-    }
-    if (gSdlInitialized) { // This flag tracks if SDL_Init() for video/timer was called
-        SDL_Quit(); // This quits all initialized SDL subsystems (including SDL_INIT_AUDIO if it was ever inited)
-        gSdlInitialized = false;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_Quit successful.\n");
-        #endif
-    }
-
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit finished.\n");
-    #endif
-}
-
 Value executeBuiltinRenderCopyEx(AST *node) {
     
     // Expected arguments:
@@ -1984,12 +1888,13 @@ void SdlCleanupAtExit(void) {
 
     // --- Clean up core SDL video and timer resources ---
     // Destroy textures first
-    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
+/*    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
         if (gSdlTextures[i] != NULL) {
             SDL_DestroyTexture(gSdlTextures[i]);
             gSdlTextures[i] = NULL;
         }
     }
+ */
     if (gSdlRenderer) {
         SDL_DestroyRenderer(gSdlRenderer);
         gSdlRenderer = NULL;
