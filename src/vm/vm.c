@@ -23,25 +23,7 @@
 
 #define MAX_WRITELN_ARGS_VM 32
 
-static const int pscalToAnsiBase[8] = {
-    0, 4, 2, 6, 1, 5, 3, 7
-};
-
 // --- VM Helper Functions ---
-// Helper function to map 0-15 to ANSI FG codes
-static int map16FgColorToAnsi(int pscalColorCode, bool isBold) {
-    int basePscalColor = pscalColorCode % 8;
-    bool isBright = isBold || (pscalColorCode >= 8);
-    int ansiBaseOffset = pscalToAnsiBase[basePscalColor];
-    return (isBright ? 90 : 30) + ansiBaseOffset;
-}
-
-// Helper function to map 0-7 to ANSI BG codes
-static int map16BgColorToAnsi(int pscalColorCode) {
-    int basePscalColor = pscalColorCode % 8;
-    return 40 + pscalToAnsiBase[basePscalColor];
-}
-
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
@@ -1672,7 +1654,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // New format: name_idx (1), address (2), arity (1)
+                // Operands: name_idx (1 byte), target_address (2 bytes), declared_arity (1 byte)
                 uint8_t name_idx_ignored = READ_BYTE(); // Read and discard the name index
                 (void)name_idx_ignored; // Suppress unused variable warning
                 uint16_t target_address = READ_SHORT(vm);

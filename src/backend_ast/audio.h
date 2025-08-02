@@ -40,10 +40,6 @@ Value vm_builtin_initsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_loadsound(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_initsoundsystem(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_loadsound(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_issoundplaying(struct VM_s* vm, int arg_count, Value* args);
 
 #endif

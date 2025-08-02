@@ -138,7 +138,7 @@ static void addBreakJump(BytecodeChunk* chunk, int line) {
 static void patchBreaks(BytecodeChunk* chunk) {
     if (loop_depth < 0) return;
     Loop* current_loop = &loop_stack[loop_depth];
-    int jump_target = chunk->count; // The address to jump to is the one right after the loop.
+    int jump_target = chunk->count;
 
     for (int i = 0; i < current_loop->break_count; i++) {
         int jump_offset = current_loop->break_jumps[i];
@@ -147,17 +147,18 @@ static void patchBreaks(BytecodeChunk* chunk) {
 
     if (current_loop->break_jumps) {
         free(current_loop->break_jumps);
-        // --- MODIFICATION: Set pointer to NULL after freeing ---
+        
         current_loop->break_jumps = NULL;
     }
 }
 
 static void endLoop(void) {
     if (loop_depth < 0) return;
-    
-    // --- MODIFICATION: This function should ONLY manage the loop depth. ---
-    // The patching and freeing is handled entirely by patchBreaks().
-    // We can add a check here to catch logic errors.
+
+    // This function now only manages the loop depth.
+    // The patching and freeing of break_jumps is handled entirely by patchBreaks().
+    // A check has been added to catch logic errors where endLoop is called
+    // without a preceding patchBreaks() call.
     if (loop_stack[loop_depth].break_jumps != NULL) {
         fprintf(stderr, "Compiler internal warning: endLoop called but break_jumps was not freed. Indicates missing patchBreaks() call.\n");
         // Safeguard free, though the call site is the real issue.

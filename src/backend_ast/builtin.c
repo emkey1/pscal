@@ -156,6 +156,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"upcase", vm_builtin_upcase},
 #ifdef SDL
     {"updatescreen", vm_builtin_updatescreen},
+    {"updatetexture", vm_builtin_updatetexture},
     {"waitkeyevent", vm_builtin_waitkeyevent}, // Moved
 #endif
     {"wherex", vm_builtin_wherex},
@@ -809,16 +810,15 @@ Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
 Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
+    int c; // FIX #2: Moved declaration to the top of the function.
 
-    // Check if the first argument is a file variable (passed by value OR by reference).
+    // Check if the first argument is a file variable.
     if (arg_count > 0) {
         Value* first_arg_ptr = &args[0];
-        // If it's a pointer (VAR param), dereference it once.
         if (first_arg_ptr->type == TYPE_POINTER && first_arg_ptr->ptr_val) {
             first_arg_ptr = (Value*)first_arg_ptr->ptr_val;
         }
 
-        // Now, check if the resulting value is a FILE.
         if (first_arg_ptr->type == TYPE_FILE) {
             if (first_arg_ptr->f_val) {
                 input_stream = first_arg_ptr->f_val;
@@ -831,106 +831,58 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
         }
     }
 
-
-    // If there are no variables to read into, just consume the rest of the line.
-    if (arg_count == var_start_index) {
-        int c;
-        while ((c = fgetc(input_stream)) != '\n' && c != EOF);
-        last_io_error = 0;
-        return makeVoid();
-    }
-
-    char line_buffer[4096];
-    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
-        last_io_error = ferror(input_stream) ? errno : 0;
-        return makeVoid();
-    }
-
-    char* buffer_ptr = line_buffer;
-
+    // Read into variables one by one.
     for (int i = var_start_index; i < arg_count; i++) {
         if (args[i].type != TYPE_POINTER) {
-            runtimeError(vm, "Readln requires an LValue for arguments to read into.");
-            goto end_readln_vm;
+            runtimeError(vm, "Readln requires VAR parameters to read into.");
+            last_io_error = 1; goto end_readln;
         }
         Value* target_lvalue = (Value*)args[i].ptr_val;
-        if (!target_lvalue) {
-            runtimeError(vm, "VM internal error: Readln received a null LValue pointer for argument %d.", i + 1);
-            continue;
-        }
-
-        int n_scanned = 0;
-        int items_scanned = 0;
-
-        if (sscanf(buffer_ptr, " %n", &n_scanned) > 0) {
-             buffer_ptr += n_scanned;
-        } else {
-            sscanf(buffer_ptr, "%n", &n_scanned);
-            buffer_ptr += n_scanned;
-        }
-
-        if (*buffer_ptr == '\0') {
-            last_io_error = 1;
-            break;
-        }
+        char buffer[256];
 
         switch (target_lvalue->type) {
             case TYPE_INTEGER:
             case TYPE_BYTE:
-            case TYPE_WORD: {
-                long long temp_val;
-                items_scanned = sscanf(buffer_ptr, "%lld%n", &temp_val, &n_scanned);
-                if (items_scanned == 1) {
-                    freeValue(target_lvalue);
-                    *target_lvalue = makeValueForType(target_lvalue->type, NULL, NULL);
-                    target_lvalue->i_val = temp_val;
-                    buffer_ptr += n_scanned;
+            case TYPE_WORD:
+                if (fscanf(input_stream, "%lld", &target_lvalue->i_val) != 1) {
+                    last_io_error = 1; goto end_readln;
                 }
                 break;
-            }
-            case TYPE_REAL: {
-                double temp_val;
-                items_scanned = sscanf(buffer_ptr, "%lf%n", &temp_val, &n_scanned);
-                if (items_scanned == 1) {
-                    freeValue(target_lvalue);
-                    *target_lvalue = makeReal(temp_val);
-                    buffer_ptr += n_scanned;
+            case TYPE_REAL:
+                if (fscanf(input_stream, "%lf", &target_lvalue->r_val) != 1) {
+                    last_io_error = 1; goto end_readln;
                 }
                 break;
-            }
-            case TYPE_CHAR: {
-                if (*buffer_ptr != '\0') {
-                    freeValue(target_lvalue);
-                    *target_lvalue = makeChar(*buffer_ptr);
-                    buffer_ptr++;
-                    items_scanned = 1;
+            case TYPE_CHAR: { // FIX #1: Read into a temporary char first.
+                char temp_char;
+                if (fscanf(input_stream, " %c", &temp_char) != 1) {
+                    last_io_error = 1; goto end_readln;
                 }
+                target_lvalue->c_val = temp_char;
                 break;
             }
-            case TYPE_STRING: {
-                char* end_of_line = strpbrk(buffer_ptr, "\n\r");
-                if (end_of_line) {
-                    *end_of_line = '\0';
+            case TYPE_STRING:
+                // Reading a full line into a string is best done by reading the whole line first.
+                // This logic is simplified to read the next "word".
+                if (fscanf(input_stream, "%255s", buffer) != 1) {
+                    last_io_error = 1; goto end_readln;
                 }
                 freeValue(target_lvalue);
-                *target_lvalue = makeString(buffer_ptr);
-                goto end_readln_vm;
-            }
+                *target_lvalue = makeString(buffer);
+                break;
             default:
-                runtimeError(vm, "Cannot use Readln with a variable of type %s.", varTypeToString(target_lvalue->type));
-                goto end_readln_vm;
-        }
-
-        if (items_scanned != 1) {
-            last_io_error = 1;
-            break;
+                runtimeError(vm, "Cannot Readln into a variable of type %s.", varTypeToString(target_lvalue->type));
+                last_io_error = 1; goto end_readln;
         }
     }
 
-end_readln_vm:
-    if (last_io_error == 0) {
-        last_io_error = 0;
-    }
+end_readln:
+    // Consume the rest of the line, if any.
+    while ((c = fgetc(input_stream)) != '\n' && c != EOF);
+
+    if (ferror(input_stream)) last_io_error = 1;
+    else if (!feof(input_stream)) last_io_error = 0;
+
     return makeVoid();
 }
 

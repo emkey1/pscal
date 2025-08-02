@@ -80,42 +80,6 @@ static void addOrdinalToResultSet(Value* resultVal, long long ordinal) {
     resultVal->set_val.set_size++;
 }
 
-// Helper array to map Pscal color codes 0-7 to ANSI base numbers (30-37 or 40-47)
-// Pscal: 0=Black, 1=Blue,  2=Green, 3=Cyan, 4=Red, 5=Magenta, 6=Brown(Yellow), 7=LightGray(White)
-// ANSI:  x0=Black,x1=Red, x2=Green,x3=Yellow,x4=Blue,x5=Magenta,x6=Cyan,x7=White
-static const int pscalToAnsiBase[8] = {
-    0, // Pscal Black   -> ANSI Black (30/40 + 0)
-    4, // Pscal Blue    -> ANSI Blue  (30/40 + 4)
-    2, // Pscal Green   -> ANSI Green (30/40 + 2)
-    6, // Pscal Cyan    -> ANSI Cyan  (30/40 + 6)
-    1, // Pscal Red     -> ANSI Red   (30/40 + 1)
-    5, // Pscal Magenta -> ANSI Magenta(30/40 + 5)
-    3, // Pscal Brown   -> ANSI Yellow(30/40 + 3) (Brown is often dark yellow)
-    7  // Pscal LtGray  -> ANSI White (30/40 + 7)
-};
-
-// Helper function to map 0-15 to ANSI FG codes (30-37 standard, 90-97 bright)
-static int map16FgColorToAnsi(int pscalColorCode, bool isBold) {
-    int basePscalColor = pscalColorCode % 8; // Get the 0-7 part
-    bool isBright = isBold || (pscalColorCode >= 8); // Determine if bright/high-intensity
-
-    int ansiBaseOffset = pscalToAnsiBase[basePscalColor];
-
-    if (isBright) {
-        return 90 + ansiBaseOffset; // Bright foregrounds 90-97
-    } else {
-        return 30 + ansiBaseOffset; // Standard foregrounds 30-37
-    }
-}
-
-static int map16BgColorToAnsi(int pscalColorCode) {
-    // Background colors typically only use the first 8 Pscal colors (0-7)
-    // and map to standard ANSI backgrounds 40-47
-    int basePscalColor = pscalColorCode % 8;
-    int ansiBaseOffset = pscalToAnsiBase[basePscalColor];
-    return 40 + ansiBaseOffset;
-}
-
 Value evalSet(AST *node) {
     // ... (initial checks and variable declarations remain the same) ...
     Value v;

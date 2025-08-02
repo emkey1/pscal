@@ -2250,6 +2250,60 @@ Value vm_builtin_fillrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vm_builtin_updatetexture(struct VM_s* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "UpdateTexture expects 2 arguments (TextureID: Integer; PixelData: ARRAY OF Byte).");
+        return makeVoid();
+    }
+
+    Value idVal = args[0];
+    Value pixelDataVal = args[1];
+
+    if (idVal.type != TYPE_INTEGER || pixelDataVal.type != TYPE_ARRAY) {
+        runtimeError(vm, "UpdateTexture argument type mismatch.");
+        return makeVoid();
+    }
+    if (pixelDataVal.element_type != TYPE_BYTE) {
+        runtimeError(vm, "UpdateTexture PixelData must be an ARRAY OF Byte. Got array of %s.", varTypeToString(pixelDataVal.element_type));
+        return makeVoid();
+    }
+
+    int textureID = (int)idVal.i_val;
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        runtimeError(vm, "UpdateTexture called with invalid TextureID %d.", textureID);
+        return makeVoid();
+    }
+
+    int texWidth = gSdlTextureWidths[textureID];
+    int pitch = texWidth * 4; // 4 bytes per pixel for RGBA8888
+    int expectedPscalArraySize = texWidth * gSdlTextureHeights[textureID] * 4;
+    int pscalArrayTotalElements = calculateArrayTotalSize(&pixelDataVal);
+
+    if (pscalArrayTotalElements != expectedPscalArraySize) {
+        runtimeError(vm, "UpdateTexture PixelData array size (%d) does not match texture dimensions*BPP (%d).",
+                pscalArrayTotalElements, expectedPscalArraySize);
+        return makeVoid();
+    }
+
+    // Since the VM passes direct Value pointers, we can create a temporary C buffer from them.
+    unsigned char* c_pixel_buffer = (unsigned char*)malloc(expectedPscalArraySize);
+    if (!c_pixel_buffer) {
+        runtimeError(vm, "Failed to allocate C buffer for UpdateTexture.");
+        return makeVoid();
+    }
+
+    for (int i = 0; i < expectedPscalArraySize; ++i) {
+        c_pixel_buffer[i] = (unsigned char)pixelDataVal.array_val[i].i_val;
+    }
+
+    if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
+        runtimeError(vm, "SDL_UpdateTexture failed: %s", SDL_GetError());
+    }
+
+    free(c_pixel_buffer);
+    return makeVoid();
+}
+
 Value vm_builtin_updatescreen(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "UpdateScreen expects 0 arguments.");
     if (gSdlRenderer) SDL_RenderPresent(gSdlRenderer);

@@ -24,6 +24,20 @@ add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
+# ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
+if(APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
+    execute_process(
+        COMMAND xcrun --sdk macosx --show-sdk-path
+        OUTPUT_VARIABLE _MACOSX_SDK_PATH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(_MACOSX_SDK_PATH AND EXISTS "${_MACOSX_SDK_PATH}/usr/include")
+        set(CMAKE_OSX_SYSROOT "${_MACOSX_SDK_PATH}" CACHE PATH "Selected macOS SDK" FORCE)
+        message(STATUS "Using macOS SDK: ${CMAKE_OSX_SYSROOT}")
+    endif()
+endif()
+
 # ---- Include Directories (Project Structure) ----
 include_directories(
     src
@@ -64,11 +78,39 @@ message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
 message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
 message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
 
-# --- CURL ---
-find_package(CURL REQUIRED)
-message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
-message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
+# --- CURL (two-path strategy) ---
+# Option A (default): use system SDK curl via FindCURL (imported target CURL::libcurl)
+# Option B (opt-in): prefer Homebrew curl for OpenSSL, etc.
+option(PSCAL_USE_BREW_CURL "Prefer Homebrew-provided curl over the macOS SDK one" OFF)
+if(APPLE AND PSCAL_USE_BREW_CURL)
+    # Hint FindCURL using Homebrew prefix and pkg-config
+    execute_process(
+        COMMAND brew --prefix curl
+        OUTPUT_VARIABLE _BREW_CURL_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(_BREW_CURL_PREFIX AND EXISTS "${_BREW_CURL_PREFIX}")
+        list(PREPEND CMAKE_PREFIX_PATH "${_BREW_CURL_PREFIX}")
+        # Propagate pkg-config hint for libcurl.pc
+        if(DEFINED ENV{PKG_CONFIG_PATH})
+            set(ENV{PKG_CONFIG_PATH} "${_BREW_CURL_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        else()
+            set(ENV{PKG_CONFIG_PATH} "${_BREW_CURL_PREFIX}/lib/pkgconfig")
+        endif()
+        message(STATUS "Hinting CURL with Homebrew prefix: ${_BREW_CURL_PREFIX}")
+    else()
+        message(WARNING "PSCAL_USE_BREW_CURL=ON but Homebrew curl not found; falling back to system CURL.")
+    endif()
+endif()
 
+find_package(CURL REQUIRED)
+if(TARGET CURL::libcurl)
+    message(STATUS "CURL: using imported target CURL::libcurl")
+else()
+    message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
+    message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
+endif()
 
 # ---- Source Files ----
 set(PSCAL_SOURCES
@@ -94,8 +136,12 @@ function(add_pscal_executable target_name)
         ${PC_SDL2_IMAGE_INCLUDE_DIRS}
         ${PC_SDL2_MIXER_INCLUDE_DIRS}
         ${PC_SDL2_TTF_INCLUDE_DIRS}
-        ${CURL_INCLUDE_DIRS}
+        # Do NOT force-add CURL_INCLUDE_DIRS if we have the imported target.
+        # Its usage requirements will supply includes automatically.
     )
+    if(NOT TARGET CURL::libcurl AND CURL_INCLUDE_DIRS)
+        target_include_directories(${target_name} PRIVATE ${CURL_INCLUDE_DIRS})
+    endif()
 
     # Add library search paths from pkg-config
     target_link_directories(${target_name} PRIVATE
@@ -115,9 +161,6 @@ function(add_pscal_executable target_name)
     endif()
 
     # SDL Extensions - using the library names from pkg-config
-    # These variables (e.g. PC_SDL2_IMAGE_LIBRARIES) often contain a list like "SDL2_image;SDL2"
-    # CMake handles linking these by name (e.g. -lSDL2_image -lSDL2)
-    # The target_link_directories above tells the linker where to find them.
     list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LIBRARIES})
     list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LIBRARIES})
     list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LIBRARIES})
@@ -133,20 +176,19 @@ function(add_pscal_executable target_name)
     else()
         list(APPEND TARGET_LINK_LIBS ${CURL_LIBRARIES})
     endif()
-    
+
     list(APPEND TARGET_LINK_LIBS m) # Math library
 
     # Specific options for dscal (ASan)
     if(${target_name} STREQUAL "dscal")
         list(APPEND TARGET_LINK_LIBS "-fsanitize=address")
     endif()
-    
+
     # Optional: Remove duplicate library names from the list before linking
-    # This helps with the ld warning but might not be strictly necessary if the linker handles it.
     if(TARGET_LINK_LIBS)
         list(REMOVE_DUPLICATES TARGET_LINK_LIBS)
     endif()
-    
+
     message(STATUS "Linking ${target_name} with: ${TARGET_LINK_LIBS}")
     target_link_libraries(${target_name} PRIVATE ${TARGET_LINK_LIBS})
 
@@ -161,7 +203,6 @@ function(add_pscal_executable target_name)
     elseif(${target_name} STREQUAL "dscal")
         target_compile_definitions(${target_name} PRIVATE DEBUG)
         target_compile_options(${target_name} PRIVATE -fsanitize=address -g)
-        # target_link_options(${target_name} PRIVATE INTERFACE -fsanitize=address) # Covered by adding to TARGET_LINK_LIBS
     elseif(${target_name} STREQUAL "hscal")
         target_compile_definitions(${target_name} PRIVATE DEBUG SUPPRESS_EXIT)
         target_compile_options(${target_name} PRIVATE -g)
@@ -176,3 +217,4 @@ add_pscal_executable(dscal)
 include(GNUInstallDirs)
 install(TARGETS pscal dscal
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+

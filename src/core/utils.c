@@ -1752,3 +1752,17 @@ int computeFlatOffset(Value *array, int *indices) {
     }
     return offset;
 }
+
+// Helper function to map 0-15 to ANSI FG codes
+int map16FgColorToAnsi(int pscalColorCode, bool isBold) {
+    int basePscalColor = pscalColorCode % 8;
+    bool isBright = isBold || (pscalColorCode >= 8);
+    int ansiBaseOffset = pscalToAnsiBase[basePscalColor];
+    return (isBright ? 90 : 30) + ansiBaseOffset;
+}
+
+// Helper function to map 0-7 to ANSI BG codes
+int map16BgColorToAnsi(int pscalColorCode) {
+    int basePscalColor = pscalColorCode % 8;
+    return 40 + pscalToAnsiBase[basePscalColor];
+}

@@ -112,6 +112,7 @@ Value vm_builtin_rendercopy(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_rendercopyex(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_setcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_setrendertarget(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_updatetexture(struct VM_s* vm, int arg_count, Value* args);
 
 #ifdef __cplusplus
 }
