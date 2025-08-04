@@ -724,24 +724,40 @@ Value vm_builtin_dispose(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "Assign requires 2 arguments."); return makeVoid(); }
+    if (arg_count != 2) {
+        runtimeError(vm, "Assign requires 2 arguments.");
+        return makeVoid();
+    }
 
-    // Check if the first argument is a pointer (passed by VAR)
-    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+    // --- FIX: Arguments are in reverse order from the stack ---
+    // For assign(f, filename), filename is at args[0] and a pointer to f is at args[1].
+    Value fileNameVal = args[0];
+    Value fileVarPtr  = args[1];
+
+    if (fileVarPtr.type != TYPE_POINTER || !fileVarPtr.ptr_val) {
         runtimeError(vm, "Assign: First argument must be a VAR file parameter.");
         return makeVoid();
     }
-    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer to get the actual file variable
-    Value* fileNameVal = &args[1];                  // The second argument is the string value
+    Value* fileVarLValue = (Value*)fileVarPtr.ptr_val;
 
-    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First arg to Assign must be a file variable."); return makeVoid(); }
-    if (fileNameVal->type != TYPE_STRING) { runtimeError(vm, "Second arg to Assign must be a string."); return makeVoid(); }
-    
+    if (fileVarLValue->type != TYPE_FILE) {
+        runtimeError(vm, "First arg to Assign must be a file variable.");
+        return makeVoid();
+    }
+    if (fileNameVal.type != TYPE_STRING) {
+        runtimeError(vm, "Second arg to Assign must be a string. Got type %s.", varTypeToString(fileNameVal.type));
+        return makeVoid();
+    }
+
     if (fileVarLValue->filename) {
         free(fileVarLValue->filename);
     }
-    
-    fileVarLValue->filename = fileNameVal->s_val ? strdup(fileNameVal->s_val) : NULL;
+
+    // Use strdup to create a persistent copy of the filename
+    fileVarLValue->filename = fileNameVal.s_val ? strdup(fileNameVal.s_val) : NULL;
+    if (fileNameVal.s_val && !fileVarLValue->filename) {
+        runtimeError(vm, "Memory allocation failed for filename in assign.");
+    }
 
     return makeVoid();
 }

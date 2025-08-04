@@ -554,33 +554,46 @@ AST *copyAST(AST *node) {
     if (!node) return NULL;
     AST *newNode = newASTNode(node->type, node->token);
     if (!newNode) return NULL;
+    
+    // Copy all scalar fields
     newNode->var_type = node->var_type;
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
     newNode->i_val = node->i_val;
-    newNode->unit_list = node->unit_list;
-    newNode->symbol_table = node->symbol_table;
-
-    AST *copiedLeft = copyAST(node->left);
-    AST *copiedRight = copyAST(node->right);
-    AST *copiedExtra = copyAST(node->extra);
+    // Do NOT copy unit_list or symbol_table unless you intend to deep copy them
+    newNode->unit_list = NULL;
+    newNode->symbol_table = NULL;
     
-#ifdef DEBUG
-if (node->type == AST_POINTER_TYPE || node->type == AST_TYPE_REFERENCE) {
-    fprintf(stderr, "[DEBUG copyAST] Copied Node %p (Type %s). Original->right=%p. Copied Node %p->right set to %p (Type %s).\n",
-            (void*)node, astTypeToString(node->type), (void*)node->right,
-            (void*)newNode, (void*)copiedRight, copiedRight ? astTypeToString(copiedRight->type) : "NULL");
-    if (node->type == AST_POINTER_TYPE && copiedRight) {
-         fprintf(stderr, "[DEBUG copyAST]   Base type node copied for POINTER_TYPE is at %p (Type %s)\n", (void*)copiedRight, astTypeToString(copiedRight->type));
+    // Handle children first
+    AST *copiedLeft = copyAST(node->left);
+    AST *copiedExtra = copyAST(node->extra);
+    AST *copiedRight = NULL;
+
+    if (node->type == AST_TYPE_REFERENCE) {
+        // For a type reference, do not deep copy the 'right' pointer.
+        // It points to a canonical definition in the type_table.
+        // Just copy the pointer value itself.
+        copiedRight = node->right;
+    } else {
+        // For all other node types, perform a recursive deep copy.
+        copiedRight = copyAST(node->right);
     }
-    fflush(stderr);
-}
-#endif
+    
+    // Now set the pointers and parents
+    newNode->left = copiedLeft;
+    if (newNode->left) newNode->left->parent = newNode;
+    
+    newNode->right = copiedRight;
+    // Only set the parent pointer if we made a deep copy.
+    // Do NOT change the parent of a node from the type_table.
+    if (newNode->right && node->type != AST_TYPE_REFERENCE) {
+        newNode->right->parent = newNode;
+    }
 
-    newNode->left = copiedLeft; if (newNode->left) newNode->left->parent = newNode;
-    newNode->right = copiedRight; if (newNode->right) newNode->right->parent = newNode;
-    newNode->extra = copiedExtra; if (newNode->extra) newNode->extra->parent = newNode;
-
+    newNode->extra = copiedExtra;
+    if (newNode->extra) newNode->extra->parent = newNode;
+    
+    // Children copy logic remains the same
     if (node->child_count > 0 && node->children) {
         newNode->child_capacity = node->child_count;
         newNode->child_count = node->child_count;
