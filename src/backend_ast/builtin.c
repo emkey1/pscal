@@ -731,8 +731,8 @@ Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
 
     // --- FIX: Arguments are in reverse order from the stack ---
     // For assign(f, filename), filename is at args[0] and a pointer to f is at args[1].
-    Value fileNameVal = args[0];
-    Value fileVarPtr  = args[1];
+    Value fileVarPtr  = args[0];
+    Value fileNameVal = args[1];
 
     if (fileVarPtr.type != TYPE_POINTER || !fileVarPtr.ptr_val) {
         runtimeError(vm, "Assign: First argument must be a VAR file parameter.");
@@ -881,7 +881,11 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
                 // Reading a full line into a string is best done by reading the whole line first.
                 // This logic is simplified to read the next "word".
                 if (fscanf(input_stream, "%255s", buffer) != 1) {
-                    last_io_error = 1; goto end_readln;
+                    // **FIX**: If fscanf fails, clear the target string to prevent using stale data.
+                    freeValue(target_lvalue);
+                    *target_lvalue = makeString(""); // Assign an empty string
+                    last_io_error = 1;
+                    goto end_readln;
                 }
                 freeValue(target_lvalue);
                 *target_lvalue = makeString(buffer);

@@ -489,36 +489,40 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_OK;
                 }
 
-                // 1. Pop the return value (pushed by compiler: function result or procedure's NIL).
+                // 1. Pop the return value from the returning function's stack.
                 Value returnValue = pop(vm);
+                
+                // 2. CRITICAL FIX: Make a safe, deep copy of the return value *before*
+                //    freeing the stack frame. This prevents a use-after-free error.
+                Value safeReturnValue = makeCopyOfValue(&returnValue);
+                
+                // 3. Now that we have a safe copy, we can free the original popped value.
+                freeValue(&returnValue);
 
                 CallFrame* currentFrame = &vm->frames[vm->frameCount - 1];
 
-                // 2. Clear the stack slots used by the function's parameters and local variables.
+                // 4. Clear the remaining stack slots used by the function's local variables.
+                //    This is now safe because we have a separate copy of the return value.
                 for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
                     freeValue(slot);
                 }
 
-                // 3. Restore VM state (IP and stackTop).
+                // 5. Restore the VM state from the frame.
                 vm->ip = currentFrame->return_address;
                 vm->stackTop = currentFrame->slots;
 
-                // 4. Decrement frame count.
+                // 6. Pop the call frame.
                 vm->frameCount--;
 
-                // Conditionally push the return value only if it's a function.
-                // Procedures return a dummy NIL, which should NOT be left on the stack.
-                // We check the function_symbol in the current CallFrame, which was stored during OP_CALL.
+                // 7. Push the safe return value back onto the caller's stack.
+                //    Procedures will have a NIL value, which is handled correctly here.
                 if (currentFrame->function_symbol && currentFrame->function_symbol->type != TYPE_VOID) {
-                    push(vm, returnValue); // Push the actual function result.
+                    push(vm, safeReturnValue); // Push the actual function result.
                 } else {
-                    // This was a procedure return (function_symbol is NULL or its type is TYPE_VOID).
-                    // The dummy NIL (or any value) pushed by the compiler has already been popped into `returnValue`.
-                    // We do NOT push it back onto the stack because the caller of a procedure doesn't expect a return value.
-                    // The temporary `returnValue` will be freed in the next step.
+                    // This was a procedure. We don't push a value for the caller.
+                    // We must free the safe copy of the (likely NIL) value to prevent a memory leak.
+                    freeValue(&safeReturnValue);
                 }
-                // 5. Free the temporary copy of the return value.
-                freeValue(&returnValue);
 
                 break;
             }
