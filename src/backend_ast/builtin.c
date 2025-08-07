@@ -826,82 +826,96 @@ Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
 Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
-    int c; // FIX #2: Moved declaration to the top of the function.
+    char line_buffer[1024]; // Buffer to hold the entire line
+    const char* p = line_buffer; // Pointer to walk through the line_buffer
 
-    // Check if the first argument is a file variable.
-    if (arg_count > 0) {
-        Value* first_arg_ptr = &args[0];
-        if (first_arg_ptr->type == TYPE_POINTER && first_arg_ptr->ptr_val) {
-            first_arg_ptr = (Value*)first_arg_ptr->ptr_val;
-        }
-
-        if (first_arg_ptr->type == TYPE_FILE) {
-            if (first_arg_ptr->f_val) {
-                input_stream = first_arg_ptr->f_val;
-                var_start_index = 1;
-            } else {
-                runtimeError(vm, "File not open for Readln.");
-                last_io_error = 1;
-                return makeVoid();
-            }
+    // 1. Determine the input stream (file or stdin)
+    if (arg_count > 0 && args[0].type == TYPE_FILE) {
+        if (args[0].f_val) {
+            input_stream = args[0].f_val;
+            var_start_index = 1;
+        } else {
+            runtimeError(vm, "File not open for Readln.");
+            last_io_error = 1;
+            return makeVoid();
         }
     }
 
-    // Read into variables one by one.
+    // 2. Read the entire line from the stream into the buffer
+    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
+        // Handle EOF or read error
+        last_io_error = feof(input_stream) ? 0 : 1;
+        // If we hit EOF, we still need to process assignments for any variables,
+        // which will typically result in empty strings or 0 for numbers.
+        line_buffer[0] = '\0';
+    } else {
+        // Strip trailing newline characters
+        line_buffer[strcspn(line_buffer, "\n\r")] = 0;
+    }
+    p = line_buffer; // Reset our parsing pointer to the start of the buffer
+
+    // 3. Parse values from the line_buffer for each variable argument
     for (int i = var_start_index; i < arg_count; i++) {
-        if (args[i].type != TYPE_POINTER) {
+        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
             runtimeError(vm, "Readln requires VAR parameters to read into.");
-            last_io_error = 1; goto end_readln;
+            last_io_error = 1;
+            break; // Exit the loop
         }
         Value* target_lvalue = (Value*)args[i].ptr_val;
-        char buffer[256];
+        int chars_read = 0; // To advance the pointer 'p'
+
+        // Skip leading whitespace in the buffer before parsing the next value
+        while (isspace((unsigned char)*p)) p++;
 
         switch (target_lvalue->type) {
             case TYPE_INTEGER:
             case TYPE_BYTE:
             case TYPE_WORD:
-                if (fscanf(input_stream, "%lld", &target_lvalue->i_val) != 1) {
-                    last_io_error = 1; goto end_readln;
+                if (sscanf(p, "%lld%n", &target_lvalue->i_val, &chars_read) < 1) {
+                    target_lvalue->i_val = 0; // Default to 0 on parse failure
+                    last_io_error = 1;
                 }
+                p += chars_read;
                 break;
             case TYPE_REAL:
-                if (fscanf(input_stream, "%lf", &target_lvalue->r_val) != 1) {
-                    last_io_error = 1; goto end_readln;
-                }
-                break;
-            case TYPE_CHAR: { // FIX #1: Read into a temporary char first.
-                char temp_char;
-                if (fscanf(input_stream, " %c", &temp_char) != 1) {
-                    last_io_error = 1; goto end_readln;
-                }
-                target_lvalue->c_val = temp_char;
-                break;
-            }
-            case TYPE_STRING:
-                // Reading a full line into a string is best done by reading the whole line first.
-                // This logic is simplified to read the next "word".
-                if (fscanf(input_stream, "%255s", buffer) != 1) {
-                    // **FIX**: If fscanf fails, clear the target string to prevent using stale data.
-                    freeValue(target_lvalue);
-                    *target_lvalue = makeString(""); // Assign an empty string
+                if (sscanf(p, "%lf%n", &target_lvalue->r_val, &chars_read) < 1) {
+                    target_lvalue->r_val = 0.0; // Default to 0.0
                     last_io_error = 1;
-                    goto end_readln;
                 }
-                freeValue(target_lvalue);
-                *target_lvalue = makeString(buffer);
+                p += chars_read;
                 break;
+            case TYPE_CHAR:
+                if (sscanf(p, " %c%n", &target_lvalue->c_val, &chars_read) < 1) {
+                    target_lvalue->c_val = '\0';
+                    last_io_error = 1;
+                }
+                p += chars_read;
+                break;
+            case TYPE_STRING:
+                // For a string, assign the rest of the buffer to it
+                if (target_lvalue->max_length > 0) { // Fixed-length string
+                    strncpy(target_lvalue->s_val, p, target_lvalue->max_length);
+                    target_lvalue->s_val[target_lvalue->max_length] = '\0';
+                } else { // Dynamic string
+                    freeValue(target_lvalue);
+                    *target_lvalue = makeString(p);
+                }
+                // Since string reads the rest of the line, we are done parsing.
+                goto end_readln_no_consume;
             default:
                 runtimeError(vm, "Cannot Readln into a variable of type %s.", varTypeToString(target_lvalue->type));
-                last_io_error = 1; goto end_readln;
+                last_io_error = 1;
+                goto end_readln_no_consume;
         }
     }
 
-end_readln:
-    // Consume the rest of the line, if any.
-    while ((c = fgetc(input_stream)) != '\n' && c != EOF);
-
-    if (ferror(input_stream)) last_io_error = 1;
-    else if (!feof(input_stream)) last_io_error = 0;
+end_readln_no_consume:
+    if (!last_io_error && ferror(input_stream)) {
+        last_io_error = 1;
+    }
+    if (last_io_error == 0 && feof(input_stream) && strlen(line_buffer) == 0) {
+        // This was a clean EOF with no partial line read
+    }
 
     return makeVoid();
 }
@@ -1274,21 +1288,20 @@ static const size_t num_builtins = sizeof(builtin_dispatch_table) / sizeof(built
 void assignValueToLValue(AST *lvalueNode, Value newValue) {
     if (!lvalueNode) {
         fprintf(stderr, "Runtime error: Cannot assign to NULL lvalue node.\n");
+        freeValue(&newValue);
         EXIT_FAILURE_HANDLER();
     }
 
     Value* target_ptr = resolveLValueToPtr(lvalueNode);
     if (!target_ptr) {
         fprintf(stderr, "Runtime error: LValue could not be resolved for assignment.\n");
-        freeValue(&newValue); // Free the value that won't be assigned
+        freeValue(&newValue);
         EXIT_FAILURE_HANDLER();
     }
 
-    // --- NEW LOGIC: Handle fixed-length string assignment ---
     if (target_ptr->type == TYPE_STRING && target_ptr->max_length > 0) {
-        // This is a fixed-length string.
         const char* source_str = "";
-        char char_buf[2]; // for assigning a char to a string
+        char char_buf[2];
 
         if (newValue.type == TYPE_STRING) {
             source_str = newValue.s_val ? newValue.s_val : "";
@@ -1302,29 +1315,17 @@ void assignValueToLValue(AST *lvalueNode, Value newValue) {
              EXIT_FAILURE_HANDLER();
         }
 
-        // Copy up to max_length, then pad with spaces.
-        size_t source_len = strlen(source_str);
-        size_t copy_len = (source_len > (size_t)target_ptr->max_length) ? (size_t)target_ptr->max_length : source_len;
-        
-        // Copy the part of the string that fits.
-        strncpy(target_ptr->s_val, source_str, copy_len);
+        strncpy(target_ptr->s_val, source_str, target_ptr->max_length);
+        target_ptr->s_val[target_ptr->max_length] = '\0'; // Ensure null-termination.
 
-        // Null-terminate at the end of the copied content.
-        if (copy_len < (size_t)target_ptr->max_length) {
-             target_ptr->s_val[copy_len] = '\0';
-        } else {
-             target_ptr->s_val[target_ptr->max_length] = '\0';
-        }
-
-        freeValue(&newValue); // Free the incoming value
+        freeValue(&newValue); // Free the incoming value's contents
         return; // Assignment is done
     }
-    // --- END NEW LOGIC ---
 
     // For all other types, use the original logic.
-    freeValue(target_ptr); // Free the old value at the target location.
-    *target_ptr = makeCopyOfValue(&newValue); // Assign a deep copy of the new value.
-    freeValue(&newValue); // Free the (now copied) incoming value.
+    freeValue(target_ptr);
+    *target_ptr = makeCopyOfValue(&newValue);
+    // No need to free newValue, its contents were moved or copied
 }
 
 // Attempts to get the current cursor position using ANSI DSR query.
