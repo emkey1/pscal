@@ -148,6 +148,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case OP_GET_CHAR_ADDRESS:
         case OP_WRITE:
         case OP_WRITE_LN:
+        case OP_INIT_LOCAL_FILE:
             return 2; // 1-byte opcode + 1-byte operand
         case OP_INIT_LOCAL_ARRAY: {
             int current_pos = offset + 1; // after opcode
@@ -379,6 +380,11 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             uint8_t dim_count = chunk->code[offset + 2];
             printf("%-16s Slot:%d Dims:%d\n", "OP_INIT_LOCAL_ARRAY", slot, dim_count);
             return offset + 5 + dim_count * 2;
+        }
+        case OP_INIT_LOCAL_FILE: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_INIT_LOCAL_FILE", slot);
+            return offset + 2;
         }
         case OP_GET_LOCAL_ADDRESS: {
             uint8_t slot = chunk->code[offset + 1];

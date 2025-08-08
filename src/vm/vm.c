@@ -1595,6 +1595,14 @@ comparison_error_label:
                 *target_slot = array_val;
                 break;
             }
+            case OP_INIT_LOCAL_FILE: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = makeValueForType(TYPE_FILE, NULL, NULL);
+                break;
+            }
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);

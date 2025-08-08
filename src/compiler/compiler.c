@@ -798,6 +798,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                         writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                    } else if (node->var_type == TYPE_FILE) {
+                        writeBytecodeChunk(chunk, OP_INIT_LOCAL_FILE, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     }
                 }
             }
