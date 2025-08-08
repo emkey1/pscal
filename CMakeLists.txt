@@ -24,6 +24,12 @@ add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
+# Optionally enable SDL-based features
+option(SDL "Enable SDL-based graphics and audio" OFF)
+if(SDL)
+    add_compile_definitions(SDL)
+endif()
+
 # ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
 if(APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
     execute_process(
@@ -50,33 +56,35 @@ include_directories(
 )
 
 # ---- Dependencies ----
-find_package(PkgConfig REQUIRED)
+if(SDL)
+    find_package(PkgConfig REQUIRED)
 
-# --- SDL2 Core ---
-find_package(SDL2 REQUIRED)
-message(STATUS "SDL2 Core Include Dirs: ${SDL2_INCLUDE_DIRS}")
-message(STATUS "SDL2 Core Libraries Variable: ${SDL2_LIBRARIES}") # e.g., /path/to/libSDL2.dylib or SDL2::SDL2
+    # --- SDL2 Core ---
+    find_package(SDL2 REQUIRED)
+    message(STATUS "SDL2 Core Include Dirs: ${SDL2_INCLUDE_DIRS}")
+    message(STATUS "SDL2 Core Libraries Variable: ${SDL2_LIBRARIES}") # e.g., /path/to/libSDL2.dylib or SDL2::SDL2
 
-# --- SDL2_image ---
-pkg_check_modules(PC_SDL2_IMAGE REQUIRED SDL2_image)
-message(STATUS "SDL2_image (pkg-config) Include Dirs: ${PC_SDL2_IMAGE_INCLUDE_DIRS}")
-message(STATUS "SDL2_image (pkg-config) Libs: ${PC_SDL2_IMAGE_LIBRARIES}")
-message(STATUS "SDL2_image (pkg-config) Lib Dirs: ${PC_SDL2_IMAGE_LIBRARY_DIRS}")
-message(STATUS "SDL2_image (pkg-config) Other LDFLAGS: ${PC_SDL2_IMAGE_LDFLAGS_OTHER}")
+    # --- SDL2_image ---
+    pkg_check_modules(PC_SDL2_IMAGE REQUIRED SDL2_image)
+    message(STATUS "SDL2_image (pkg-config) Include Dirs: ${PC_SDL2_IMAGE_INCLUDE_DIRS}")
+    message(STATUS "SDL2_image (pkg-config) Libs: ${PC_SDL2_IMAGE_LIBRARIES}")
+    message(STATUS "SDL2_image (pkg-config) Lib Dirs: ${PC_SDL2_IMAGE_LIBRARY_DIRS}")
+    message(STATUS "SDL2_image (pkg-config) Other LDFLAGS: ${PC_SDL2_IMAGE_LDFLAGS_OTHER}")
 
-# --- SDL2_mixer ---
-pkg_check_modules(PC_SDL2_MIXER REQUIRED SDL2_mixer)
-message(STATUS "SDL2_mixer (pkg-config) Include Dirs: ${PC_SDL2_MIXER_INCLUDE_DIRS}")
-message(STATUS "SDL2_mixer (pkg-config) Libs: ${PC_SDL2_MIXER_LIBRARIES}")
-message(STATUS "SDL2_mixer (pkg-config) Lib Dirs: ${PC_SDL2_MIXER_LIBRARY_DIRS}")
-message(STATUS "SDL2_mixer (pkg-config) Other LDFLAGS: ${PC_SDL2_MIXER_LDFLAGS_OTHER}")
+    # --- SDL2_mixer ---
+    pkg_check_modules(PC_SDL2_MIXER REQUIRED SDL2_mixer)
+    message(STATUS "SDL2_mixer (pkg-config) Include Dirs: ${PC_SDL2_MIXER_INCLUDE_DIRS}")
+    message(STATUS "SDL2_mixer (pkg-config) Libs: ${PC_SDL2_MIXER_LIBRARIES}")
+    message(STATUS "SDL2_mixer (pkg-config) Lib Dirs: ${PC_SDL2_MIXER_LIBRARY_DIRS}")
+    message(STATUS "SDL2_mixer (pkg-config) Other LDFLAGS: ${PC_SDL2_MIXER_LDFLAGS_OTHER}")
 
-# --- SDL2_ttf ---
-pkg_check_modules(PC_SDL2_TTF REQUIRED SDL2_ttf)
-message(STATUS "SDL2_ttf (pkg-config) Include Dirs: ${PC_SDL2_TTF_INCLUDE_DIRS}")
-message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
-message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
-message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
+    # --- SDL2_ttf ---
+    pkg_check_modules(PC_SDL2_TTF REQUIRED SDL2_ttf)
+    message(STATUS "SDL2_ttf (pkg-config) Include Dirs: ${PC_SDL2_TTF_INCLUDE_DIRS}")
+    message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
+    message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
+    message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
+endif()
 
 # --- CURL (two-path strategy) ---
 # Option A (default): use system SDK curl via FindCURL (imported target CURL::libcurl)
@@ -130,45 +138,49 @@ set(PSCAL_SOURCES
 # ---- Executable Targets Function ----
 function(add_pscal_executable target_name)
     add_executable(${target_name} ${PSCAL_SOURCES})
-
-    target_include_directories(${target_name} PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
-        # Do NOT force-add CURL_INCLUDE_DIRS if we have the imported target.
-        # Its usage requirements will supply includes automatically.
-    )
+    
+    if(SDL)
+        target_include_directories(${target_name} PRIVATE
+            ${SDL2_INCLUDE_DIRS}
+            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL2_MIXER_INCLUDE_DIRS}
+            ${PC_SDL2_TTF_INCLUDE_DIRS}
+        )
+    endif()
     if(NOT TARGET CURL::libcurl AND CURL_INCLUDE_DIRS)
         target_include_directories(${target_name} PRIVATE ${CURL_INCLUDE_DIRS})
     endif()
 
-    # Add library search paths from pkg-config
-    target_link_directories(${target_name} PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
-    )
+    if(SDL)
+        # Add library search paths from pkg-config
+        target_link_directories(${target_name} PRIVATE
+            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL2_MIXER_LIBRARY_DIRS}
+            ${PC_SDL2_TTF_LIBRARY_DIRS}
+        )
+    endif()
 
     # Construct the list of libraries and flags to link
     set(TARGET_LINK_LIBS "")
 
-    # Core SDL2
-    if(TARGET SDL2::SDL2)
-        list(APPEND TARGET_LINK_LIBS SDL2::SDL2)
-    else()
-        list(APPEND TARGET_LINK_LIBS ${SDL2_LIBRARIES})
+    if(SDL)
+        # Core SDL2
+        if(TARGET SDL2::SDL2)
+            list(APPEND TARGET_LINK_LIBS SDL2::SDL2)
+        else()
+            list(APPEND TARGET_LINK_LIBS ${SDL2_LIBRARIES})
+        endif()
+
+        # SDL Extensions - using the library names from pkg-config
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LIBRARIES})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LIBRARIES})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LIBRARIES})
+
+        # Add other linker flags from pkg-config (these might include rpath, etc.)
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LDFLAGS_OTHER})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LDFLAGS_OTHER})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LDFLAGS_OTHER})
     endif()
-
-    # SDL Extensions - using the library names from pkg-config
-    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LIBRARIES})
-    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LIBRARIES})
-    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LIBRARIES})
-
-    # Add other linker flags from pkg-config (these might include rpath, etc.)
-    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LDFLAGS_OTHER})
-    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LDFLAGS_OTHER})
-    list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LDFLAGS_OTHER})
 
     # CURL
     if(TARGET CURL::libcurl)
@@ -191,6 +203,10 @@ function(add_pscal_executable target_name)
 
     message(STATUS "Linking ${target_name} with: ${TARGET_LINK_LIBS}")
     target_link_libraries(${target_name} PRIVATE ${TARGET_LINK_LIBS})
+
+    if(SDL)
+        target_compile_definitions(${target_name} PRIVATE SDL)
+    endif()
 
     # Specific compile definitions and options
     if(${target_name} STREQUAL "pscal")
