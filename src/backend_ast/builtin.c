@@ -680,17 +680,32 @@ Value vm_builtin_low(VM* vm, int arg_count, Value* args) {
 
     Value arg = args[0];
     const char* typeName = NULL;
+    AST* typeDef = NULL;
     VarType t = TYPE_UNKNOWN;
 
+    // Extract type name or type information from the argument
     if (arg.type == TYPE_STRING) {
         typeName = AS_STRING(arg);
+    } else if (arg.type == TYPE_ENUM) {
+        typeName = arg.enum_val.enum_name;
+        t = TYPE_ENUM;
+    } else {
+        t = arg.type;
+    }
+
+    // Map the provided name to a VarType if we haven't yet
+    if (t == TYPE_UNKNOWN && typeName) {
         if (strcasecmp(typeName, "integer") == 0)      t = TYPE_INTEGER;
         else if (strcasecmp(typeName, "char") == 0)    t = TYPE_CHAR;
         else if (strcasecmp(typeName, "boolean") == 0) t = TYPE_BOOLEAN;
         else if (strcasecmp(typeName, "byte") == 0)    t = TYPE_BYTE;
         else if (strcasecmp(typeName, "word") == 0)    t = TYPE_WORD;
-    } else {
-        t = arg.type;
+        else {
+            typeDef = lookupType(typeName);
+            if (typeDef) t = typeDef->var_type;
+        }
+    } else if (t == TYPE_ENUM && typeName) {
+        typeDef = lookupType(typeName);
     }
 
     switch (t) {
@@ -700,10 +715,8 @@ Value vm_builtin_low(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE:    return makeInt(0);
         case TYPE_WORD:    return makeInt(0);
         case TYPE_ENUM: {
-            const char* enumName = typeName ? typeName : arg.enum_val.enum_name;
-            if (enumName) {
-                AST* typeDef = lookupType(enumName);
-                if (typeDef && typeDef->var_type == TYPE_ENUM) return makeEnum(enumName, 0);
+            if (typeDef && typeDef->var_type == TYPE_ENUM && typeName) {
+                return makeEnum(typeName, 0);
             }
             break;
         }
@@ -726,17 +739,30 @@ Value vm_builtin_high(VM* vm, int arg_count, Value* args) {
 
     Value arg = args[0];
     const char* typeName = NULL;
+    AST* typeDef = NULL;
     VarType t = TYPE_UNKNOWN;
 
     if (arg.type == TYPE_STRING) {
         typeName = AS_STRING(arg);
+    } else if (arg.type == TYPE_ENUM) {
+        typeName = arg.enum_val.enum_name;
+        t = TYPE_ENUM;
+    } else {
+        t = arg.type;
+    }
+
+    if (t == TYPE_UNKNOWN && typeName) {
         if (strcasecmp(typeName, "integer") == 0)      t = TYPE_INTEGER;
         else if (strcasecmp(typeName, "char") == 0)    t = TYPE_CHAR;
         else if (strcasecmp(typeName, "boolean") == 0) t = TYPE_BOOLEAN;
         else if (strcasecmp(typeName, "byte") == 0)    t = TYPE_BYTE;
         else if (strcasecmp(typeName, "word") == 0)    t = TYPE_WORD;
-    } else {
-        t = arg.type;
+        else {
+            typeDef = lookupType(typeName);
+            if (typeDef) t = typeDef->var_type;
+        }
+    } else if (t == TYPE_ENUM && typeName) {
+        typeDef = lookupType(typeName);
     }
 
     switch (t) {
@@ -746,11 +772,8 @@ Value vm_builtin_high(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE:    return makeInt(255);
         case TYPE_WORD:    return makeInt(65535);
         case TYPE_ENUM: {
-            const char* enumName = typeName ? typeName : arg.enum_val.enum_name;
-            if (enumName) {
-                AST* typeDef = lookupType(enumName);
-                if (typeDef && typeDef->var_type == TYPE_ENUM && typeDef->type == AST_ENUM_TYPE)
-                    return makeEnum(enumName, typeDef->child_count - 1);
+            if (typeDef && typeDef->var_type == TYPE_ENUM && typeName) {
+                return makeEnum(typeName, typeDef->child_count - 1);
             }
             break;
         }
@@ -3524,150 +3547,36 @@ Value executeBuiltinLow(AST *node) {
     }
 
     AST *argNode = node->children[0];
-    if (argNode->type != AST_VARIABLE || !argNode->token) { // Check token too
-         fprintf(stderr, "Runtime error: Low argument must be a valid type identifier. Got AST type %s\n", astTypeToString(argNode->type));
-         EXIT_FAILURE_HANDLER();
-    }
-
-    const char* typeName = argNode->token->value; // Get the type name string
-
-    if (strcasecmp(typeName, "integer") == 0 || strcasecmp(typeName, "longint") == 0 || strcasecmp(typeName, "cardinal") == 0) {
-        // Assuming 32-bit signed integer minimum for simplicity, adjust if needed
-        return makeInt(-2147483648); // Or MIN_INT if defined, or 0 for Cardinal? TP used 0 for cardinal Low. Let's use 0 for Cardinal.
-        // For simplicity let's return 0 for now as MIN_INT isn't defined
-        // return makeInt(0);
-    } else if (strcasecmp(typeName, "char") == 0) {
-        return makeChar((char)0); // Low(Char) is ASCII 0
-    } else if (strcasecmp(typeName, "boolean") == 0) {
-        return makeBoolean(0); // Low(Boolean) is False (ordinal 0)
-    } else if (strcasecmp(typeName, "byte") == 0) {
-        return makeInt(0); // Low(Byte) is 0
-    } else if (strcasecmp(typeName, "word") == 0) {
-        return makeInt(0); // Low(Word) is 0
-    }
-
-    // --- If not a built-in, assume user-defined type and lookup ---
-    AST* typeDef = lookupType(typeName);
-
-    if (!typeDef) {
-        // Check again if it *looks* like a basic type that wasn't handled above (shouldn't happen now)
-        fprintf(stderr, "Runtime error: Type '%s' not found or not an ordinal type in Low().\n", typeName);
+    if (argNode->type != AST_VARIABLE || !argNode->token) {
+        fprintf(stderr, "Runtime error: Low argument must be a valid type identifier. Got AST type %s\n", astTypeToString(argNode->type));
         EXIT_FAILURE_HANDLER();
     }
 
-    // Resolve type reference if necessary
-    if (typeDef->type == AST_TYPE_REFERENCE) {
-        typeDef = typeDef->right; // Assuming right points to the actual definition
-         if (!typeDef) {
-              fprintf(stderr, "Runtime error: Could not resolve type reference '%s' in Low().\n", typeName);
-              EXIT_FAILURE_HANDLER();
-         }
-    }
-
-    // We have the type definition AST node (typeDef)
-    VarType actualType = typeDef->var_type; // Get the VarType from the definition node
-
-    switch (actualType) {
-        // Remove cases handled above (Integer, Char, Boolean, Byte, Word)
-        case TYPE_ENUM:
-        {
-            if (typeDef->type != AST_ENUM_TYPE) {
-                 fprintf(stderr, "Runtime error: Type definition for '%s' is not an Enum type for Low().\n", typeName);
-                 EXIT_FAILURE_HANDLER();
-            }
-            // Lowest ordinal is 0
-            const char* enumTypeName = typeDef->token ? typeDef->token->value : typeName; // Use original name if possible
-            Value lowEnum = makeEnum(enumTypeName, 0);
-            // Free the value returned by makeEnum before returning a copy or reassigning
-            Value result = makeCopyOfValue(&lowEnum);
-            freeValue(&lowEnum); // Free the temporary enum created by makeEnum
-            return result; // Return the copy
-        }
-        // Keep default for unsupported types
-        default:
-            fprintf(stderr, "Runtime error: Low() not supported for user-defined type %s ('%s').\n", varTypeToString(actualType), typeName);
-            EXIT_FAILURE_HANDLER();
-    }
-     return makeVoid(); // Should not be reached
+    Value arg = makeString(argNode->token->value);
+    Value result = vm_builtin_low(NULL, 1, &arg);
+    freeValue(&arg);
+    return result;
 }
 
 // --- High(X) ---
 // Argument X: An expression evaluating to an ordinal type, OR more simply,
 //             an AST_VARIABLE node whose type is ordinal. We use the latter.
 Value executeBuiltinHigh(AST *node) {
-     if (node->child_count != 1) {
+    if (node->child_count != 1) {
         fprintf(stderr, "Runtime error: High expects 1 argument (a type identifier).\n");
         EXIT_FAILURE_HANDLER();
     }
 
     AST *argNode = node->children[0];
-     if (argNode->type != AST_VARIABLE || !argNode->token) { // Check token too
-         fprintf(stderr, "Runtime error: High argument must be a valid type identifier. Got AST type %s\n", astTypeToString(argNode->type));
-         EXIT_FAILURE_HANDLER();
-    }
-
-    const char* typeName = argNode->token->value;
-
-    if (strcasecmp(typeName, "integer") == 0 || strcasecmp(typeName, "longint") == 0) {
-        // Assuming 32-bit signed integer maximum for simplicity, adjust if needed
-        return makeInt(2147483647); // Or MAX_INT if defined
-    } else if (strcasecmp(typeName, "cardinal") == 0) {
-        // Assuming 32-bit unsigned integer maximum for simplicity
-        return makeInt(4294967295); // Or MAX_CARDINAL if defined
-    } else if (strcasecmp(typeName, "char") == 0) {
-        return makeChar((char)255); // High(Char) is ASCII 255 (assuming 8-bit char)
-    } else if (strcasecmp(typeName, "boolean") == 0) {
-        return makeBoolean(1); // High(Boolean) is True (ordinal 1)
-    } else if (strcasecmp(typeName, "byte") == 0) {
-        return makeInt(255); // High(Byte) is 255
-    } else if (strcasecmp(typeName, "word") == 0) {
-        return makeInt(65535); // High(Word) is 65535
-    }
-
-    // --- If not a built-in, assume user-defined type and lookup ---
-    AST* typeDef = lookupType(typeName);
-
-    if (!typeDef) {
-        fprintf(stderr, "Runtime error: Type '%s' not found or not an ordinal type in High().\n", typeName);
+    if (argNode->type != AST_VARIABLE || !argNode->token) {
+        fprintf(stderr, "Runtime error: High argument must be a valid type identifier. Got AST type %s\n", astTypeToString(argNode->type));
         EXIT_FAILURE_HANDLER();
     }
 
-    // Resolve type reference if necessary
-    if (typeDef->type == AST_TYPE_REFERENCE) {
-        typeDef = typeDef->right; // Assuming right points to the actual definition
-         if (!typeDef) {
-              fprintf(stderr, "Runtime error: Could not resolve type reference '%s' in High().\n", typeName);
-              EXIT_FAILURE_HANDLER();
-         }
-    }
-
-    VarType actualType = typeDef->var_type;
-
-    switch (actualType) {
-        // Remove cases handled above (Integer, Char, Boolean, Byte, Word)
-        case TYPE_ENUM:
-        {
-            if (typeDef->type != AST_ENUM_TYPE) {
-                fprintf(stderr, "Runtime error: Type definition for '%s' is not an Enum type for High().\n", typeName);
-                EXIT_FAILURE_HANDLER();
-            }
-            // Highest ordinal is number of members - 1
-            int highOrdinal = typeDef->child_count - 1;
-            if (highOrdinal < 0) highOrdinal = 0; // Handle empty enum?
-
-            const char* enumTypeName = typeDef->token ? typeDef->token->value : typeName;
-            Value highEnum = makeEnum(enumTypeName, highOrdinal);
-            // Free the value returned by makeEnum before returning a copy or reassigning
-            Value result = makeCopyOfValue(&highEnum);
-            freeValue(&highEnum); // Free the temporary enum created by makeEnum
-            return result; // Return the copy
-        }
-        // Keep default for unsupported types
-        default:
-            fprintf(stderr, "Runtime error: High() not supported for user-defined type %s ('%s').\n", varTypeToString(actualType), typeName);
-            EXIT_FAILURE_HANDLER();
-    }
-     return makeVoid(); // Should not be reached
+    Value arg = makeString(argNode->token->value);
+    Value result = vm_builtin_high(NULL, 1, &arg);
+    freeValue(&arg);
+    return result;
 }
 // --- Succ(X) ---
 // Argument X: An expression evaluating to an ordinal type.
