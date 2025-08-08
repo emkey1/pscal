@@ -16,6 +16,7 @@
 typedef enum {
     OP_RETURN,        // Return from current function/script (implicit at end of main block)
     OP_CONSTANT,      // Push a constant from the constant pool onto the stack
+    OP_CONSTANT16,   // For cases where the number exceeds a byte
     OP_ADD,           // Pop two values, add, push result
     OP_SUBTRACT,      // Pop two values, subtract, push result
     OP_MULTIPLY,      // Pop two values, multiply, push result
@@ -40,7 +41,12 @@ typedef enum {
     OP_SWAP,          // OPCODE to swap the top two stack items.
     OP_DUP,           // Duplicate the top value on the stack
 
-    // OP_DEFINE_GLOBAL: Operand1: name_const_idx, Operand2: type_name_const_idx (or 0), Operand3: var_type_enum
+    // OP_DEFINE_GLOBAL encoding used by VM/disassembler:
+    //   [name_const_idx][var_type_enum][payload...]
+    //   If var_type_enum == TYPE_ARRAY:
+    //       [dim_count] { [lower_idx][upper_idx] }*dim_count [elem_var_type][elem_type_name_idx]
+    //   Else:
+    //       [type_name_const_idx]   // may be 0 when not applicable
     OP_DEFINE_GLOBAL,
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)

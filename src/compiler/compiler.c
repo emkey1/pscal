@@ -80,6 +80,25 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     return index;
 }
 
+static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
+    if (constant_index < 0) {
+        fprintf(stderr, "L%d: Compiler error: negative constant index.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    if (constant_index <= 0xFF) {
+        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+        writeBytecodeChunk(chunk, (uint8_t)constant_index, line);
+    } else if (constant_index <= 0xFFFF) {
+        writeBytecodeChunk(chunk, OP_CONSTANT16, line);
+        emitShort(chunk, (uint16_t)constant_index, line);
+    } else {
+        fprintf(stderr, "L%d: Compiler error: too many constants (%d). Limit is 65535.\n",
+                line, constant_index);
+        compiler_had_error = true;
+    }
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -489,6 +508,39 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
     }
 }
 
+static void preloadSmallIndexStrings(BytecodeChunk* chunk) {
+    // 1) Builtins you may emit via OP_CALL_BUILTIN
+    const char* builtins[] = {
+        "abs","length","copy","pos","ord","chr","upcase","low","high","trunc","inc","dec",
+        "assign","reset","rewrite","close","new","dispose",
+        "mstreamloadfromfile","mstreamsavetofile","mstreamfree","read","readln","write","writeln"
+    };
+    for (size_t i = 0; i < sizeof(builtins)/sizeof(builtins[0]); i++) {
+        (void)addStringConstant(chunk, builtins[i]);
+    }
+
+    // 2) Type names you embed in OP_DEFINE_GLOBAL (non-arrays and array element types)
+    const char* type_names[] = {
+        "integer","real","string","char","boolean","byte","word","file","text"
+        // add any user types you stringify into bytecode (records/enums aliases etc.) if applicable
+    };
+    for (size_t i = 0; i < sizeof(type_names)/sizeof(type_names[0]); i++) {
+        (void)addStringConstant(chunk, type_names[i]);
+    }
+
+    // 3) (Nice-to-have) Preload procedure/function names so OP_CALL's 1-byte name index stays small.
+    // If you have access to the global procedure table here, intern their names:
+    if (procedure_table) {
+        for (int b = 0; b < HASHTABLE_SIZE; b++) {
+            for (Symbol* s = procedure_table->buckets[b]; s; s = s->next) {
+                if (s->name && s->name[0]) {
+                    (void)addStringConstant(chunk, s->name);  // use the same casing your OP_CALL writes
+                }
+            }
+        }
+    }
+}
+
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
     // Do NOT re-initialize the chunk here, it's already populated with unit code.
@@ -496,6 +548,8 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     compilerGlobalCount = 0;
     compiler_had_error = false;
     current_function_compiler = NULL;
+    
+    preloadSmallIndexStrings(outputChunk);
 
     if (rootNode->type == AST_PROGRAM) {
         // The `USES` clause has already been handled during parsing.
@@ -772,9 +826,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
         writeBytecodeChunk(chunk, (uint8_t)return_value_slot, line);
     } else {
-        int nil_const_idx = addNilConstant(chunk);
-        writeBytecodeChunk(chunk, OP_CONSTANT, line);
-        writeBytecodeChunk(chunk, (uint8_t)nil_const_idx, line);
+        //int nil_const_idx = addNilConstant(chunk);
+        //writeBytecodeChunk(chunk, OP_CONSTANT, line);
+        //writeBytecodeChunk(chunk, (uint8_t)nil_const_idx, line);
     }
     writeBytecodeChunk(chunk, OP_RETURN, line);
     
@@ -867,9 +921,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         // This is a more direct and correct translation.
                         
                         // Check lower bound
-                        writeBytecodeChunk(chunk, OP_DUP, line);                   // Stack: [case, case, case]
-                        compileRValue(label->left, chunk, getLine(label));      // Stack: [case, case, case, lower]
-                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, case, lower, case]
+                        writeBytecodeChunk(chunk, OP_DUP, line);                   // Stack: [case, case]
+                        compileRValue(label->left, chunk, getLine(label));      // Stack: [case, case, lower]
+                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, lower, case]
                         writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);          // Stack: [case, case, bool1]
 
                         // Check upper bound
@@ -942,8 +996,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileRValue(node->right, chunk, getLine(node->right));
             } else {
                 int falseConstIdx = addBooleanConstant(chunk, false);
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)falseConstIdx, line);
+                emitConstant(chunk, falseConstIdx, line);
             }
 
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
@@ -996,7 +1049,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             if (current_function_compiler && lvalue->type == AST_VARIABLE &&
                            (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                            strcasecmp(lvalue->token->value, "result") == 0) ) { 
+                            strcasecmp(lvalue->token->value, "result") == 0) ) {
                 
                 int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 if (return_slot != -1) {
@@ -1077,8 +1130,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
             }
             int one_const_idx = addIntConstant(chunk, 1);
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)one_const_idx, line);
+            emitConstant(chunk, one_const_idx, line);
             writeBytecodeChunk(chunk, is_downto ? OP_SUBTRACT : OP_ADD, line);
 
             if (var_slot != -1) {
@@ -1328,8 +1380,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             int constIndex = addConstantToChunk(chunk, &set_const_val);
             freeValue(&set_const_val);
 
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+            emitConstant(chunk, constIndex, line);
             break;
         }
         case AST_NUMBER: {
@@ -1342,9 +1393,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             } else {
                 constIndex = addIntConstant(chunk, atoll(node_token->value));
             }
-
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+            emitConstant(chunk, constIndex, line);
             break;
         }
         case AST_FORMATTED_EXPR: {
@@ -1370,21 +1419,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (strlen(node_token->value) == 1) {
                 Value val = makeChar(node_token->value[0]);
                 int constIndex = addConstantToChunk(chunk, &val);
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+                emitConstant(chunk, constIndex, line);
                 // The temporary char value `val` does not need `freeValue`
             } else {
                 // For strings longer than 1 character, use the existing logic
                 int constIndex = addStringConstant(chunk, node_token->value);
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+                emitConstant(chunk, constIndex, line);
             }
             break;
         }
         case AST_NIL: {
             int constIndex = addNilConstant(chunk);
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+            emitConstant(chunk, constIndex, line);
             break;
         }
         case AST_DEREFERENCE: {
@@ -1434,9 +1480,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (const_val_ptr) {
                     // <<<< FIX for compile-time constant >>>>
                     // Pass the pointer to the constant value directly.
-                    int constIndex = addConstantToChunk(chunk, const_val_ptr);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+                    emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
                 } else {
                     // <<<< FIX for global variable >>>>
                     // It's a global variable, so add its name to the constants
@@ -1488,12 +1532,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     int jump_over_false_case = chunk->count;
                     writeBytecodeChunk(chunk, OP_JUMP, line);
                     emitShort(chunk, 0xFFFF, line);
-
                     // If A was false, jump here and push 'false' as the result.
                     patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
                     int false_const_idx = addBooleanConstant(chunk, false);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)false_const_idx, line); // stack: [false]
+                    emitConstant(chunk, false_const_idx, line); // stack: [false]
 
                     // End of the expression for both paths.
                     patchShort(chunk, jump_over_false_case + 1, chunk->count - (jump_over_false_case + 3));
@@ -1514,8 +1556,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                 // If we get here, A was true. Stack is empty. The result must be 'true'.
                 int true_const_idx = addBooleanConstant(chunk, true);
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)true_const_idx, line);
+                emitConstant(chunk, true_const_idx, line);
                 int jump_to_end = chunk->count;
                 writeBytecodeChunk(chunk, OP_JUMP, line);
                 emitShort(chunk, 0xFFFF, line);
@@ -1583,10 +1624,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             // Use the new helper to add the boolean constant and get its index.
             // The node->i_val for booleans is 0 for false and 1 for true.
-            int constIndex = addBooleanConstant(chunk, (node->i_val != 0));
-            
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)constIndex, line);
+            emitConstant(chunk, addBooleanConstant(chunk, (node->i_val != 0)), line);
             break;
         }
         case AST_PROCEDURE_CALL: {
@@ -1608,8 +1646,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             } else {
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
                 compiler_had_error = true;
-                writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                emitConstant(chunk, addNilConstant(chunk), line);
                 break;
             }
             
@@ -1640,8 +1677,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
                     int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)typeNameIndex, line);
+                    emitConstant(chunk, typeNameIndex, line);
                 } else {
                     fprintf(stderr, "L%d: Compiler error: Argument to '%s' must be a single type identifier.\n", line, functionName);
                     compiler_had_error = true;
@@ -1673,8 +1709,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
                     compiler_had_error = true;
                     for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                    emitConstant(chunk, addNilConstant(chunk), line);
                 } else if (type == BUILTIN_TYPE_FUNCTION) {
                     char normalized_name[MAX_SYMBOL_LENGTH];
                     strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
@@ -1688,8 +1723,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                      fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context.\n", line, functionName);
                     compiler_had_error = true;
                     for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                    emitConstant(chunk, addNilConstant(chunk), line);
                 }
             } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
@@ -1704,14 +1738,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                         compiler_had_error = true;
                         for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                        writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                        emitConstant(chunk, addNilConstant(chunk), line);
                     } else if (func_symbol->arity != node->child_count) {
                         fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n", line, original_display_name, func_symbol->arity, node->child_count);
                         compiler_had_error = true;
                         for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                        writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                        writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                        emitConstant(chunk, addNilConstant(chunk), line);
                     } else {
                         int nameIndex = addStringConstant(chunk, functionName);
                         writeBytecodeChunk(chunk, OP_CALL, line);
@@ -1728,17 +1760,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                      fprintf(stderr, "L%d: Compiler Error: Undefined function '%s'.\n", line, original_display_name);
                      compiler_had_error = true;
                      for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                     writeBytecodeChunk(chunk, OP_CONSTANT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)addNilConstant(chunk), line);
+                     emitConstant(chunk, addNilConstant(chunk), line);
                 }
             }
             break;
         }
         default:
             fprintf(stderr, "L%d: Compiler warning: Unhandled AST node type %s in compileRValue.\n", line, astTypeToString(node->type));
-            int dummyIdx = addIntConstant(chunk, 0); // Push dummy 0 for expression context
-            writeBytecodeChunk(chunk, OP_CONSTANT, line);
-            writeBytecodeChunk(chunk, (uint8_t)dummyIdx, line);
+            emitConstant(chunk, addIntConstant(chunk, 0), line); // Push dummy 0
             break;
     }
 }
@@ -1752,11 +1781,6 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
         return;
     }
 
-    #ifdef DEBUG
-    fprintf(stderr, "[Compiler] Compiling IMPLEMENTATION section for unit '%s'.\n",
-            unit_ast->token ? unit_ast->token->value : "?");
-    fflush(stderr);
-    #endif
 
     // Set the compilation context for qualified lookups
     current_compilation_unit_name = unit_ast->token ? unit_ast->token->value : NULL;
@@ -1773,9 +1797,6 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
 }
 
 void finalizeBytecode(BytecodeChunk* chunk) {
-    #ifdef DEBUG
-    fprintf(stderr, "[Compiler DEBUG] Starting final bytecode back-patching pass...\n");
-    #endif
 
     if (!procedure_table || !chunk || !chunk->code) return;
 
@@ -1819,10 +1840,6 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 }
 
                 if (symbol_to_patch && symbol_to_patch->is_defined) {
-                    #ifdef DEBUG
-                    fprintf(stderr, "[Compiler DEBUG]   Patching call to '%s' at offset %d with final address %04X\n",
-                            proc_name, offset, symbol_to_patch->bytecode_address);
-                    #endif
                     // Patch the address in place. The patch offset is offset + 2.
                     patchShort(chunk, offset + 2, (uint16_t)symbol_to_patch->bytecode_address);
                 } else {

@@ -343,34 +343,29 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         Value result_val; \
         bool op_is_handled = false; \
         \
+        /* String/char concatenation for OP_ADD */ \
         if (current_instruction_code == OP_ADD) { \
             if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
                 (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
-                \
                 char a_buffer[2] = {0}; \
                 char b_buffer[2] = {0}; \
                 const char* s_a = NULL; \
                 const char* s_b = NULL; \
-                \
                 if (IS_STRING(a_val_popped)) { \
                     s_a = AS_STRING(a_val_popped) ? AS_STRING(a_val_popped) : ""; \
                 } else { \
                     a_buffer[0] = AS_CHAR(a_val_popped); \
                     s_a = a_buffer; \
                 } \
-                \
                 if (IS_STRING(b_val_popped)) { \
                     s_b = AS_STRING(b_val_popped) ? AS_STRING(b_val_popped) : ""; \
-                    \
                 } else { \
                     b_buffer[0] = AS_CHAR(b_val_popped); \
                     s_b = b_buffer; \
                 } \
-                \
                 size_t len_a = strlen(s_a); \
                 size_t len_b = strlen(s_b); \
                 size_t total_len = len_a + len_b; \
-                \
                 char* temp_concat_buffer = (char*)malloc(total_len + 1); \
                 if (!temp_concat_buffer) { \
                     runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
@@ -380,45 +375,41 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 memcpy(temp_concat_buffer, s_a, len_a); \
                 memcpy(temp_concat_buffer + len_a, s_b, len_b); \
                 temp_concat_buffer[total_len] = '\0'; \
-                \
                 result_val = makeString(temp_concat_buffer); \
                 free(temp_concat_buffer); \
-                \
                 op_is_handled = true; \
             } \
         } \
         \
+        /* Char +/- intlike */ \
         if (!op_is_handled) { \
-            /* Handle char/integer arithmetic for FOR loops and ordinal math */ \
             if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
-                if (a_val_popped.type == TYPE_CHAR && IS_INTEGER(b_val_popped)) { \
+                if (a_val_popped.type == TYPE_CHAR && IS_INTLIKE(b_val_popped)) { \
                     char result_char = (current_instruction_code == OP_ADD) ? \
-                                       (AS_CHAR(a_val_popped) + AS_INTEGER(b_val_popped)) : \
-                                       (AS_CHAR(a_val_popped) - AS_INTEGER(b_val_popped)); \
+                                       (AS_CHAR(a_val_popped) + (char)as_i64(b_val_popped)) : \
+                                       (AS_CHAR(a_val_popped) - (char)as_i64(b_val_popped)); \
                     result_val = makeChar(result_char); \
                     op_is_handled = true; \
-                } else if (IS_INTEGER(a_val_popped) && b_val_popped.type == TYPE_CHAR && current_instruction_code == OP_ADD) { \
-                    /* Handle integer + char as well */ \
-                    char result_char = AS_INTEGER(a_val_popped) + AS_CHAR(b_val_popped); \
+                } else if (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_CHAR && current_instruction_code == OP_ADD) { \
+                    char result_char = (char)(as_i64(a_val_popped) + AS_CHAR(b_val_popped)); \
                     result_val = makeChar(result_char); \
                     op_is_handled = true; \
                 } \
             } \
         } \
         \
+        /* Numeric arithmetic (INTEGER/BYTE/WORD/REAL) */ \
         if (!op_is_handled) { \
-            if ((IS_INTEGER(a_val_popped) || IS_REAL(a_val_popped)) && \
-                (IS_INTEGER(b_val_popped) || IS_REAL(b_val_popped))) { \
-                \
+            if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
                 if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
-                    double fa = IS_REAL(a_val_popped) ? AS_REAL(a_val_popped) : (double)AS_INTEGER(a_val_popped); \
-                    double fb = IS_REAL(b_val_popped) ? AS_REAL(b_val_popped) : (double)AS_INTEGER(b_val_popped); \
+                    double fa = as_f64(a_val_popped); \
+                    double fb = as_f64(b_val_popped); \
                     if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
                         runtimeError(vm, "Runtime Error: Division by zero."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
-                    switch(current_instruction_code) { \
+                    switch (current_instruction_code) { \
                         case OP_ADD:      result_val = makeReal(fa + fb); break; \
                         case OP_SUBTRACT: result_val = makeReal(fa - fb); break; \
                         case OP_MULTIPLY: result_val = makeReal(fa * fb); break; \
@@ -429,14 +420,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             return INTERPRET_RUNTIME_ERROR; \
                     } \
                 } else { \
-                    long long ia = AS_INTEGER(a_val_popped); \
-                    long long ib = AS_INTEGER(b_val_popped); \
+                    long long ia = as_i64(a_val_popped); \
+                    long long ib = as_i64(b_val_popped); \
                     if (current_instruction_code == OP_DIVIDE && ib == 0) { \
                         runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
-                    switch(current_instruction_code) { \
+                    switch (current_instruction_code) { \
                         case OP_ADD:      result_val = makeInt(ia + ib); break; \
                         case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
                         case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
@@ -452,7 +443,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         } \
         \
         if (!op_is_handled) { \
-            runtimeError(vm, "Runtime Error: Operands must be numbers for arithmetic operation '%s' (or strings/chars for '+'). Got %s and %s", op_char_for_error_msg, varTypeToString(a_val_popped.type), varTypeToString(b_val_popped.type)); \
+            runtimeError(vm, "Runtime Error: Operands must be numbers for arithmetic operation '%s' (or strings/chars for '+'). Got %s and %s", \
+                         op_char_for_error_msg, varTypeToString(a_val_popped.type), varTypeToString(b_val_popped.type)); \
             freeValue(&a_val_popped); \
             freeValue(&b_val_popped); \
             return INTERPRET_RUNTIME_ERROR; \
@@ -481,7 +473,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         instruction_val = READ_BYTE();
         switch (instruction_val) {
             case OP_RETURN: {
-                if (vm->frameCount == 0) { // Top-level script return
+                // Returning from the top-level script (no frame to unwind)
+                if (vm->frameCount == 0) {
+                    // If the script accidentally left a value on the stack, discard it.
                     if (vm->stackTop > vm->stack) {
                         Value final_return_val = pop(vm);
                         freeValue(&final_return_val);
@@ -489,49 +483,62 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_OK;
                 }
 
-                // 1. Pop the return value from the returning function's stack.
-                Value returnValue = pop(vm);
-                
-                // 2. CRITICAL FIX: Make a safe, deep copy of the return value *before*
-                //    freeing the stack frame. This prevents a use-after-free error.
-                Value safeReturnValue = makeCopyOfValue(&returnValue);
-                
-                // 3. Now that we have a safe copy, we can free the original popped value.
-                freeValue(&returnValue);
-
+                // Current frame we’re returning from
                 CallFrame* currentFrame = &vm->frames[vm->frameCount - 1];
 
-                // 4. Clear the remaining stack slots used by the function's local variables.
-                //    This is now safe because we have a separate copy of the return value.
+                // Does this callee have a return value?
+                bool has_result =
+                    (currentFrame->function_symbol != NULL) &&
+                    (currentFrame->function_symbol->type != TYPE_VOID);
+
+                // Only pop a return value if the callee actually returns one.
+                Value safeReturnValue = makeVoid();
+                if (has_result) {
+                    if (vm->stackTop <= currentFrame->slots) {
+                        runtimeError(vm, "Stack underflow on function return.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    Value returnValue = pop(vm);
+                    safeReturnValue = makeCopyOfValue(&returnValue);
+                    freeValue(&returnValue);
+                }
+
+                // Free locals still on the stack (whatever remains in this frame)
                 for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
                     freeValue(slot);
                 }
 
-                // 5. Restore the VM state from the frame.
+                // Restore caller state
                 vm->ip = currentFrame->return_address;
                 vm->stackTop = currentFrame->slots;
 
-                // 6. Pop the call frame.
+                // Pop frame
                 vm->frameCount--;
 
-                // 7. Push the safe return value back onto the caller's stack.
-                //    Procedures will have a NIL value, which is handled correctly here.
-                if (currentFrame->function_symbol && currentFrame->function_symbol->type != TYPE_VOID) {
-                    push(vm, safeReturnValue); // Push the actual function result.
+                // Deliver function result (procedures push nothing)
+                if (has_result) {
+                    push(vm, safeReturnValue);
                 } else {
-                    // This was a procedure. We don't push a value for the caller.
-                    // We must free the safe copy of the (likely NIL) value to prevent a memory leak.
                     freeValue(&safeReturnValue);
                 }
-
                 break;
             }
-
             case OP_CONSTANT: {
                 Value constant = READ_CONSTANT();
                 push(vm, makeCopyOfValue(&constant));
                 break;
             }
+                
+            case OP_CONSTANT16: {
+                uint16_t idx = READ_SHORT(vm);
+                if (idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Constant index %u out of bounds for OP_CONSTANT16.", idx);
+                   return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(&vm->chunk->constants[idx]));
+                break;
+            }
+
             case OP_GET_CHAR_ADDRESS: {
                 Value index_val = pop(vm);
                 Value* string_ptr_val = vm->stackTop - 1; // Peek at the string pointer
@@ -569,13 +576,32 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case OP_GET_GLOBAL_ADDRESS: {
-                Value varNameVal = READ_CONSTANT();
-                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { return INTERPRET_RUNTIME_ERROR; }
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                if (!sym || !sym->value) {
-                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", varNameVal.s_val);
+                uint8_t name_idx = READ_BYTE();
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL_ADDRESS.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for GET_GLOBAL_ADDRESS (idx=%u, type=%s).",
+                                 name_idx, varTypeToString(varNameVal.type));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Optional sanity log (keep while debugging)
+                // fprintf(stderr, "[VM_DEBUG] GET_GLOBAL_ADDRESS '%s'\n", varNameVal.s_val);
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    runtimeError(vm, "Runtime Error: Global '%s' has no Value slot.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
                 push(vm, makePointer(sym->value, NULL));
                 break;
             }
@@ -649,7 +675,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     } else {
                         result_val = makeBoolean(ba || bb);
                     }
-                } else if (IS_INTEGER(a_val) && IS_INTEGER(b_val)) {
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val))  {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (instruction_val == OP_AND) {
@@ -671,7 +697,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_INT_DIV: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTEGER(a_val) && IS_INTEGER(b_val)) {
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -693,7 +719,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_MOD: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTEGER(a_val) && IS_INTEGER(b_val)) {
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -716,7 +742,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_SHR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTEGER(a_val) && IS_INTEGER(b_val)) {
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib < 0) {
@@ -751,25 +777,31 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool comparison_succeeded = false;
 
                 // Numeric comparison (Integers and Reals)
-                if ((IS_INTEGER(a_val) || IS_REAL(a_val)) && (IS_INTEGER(b_val) || IS_REAL(b_val))) {
-                    double fa, fb;
-                    if (IS_REAL(a_val) || IS_REAL(b_val)) {
-                        fa = IS_REAL(a_val) ? AS_REAL(a_val) : (double)AS_INTEGER(a_val);
-                        fb = IS_REAL(b_val) ? AS_REAL(b_val) : (double)AS_INTEGER(b_val);
+                if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
+                    if (a_val.type == TYPE_REAL || b_val.type == TYPE_REAL) {
+                        double fa = as_f64(a_val);
+                        double fb = as_f64(b_val);
+                        switch (instruction_val) {
+                            case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
+                            case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
+                            case OP_GREATER:       result_val = makeBoolean(fa >  fb); break;
+                            case OP_GREATER_EQUAL: result_val = makeBoolean(fa >= fb); break;
+                            case OP_LESS:          result_val = makeBoolean(fa <  fb); break;
+                            case OP_LESS_EQUAL:    result_val = makeBoolean(fa <= fb); break;
+                            default: goto comparison_error_label;
+                        }
                     } else {
-                        fa = (double)AS_INTEGER(a_val);
-                        fb = (double)AS_INTEGER(b_val);
-                    }
-                    switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
-                        case OP_GREATER:       result_val = makeBoolean(fa > fb);  break;
-                        case OP_GREATER_EQUAL: result_val = makeBoolean(fa >= fb); break;
-                        case OP_LESS:          result_val = makeBoolean(fa < fb);  break;
-                        case OP_LESS_EQUAL:    result_val = makeBoolean(fa <= fb); break;
-                        default:
-                            runtimeError(vm, "VM Error: Unexpected numeric comparison opcode %d.", instruction_val);
-                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                        long long ia = as_i64(a_val);
+                        long long ib = as_i64(b_val);
+                        switch (instruction_val) {
+                            case OP_EQUAL:         result_val = makeBoolean(ia == ib); break;
+                            case OP_NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
+                            case OP_GREATER:       result_val = makeBoolean(ia >  ib); break;
+                            case OP_GREATER_EQUAL: result_val = makeBoolean(ia >= ib); break;
+                            case OP_LESS:          result_val = makeBoolean(ia <  ib); break;
+                            case OP_LESS_EQUAL:    result_val = makeBoolean(ia <= ib); break;
+                            default: goto comparison_error_label;
+                        }
                     }
                     comparison_succeeded = true;
                 } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
@@ -842,26 +874,32 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     comparison_succeeded = true;
                 } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
-                    char a_char, b_char;
-                    if (IS_CHAR(a_val)) {
-                        a_char = AS_CHAR(a_val);
+                    char char_val;
+                    const char* str_val;
+                    if (IS_CHAR(a_val)) { char_val = AS_CHAR(a_val); str_val = AS_STRING(b_val); }
+                    else { char_val = AS_CHAR(b_val); str_val = AS_STRING(a_val); }
+
+                    size_t slen = str_val ? strlen(str_val) : 0;
+
+                    bool eq;
+                    if (slen == 1) {
+                        eq = (str_val[0] == char_val);
+                    } else if (slen == 0) {
+                        // Treat empty string as #0 char for equality tests
+                        eq = (char_val == '\0');
                     } else {
-                        if (strlen(AS_STRING(a_val)) != 1) goto comparison_error_label;
-                        a_char = AS_STRING(a_val)[0];
+                        eq = false;
                     }
-                    if (IS_CHAR(b_val)) {
-                        b_char = AS_CHAR(b_val);
-                    } else {
-                        if (strlen(AS_STRING(b_val)) != 1) goto comparison_error_label;
-                        b_char = AS_STRING(b_val)[0];
-                    }
+
                     switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean(a_char == b_char); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean(a_char != b_char); break;
-                        case OP_GREATER:       result_val = makeBoolean(a_char > b_char);  break;
-                        case OP_GREATER_EQUAL: result_val = makeBoolean(a_char >= b_char); break;
-                        case OP_LESS:          result_val = makeBoolean(a_char < b_char);  break;
-                        case OP_LESS_EQUAL:    result_val = makeBoolean(a_char <= b_char); break;
+                        case OP_EQUAL:         result_val = makeBoolean(eq); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean(!eq); break;
+                        case OP_GREATER:
+                        case OP_GREATER_EQUAL:
+                        case OP_LESS:
+                        case OP_LESS_EQUAL:
+                            runtimeError(vm, "Runtime Error: Relational comparison between CHAR and STRING is not supported.");
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                         default:
                             runtimeError(vm, "VM Error: Unexpected char/string comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
@@ -1519,18 +1557,21 @@ comparison_error_label:
                 FILE *output_stream = stdout;
                 int start_index = 0;
 
-                // Check if the first argument is a file variable.
-                if (argCount > 0 && vm->stackTop[-argCount].type == TYPE_FILE) {
-                    Value fileVal = vm->stackTop[-argCount];
-                    if (fileVal.f_val != NULL) {
-                        output_stream = fileVal.f_val;
-                        start_index = 1; // Start processing printable args from the next one.
-                    } else {
-                        runtimeError(vm, "File not open for writing.");
-                        // Pop all arguments off the stack before returning.
-                        for (int i = 0; i < argCount; i++) { freeValue(&vm->stackTop[-i-1]); }
-                        vm->stackTop -= argCount;
-                        return INTERPRET_RUNTIME_ERROR;
+                // First arg may be FILE or ^FILE; route output accordingly.
+                if (argCount > 0) {
+                    Value first = vm->stackTop[-argCount];
+                    const Value* f = &first;
+                    if (first.type == TYPE_POINTER && first.ptr_val) f = (const Value*)first.ptr_val;
+                    if (f->type == TYPE_FILE) {
+                        if (!f->f_val) {
+                            runtimeError(vm, "File not open for writing.");
+                            // pop & clean args then bail...
+                            for (int i = 0; i < argCount; i++) freeValue(&vm->stackTop[-i-1]);
+                            vm->stackTop -= argCount;
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        output_stream = f->f_val;
+                        start_index = 1;
                     }
                 }
 
@@ -1541,10 +1582,10 @@ comparison_error_label:
                 for (int i = 0; i < print_arg_count; i++) {
                     args_to_print[print_arg_count - 1 - i] = pop(vm);
                 }
-                // If there was a file argument, pop it now.
                 if (start_index > 0) {
+                    // DO NOT free the file here; ownership stays with the variable.
                     Value file_arg = pop(vm);
-                    freeValue(&file_arg);
+                    if (file_arg.type != TYPE_FILE) freeValue(&file_arg);
                 }
 
                 bool color_was_applied = false; // Flag to track if we change the color
@@ -1580,11 +1621,19 @@ comparison_error_label:
                     }
                 }
 
-                // Print the arguments to the correct stream.
+                // Print the arguments (strings raw; chars as a single byte)
                 for (int i = 0; i < print_arg_count; i++) {
                     Value val = args_to_print[i];
-                    printValueToStream(val, output_stream); // Use a helper to abstract the printing logic
-                    freeValue(&val);
+                    if (val.type == TYPE_STRING) {
+                        fprintf(output_stream, "%s", val.s_val ? val.s_val : "");
+                        freeValue(&val);
+                    } else if (val.type == TYPE_CHAR) {
+                        fputc(val.c_val, output_stream);
+                        freeValue(&val);
+                    } else {
+                        printValueToStream(val, output_stream);
+                        freeValue(&val);
+                    }
                 }
 
                 if (instruction_val == OP_WRITE_LN) {
@@ -1675,7 +1724,7 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
 
                 Symbol* proc_symbol = NULL;
-                if(vm->procedureTable) {
+                if (vm->procedureTable) {
                     for (int i = 0; i < HASHTABLE_SIZE; i++) {
                         for (Symbol* s = vm->procedureTable->buckets[i]; s; s = s->next) {
                             if (s->is_defined && s->bytecode_address == target_address) {
@@ -1693,42 +1742,51 @@ comparison_error_label:
                 }
 
                 frame->function_symbol = proc_symbol;
+
                 int locals_pushed = 0;
                 AST* decl_ast = proc_symbol->type_def;
                 if (decl_ast) {
-                  // CORRECTED ORDER: Initialize function result variable FIRST.
-                  // This ensures it gets the correct slot (the one right after the last parameter).
-                  if (decl_ast->type == AST_FUNCTION_DECL) {
-                      push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
-                      locals_pushed++;
-                  }
-                  
-                  // THEN, push all other declared local variables.
-                  AST* blockNode = (decl_ast->type == AST_PROCEDURE_DECL) ? decl_ast->right : decl_ast->extra;
-                  if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
-                      AST* decls_compound = blockNode->children[0];
-                      if (decls_compound && decls_compound->type == AST_COMPOUND) {
-                          for (int i = 0; i < decls_compound->child_count; i++) {
-                              AST* decl_group = decls_compound->children[i];
-                              if (decl_group && decl_group->type == AST_VAR_DECL) {
-                                  for (int j = 0; j < decl_group->child_count; j++) {
-                                      push(vm, makeValueForType(decl_group->var_type, decl_group->right, NULL));
-                                      locals_pushed++;
-                                  }
-                              }
-                          }
-                      }
-                  }
+                    // *** SLOT ALIGNMENT FOR PROCEDURES ***
+                    // Your compiler numbers locals starting at 1 (after params).
+                    // Insert a sentinel NIL so local #1 maps to the first real local.
+                    if (decl_ast->type == AST_PROCEDURE_DECL) {
+                        push(vm, makeNil()); // <-- sentinel; NOT counted as a local
+                    }
+
+                    // Initialize function result variable FIRST so it sits right after the last parameter.
+                    if (decl_ast->type == AST_FUNCTION_DECL) {
+                        push(vm, makeValueForType(decl_ast->var_type, decl_ast->right, NULL));
+                        locals_pushed++;
+                    }
+
+                    // THEN push all other declared locals from the block.
+                    AST* blockNode = (decl_ast->type == AST_PROCEDURE_DECL) ? decl_ast->right : decl_ast->extra;
+                    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+                        AST* decls_compound = blockNode->children[0];
+                        if (decls_compound && decls_compound->type == AST_COMPOUND) {
+                            for (int i = 0; i < decls_compound->child_count; i++) {
+                                AST* decl_group = decls_compound->children[i];
+                                if (decl_group && decl_group->type == AST_VAR_DECL) {
+                                    for (int j = 0; j < decl_group->child_count; j++) {
+                                        push(vm, makeValueForType(decl_group->var_type, decl_group->right, NULL));
+                                        locals_pushed++;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (locals_pushed != proc_symbol->locals_count) {
-                  runtimeError(vm, "Internal VM Error: Mismatch in local variable count during call frame setup for %s. Expected %d, pushed %d.",
-                               proc_symbol->name, proc_symbol->locals_count, locals_pushed);
-                  return INTERPRET_RUNTIME_ERROR;
+                    runtimeError(vm, "Internal VM Error: Mismatch in local variable count during call frame setup for %s. Expected %d, pushed %d.",
+                                 proc_symbol->name, proc_symbol->locals_count, locals_pushed);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
+
             case OP_HALT:
                 return INTERPRET_OK;
             case OP_CALL_HOST: {

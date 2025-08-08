@@ -33,7 +33,7 @@ struct Symbol_s {
     uint8_t locals_count;         // Number of local variables (excluding parameters)
     // bool is_host_function;    // Could add later if OP_CALL_HOST uses this table too
     // HostFunctionID host_id;   // Corresponding host function ID
-    
+    int slot_index;             // Index into the procedure's locals frame (-1 if not a local)
     struct Symbol_s* real_symbol; // If this is an alias, this points to the real symbol
 };
 typedef struct Symbol_s Symbol;

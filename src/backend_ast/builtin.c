@@ -523,24 +523,22 @@ Value vm_builtin_trunc(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
-Value vm_builtin_dec(VM* vm, int arg_count, Value* args) {
-    if (arg_count < 1 || arg_count > 2) { runtimeError(vm, "Dec expects 1 or 2 arguments."); return makeVoid(); }
+static inline bool isOrdinalDelta(const Value* v) {
+    return v->type == TYPE_INTEGER || v->type == TYPE_BYTE || v->type == TYPE_WORD || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
+}
 
-    Value* target_lvalue = (Value*)args[0].ptr_val;
-    if (!target_lvalue) { runtimeError(vm, "First argument to Dec must be a variable."); return makeVoid(); }
-
-    long long decrement = 1;
-    if (arg_count == 2) {
-        if (args[1].type != TYPE_INTEGER) { runtimeError(vm, "Dec amount must be an integer."); return makeVoid(); }
-        decrement = args[1].i_val;
+static inline long long coerceDeltaToI64(const Value* v) {
+    switch (v->type) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+            return v->i_val;
+        case TYPE_CHAR:
+            return (unsigned char)v->c_val;
+        default:
+            return 0;
     }
-
-    if (target_lvalue->type == TYPE_INTEGER) target_lvalue->i_val -= decrement;
-    else if (target_lvalue->type == TYPE_CHAR) target_lvalue->c_val -= decrement;
-    else if (target_lvalue->type == TYPE_ENUM) target_lvalue->enum_val.ordinal -= decrement;
-    else { runtimeError(vm, "Cannot Dec a non-ordinal type."); }
-    
-    return makeVoid();
 }
 
 Value vm_builtin_ord(VM* vm, int arg_count, Value* args) {
@@ -555,23 +553,123 @@ Value vm_builtin_ord(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_inc(VM* vm, int arg_count, Value* args) {
-    if (arg_count < 1 || arg_count > 2) { runtimeError(vm, "Inc expects 1 or 2 arguments."); return makeVoid(); }
-    
-    Value* target_lvalue = (Value*)args[0].ptr_val;
-    if (!target_lvalue) { runtimeError(vm, "First argument to Inc must be a variable."); return makeVoid(); }
-
-    long long increment = 1;
-    if (arg_count == 2) {
-        if (args[1].type != TYPE_INTEGER) { runtimeError(vm, "Inc amount must be an integer."); return makeVoid(); }
-        increment = args[1].i_val;
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "Inc expects 1 or 2 arguments.");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
+        runtimeError(vm, "First argument to Inc must be a variable (pointer).");
+        return makeVoid();
     }
 
-    if (target_lvalue->type == TYPE_INTEGER) target_lvalue->i_val += increment;
-    else if (target_lvalue->type == TYPE_CHAR) target_lvalue->c_val += increment;
-    else if (target_lvalue->type == TYPE_ENUM) target_lvalue->enum_val.ordinal += increment;
-    else { runtimeError(vm, "Cannot Inc a non-ordinal type."); }
-    
-    return makeVoid();
+    Value* target = (Value*)args[0].ptr_val;
+
+    long long delta = 1;
+    if (arg_count == 2) {
+        if (!isOrdinalDelta(&args[1])) {
+            runtimeError(vm, "Inc amount must be an ordinal (integer/byte/word/char).");
+            return makeVoid();
+        }
+        delta = coerceDeltaToI64(&args[1]);
+    }
+
+    switch (target->type) {
+        case TYPE_INTEGER:
+            target->i_val += delta;
+            break;
+
+        case TYPE_BYTE: {
+            long long next = target->i_val + delta;
+            if (next < 0 || next > 255) {
+                runtimeError(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
+            }
+            target->i_val = (next & 0xFF);
+            break;
+        }
+
+        case TYPE_WORD: {
+            long long next = target->i_val + delta;
+            if (next < 0 || next > 65535) {
+                runtimeError(vm, "Warning: Range check error incrementing WORD to %lld.", next);
+            }
+            target->i_val = (next & 0xFFFF);
+            break;
+        }
+
+        case TYPE_CHAR:
+            target->c_val = (char)((unsigned char)target->c_val + (unsigned long long)delta);
+            break;
+
+        case TYPE_ENUM:
+            target->enum_val.ordinal += (int)delta;
+            break;
+
+        default:
+            runtimeError(vm, "Cannot Inc a non-ordinal type.");
+            break;
+    }
+
+    return makeVoid(); // procedure
+}
+
+Value vm_builtin_dec(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "Dec expects 1 or 2 arguments.");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
+        runtimeError(vm, "First argument to Dec must be a variable (pointer).");
+        return makeVoid();
+    }
+
+    Value* target = (Value*)args[0].ptr_val;
+
+    long long delta = 1;
+    if (arg_count == 2) {
+        if (!isOrdinalDelta(&args[1])) {
+            runtimeError(vm, "Dec amount must be an ordinal (integer/byte/word/char).");
+            return makeVoid();
+        }
+        delta = coerceDeltaToI64(&args[1]);
+    }
+
+    switch (target->type) {
+        case TYPE_INTEGER:
+            target->i_val -= delta;
+            break;
+
+        case TYPE_BYTE: {
+            long long next = target->i_val - delta;
+            if (next < 0 || next > 255) {
+                runtimeError(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
+            }
+            target->i_val = (next & 0xFF);
+            break;
+        }
+
+        case TYPE_WORD: {
+            long long next = target->i_val - delta;
+            if (next < 0 || next > 65535) {
+                runtimeError(vm, "Warning: Range check error decrementing WORD to %lld.", next);
+            }
+            target->i_val = (next & 0xFFFF);
+            break;
+        }
+
+        case TYPE_CHAR:
+            target->c_val = (char)((unsigned char)target->c_val - (unsigned long long)delta);
+            break;
+
+        case TYPE_ENUM:
+            target->enum_val.ordinal -= (int)delta;
+            break;
+
+        default:
+            runtimeError(vm, "Cannot Dec a non-ordinal type.");
+            break;
+    }
+
+    return makeVoid(); // procedure
 }
 
 Value vm_builtin_low(VM* vm, int arg_count, Value* args) {
@@ -730,7 +828,7 @@ Value vm_builtin_assign(VM* vm, int arg_count, Value* args) {
     }
 
     // --- FIX: Arguments are in reverse order from the stack ---
-    // For assign(f, filename), filename is at args[0] and a pointer to f is at args[1].
+    // For assign(f, filename), filename is at args[1] and a pointer to f is at args[0].
     Value fileVarPtr  = args[0];
     Value fileNameVal = args[1];
 
@@ -826,96 +924,92 @@ Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
 Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
-    char line_buffer[1024]; // Buffer to hold the entire line
-    const char* p = line_buffer; // Pointer to walk through the line_buffer
+    bool first_arg_is_file_by_value = false;   // ***NEW***
 
-    // 1. Determine the input stream (file or stdin)
-    if (arg_count > 0 && args[0].type == TYPE_FILE) {
-        if (args[0].f_val) {
-            input_stream = args[0].f_val;
+    // 1) Determine input stream: allow FILE or ^FILE
+    if (arg_count > 0) {
+        const Value* a0 = &args[0];
+        if (a0->type == TYPE_POINTER && a0->ptr_val) a0 = (const Value*)a0->ptr_val;
+        if (a0->type == TYPE_FILE) {
+            if (!a0->f_val) { runtimeError(vm, "File not open for Readln."); last_io_error = 1; return makeVoid(); }
+            input_stream = a0->f_val;
             var_start_index = 1;
-        } else {
-            runtimeError(vm, "File not open for Readln.");
-            last_io_error = 1;
-            return makeVoid();
+            // If the actual arg0 on the stack is a FILE by value (not a pointer),
+            // the VM will free it after we return, which would fclose() the stream.
+            // Prevent that by neutering the stack value before we return.
+            if (args[0].type == TYPE_FILE) first_arg_is_file_by_value = true;   // ***NEW***
         }
     }
 
-    // 2. Read the entire line from the stream into the buffer
+    // 2) Read full line
+    char line_buffer[1024];
     if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
-        // Handle EOF or read error
         last_io_error = feof(input_stream) ? 0 : 1;
-        // If we hit EOF, we still need to process assignments for any variables,
-        // which will typically result in empty strings or 0 for numbers.
-        line_buffer[0] = '\0';
-    } else {
-        // Strip trailing newline characters
-        line_buffer[strcspn(line_buffer, "\n\r")] = 0;
+        // ***NEW***: prevent VM cleanup from closing the stream we used
+        if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
+        return makeVoid();
     }
-    p = line_buffer; // Reset our parsing pointer to the start of the buffer
+    line_buffer[strcspn(line_buffer, "\r\n")] = '\0';
 
-    // 3. Parse values from the line_buffer for each variable argument
+    // 3) Parse vars from buffer
+    const char* p = line_buffer;
     for (int i = var_start_index; i < arg_count; i++) {
-        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
-            runtimeError(vm, "Readln requires VAR parameters to read into.");
-            last_io_error = 1;
-            break; // Exit the loop
-        }
-        Value* target_lvalue = (Value*)args[i].ptr_val;
-        int chars_read = 0; // To advance the pointer 'p'
+        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) { runtimeError(vm, "Readln requires VAR parameters to read into."); last_io_error = 1; break; }
+        Value* dst = (Value*)args[i].ptr_val;
 
-        // Skip leading whitespace in the buffer before parsing the next value
         while (isspace((unsigned char)*p)) p++;
 
-        switch (target_lvalue->type) {
+        switch (dst->type) {
             case TYPE_INTEGER:
-            case TYPE_BYTE:
             case TYPE_WORD:
-                if (sscanf(p, "%lld%n", &target_lvalue->i_val, &chars_read) < 1) {
-                    target_lvalue->i_val = 0; // Default to 0 on parse failure
-                    last_io_error = 1;
-                }
-                p += chars_read;
+            case TYPE_BYTE: {
+                errno = 0;
+                char* endp = NULL;
+                long long v = strtoll(p, &endp, 10);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                dst->i_val = v;
+                p = endp ? endp : p;
                 break;
-            case TYPE_REAL:
-                if (sscanf(p, "%lf%n", &target_lvalue->r_val, &chars_read) < 1) {
-                    target_lvalue->r_val = 0.0; // Default to 0.0
-                    last_io_error = 1;
-                }
-                p += chars_read;
+            }
+            case TYPE_REAL: {
+                errno = 0;
+                char* endp = NULL;
+                double v = strtod(p, &endp);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
+                dst->r_val = v;
+                p = endp ? endp : p;
                 break;
+            }
             case TYPE_CHAR:
-                if (sscanf(p, " %c%n", &target_lvalue->c_val, &chars_read) < 1) {
-                    target_lvalue->c_val = '\0';
-                    last_io_error = 1;
-                }
-                p += chars_read;
+                if (*p) { dst->c_val = *p++; } else { dst->c_val = '\0'; last_io_error = 1; }
                 break;
-            case TYPE_STRING:
-                // For a string, assign the rest of the buffer to it
-                if (target_lvalue->max_length > 0) { // Fixed-length string
-                    strncpy(target_lvalue->s_val, p, target_lvalue->max_length);
-                    target_lvalue->s_val[target_lvalue->max_length] = '\0';
-                } else { // Dynamic string
-                    freeValue(target_lvalue);
-                    *target_lvalue = makeString(p);
-                }
-                // Since string reads the rest of the line, we are done parsing.
-                goto end_readln_no_consume;
+
+            case TYPE_STRING: {
+                // Copy the remainder safely (don’t rely on our stack buffer)
+                size_t n = strlen(p);
+                char* tmp = (char*)malloc(n + 1);
+                if (!tmp) { runtimeError(vm, "Out of memory in Readln."); last_io_error = 1; break; }
+                memcpy(tmp, p, n + 1);
+                freeValue(dst);
+                *dst = makeString(tmp);
+                free(tmp);
+                i = arg_count; // consume the line; ignore trailing params
+                break;
+            }
+
             default:
-                runtimeError(vm, "Cannot Readln into a variable of type %s.", varTypeToString(target_lvalue->type));
+                runtimeError(vm, "Cannot Readln into a variable of type %s.", varTypeToString(dst->type));
                 last_io_error = 1;
-                goto end_readln_no_consume;
+                i = arg_count;
+                break;
         }
     }
 
-end_readln_no_consume:
-    if (!last_io_error && ferror(input_stream)) {
-        last_io_error = 1;
-    }
-    if (last_io_error == 0 && feof(input_stream) && strlen(line_buffer) == 0) {
-        // This was a clean EOF with no partial line read
-    }
+    if (!last_io_error && ferror(input_stream)) last_io_error = 1;
+    else if (last_io_error != 1) last_io_error = 0;
+
+    // ***NEW***: neuter FILE-by-value arg so VM cleanup won’t fclose()
+    if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
 
     return makeVoid();
 }

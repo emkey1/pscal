@@ -1173,280 +1173,158 @@ char *findUnitFile(const char *unit_name) {
 void linkUnit(AST *unit_ast, int recursion_depth) {
     if (!unit_ast) return;
 
-    // Ensure that the unit_ast has a symbol table (built by unitParser)
+    // The unit parser should have built a temporary (unit-scoped) symbol list.
     if (!unit_ast->symbol_table) {
         fprintf(stderr, "Error: Symbol table for unit is missing.\n");
         EXIT_FAILURE_HANDLER();
     }
 
-    // Iterate through the unit's symbol table and add ONLY VARIABLES and CONSTANTS
-    // to the global symbol table. Procedures and Functions are handled by the procedure_table.
+    // Walk the unit's symbol list and merge ONLY variables/constants into globals.
     Symbol *unit_symbol = unit_ast->symbol_table;
     while (unit_symbol) {
 
-        // ADDED: Check if the symbol represents a procedure or function declaration
-        // If it is, skip it as it's already added to the procedure_table during parsing.
-        // We identify procedures/functions by checking if their type_def links back
-        // to a PROCEDURE_DECL or FUNCTION_DECL node in the AST.
-        bool is_routine_symbol = (unit_symbol->type_def &&
-                                  (unit_symbol->type_def->type == AST_PROCEDURE_DECL ||
-                                   unit_symbol->type_def->type == AST_FUNCTION_DECL));
-
+        // Skip procedures/functions (these live in procedure_table and are handled elsewhere).
+        bool is_routine_symbol =
+            (unit_symbol->type_def &&
+            (unit_symbol->type_def->type == AST_PROCEDURE_DECL ||
+             unit_symbol->type_def->type == AST_FUNCTION_DECL));
         if (is_routine_symbol) {
-             DEBUG_PRINT("[DEBUG] linkUnit: Skipping routine symbol '%s' (type %s) from unit interface, handled by procedure_table.\n",
-                         unit_symbol->name, varTypeToString(unit_symbol->type));
-             unit_symbol = unit_symbol->next;
-             continue; // Skip to the next symbol
-        }
-        // The original check 'if (unit_symbol->type == TYPE_VOID)' was insufficient
-        // because functions have a non-VOID return type.
-
-
-        // Check for name conflicts (only for variables/constants we are about to insert)
-        Symbol *existing = lookupGlobalSymbol(unit_symbol->name);
-        if (existing) {
-            DEBUG_PRINT("[DEBUG] Skipping already-defined global variable/constant '%s' during linkUnit()\n", unit_symbol->name);
+            DEBUG_PRINT("[DEBUG] linkUnit: Skipping routine symbol '%s' (type %s) from unit interface.\n",
+                        unit_symbol->name, varTypeToString(unit_symbol->type));
             unit_symbol = unit_symbol->next;
             continue;
         }
 
-        DEBUG_PRINT("[DEBUG] linkUnit: Attempting to insert global variable/constant '%s' (type %s) from unit.\n",
-                    unit_symbol->name, varTypeToString(unit_symbol->type));
-        // Insert the variable or constant symbol into the global symbol table.
-        // insertGlobalSymbol allocates the Value struct and its default content.
-        insertGlobalSymbol(unit_symbol->name, unit_symbol->type, unit_symbol->type_def); // NOTE: Your code had NULL here, using unit_symbol->type_def is likely correct.
+        // Already present in globals?
+        Symbol *existing_global = lookupGlobalSymbol(unit_symbol->name);
+        if (existing_global) {
+            DEBUG_PRINT("[DEBUG] linkUnit: '%s' already exists globally.\n", unit_symbol->name);
 
-        Symbol* inserted_check = lookupGlobalSymbol(unit_symbol->name);
-        if (inserted_check) {
-            DEBUG_PRINT("[DEBUG] linkUnit: Successfully inserted/found global symbol '%s'.\n", inserted_check->name);
-        } else {
-            fprintf(stderr, "Internal Error: FAILED to find global symbol '%s' immediately after insertion!\n", unit_symbol->name);
-            // This is a critical error, maybe EXIT?
+            // If the unit provided a constant value, update the existing global
+            // using a DEEP COPY so updateSymbol can free its temp safely.
+            if (unit_symbol->is_const && unit_symbol->value) {
+                DEBUG_PRINT("[DEBUG] linkUnit: Updating existing global const '%s' from unit.\n",
+                            unit_symbol->name);
+                Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
+                updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
+                existing_global->is_const = true;
+            }
+
+            unit_symbol = unit_symbol->next;
+            continue;
+        }
+
+        // Insert a fresh global (Value is default-initialized inside insertGlobalSymbol).
+        DEBUG_PRINT("[DEBUG] linkUnit: Inserting global '%s' (type %s) from unit.\n",
+                    unit_symbol->name, varTypeToString(unit_symbol->type));
+        insertGlobalSymbol(unit_symbol->name, unit_symbol->type, unit_symbol->type_def);
+
+        Symbol *g = lookupGlobalSymbol(unit_symbol->name);
+        if (!g) {
+            fprintf(stderr, "Internal Error: Failed to find global '%s' after insertion.\n",
+                    unit_symbol->name);
             EXIT_FAILURE_HANDLER();
         }
+        DEBUG_PRINT("[DEBUG] linkUnit: Successfully inserted '%s'.\n", g->name);
 
-        // If the unit symbol table entry represents a constant and has a value (constants built here do),
-        // copy that constant value over the default value created by insertGlobalSymbol.
-        // Variables in the interface table have NULL values in the unit's symbol table.
+        // If the unit symbol is a constant with a value, copy that value into the global now.
         if (unit_symbol->is_const && unit_symbol->value) {
-            // Retrieve the symbol we just inserted (this is the one we will update)
-            Symbol *global_sym_entry = lookupGlobalSymbol(unit_symbol->name);
-            if (global_sym_entry && global_sym_entry->value) {
-                // updateSymbol handles freeing the default value in global_sym_entry->value
-                // and copies the content from unit_symbol->value.
-                DEBUG_PRINT("[DEBUG] linkUnit: Copying constant value for '%s'.\n", unit_symbol->name);
-                updateSymbol(unit_symbol->name, *(unit_symbol->value)); // Pass the Value struct by value
-                global_sym_entry->is_const = true; // Ensure it's marked as const globally
-            } else {
-                 fprintf(stderr, "Internal Error: Could not locate global symbol entry for constant '%s' after insertion.\n", unit_symbol->name);
-                 EXIT_FAILURE_HANDLER();
-            }
+            DEBUG_PRINT("[DEBUG] linkUnit: Copying constant value for '%s'.\n", unit_symbol->name);
+            Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
+            updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
+            g->is_const = true;
         }
-        // ADDED: Copy array value if the unit symbol is an array.
-        // Your original code had a case for TYPE_ARRAY but it was empty.
-        // This is where you would add the logic to copy array values.
-        // If unit_symbol->type == TYPE_ARRAY, the symbol has been inserted globally
-        // with a default-initialized array value by insertGlobalSymbol.
-        // If unit_symbol->value is also an initialized array (from a unit constant array),
-        // you would copy it here.
+        // If the unit symbol is an initialized array *variable* in the interface (rare),
+        // copy its initial value too (deep copy). Constants were handled above already.
         else if (unit_symbol->type == TYPE_ARRAY && unit_symbol->value) {
-             Symbol *global_sym_entry = lookupGlobalSymbol(unit_symbol->name);
-             if (global_sym_entry && global_sym_entry->value) {
-                 DEBUG_PRINT("[DEBUG] linkUnit: Copying array value for '%s'.\n", unit_symbol->name);
-                 updateSymbol(unit_symbol->name, makeCopyOfValue(unit_symbol->value)); // updateSymbol frees old, copies new
-             } else {
-                  fprintf(stderr, "Internal Error: Could not locate global symbol entry for array '%s' after insertion.\n", unit_symbol->name);
-                  EXIT_FAILURE_HANDLER();
-             }
+            DEBUG_PRINT("[DEBUG] linkUnit: Copying initial array value for '%s'.\n",
+                        unit_symbol->name);
+            Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
+            updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
         }
-        // Note: Your original code had a switch statement here for other types.
-        // This switch statement is relevant for copying the *value* of the symbol
-        // from the unit's symbol table entry to the global symbol table entry.
-        // It seems you intended to copy values for various types here.
-        // Let's include that logic based on your original code structure, but
-        // ensure it only runs if unit_symbol->value is not NULL (i.e., for constants).
 
-        // ADDED: Start of the switch statement to copy constant values by type
-        switch (unit_symbol->type) {
-             case TYPE_INTEGER: /* handled above */ break;
-             case TYPE_BYTE: /* handled above */ break;
-             case TYPE_WORD: /* handled above */ break;
-             case TYPE_REAL: /* handled above */ break;
-             case TYPE_STRING: /* handled above */ break;
-             case TYPE_CHAR: /* handled above */ break;
-             case TYPE_BOOLEAN: /* handled above */ break;
-             case TYPE_FILE: /* handled above */ break; // File variables are not typically assigned directly like this
-             case TYPE_RECORD: /* handled above */ break;
-             case TYPE_ARRAY: /* handled above */ break;
-             case TYPE_MEMORYSTREAM: /* handled above */ break; // Similar to File/Record, requires careful copy semantic
-
-             case TYPE_ENUM:
-                  // ADDED: Copy enum value if it's a constant
-                  if (unit_symbol->is_const && unit_symbol->value) {
-                       Symbol *global_sym_entry = lookupGlobalSymbol(unit_symbol->name);
-                       if (global_sym_entry && global_sym_entry->value) {
-                            DEBUG_PRINT("[DEBUG] linkUnit: Copying enum value for '%s'.\n", unit_symbol->name);
-                            // Free the default enum name string created by insertGlobalSymbol
-                            if(global_sym_entry->value->enum_val.enum_name) free(global_sym_entry->value->enum_val.enum_name);
-                            // Copy the unit's enum value content
-                            global_sym_entry->value->enum_val.enum_name = unit_symbol->value->enum_val.enum_name ? strdup(unit_symbol->value->enum_val.enum_name) : NULL;
-                            global_sym_entry->value->enum_val.ordinal = unit_symbol->value->enum_val.ordinal;
-                            global_sym_entry->value->type = TYPE_ENUM; // Ensure type is set
-                            global_sym_entry->is_const = true;
-                       } else {
-                            fprintf(stderr, "Internal Error: Could not locate global symbol entry for enum constant '%s'.\n", unit_symbol->name);
-                            EXIT_FAILURE_HANDLER();
-                       }
-                  }
-                  break;
-
-             case TYPE_SET:
-                   // ADDED: Copy set value if it's a constant
-                  if (unit_symbol->is_const && unit_symbol->value) {
-                       Symbol *global_sym_entry = lookupGlobalSymbol(unit_symbol->name);
-                       if (global_sym_entry && global_sym_entry->value) {
-                            DEBUG_PRINT("[DEBUG] linkUnit: Copying set value for '%s'.\n", unit_symbol->name);
-                            // Free the default set allocation by insertGlobalSymbol
-                            freeValue(global_sym_entry->value);
-                            // Copy the unit's set value (deep copy)
-                            *(global_sym_entry->value) = makeCopyOfValue(unit_symbol->value);
-                            global_sym_entry->is_const = true;
-                       } else {
-                             fprintf(stderr, "Internal Error: Could not locate global symbol entry for set constant '%s'.\n", unit_symbol->name);
-                             EXIT_FAILURE_HANDLER();
-                       }
-                  }
-                 break;
-
-             case TYPE_POINTER:
-                  // ADDED: Copy pointer value (the address and base type node) if it's a constant
-                  if (unit_symbol->is_const && unit_symbol->value) {
-                       Symbol *global_sym_entry = lookupGlobalSymbol(unit_symbol->name);
-                       if (global_sym_entry && global_sym_entry->value) {
-                            DEBUG_PRINT("[DEBUG] linkUnit: Copying pointer value for '%s'.\n", unit_symbol->name);
-                            // Pointer value is just the ptr_val and base_type_node (shallow copy of node pointer)
-                            global_sym_entry->value->ptr_val = unit_symbol->value->ptr_val;
-                            // The base_type_node should ideally come from the *global* symbol's type definition
-                            // which was linked by insertGlobalSymbol using unit_symbol->type_def.
-                            // We should NOT overwrite the global sym's base_type_node with the unit sym's.
-                            // The base_type_node is part of the type definition AST structure, not the Value data itself.
-                            // So only copy the ptr_val.
-                            // global_sym_entry->value->base_type_node = unit_symbol->value->base_type_node; // DO NOT DO THIS
-                            global_sym_entry->is_const = true;
-                       } else {
-                            fprintf(stderr, "Internal Error: Could not locate global symbol entry for pointer constant '%s'.\n", unit_symbol->name);
-                            EXIT_FAILURE_HANDLER();
-                       }
-                  }
-                 break;
-
-             default:
-                 // Any other types that were not explicitly handled above, and are constants with values
-                 if (unit_symbol->is_const && unit_symbol->value) {
-                      fprintf(stderr, "Warning: Unhandled constant type %s for copying value during unit linking.\n", varTypeToString(unit_symbol->type));
-                 }
-                 break;
-        }
-        // ADDED: End of the switch statement
-
+        // NOTE:
+        // We intentionally do NOT perform additional manual per-type copying here.
+        // updateSymbol(...) already handles all supported types (ENUM, SET, POINTER, etc.)
+        // and takes ownership of the temporary deep-copied Value safely. Doing manual
+        // re-copies after updateSymbol risks double-frees and is redundant.
 
         unit_symbol = unit_symbol->next;
     }
 
-    // ADDED: Free the temporary unit symbol table after processing.
-    // This list was created by buildUnitSymbolTable in unitParser and attached to unit_ast->symbol_table.
-    // Its contents (for variables/constants) have now been copied into the global symbol table.
-    // The Symbol structs and their contents (for constants) are no longer needed.
+    // Done merging: free the temporary unit symbol list. Its Values are still owned by the unit
+    // list and will be freed here; globals now own their own deep copies, so this is safe.
     if (unit_ast->symbol_table) {
         DEBUG_PRINT("[DEBUG] linkUnit: Freeing unit symbol table for '%s' at %p\n",
                     unit_ast->token ? unit_ast->token->value : "NULL",
                     (void*)unit_ast->symbol_table);
         freeUnitSymbolTable(unit_ast->symbol_table);
-        unit_ast->symbol_table = NULL; // Crucial: set to NULL to prevent double free attempts via AST freeing
+        unit_ast->symbol_table = NULL; // prevent double free when freeing the AST later
     }
 
-
-    // Handle type definitions...
-    // Type definitions themselves are added to the global type_table by insertType in unitParser.
-    // Their AST nodes are owned by the type_table and freed by freeTypeTableASTNodes.
-    // The loop below iterates over declaration nodes, which are part of the unit_ast.
-    // These nodes will be freed when unit_ast is freed (see changes below).
-    AST *type_decl = unit_ast->right; // Assuming right contains decls in some AST structure
+    // Register types declared in the unit's interface (these ASTs are managed by the type table).
+    AST *type_decl = unit_ast->right;
     while (type_decl && type_decl->type == AST_TYPE_DECL) {
-        // This loop seems correct for its purpose (registering types globally),
-        // no memory leak here as the AST nodes are linked into type_table
-        // and freed by freeTypeTableASTNodes.
         insertType(type_decl->token->value, type_decl->left);
-        type_decl = type_decl->right; // Move to next sibling? Or structure is different?
+        type_decl = type_decl->right;
     }
-    
-    AST *interface_compound_node = unit_ast->left; // unit_ast->left is the AST_COMPOUND for INTERFACE declarations
+
+    // Add unqualified aliases for interface routines (procedure_table logic unchanged).
+    AST *interface_compound_node = unit_ast->left;
     if (interface_compound_node && interface_compound_node->type == AST_COMPOUND) {
-        DEBUG_PRINT("[DEBUG] linkUnit: Processing interface routines for unit '%s' to add unqualified aliases to implementations.\n",
+        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified aliases for interface routines of unit '%s'.\n",
                     unit_ast->token ? unit_ast->token->value : "UNKNOWN_UNIT");
 
         for (int i = 0; i < interface_compound_node->child_count; i++) {
-            AST *interface_decl_node = interface_compound_node->children[i]; // e.g., AST_PROCEDURE_DECL for "Procedure ClrScr;" (header from interface)
+            AST *interface_decl_node = interface_compound_node->children[i];
 
             if (interface_decl_node && interface_decl_node->token &&
-                (interface_decl_node->type == AST_PROCEDURE_DECL || interface_decl_node->type == AST_FUNCTION_DECL)) {
+                (interface_decl_node->type == AST_PROCEDURE_DECL ||
+                 interface_decl_node->type == AST_FUNCTION_DECL)) {
 
-                const char* unqualified_name_original_case = interface_decl_node->token->value;
-                char unqualified_name_lower[MAX_ID_LENGTH + 1]; // For case-insensitive lookup
+                const char* unq_orig = interface_decl_node->token->value;
+                char unq_lower[MAX_ID_LENGTH + 1];
+                strncpy(unq_lower, unq_orig, MAX_ID_LENGTH);
+                unq_lower[MAX_ID_LENGTH] = '\0';
+                toLowerString(unq_lower);
 
-                strncpy(unqualified_name_lower, unqualified_name_original_case, MAX_ID_LENGTH);
-                unqualified_name_lower[MAX_ID_LENGTH] = '\0';
-                toLowerString(unqualified_name_lower); // Convert to lowercase for procedure_table lookups
-
-                const char* unit_name_original_case = unit_ast->token ? unit_ast->token->value : NULL;
-                if (!unit_name_original_case) {
-                    fprintf(stderr, "[ERROR] linkUnit: Cannot determine unit name for aliasing routine '%s'.\n", unqualified_name_original_case);
+                const char* unit_name = unit_ast->token ? unit_ast->token->value : NULL;
+                if (!unit_name) {
+                    fprintf(stderr, "[ERROR] linkUnit: Cannot determine unit name for aliasing '%s'.\n", unq_orig);
                     continue;
                 }
 
-                // Construct qualified name (lowercase for lookup), e.g., "crt.clrscr"
-                char qualified_name_lower[MAX_ID_LENGTH * 2 + 2]; // Max unit name + '.' + max proc name + null
-                snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", unit_name_original_case, unqualified_name_original_case);
-                toLowerString(qualified_name_lower);
+                char qualified_lower[MAX_ID_LENGTH * 2 + 2];
+                snprintf(qualified_lower, sizeof(qualified_lower), "%s.%s", unit_name, unq_orig);
+                toLowerString(qualified_lower);
 
-                // Lookup the qualified symbol, which should point to the implementation AST
-                Symbol* qualified_proc_symbol = hashTableLookup(procedure_table, qualified_name_lower);
+                Symbol* qualified_proc_symbol = hashTableLookup(procedure_table, qualified_lower);
+                if (qualified_proc_symbol && qualified_proc_symbol->type_def &&
+                    qualified_proc_symbol->type_def != (AST*)0x1) {
 
-                if (qualified_proc_symbol && qualified_proc_symbol->type_def && qualified_proc_symbol->type_def != (AST*)0x1 /* not a built-in sentinel */) {
-                    // Found the qualified symbol with its implementation AST (qualified_proc_symbol->type_def).
-                    // Now, check if an unqualified alias already exists.
-                    Symbol* existing_unqualified_alias = hashTableLookup(procedure_table, unqualified_name_lower);
-
-                    if (!existing_unqualified_alias) {
-                        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias for routine '%s' (from '%s').\n",
-                                    unqualified_name_original_case, qualified_name_lower);
-                        
-                        // Create a NEW, lightweight alias symbol
-                        Symbol* alias_sym = (Symbol*)calloc(1, sizeof(Symbol)); // Use calloc to zero-out
-                        if (!alias_sym) { /* error */ EXIT_FAILURE_HANDLER(); }
-
-                        alias_sym->name = strdup(unqualified_name_lower); // The alias has its own name
+                    Symbol* existing_unq = hashTableLookup(procedure_table, unq_lower);
+                    if (!existing_unq) {
+                        DEBUG_PRINT("[DEBUG] linkUnit: Adding unqualified alias '%s' -> '%s'.\n",
+                                    unq_lower, qualified_lower);
+                        Symbol* alias_sym = (Symbol*)calloc(1, sizeof(Symbol));
+                        if (!alias_sym) { EXIT_FAILURE_HANDLER(); }
+                        alias_sym->name = strdup(unq_lower);
                         alias_sym->is_alias = true;
-                        alias_sym->real_symbol = qualified_proc_symbol; // <<<< POINT TO THE REAL SYMBOL
-                        
-                        // Insert this new alias symbol into the procedure table.
+                        alias_sym->real_symbol = qualified_proc_symbol;
                         hashTableInsert(procedure_table, alias_sym);
                     } else {
-                        // This might happen if a built-in has the same name or due to other linking complexities.
-                        // Or if the user explicitly qualified a call to a routine that also matches an unqualified one.
-                        // Depending on desired behavior, could overwrite or just log.
-                        // For now, if it exists, assume it's correctly handled or was a built-in.
-                        DEBUG_PRINT("[DEBUG] linkUnit: Unqualified routine '%s' already exists in procedure_table. Skipping duplicate alias add from unit '%s'.\n",
-                                    unqualified_name_original_case, unit_name_original_case);
+                        DEBUG_PRINT("[DEBUG] linkUnit: Unqualified alias '%s' already exists, skipping.\n",
+                                    unq_lower);
                     }
                 } else {
-                    DEBUG_PRINT("[WARN] linkUnit: Could not find valid *implementation AST* for qualified routine '%s' to create alias for '%s'. Interface declaration might exist without full implementation being linked.\n",
-                                qualified_name_lower, unqualified_name_original_case);
+                    DEBUG_PRINT("[WARN] linkUnit: No implementation for '%s'; cannot alias '%s'.\n",
+                                qualified_lower, unq_lower);
                 }
             }
         }
     }
 }
+
 
 // buildUnitSymbolTable traverses the interface AST node and creates a symbol table
 // containing all exported symbols (variables, procedures, functions, types) for the unit.

@@ -2,6 +2,7 @@
 #define UTILS_H
 #include "parser.h"
 #include "symbol.h"
+#include "vm.h"
 
 /* =======================
    DEBUG MACROS & GLOBALS
@@ -52,6 +53,43 @@ static const int pscalToAnsiBase[8] = {
     3, // Pscal Brown   -> ANSI Yellow(30/40 + 3) (Brown is often dark yellow)
     7  // Pscal LtGray  -> ANSI White (30/40 + 7)
 };
+
+static inline bool is_intlike_type(VarType t) {
+    return t == TYPE_INTEGER || t == TYPE_WORD || t == TYPE_BYTE;
+}
+
+static inline bool is_ordinal_type(VarType t) {
+    // Pascal ordinals: integer subranges, enumerations, char, boolean.
+    // Here we treat INTEGER/BYTE/WORD/CHAR/ENUM (BOOLEAN optional) as ordinal.
+    return is_intlike_type(t) || t == TYPE_CHAR || t == TYPE_ENUM /*|| t == TYPE_BOOLEAN*/;
+}
+
+static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
+    switch (v->type) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN: return v->i_val;
+        case TYPE_CHAR:    return (unsigned char)v->c_val;
+        // Real not allowed as delta in Pascal's inc/dec
+        default:
+            runtimeError(vm, "Argument error: %s delta must be an ordinal, got %s.",
+                         who, varTypeToString(v->type));
+            // You can longjmp/return; here we just return 0 and let caller bail if needed.
+            return 0;
+    }
+}
+
+#define IS_INTLIKE(v) (is_intlike_type((v).type))
+#define IS_NUMERIC(v) (IS_INTLIKE(v) || IS_REAL(v))
+
+// Accessors (use your existing Value layout: i_val for INTEGER/BYTE/WORD/BOOLEAN)
+static inline long long as_i64(Value v) {
+    return v.i_val; // INTEGER, BYTE, WORD, BOOLEAN all use i_val
+}
+static inline double as_f64(Value v) {
+    return (v.type == TYPE_REAL) ? v.r_val : (double)v.i_val;
+}
 
 const char *varTypeToString(VarType type);
 const char *tokenTypeToString(TokenType type);

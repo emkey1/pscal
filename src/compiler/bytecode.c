@@ -21,7 +21,7 @@ void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     chunk->constants_count = 0;
     chunk->constants_capacity = 0;
     chunk->constants = NULL;
-    chunk->lines = 0;
+  //  chunk->lines = 0;
 }
 
 void freeBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
@@ -149,6 +149,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case OP_WRITE:
         case OP_WRITE_LN:
             return 2; // 1-byte opcode + 1-byte operand
+        case OP_CONSTANT16:
+            return 3; // 1 byte opcode + 2-byte operand
         case OP_JUMP:
         case OP_JUMP_IF_FALSE:
         case OP_CALL_BUILTIN:
@@ -199,7 +201,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
 
         case OP_CONSTANT: {
             uint8_t constant_index = chunk->code[offset + 1];
-            printf("%-16s %4d '", "OP_CONSTANT", constant_index);
+            printf("%-16s %4u ", "OP_CONSTANT", (unsigned)constant_index);
+            if (constant_index >= chunk->constants_count) {
+                printf("<INVALID CONST IDX %u>\n", (unsigned)constant_index);
+                return offset + 2;
+            }
+            printf("'");
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
@@ -212,6 +219,27 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             printf("'\n");
             return offset + 2;
+        }
+        case OP_CONSTANT16: {
+            uint16_t constant_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            printf("%-16s %4u ", "OP_CONSTANT16", (unsigned)constant_index);
+            if (constant_index >= chunk->constants_count) {
+                printf("<INVALID CONST IDX %u>\n", (unsigned)constant_index);
+                return offset + 3;
+            }
+            printf("'");
+            Value constantValue = chunk->constants[constant_index];
+            switch(constantValue.type) {
+                case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
+                case TYPE_REAL:    printf("%f", constantValue.r_val); break;
+                case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
+                case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
+                case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
+                case TYPE_NIL:     printf("nil"); break;
+                default:           printf("Value type %s", varTypeToString(constantValue.type)); break;
+            }
+            printf("'\n");
+            return offset + 3;
         }
         case OP_ADD:           printf("OP_ADD\n"); return offset + 1;
         case OP_SUBTRACT:      printf("OP_SUBTRACT\n"); return offset + 1;
