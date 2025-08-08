@@ -691,7 +691,18 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         } else {
                             // This now correctly handles ALL non-array types, including simple types,
                             // records, dynamic strings, and fixed-length strings.
-                            const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
+                            const char* type_name = "";
+                            if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
+                                type_name = type_specifier_node->token->value;
+                            } else if (actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
+                                /*
+                                 * For user-defined enum types the copied type specifier may not carry
+                                 * a token with the enum's name.  Falling back to the resolved type
+                                 * definition guarantees that the enum's identifier is embedded in the
+                                 * bytecode so that OP_DEFINE_GLOBAL can later reconstruct the type.
+                                 */
+                                type_name = actual_type_def_node->token->value;
+                            }
                             writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, type_name), getLine(varNameNode));
 
                             if (node->var_type == TYPE_STRING) {

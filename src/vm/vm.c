@@ -1422,6 +1422,10 @@ comparison_error_label:
                         setRight(type_def_node, lenNode);
                     } else if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
                         type_def_node = lookupType(typeNameVal.s_val);
+                        if (declaredType == TYPE_ENUM && type_def_node == NULL) {
+                            runtimeError(vm, "VM Error: Enum type '%s' not found for global '%s'.", typeNameVal.s_val, varNameVal.s_val);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
                     }
 
                     if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
