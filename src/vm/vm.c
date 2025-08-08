@@ -1397,10 +1397,30 @@ comparison_error_label:
 
                 } else {
                     uint8_t type_name_idx = READ_BYTE();
+                    int str_len = 0;
+                    if (declaredType == TYPE_STRING) {
+                        uint8_t len_idx = READ_BYTE();
+                        Value len_val = vm->chunk->constants[len_idx];
+                        if (len_val.type == TYPE_INTEGER) {
+                            str_len = (int)len_val.i_val;
+                        }
+                    }
                     Value typeNameVal = vm->chunk->constants[type_name_idx];
                     AST* type_def_node = NULL;
 
-                    if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
+                    if (declaredType == TYPE_STRING && str_len > 0) {
+                        Token* strTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0);
+                        type_def_node = newASTNode(AST_VARIABLE, strTok);
+                        setTypeAST(type_def_node, TYPE_STRING);
+                        freeToken(strTok);
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), "%d", str_len);
+                        Token* lenTok = newToken(TOKEN_INTEGER_CONST, buf, 0, 0);
+                        AST* lenNode = newASTNode(AST_NUMBER, lenTok);
+                        setTypeAST(lenNode, TYPE_INTEGER);
+                        freeToken(lenTok);
+                        setRight(type_def_node, lenNode);
+                    } else if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
                         type_def_node = lookupType(typeNameVal.s_val);
                     }
 

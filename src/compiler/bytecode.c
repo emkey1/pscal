@@ -171,7 +171,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             // This instruction has a variable length.
             int current_pos = offset + 1; // Position after the opcode
             if (current_pos + 1 >= chunk->count) return 1; // Safeguard for incomplete instruction
-            
+
             VarType declaredType = (VarType)chunk->code[offset + 2];
             current_pos = offset + 3; // Position after the type byte
 
@@ -182,8 +182,11 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                     current_pos += 2; // Skip element VarType and element type name index
                 }
             } else {
-                // All other types (simple, record, string, etc.) have one more byte for the type name index.
-                current_pos++;
+                // Simple types store the type name index and, for strings, an extra length constant.
+                current_pos++; // type name index
+                if (declaredType == TYPE_STRING) {
+                    current_pos++; // length constant index
+                }
             }
             return (current_pos - offset); // Return the total calculated length
         }
@@ -334,6 +337,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     uint8_t type_name_idx = chunk->code[current_offset++];
                     if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
                         printf("('%s')", chunk->constants[type_name_idx].s_val);
+                    }
+                    if (declaredType == TYPE_STRING && current_offset < chunk->count) {
+                        uint8_t len_idx = chunk->code[current_offset++];
+                        if (len_idx < chunk->constants_count && chunk->constants[len_idx].type == TYPE_INTEGER) {
+                            printf(" len=%lld", chunk->constants[len_idx].i_val);
+                        }
                     }
                 }
             }
