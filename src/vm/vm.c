@@ -1521,6 +1521,56 @@ comparison_error_label:
                 freeValue(&value_from_stack);
                 break;
             }
+            case OP_INIT_LOCAL_ARRAY: {
+                uint8_t slot = READ_BYTE();
+                uint8_t dimension_count = READ_BYTE();
+                if (dimension_count == 0) {
+                    runtimeError(vm, "VM Error: Array defined with zero dimensions for local variable.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                if (!lower_bounds || !upper_bounds) {
+                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                    if (lower_bounds) free(lower_bounds);
+                    if (upper_bounds) free(upper_bounds);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    uint8_t lower_idx = READ_BYTE();
+                    uint8_t upper_idx = READ_BYTE();
+                    Value lower_val = vm->chunk->constants[lower_idx];
+                    Value upper_val = vm->chunk->constants[upper_idx];
+                    if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+                        runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
+                        free(lower_bounds); free(upper_bounds);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    lower_bounds[i] = (int)lower_val.i_val;
+                    upper_bounds[i] = (int)upper_val.i_val;
+                }
+
+                VarType elem_var_type = (VarType)READ_BYTE();
+                uint8_t elem_name_idx = READ_BYTE();
+                Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                AST* elem_type_def = NULL;
+                if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+                    elem_type_def = lookupType(elem_name_val.s_val);
+                }
+
+                Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+
+                free(lower_bounds);
+                free(upper_bounds);
+
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = array_val;
+                break;
+            }
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
