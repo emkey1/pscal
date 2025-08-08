@@ -500,10 +500,14 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
     AST* actual_type_def = node_to_inspect;
 
-    // If the resolved type definition is an enum, ensure the value type reflects that.
-    if (actual_type_def && actual_type_def->type == AST_ENUM_TYPE && type != TYPE_ENUM) {
-        type = TYPE_ENUM;
-        v.type = TYPE_ENUM;
+    // If the resolved type definition is an enum, ensure the value type reflects that
+    // and remember the enum's definition node for later metadata access.
+    if (actual_type_def && actual_type_def->type == AST_ENUM_TYPE) {
+        if (type != TYPE_ENUM) {
+            type = TYPE_ENUM;
+            v.type = TYPE_ENUM;
+        }
+        v.base_type_node = actual_type_def;
     }
 
     if (type == TYPE_POINTER) {

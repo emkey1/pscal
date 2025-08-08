@@ -926,12 +926,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // ENUM comparison
                 else if (a_val.type == TYPE_ENUM && b_val.type == TYPE_ENUM) {
-                    bool types_match = false;
-                    if (a_val.enum_val.enum_name != NULL && b_val.enum_val.enum_name != NULL &&
-                        strcmp(a_val.enum_val.enum_name, b_val.enum_val.enum_name) == 0) {
-                        types_match = true;
-                    }
-
+                    const char *name_a = a_val.enum_val.enum_name;
+                    const char *name_b = b_val.enum_val.enum_name;
+                    bool types_match = (name_a && name_b && strcmp(name_a, name_b) == 0);
                     int ord_a = a_val.enum_val.ordinal;
                     int ord_b = b_val.enum_val.ordinal;
 
@@ -941,9 +938,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         result_val = makeBoolean(!types_match || (ord_a != ord_b));
                     } else {
                         if (!types_match) {
-                            runtimeError(vm, "Runtime Error: Cannot compare different ENUM types ('%s' vs '%s') with relational operator.",
-                                         a_val.enum_val.enum_name ? a_val.enum_val.enum_name : "<anon>",
-                                         b_val.enum_val.enum_name ? b_val.enum_val.enum_name : "<anon>");
+                            runtimeError(vm,
+                                         "Runtime Error: Cannot compare different ENUM types ('%s' vs '%s') with relational operator.",
+                                         name_a ? name_a : "<anon>",
+                                         name_b ? name_b : "<anon>");
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                         }
                         switch (instruction_val) {
