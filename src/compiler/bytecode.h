@@ -56,6 +56,7 @@ typedef enum {
     OP_GET_LOCAL,     // Get local scoped variables
     OP_SET_LOCAL,     // Set local scoped variables
     OP_INIT_LOCAL_ARRAY, // Initialize local array variable
+    OP_INIT_LOCAL_FILE,  // Initialize local file variable
     OP_GET_LOCAL_ADDRESS,
     
     OP_GET_FIELD_ADDRESS,
