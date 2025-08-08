@@ -737,6 +737,10 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         return_value_slot = fc.local_count - 1;
     }
     
+    addLocal(&fc, "result", line, false); // Alias to support Pascal Functions properly
+    // Note: The slot number will be the same as we look up from the end.
+    // This is a simple way to alias them.
+    
     // Step 3: Add all other local variables.
     uint8_t local_var_count = 0;
     AST* blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
@@ -991,7 +995,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             compileRValue(rvalue, chunk, getLine(rvalue));
 
             if (current_function_compiler && lvalue->type == AST_VARIABLE &&
-                strcasecmp(lvalue->token->value, current_function_compiler->name) == 0) {
+                           (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                            strcasecmp(lvalue->token->value, "result") == 0) ) { 
                 
                 int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 if (return_slot != -1) {
