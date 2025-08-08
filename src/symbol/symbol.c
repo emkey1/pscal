@@ -287,6 +287,23 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     // Initialize the contents of the Value struct using the helper function
     *(new_symbol->value) = makeValueForType(type, type_def, new_symbol); // Use assignment to copy the returned Value
 
+    // If this symbol ultimately represents an enum, ensure the Value carries
+    // the enum metadata (name/ordinal) so the VM can reason about it later.
+    if (type == TYPE_ENUM && new_symbol->value) {
+        AST *def = type_def;
+        if (def && def->type == AST_TYPE_REFERENCE && def->right) {
+            def = def->right;
+        }
+        if (def && def->type == AST_ENUM_TYPE && def->token && def->token->value) {
+            if (new_symbol->value->enum_val.enum_name) {
+                free(new_symbol->value->enum_val.enum_name);
+            }
+            new_symbol->value->enum_val.enum_name = strdup(def->token->value);
+            new_symbol->value->enum_val.ordinal = 0;
+            new_symbol->value->base_type_node = def;
+        }
+    }
+
     DEBUG_PRINT("[DEBUG SYMBOL] Created Symbol '%s' at %p (Value @ %p, base_type_node @ %p).\n",
                 new_symbol->name, (void*)new_symbol, (void*)new_symbol->value, (void*)(new_symbol->value ? new_symbol->value->base_type_node : NULL));
 

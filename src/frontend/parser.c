@@ -1416,10 +1416,22 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
         AST* typeNodeCopy = copyAST(originalTypeNode);
         if (!typeNodeCopy) { /* error handling */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(var_decl_node); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
         setRight(var_decl_node, typeNodeCopy); // Link VAR_DECL to the UNIQUE copy
+
         // Ensure the declared variable's type matches the copied type node.
         // This avoids cases where a previous declaration (e.g., an array)
         // leaks its var_type into a subsequent enum declaration.
         var_decl_node->var_type = typeNodeCopy->var_type;
+
+        // If the resolved type ultimately refers to an enum definition,
+        // force the VAR_DECL node to carry TYPE_ENUM rather than whatever
+        // var_type happened to be set on the copied node (e.g. TYPE_ARRAY).
+        AST *enumCheck = typeNodeCopy;
+        if (enumCheck && enumCheck->type == AST_TYPE_REFERENCE && enumCheck->right) {
+            enumCheck = enumCheck->right;
+        }
+        if (enumCheck && enumCheck->type == AST_ENUM_TYPE) {
+            var_decl_node->var_type = TYPE_ENUM;
+        }
         // ---
 
         addChild(finalCompoundNode, var_decl_node);
