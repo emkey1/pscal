@@ -697,6 +697,86 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                     }
                 }
+            } else { // Local variables
+                AST* type_specifier_node = node->right;
+
+                // Resolve type alias if necessary
+                AST* actual_type_def_node = type_specifier_node;
+                if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                    AST* resolved_node = lookupType(actual_type_def_node->token->value);
+                    if (resolved_node) {
+                        actual_type_def_node = resolved_node;
+                    } else {
+                        fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                        compiler_had_error = true;
+                        break;
+                    }
+                }
+
+                if (!actual_type_def_node) {
+                    fprintf(stderr, "L%d: Compiler error: Could not determine type definition for a variable declaration.\n", getLine(node));
+                    compiler_had_error = true;
+                    break;
+                }
+
+                for (int i = 0; i < node->child_count; i++) {
+                    AST* varNameNode = node->children[i];
+                    if (!varNameNode || !varNameNode->token) continue;
+                    int slot = resolveLocal(current_function_compiler, varNameNode->token->value);
+                    if (slot < 0) {
+                        fprintf(stderr, "L%d: Compiler error: Local variable '%s' not found in scope.\n", getLine(varNameNode), varNameNode->token->value);
+                        compiler_had_error = true;
+                        continue;
+                    }
+
+                    if (node->var_type == TYPE_ARRAY) {
+                        int dimension_count = actual_type_def_node->child_count;
+                        if (dimension_count > 255) {
+                            fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", getLine(varNameNode));
+                            compiler_had_error = true;
+                            break;
+                        }
+
+                        writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
+
+                        for (int dim = 0; dim < dimension_count; dim++) {
+                            AST* subrange = actual_type_def_node->children[dim];
+                            if (subrange && subrange->type == AST_SUBRANGE) {
+                                Value lower_b = evaluateCompileTimeValue(subrange->left);
+                                Value upper_b = evaluateCompileTimeValue(subrange->right);
+
+                                if (lower_b.type == TYPE_INTEGER) {
+                                    writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                } else {
+                                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                    compiler_had_error = true;
+                                }
+                                freeValue(&lower_b);
+
+                                if (upper_b.type == TYPE_INTEGER) {
+                                    writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                } else {
+                                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                    compiler_had_error = true;
+                                }
+                                freeValue(&upper_b);
+
+                            } else {
+                                fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
+                                compiler_had_error = true;
+                                writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                            }
+                        }
+
+                        AST* elem_type = actual_type_def_node->right;
+                        writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
+                        const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                        writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                    }
+                }
             }
             break;
         }
