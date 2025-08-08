@@ -732,21 +732,23 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     FunctionCompilerState fc;
     initFunctionCompiler(&fc);
     current_function_compiler = &fc;
-    
-    const char* func_name = func_decl_node->token->value;
-    fc.name = func_name;
-    
-    int func_bytecode_start_address = chunk->count;
 
+    // --- FIX: Declare all variables at the top of the function ---
+    const char* func_name = func_decl_node->token->value;
+    int return_value_slot = -1;
     Symbol* proc_symbol = NULL;
     char name_for_lookup[MAX_SYMBOL_LENGTH * 2 + 2];
+    AST* blockNode = NULL;
 
+    fc.name = func_name;
+
+    int func_bytecode_start_address = chunk->count;
+
+    // --- FIX: Look up the symbol *before* trying to use it ---
     if (current_compilation_unit_name) {
-        // We are inside a unit, so the symbol in the table has a qualified name.
         snprintf(name_for_lookup, sizeof(name_for_lookup), "%s.%s", current_compilation_unit_name, func_name);
-        toLowerString(name_for_lookup); // The table uses lowercase keys.
+        toLowerString(name_for_lookup);
     } else {
-        // Not in a unit (e.g., main program block), use the unqualified name.
         strncpy(name_for_lookup, func_name, sizeof(name_for_lookup) - 1);
         name_for_lookup[sizeof(name_for_lookup) - 1] = '\0';
         toLowerString(name_for_lookup);
@@ -755,18 +757,14 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     proc_symbol = lookupSymbolIn(procedure_table, name_for_lookup);
 
     if (!proc_symbol) {
-        // This can happen if a procedure is in the implementation but not the interface.
-        // For now, we'll treat it as an error, though some compilers might just make it a private procedure.
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
-        compiler_had_error = true; // Set error flag
+        compiler_had_error = true;
         current_function_compiler = NULL;
         return;
     }
 
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
-
-    int return_value_slot = -1;
 
     // Step 1: Add parameters to the local scope FIRST.
     if (func_decl_node->children) {
@@ -785,19 +783,16 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
     proc_symbol->arity = fc.local_count;
 
-    // Step 2: If it's a function, add its name as a local variable for the return value.
+    // Step 2: If it's a function, add its name and 'result' as local variables.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         addLocal(&fc, func_name, line, false);
         return_value_slot = fc.local_count - 1;
+
+        addLocal(&fc, "result", line, false);
     }
     
-    addLocal(&fc, "result", line, false); // Alias to support Pascal Functions properly
-    // Note: The slot number will be the same as we look up from the end.
-    // This is a simple way to alias them.
-    
     // Step 3: Add all other local variables.
-    uint8_t local_var_count = 0;
-    AST* blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
+    blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
     if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0 && blockNode->children[0]->type == AST_COMPOUND) {
         AST* decls = blockNode->children[0];
         for (int i = 0; i < decls->child_count; i++) {
@@ -807,14 +802,14 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
                     AST* var_name_node = var_decl_group->children[j];
                     if (var_name_node && var_name_node->token) {
                         addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
-                        local_var_count++;
                     }
                 }
             }
         }
     }
     
-    proc_symbol->locals_count = local_var_count + (func_decl_node->type == AST_FUNCTION_DECL ? 1 : 0);
+    // Store the final count of locals (excluding parameters).
+    proc_symbol->locals_count = fc.local_count - proc_symbol->arity;
     
     // Step 4: Compile the function body.
     if (blockNode) {
@@ -825,10 +820,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
         writeBytecodeChunk(chunk, (uint8_t)return_value_slot, line);
-    } else {
-        //int nil_const_idx = addNilConstant(chunk);
-        //writeBytecodeChunk(chunk, OP_CONSTANT, line);
-        //writeBytecodeChunk(chunk, (uint8_t)nil_const_idx, line);
     }
     writeBytecodeChunk(chunk, OP_RETURN, line);
     
