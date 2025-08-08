@@ -1690,6 +1690,13 @@ void freeUnitSymbolTable(Symbol *symbol_table) {
 void toLowerString(char *str) {
     if (!str) return;
     for (int i = 0; str[i]; i++) {
-        str[i] = tolower(str[i]);
+        /*
+         * tolower expects either EOF or an unsigned char value.  Passing a
+         * plain `char` that happens to be negative results in undefined
+         * behaviour on platforms where `char` is signed.  Cast to
+         * unsigned char before calling tolower to ensure well-defined
+         * behaviour for characters with the high bit set.
+         */
+        str[i] = (char)tolower((unsigned char)str[i]);
     }
 }
