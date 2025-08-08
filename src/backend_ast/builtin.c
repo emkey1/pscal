@@ -673,38 +673,95 @@ Value vm_builtin_dec(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_low(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "Low() expects a single type identifier."); return makeInt(0); }
-    const char* typeName = AS_STRING(args[0]);
+    if (arg_count != 1) {
+        runtimeError(vm, "Low() expects a single type identifier.");
+        return makeInt(0);
+    }
 
-    if (strcasecmp(typeName, "integer") == 0) return makeInt(-2147483648);
-    if (strcasecmp(typeName, "char") == 0) return makeChar((char)0);
-    if (strcasecmp(typeName, "boolean") == 0) return makeBoolean(false);
-    if (strcasecmp(typeName, "byte") == 0) return makeInt(0);
-    if (strcasecmp(typeName, "word") == 0) return makeInt(0);
+    Value arg = args[0];
+    const char* typeName = NULL;
+    VarType t = TYPE_UNKNOWN;
 
-    AST* typeDef = lookupType(typeName);
-    if (typeDef && typeDef->var_type == TYPE_ENUM) return makeEnum(typeName, 0);
+    if (arg.type == TYPE_STRING) {
+        typeName = AS_STRING(arg);
+        if (strcasecmp(typeName, "integer") == 0)      t = TYPE_INTEGER;
+        else if (strcasecmp(typeName, "char") == 0)    t = TYPE_CHAR;
+        else if (strcasecmp(typeName, "boolean") == 0) t = TYPE_BOOLEAN;
+        else if (strcasecmp(typeName, "byte") == 0)    t = TYPE_BYTE;
+        else if (strcasecmp(typeName, "word") == 0)    t = TYPE_WORD;
+    } else {
+        t = arg.type;
+    }
 
-    runtimeError(vm, "Low() not supported for type '%s'.", typeName);
+    switch (t) {
+        case TYPE_INTEGER: return makeInt(-2147483648);
+        case TYPE_CHAR:    return makeChar((char)0);
+        case TYPE_BOOLEAN: return makeBoolean(false);
+        case TYPE_BYTE:    return makeInt(0);
+        case TYPE_WORD:    return makeInt(0);
+        case TYPE_ENUM: {
+            const char* enumName = typeName ? typeName : arg.enum_val.enum_name;
+            if (enumName) {
+                AST* typeDef = lookupType(enumName);
+                if (typeDef && typeDef->var_type == TYPE_ENUM) return makeEnum(enumName, 0);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    if (typeName)
+        runtimeError(vm, "Low() not supported for type '%s'.", typeName);
+    else
+        runtimeError(vm, "Low() not supported for provided type.");
     return makeInt(0);
 }
 
 Value vm_builtin_high(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "High() expects a single type identifier."); return makeInt(0); }
-    const char* typeName = AS_STRING(args[0]);
-
-    if (strcasecmp(typeName, "integer") == 0) return makeInt(2147483647);
-    if (strcasecmp(typeName, "char") == 0) return makeChar((char)255);
-    if (strcasecmp(typeName, "boolean") == 0) return makeBoolean(true);
-    if (strcasecmp(typeName, "byte") == 0) return makeInt(255);
-    if (strcasecmp(typeName, "word") == 0) return makeInt(65535);
-
-    AST* typeDef = lookupType(typeName);
-    if (typeDef && typeDef->var_type == TYPE_ENUM && typeDef->type == AST_ENUM_TYPE) {
-        return makeEnum(typeName, typeDef->child_count - 1);
+    if (arg_count != 1) {
+        runtimeError(vm, "High() expects a single type identifier.");
+        return makeInt(0);
     }
 
-    runtimeError(vm, "High() not supported for type '%s'.", typeName);
+    Value arg = args[0];
+    const char* typeName = NULL;
+    VarType t = TYPE_UNKNOWN;
+
+    if (arg.type == TYPE_STRING) {
+        typeName = AS_STRING(arg);
+        if (strcasecmp(typeName, "integer") == 0)      t = TYPE_INTEGER;
+        else if (strcasecmp(typeName, "char") == 0)    t = TYPE_CHAR;
+        else if (strcasecmp(typeName, "boolean") == 0) t = TYPE_BOOLEAN;
+        else if (strcasecmp(typeName, "byte") == 0)    t = TYPE_BYTE;
+        else if (strcasecmp(typeName, "word") == 0)    t = TYPE_WORD;
+    } else {
+        t = arg.type;
+    }
+
+    switch (t) {
+        case TYPE_INTEGER: return makeInt(2147483647);
+        case TYPE_CHAR:    return makeChar((char)255);
+        case TYPE_BOOLEAN: return makeBoolean(true);
+        case TYPE_BYTE:    return makeInt(255);
+        case TYPE_WORD:    return makeInt(65535);
+        case TYPE_ENUM: {
+            const char* enumName = typeName ? typeName : arg.enum_val.enum_name;
+            if (enumName) {
+                AST* typeDef = lookupType(enumName);
+                if (typeDef && typeDef->var_type == TYPE_ENUM && typeDef->type == AST_ENUM_TYPE)
+                    return makeEnum(enumName, typeDef->child_count - 1);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    if (typeName)
+        runtimeError(vm, "High() not supported for type '%s'.", typeName);
+    else
+        runtimeError(vm, "High() not supported for provided type.");
     return makeInt(0);
 }
 
