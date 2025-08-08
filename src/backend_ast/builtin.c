@@ -959,6 +959,16 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
 
         while (isspace((unsigned char)*p)) p++;
 
+        // If the destination has not been initialized, default it to an empty
+        // string so that Readln can populate it.  Variables declared as
+        // strings start out with the TYPE_NIL tag which caused the builtin to
+        // reject them.  Treating TYPE_NIL as a string matches Pascal's
+        // semantics where uninitialised strings can be read into directly.
+        if (dst->type == TYPE_NIL) {
+            dst->type = TYPE_STRING;
+            dst->s_val = NULL;
+        }
+
         switch (dst->type) {
             case TYPE_INTEGER:
             case TYPE_WORD:
