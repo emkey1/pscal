@@ -1702,11 +1702,16 @@ comparison_error_label:
                     }
                 }
 
-                // Print the arguments (strings raw; chars as a single byte)
+                // Print the arguments (strings as full buffers; chars as a single byte)
                 for (int i = 0; i < print_arg_count; i++) {
                     Value val = args_to_print[i];
                     if (val.type == TYPE_STRING) {
-                        fprintf(output_stream, "%s", val.s_val ? val.s_val : "");
+                        if (output_stream == stdout) {
+                            fputs(val.s_val ? val.s_val : "", output_stream);
+                        } else {
+                            size_t len = val.s_val ? strlen(val.s_val) : 0;
+                            fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
+                        }
                         freeValue(&val);
                     } else if (val.type == TYPE_CHAR) {
                         fputc(val.c_val, output_stream);

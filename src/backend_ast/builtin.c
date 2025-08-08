@@ -1075,14 +1075,11 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
                 break;
 
             case TYPE_STRING: {
-                // Copy the remainder safely (don’t rely on our stack buffer)
-                size_t n = strlen(p);
-                char* tmp = (char*)malloc(n + 1);
+                char* tmp = strdup(p);
                 if (!tmp) { runtimeError(vm, "Out of memory in Readln."); last_io_error = 1; break; }
-                memcpy(tmp, p, n + 1);
                 freeValue(dst);
-                *dst = makeString(tmp);
-                free(tmp);
+                dst->type = TYPE_STRING;
+                dst->s_val = tmp;
                 i = arg_count; // consume the line; ignore trailing params
                 break;
             }
