@@ -1398,7 +1398,7 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
     for (int i = 0; i < groupNode->child_count; ++i) {
         AST *var_decl_node = newASTNode(AST_VAR_DECL, NULL);
         if (!var_decl_node) { /* Malloc check */ freeAST(groupNode); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
-        var_decl_node->var_type = originalTypeNode->var_type;
+        // var_type will be set after copying the type node.
 
         // Transfer the name node (AST_VARIABLE) from groupNode
         var_decl_node->child_count = 1;
@@ -1416,6 +1416,10 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
         AST* typeNodeCopy = copyAST(originalTypeNode);
         if (!typeNodeCopy) { /* error handling */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(var_decl_node); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
         setRight(var_decl_node, typeNodeCopy); // Link VAR_DECL to the UNIQUE copy
+        // Ensure the declared variable's type matches the copied type node.
+        // This avoids cases where a previous declaration (e.g., an array)
+        // leaks its var_type into a subsequent enum declaration.
+        var_decl_node->var_type = typeNodeCopy->var_type;
         // ---
 
         addChild(finalCompoundNode, var_decl_node);

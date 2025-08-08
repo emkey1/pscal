@@ -493,9 +493,18 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     if (!node_to_inspect && context_symbol) {
         node_to_inspect = context_symbol->type_def;
     }
+    if (node_to_inspect && node_to_inspect->type == AST_TYPE_REFERENCE && node_to_inspect->right) {
+        node_to_inspect = node_to_inspect->right;
+    }
     // --- END MODIFICATION ---
 
     AST* actual_type_def = node_to_inspect;
+
+    // If the resolved type definition is an enum, ensure the value type reflects that.
+    if (actual_type_def && actual_type_def->type == AST_ENUM_TYPE && type != TYPE_ENUM) {
+        type = TYPE_ENUM;
+        v.type = TYPE_ENUM;
+    }
 
     if (type == TYPE_POINTER) {
         #ifdef DEBUG
@@ -716,8 +725,11 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_MEMORYSTREAM: v.mstream = createMStream(); break;
         case TYPE_ENUM:
              v.enum_val.ordinal = 0;
-             v.enum_val.enum_name = (node_to_inspect && node_to_inspect->token && node_to_inspect->token->value) ? strdup(node_to_inspect->token->value) : strdup("<unknown_enum>");
+             v.enum_val.enum_name = (actual_type_def && actual_type_def->token && actual_type_def->token->value)
+                                      ? strdup(actual_type_def->token->value)
+                                      : strdup("<unknown_enum>");
              if (!v.enum_val.enum_name) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
+             v.base_type_node = actual_type_def;
              break;
         case TYPE_BYTE:    v.i_val = 0; break;
         case TYPE_WORD:    v.i_val = 0; break;

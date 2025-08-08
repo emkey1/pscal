@@ -238,6 +238,17 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
         return;
     }
 
+    // If the provided type definition is an enum, force the symbol type to TYPE_ENUM.
+    if (type_def) {
+        AST *def = type_def;
+        if (def->type == AST_TYPE_REFERENCE && def->right) {
+            def = def->right;
+        }
+        if (def->type == AST_ENUM_TYPE) {
+            type = TYPE_ENUM;
+        }
+    }
+
     // Check for duplicates before inserting (optional - currently just warns/returns)
     // If strict "duplicate identifier" errors are needed, this check should be here
     // before allocation. For now, let's match the previous behavior and allow
