@@ -2,7 +2,8 @@
 #BIN="$HOME/.bin"          # all your executables live here
 BIN="$HOME/Dropbox/PBuild/build/bin"          # all your executables live here
 
-TESTS="$HOME/git/pscal/Tests"  # all your .p / .pas files live here
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TESTS="${TESTS:-$ROOT/Tests}"  # all your .p / .pas files live here
 
 PSCAL="$BIN/pscal"       # plain interpreter
 
