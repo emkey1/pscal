@@ -544,7 +544,7 @@ static inline long long coerceDeltaToI64(const Value* v) {
 Value vm_builtin_ord(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "ord expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
-    if (arg.type == TYPE_CHAR) return makeInt((long long)arg.c_val);
+    if (arg.type == TYPE_CHAR) return makeInt((unsigned char)arg.c_val);
     if (arg.type == TYPE_BOOLEAN) return makeInt(arg.i_val);
     if (arg.type == TYPE_ENUM) return makeInt(arg.enum_val.ordinal);
     if (arg.type == TYPE_INTEGER) return makeInt(arg.i_val);
@@ -710,7 +710,7 @@ Value vm_builtin_low(VM* vm, int arg_count, Value* args) {
 
     switch (t) {
         case TYPE_INTEGER: return makeInt(-2147483648);
-        case TYPE_CHAR:    return makeChar((char)0);
+        case TYPE_CHAR:    return makeChar(0);
         case TYPE_BOOLEAN: return makeBoolean(false);
         case TYPE_BYTE:    return makeInt(0);
         case TYPE_WORD:    return makeInt(0);
@@ -767,7 +767,7 @@ Value vm_builtin_high(VM* vm, int arg_count, Value* args) {
 
     switch (t) {
         case TYPE_INTEGER: return makeInt(2147483647);
-        case TYPE_CHAR:    return makeChar((char)255);
+        case TYPE_CHAR:    return makeChar(255);
         case TYPE_BOOLEAN: return makeBoolean(true);
         case TYPE_BYTE:    return makeInt(255);
         case TYPE_WORD:    return makeInt(65535);
