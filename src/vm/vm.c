@@ -927,17 +927,18 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 // ENUM comparison
                 else if (a_val.type == TYPE_ENUM && b_val.type == TYPE_ENUM) {
                     bool types_match = false;
-                    if (a_val.enum_val.enum_name == NULL && b_val.enum_val.enum_name == NULL) {
-                        types_match = true;
-                    } else if (a_val.enum_val.enum_name != NULL && b_val.enum_val.enum_name != NULL &&
-                               strcmp(a_val.enum_val.enum_name, b_val.enum_val.enum_name) == 0) {
+                    if (a_val.enum_val.enum_name != NULL && b_val.enum_val.enum_name != NULL &&
+                        strcmp(a_val.enum_val.enum_name, b_val.enum_val.enum_name) == 0) {
                         types_match = true;
                     }
 
+                    int ord_a = a_val.enum_val.ordinal;
+                    int ord_b = b_val.enum_val.ordinal;
+
                     if (instruction_val == OP_EQUAL) {
-                        result_val = makeBoolean(types_match && (a_val.enum_val.ordinal == b_val.enum_val.ordinal));
+                        result_val = makeBoolean(types_match && (ord_a == ord_b));
                     } else if (instruction_val == OP_NOT_EQUAL) {
-                        result_val = makeBoolean(!types_match || (a_val.enum_val.ordinal != b_val.enum_val.ordinal));
+                        result_val = makeBoolean(!types_match || (ord_a != ord_b));
                     } else {
                         if (!types_match) {
                             runtimeError(vm, "Runtime Error: Cannot compare different ENUM types ('%s' vs '%s') with relational operator.",
@@ -945,8 +946,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                                          b_val.enum_val.enum_name ? b_val.enum_val.enum_name : "<anon>");
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                         }
-                        int ord_a = a_val.enum_val.ordinal;
-                        int ord_b = b_val.enum_val.ordinal;
                         switch (instruction_val) {
                             case OP_GREATER:       result_val = makeBoolean(ord_a > ord_b);  break;
                             case OP_GREATER_EQUAL: result_val = makeBoolean(ord_a >= ord_b); break;
