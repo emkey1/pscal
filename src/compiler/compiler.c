@@ -693,6 +693,18 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             // records, dynamic strings, and fixed-length strings.
                             const char* type_name = (type_specifier_node && type_specifier_node->token) ? type_specifier_node->token->value : "";
                             writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, type_name), getLine(varNameNode));
+
+                            if (node->var_type == TYPE_STRING) {
+                                int max_len = 0;
+                                if (actual_type_def_node && actual_type_def_node->right) {
+                                    Value len_val = evaluateCompileTimeValue(actual_type_def_node->right);
+                                    if (len_val.type == TYPE_INTEGER) {
+                                        max_len = (int)len_val.i_val;
+                                    }
+                                    freeValue(&len_val);
+                                }
+                                writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, max_len), getLine(varNameNode));
+                            }
                         }
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
                     }
