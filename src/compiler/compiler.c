@@ -1035,22 +1035,22 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         writeBytecodeChunk(chunk, OP_EQUAL, line);                  // Stack: [case, bool]
                     }
                     
-                    // If the result is true, jump to the body.
-                    int jump_to_body = chunk->count;
-                    writeBytecodeChunk(chunk, OP_NOT, line);
+                    // If the comparison is false, skip the branch body.
+                    int false_jump = chunk->count;
                     writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
-                    
-                    // If we fall through, this label matched. Jump to the body.
-                    patchShort(chunk, jump_to_body + 2, chunk->count - (jump_to_body + 4));
 
-                    // The branch body starts here.
+                    // The branch body starts here when the label matches.
                     writeBytecodeChunk(chunk, OP_POP, line); // Pop the matched case value.
                     compileStatement(branch->right, chunk, getLine(branch->right));
-                    
+
                     // After body, jump to the end of the CASE.
                     end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
                     end_jumps[end_jumps_count++] = chunk->count;
                     writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
+
+                    // Patch the false jump to point to the next label.
+                    patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
+                    fallthrough_jump = false_jump + 1;
 
                     // If a label in a multi-label branch matches, we jump to the body.
                     // The other labels for this branch are now irrelevant.
