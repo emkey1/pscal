@@ -2555,6 +2555,16 @@ AST *factor(Parser *parser) {
              } else { node->children = NULL; node->child_count = 0; node->child_capacity=0; } // Empty arg list '()'
              if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) { errorParser(parser,"Expected ) after args"); return node;}
              eat(parser, TOKEN_RPAREN); // Eat ')'
+
+             // If this is a builtin low/high call on 'char', mark result type as char
+             if (node->token && isBuiltin(node->token->value) && node->child_count == 1) {
+                 if (strcasecmp(node->token->value, "low") == 0 || strcasecmp(node->token->value, "high") == 0) {
+                     AST* arg0 = node->children[0];
+                     if (arg0 && arg0->token && strcasecmp(arg0->token->value, "char") == 0) {
+                         setTypeAST(node, TYPE_CHAR);
+                     }
+                 }
+             }
              // Type annotation will set the function's return type later
         }
         // Check if lvalue returned a simple variable that might be a parameter-less function
