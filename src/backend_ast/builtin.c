@@ -211,7 +211,14 @@ Value vm_builtin_succ(VM* vm, int arg_count, Value* args) {
         case TYPE_INTEGER: return makeInt(arg.i_val + 1);
         case TYPE_CHAR:    return makeChar(arg.c_val + 1);
         case TYPE_BOOLEAN: return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
-        // Enums would require more type info
+        case TYPE_ENUM: {
+            int ordinal = arg.enum_val.ordinal;
+            if (arg.enum_meta && ordinal + 1 >= arg.enum_meta->member_count) {
+                runtimeError(vm, "Succ enum overflow.");
+                return makeVoid();
+            }
+            return makeEnum(arg.enum_val.enum_name, ordinal + 1);
+        }
         default:
             runtimeError(vm, "Succ requires an ordinal type argument. Got %s.", varTypeToString(arg.type));
             return makeVoid();
