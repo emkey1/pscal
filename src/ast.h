@@ -41,5 +41,5 @@ bool verifyASTLinks(AST *node, AST *expectedParent);
 void freeTypeTableASTNodes(void);
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode);
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode);
-VarType getBuiltinReturnType(const char* name);
+VarType getBuiltInFunctionReturnType(AST *callNode);
 #endif // AST_H
