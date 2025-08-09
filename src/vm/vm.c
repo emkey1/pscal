@@ -11,7 +11,6 @@
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "globals.h"
-#include "backend_ast/interpreter.h" // For makeCopyOfValue (If still needed, consider moving to utils.c)
 #include "backend_ast/audio.h"
 #include "frontend/parser.h"
 #include "frontend/ast.h"
