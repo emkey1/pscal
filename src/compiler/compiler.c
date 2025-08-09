@@ -842,6 +842,17 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     } else if (node->var_type == TYPE_FILE) {
                         writeBytecodeChunk(chunk, OP_INIT_LOCAL_FILE, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+                    } else if (node->var_type == TYPE_POINTER) {
+                        writeBytecodeChunk(chunk, OP_INIT_LOCAL_POINTER, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+
+                        const char* type_name = "";
+                        if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
+                            type_name = type_specifier_node->token->value;
+                        } else if (actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
+                            type_name = actual_type_def_node->token->value;
+                        }
+                        emitConstantIndex16(chunk, addStringConstant(chunk, type_name), getLine(varNameNode));
                     }
                 }
             }
