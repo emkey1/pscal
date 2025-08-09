@@ -48,7 +48,7 @@ Value makeNil(void);
 // Used by the 'new' builtin.
 Value makePointer(void* address, AST* base_type_node); // <<< ADD THIS PROTOTYPE >>>
 Value makeString(const char *val);
-Value makeChar(char c);
+Value makeChar(unsigned char c);
 Value makeBoolean(int b);
 Value makeFile(FILE *f);
 Value makeRecord(FieldValue *rec);

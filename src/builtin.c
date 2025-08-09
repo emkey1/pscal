@@ -933,7 +933,7 @@ Value executeBuiltinUpcase(AST *node) {
     }
 
     char up = toupper((unsigned char)ch);
-    return makeChar(up);
+    return makeChar((unsigned char)up);
 }
 
 #include <termios.h> // Make sure these headers are included at the top of builtin.c
@@ -1254,7 +1254,7 @@ Value executeBuiltinInc(AST *node) {
              newValue = makeBoolean((int)new_iVal); break;
         case TYPE_CHAR:
              if (new_iVal > 255 || new_iVal < 0) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
-             newValue = makeChar((char)new_iVal); break;
+             newValue = makeChar((unsigned char)new_iVal); break;
         case TYPE_BYTE:
              if (new_iVal > 255 || new_iVal < 0) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
              newValue = makeInt(new_iVal); newValue.type = TYPE_BYTE; break;
@@ -1340,7 +1340,7 @@ Value executeBuiltinDec(AST *node) {
              newValue = makeBoolean((int)new_iVal); break;
          case TYPE_CHAR:
              if (new_iVal < 0 || new_iVal > 255) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
-             newValue = makeChar((char)new_iVal); break;
+             newValue = makeChar((unsigned char)new_iVal); break;
          case TYPE_BYTE:
               if (new_iVal < 0 || new_iVal > 255) { /* Error handling */ freeValue(&currentVal); EXIT_FAILURE_HANDLER(); }
               newValue = makeInt(new_iVal); newValue.type = TYPE_BYTE; break;
@@ -2313,7 +2313,7 @@ Value executeBuiltinLow(AST *node) {
         // return makeInt(0);
     } else if (strcasecmp(typeName, "char") == 0) {
         // Low(Char) is ASCII NUL (ordinal 0) and must stay TYPE_CHAR
-        return makeChar(0);
+        return makeChar((unsigned char)0);
     } else if (strcasecmp(typeName, "boolean") == 0) {
         return makeBoolean(0); // Low(Boolean) is False (ordinal 0)
     } else if (strcasecmp(typeName, "byte") == 0) {
@@ -2391,7 +2391,7 @@ Value executeBuiltinHigh(AST *node) {
         // Assuming 32-bit unsigned integer maximum for simplicity
         return makeInt(4294967295); // Or MAX_CARDINAL if defined
     } else if (strcasecmp(typeName, "char") == 0) {
-        return makeChar((char)255); // High(Char) is ASCII 255 (assuming 8-bit char)
+        return makeChar((unsigned char)255); // High(Char) is ASCII 255 (assuming 8-bit char)
     } else if (strcasecmp(typeName, "boolean") == 0) {
         return makeBoolean(1); // High(Boolean) is True (ordinal 1)
     } else if (strcasecmp(typeName, "byte") == 0) {
@@ -2485,7 +2485,7 @@ Value executeBuiltinSucc(AST *node) {
             maxOrdinal = 255;
             checkMax = true;
             if (currentOrdinal >= maxOrdinal && checkMax) { goto succ_overflow; }
-            result = makeChar((char)(currentOrdinal + 1));
+            result = makeChar((unsigned char)(currentOrdinal + 1));
             break;
         case TYPE_BOOLEAN:
             currentOrdinal = argVal.i_val;
