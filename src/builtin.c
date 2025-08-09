@@ -2494,33 +2494,61 @@ Value executeBuiltinSucc(AST *node) {
             if (currentOrdinal >= maxOrdinal && checkMax) { goto succ_overflow; }
             result = makeBoolean((int)(currentOrdinal + 1));
             break;
-        case TYPE_ENUM:
-            {
-                currentOrdinal = argVal.enum_val.ordinal;
+        case TYPE_ENUM: {
+            /*
+             * Enum values should carry their originating type name in
+             * argVal.enum_val.enum_name.  In practice, however, older code
+             * paths sometimes produce enum Values without this metadata.  When
+             * that occurs, the previous implementation treated the argument as
+             * non‑ordinal and bailed out, yielding the user facing
+             * "Succ requires an ordinal type argument" error even though an
+             * enum was supplied.  To make Succ robust we now attempt to infer
+             * the enum's type from the AST/symbol table when the name is
+             * missing before performing the ordinal bounds check.
+             */
 
-                if (!argVal.enum_val.enum_name) {
-                    fprintf(stderr, "Runtime error: Enum value missing type name in Succ().\n");
-                    freeValue(&argVal);
-                    EXIT_FAILURE_HANDLER();
+            currentOrdinal = argVal.enum_val.ordinal;
+
+            const char *enumTypeName = argVal.enum_val.enum_name;
+
+            // If the value lacks a type name, try to deduce it from the
+            // argument's AST variable (if any).
+            if (!enumTypeName && node->child_count > 0) {
+                AST *argNode = node->children[0];
+                if (argNode && argNode->type == AST_VARIABLE && argNode->token) {
+                    Symbol *sym = lookupSymbol(argNode->token->value);
+                    if (sym && sym->type_def && sym->type_def->token) {
+                        enumTypeName = sym->type_def->token->value;
+                    }
                 }
-
-                AST *typeDef = lookupType(argVal.enum_val.enum_name);
-                if (typeDef && typeDef->type == AST_TYPE_REFERENCE) {
-                    typeDef = typeDef->right; // Resolve reference
-                }
-                if (!typeDef || typeDef->type != AST_ENUM_TYPE) {
-                    fprintf(stderr, "Runtime error: Cannot resolve enum type '%s' in Succ().\n",
-                            argVal.enum_val.enum_name);
-                    freeValue(&argVal);
-                    EXIT_FAILURE_HANDLER();
-                }
-
-                maxOrdinal = typeDef->child_count - 1;
-                if (currentOrdinal >= maxOrdinal) { goto succ_overflow; }
-
-                result = makeEnum(argVal.enum_val.enum_name, (int)(currentOrdinal + 1));
             }
+
+            if (!enumTypeName) {
+                fprintf(stderr, "Runtime error: Enum value missing type name in Succ().\n");
+                freeValue(&argVal);
+                EXIT_FAILURE_HANDLER();
+            }
+
+            AST *typeDef = lookupType(enumTypeName);
+            if (typeDef && typeDef->type == AST_TYPE_REFERENCE) {
+                typeDef = typeDef->right; // Resolve reference
+            }
+            if (!typeDef || typeDef->type != AST_ENUM_TYPE) {
+                fprintf(stderr,
+                        "Runtime error: Cannot resolve enum type '%s' in Succ().\n",
+                        enumTypeName);
+                freeValue(&argVal);
+                EXIT_FAILURE_HANDLER();
+            }
+
+            maxOrdinal = typeDef->child_count - 1;
+            if (currentOrdinal >= maxOrdinal) {
+                goto succ_overflow;
+            }
+
+            result = makeEnum(enumTypeName, (int)(currentOrdinal + 1));
             break;
+        }
          case TYPE_BYTE:
              currentOrdinal = argVal.i_val;
              maxOrdinal = 255; checkMax = true;
