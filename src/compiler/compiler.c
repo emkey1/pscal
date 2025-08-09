@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
+#include <math.h>
 
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h" // For isBuiltin
@@ -368,69 +369,85 @@ Value evaluateCompileTimeValue(AST* node) {
             if (node->left && node->right && node->token) {
                 Value left_val = evaluateCompileTimeValue(node->left);
                 Value right_val = evaluateCompileTimeValue(node->right);
-                Value result = makeVoid(); // Default
 
-                if (left_val.type != TYPE_VOID && left_val.type != TYPE_UNKNOWN &&
-                    right_val.type != TYPE_VOID && right_val.type != TYPE_UNKNOWN) {
+                if (left_val.type == TYPE_VOID || left_val.type == TYPE_UNKNOWN ||
+                    right_val.type == TYPE_VOID || right_val.type == TYPE_UNKNOWN) {
+                    freeValue(&left_val);
+                    freeValue(&right_val);
+                    return makeVoid();
+                }
 
-                    if (left_val.type == TYPE_INTEGER && right_val.type == TYPE_INTEGER) {
-                        switch (node->token->type) {
-                            case TOKEN_INT_DIV:
-                            case TOKEN_SLASH: // Treat '/' as integer division for const eval when both operands are integers
-                                if (right_val.i_val == 0) {
-                                    fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                                } else {
-                                    result = makeInt(left_val.i_val / right_val.i_val);
-                                }
-                                break;
-                            case TOKEN_PLUS:
-                                result = makeInt(left_val.i_val + right_val.i_val);
-                                break;
-                            case TOKEN_MINUS:
-                                result = makeInt(left_val.i_val - right_val.i_val);
-                                break;
-                            case TOKEN_MUL:
-                                result = makeInt(left_val.i_val * right_val.i_val);
-                                break;
-                            case TOKEN_MOD:
-                                if (right_val.i_val == 0) {
-                                    fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                                } else {
-                                    result = makeInt(left_val.i_val % right_val.i_val);
-                                }
-                                break;
-                            default:
-                                break;
-                        }
-                    } else if (left_val.type == TYPE_REAL || right_val.type == TYPE_REAL) {
-                        double a = (left_val.type == TYPE_REAL) ? left_val.r_val : (double)left_val.i_val;
-                        double b = (right_val.type == TYPE_REAL) ? right_val.r_val : (double)right_val.i_val;
-                        switch (node->token->type) {
-                            case TOKEN_PLUS:
-                                result = makeReal(a + b);
-                                break;
-                            case TOKEN_MINUS:
-                                result = makeReal(a - b);
-                                break;
-                            case TOKEN_MUL:
-                                result = makeReal(a * b);
-                                break;
-                            case TOKEN_SLASH:
-                                if (b == 0.0) {
-                                    fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                                } else {
-                                    result = makeReal(a / b);
-                                }
-                                break;
-                            case TOKEN_INT_DIV:
-                            case TOKEN_MOD:
-                                fprintf(stderr, "Compile-time Error: Invalid operator for real constant expression.\n");
-                                break;
-                            default:
-                                break;
-                        }
+                Value result = makeVoid();
+
+                if (left_val.type == TYPE_REAL || right_val.type == TYPE_REAL) {
+                    double a = (left_val.type == TYPE_REAL) ? left_val.r_val : (double)left_val.i_val;
+                    double b = (right_val.type == TYPE_REAL) ? right_val.r_val : (double)right_val.i_val;
+                    switch (node->token->type) {
+                        case TOKEN_PLUS:
+                            result = makeReal(a + b);
+                            break;
+                        case TOKEN_MINUS:
+                            result = makeReal(a - b);
+                            break;
+                        case TOKEN_MUL:
+                            result = makeReal(a * b);
+                            break;
+                        case TOKEN_SLASH:
+                            if (b == 0.0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeReal(a / b);
+                            }
+                            break;
+                        case TOKEN_MOD:
+                            if (b == 0.0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeReal(fmod(a, b));
+                            }
+                            break;
+                        default:
+                            break;
+                    }
+                } else { // Both operands are integers
+                    long long a = left_val.i_val;
+                    long long b = right_val.i_val;
+                    switch (node->token->type) {
+                        case TOKEN_PLUS:
+                            result = makeInt(a + b);
+                            break;
+                        case TOKEN_MINUS:
+                            result = makeInt(a - b);
+                            break;
+                        case TOKEN_MUL:
+                            result = makeInt(a * b);
+                            break;
+                        case TOKEN_SLASH:
+                            if (b == 0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeInt(a / b);
+                            }
+                            break;
+                        case TOKEN_INT_DIV:
+                            if (b == 0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeInt(a / b);
+                            }
+                            break;
+                        case TOKEN_MOD:
+                            if (b == 0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeInt(a % b);
+                            }
+                            break;
+                        default:
+                            break;
                     }
                 }
+
                 freeValue(&left_val);
                 freeValue(&right_val);
                 return result;
