@@ -1398,7 +1398,32 @@ comparison_error_label:
                     }
 
                     // (Your existing logic for handling fixed-length strings, pointers, reals, etc. goes here)
-                    if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
+                    if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length <= 0) {
+                        if (value_to_set.type == TYPE_CHAR) {
+                            freeValue(target_lvalue_ptr);
+                            target_lvalue_ptr->s_val = (char*)malloc(2);
+                            if (!target_lvalue_ptr->s_val) {
+                                runtimeError(vm, "VM Error: Malloc failed for CHAR to STRING assignment.");
+                            } else {
+                                target_lvalue_ptr->s_val[0] = value_to_set.c_val;
+                                target_lvalue_ptr->s_val[1] = '\0';
+                            }
+                            target_lvalue_ptr->type = TYPE_STRING;
+                            target_lvalue_ptr->max_length = -1;
+                        } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                            freeValue(target_lvalue_ptr);
+                            target_lvalue_ptr->s_val = strdup(value_to_set.s_val);
+                            if (!target_lvalue_ptr->s_val) {
+                                runtimeError(vm, "VM Error: strdup failed for string assignment.");
+                                target_lvalue_ptr->s_val = NULL;
+                            }
+                            target_lvalue_ptr->type = TYPE_STRING;
+                            target_lvalue_ptr->max_length = -1;
+                        } else {
+                            runtimeError(vm, "Type mismatch: Cannot assign this type to a dynamic string.");
+                        }
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
                         if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
                             strncpy(target_lvalue_ptr->s_val, value_to_set.s_val, target_lvalue_ptr->max_length);
                             target_lvalue_ptr->s_val[target_lvalue_ptr->max_length] = '\0'; // Ensure null termination
