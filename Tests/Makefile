@@ -6,15 +6,33 @@ PSCAL = ../build/bin/pscal
 # List of test files
 TESTS = test1.p test2.p test3.p test4.p test5.p test6.p test7.p test8.p test9.p BoolTest1.p BoolTest2.p BoolTest3.p BoolTest4.p TestSuite.p math.p FileTests.p FileTests2.p TestCase.p inc.p pass-by-reference.p StringTruncationTest.p LowHighCharTest.p GlobalEnumTest.p EnumComparisonTest.p EnumCaseTest.p RecordFieldIndexTest.p CompileTimeBounds.p
 
+# SDL-specific tests
+SDL_TESTS = SDLFeaturesTest SDLRenderCopyTest.p
+
+# Detect if SDL was enabled in the build (via CMakeCache)
+SDL_ENABLED := $(shell grep -q '^SDL:BOOL=ON$$' ../build/CMakeCache.txt 2>/dev/null && echo 1 || echo 0)
+
 all: test
 
 test:
 	@echo "Running tests..."
 	@for t in $(TESTS); do \
-		echo "----------------------------------------------------"; \
-		echo "Running $$t:"; \
-		$(PSCAL) $$t; \
-		echo "----------------------------------------------------"; \
-		echo ""; \
+	echo "----------------------------------------------------"; \
+	echo "Running $$t:"; \
+	$(PSCAL) $$t; \
+	echo "----------------------------------------------------"; \
+	echo ""; \
 	done
-
+	@if [ $(SDL_ENABLED) -eq 1 ]; then \
+	echo "Running SDL tests..."; \
+	for t in $(SDL_TESTS); do \
+	echo "----------------------------------------------------"; \
+	echo "Running $$t:"; \
+	$(PSCAL) $$t; \
+	echo "----------------------------------------------------"; \
+	echo ""; \
+	done; \
+	else \
+	echo "Skipping SDL tests (SDL option is OFF)"; \
+	fi
+	
