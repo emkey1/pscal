@@ -367,7 +367,7 @@ Value makeString(const char *val) {
     return v;
 }
 
-Value makeChar(char c) {
+Value makeChar(unsigned char c) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_CHAR;

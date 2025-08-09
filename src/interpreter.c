@@ -841,7 +841,7 @@ Value eval(AST *node) {
                 size_t idx_0based = (size_t)idx_ll - 1; // Convert to 0-based index
 
                 // 4. Extract character and return as TYPE_CHAR Value
-                result = makeChar(str_ptr[idx_0based]);
+                result = makeChar((unsigned char)str_ptr[idx_0based]);
                 #ifdef DEBUG
                 fprintf(stderr, "[DEBUG EVAL ARR_ACCESS] String index %lld resolved to char '%c'.\n", idx_ll, result.c_val);
                 #endif
@@ -2208,7 +2208,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 if (loop_var_type == TYPE_CHAR) {
                      if (current.type != TYPE_CHAR) { /* Error */ fprintf(stderr, "Loop variable %s changed type mid-loop\n", var_name); EXIT_FAILURE_HANDLER(); }
                      next_ordinal = current.c_val + step;
-                     next_val = makeChar((char)next_ordinal);
+                     next_val = makeChar((unsigned char)next_ordinal);
                 } else if (loop_var_type == TYPE_INTEGER || loop_var_type == TYPE_BYTE || loop_var_type == TYPE_WORD || loop_var_type == TYPE_ENUM || loop_var_type == TYPE_BOOLEAN) {
                      // Use ordinal for enum calculation
                      long long current_ordinal = (loop_var_type == TYPE_ENUM) ? current.enum_val.ordinal : current.i_val;
@@ -2448,7 +2448,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                         newValue = makeReal(atof(buffer));
                         break;
                     case TYPE_CHAR:
-                        newValue = makeChar(buffer[0]); // Take first char
+                        newValue = makeChar((unsigned char)buffer[0]); // Take first char
                         break;
                     case TYPE_BOOLEAN:
                         // Simplified: treat non-zero integer string as true
@@ -2540,7 +2540,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                         updateSymbol(target->token->value, makeString(buffer));
                     else if (sym->type == TYPE_CHAR) {
                         char ch = (buffer[0] != '\0') ? buffer[0] : ' ';
-                        updateSymbol(target->token->value, makeChar(ch));
+                        updateSymbol(target->token->value, makeChar((unsigned char)ch));
                     }
                 }
             }
