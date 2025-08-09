@@ -15,6 +15,8 @@ set(BASE_VERSION "${CURRENT_YEAR}${CURRENT_MONTH}${CURRENT_DAY}.${CURRENT_HOUR}$
 # Add an option for RELEASE build, default to OFF (meaning DEV)
 # This allows "cmake .. -DRELEASE_BUILD=ON"
 option(RELEASE_BUILD "Build as a release version (appends _REL)" OFF)
+option(BUILD_SPSCAL "Build SDL-enabled release binary" OFF)
+option(BUILD_SDSCAL "Build SDL-enabled debug binary" OFF)
 
 if(RELEASE_BUILD)
     set(VERSION_SUFFIX "_REL")
@@ -39,12 +41,20 @@ add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
 # ---- gather sources ------------------------------------------------------
 file(GLOB SRC_FILES CONFIGURE_DEPENDS src/*.c src/*.h)
+set(EXE_TARGETS pscal dscal hscal)
 
 # ---- Release build -------------------------------------------------------
 add_executable(pscal ${SRC_FILES})
 target_compile_options(pscal PRIVATE -O3)
 if(RELEASE_BUILD) # If you use the CMake option RELEASE_BUILD
     target_compile_definitions(pscal PRIVATE RELEASE) # Define RELEASE C macro for pscal target
+endif()
+
+if(BUILD_SPSCAL)
+    add_executable(spscal ${SRC_FILES})
+    target_compile_definitions(spscal PRIVATE SDL)
+    target_compile_options(spscal PRIVATE -O3)
+    list(APPEND EXE_TARGETS spscal)
 endif()
 
 # ---- ASan debug build ----------------------------------------------------
@@ -57,6 +67,14 @@ target_compile_definitions(dscal PRIVATE DEBUG)
 target_compile_options( dscal PRIVATE -fsanitize=address -g)
 target_link_options( dscal PRIVATE -fsanitize=address)
 
+if(BUILD_SDSCAL)
+    add_executable(sdscal ${SRC_FILES})
+    target_compile_definitions(sdscal PRIVATE SDL DEBUG)
+    target_compile_options(sdscal PRIVATE -fsanitize=address -g)
+    target_link_options(sdscal PRIVATE -fsanitize=address)
+    list(APPEND EXE_TARGETS sdscal)
+endif()
+
 # ---- “no-exit” build -----------------------------------------------------
 add_executable(hscal ${SRC_FILES})
 target_compile_definitions(hscal PRIVATE SUPPRESS_EXIT)
@@ -64,7 +82,7 @@ target_compile_options( hscal PRIVATE -g)
 
 # ---- optional install ----------------------------------------------------
 include(GNUInstallDirs)
-install(TARGETS pscal dscal RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS ${EXE_TARGETS} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # --------------------------------------------------------------------------
 # SDL Support  ──────────────────────────────────────────────────────────────
@@ -203,7 +221,7 @@ list(REMOVE_DUPLICATES ALL_SDL_LIBRARIES)
 message(STATUS "Consolidated All SDL Libraries to Link = ${ALL_SDL_LIBRARIES}")
 
 # --- Apply to targets ---
-foreach(TARGET_EXE pscal dscal hscal)
+foreach(TARGET_EXE ${EXE_TARGETS})
     target_include_directories(${TARGET_EXE} PRIVATE ${ALL_SDL_INCLUDE_DIRS})
     target_link_libraries(${TARGET_EXE} PRIVATE ${ALL_SDL_LIBRARIES} m curl) # Added m and curl here
 endforeach()
