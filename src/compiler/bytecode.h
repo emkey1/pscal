@@ -52,7 +52,10 @@ typedef enum {
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
     OP_GET_GLOBAL_ADDRESS,
-    
+    OP_GET_GLOBAL16,  // 16-bit name index variant of OP_GET_GLOBAL
+    OP_SET_GLOBAL16,  // 16-bit name index variant of OP_SET_GLOBAL
+    OP_GET_GLOBAL_ADDRESS16, // 16-bit name index variant of OP_GET_GLOBAL_ADDRESS
+
     OP_GET_LOCAL,     // Get local scoped variables
     OP_SET_LOCAL,     // Set local scoped variables
     OP_INIT_LOCAL_ARRAY, // Initialize local array variable

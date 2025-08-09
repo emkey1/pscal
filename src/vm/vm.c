@@ -279,6 +279,7 @@ void freeVM(VM* vm) {
 // Your existing READ_BYTE and READ_CONSTANT macros are fine as they implicitly use 'vm' from runVM scope
 #define READ_BYTE() (*vm->ip++)
 #define READ_CONSTANT() (vm->chunk->constants[READ_BYTE()])
+#define READ_CONSTANT16() (vm->chunk->constants[READ_SHORT(vm)])
 
 // Helper function to read a 16-bit short. It will use the READ_BYTE() macro.
 static inline uint16_t READ_SHORT(VM* vm_param) { // Pass vm explicitly here
@@ -591,6 +592,33 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
                 // Optional sanity log (keep while debugging)
                 // fprintf(stderr, "[VM_DEBUG] GET_GLOBAL_ADDRESS '%s'\n", varNameVal.s_val);
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    runtimeError(vm, "Runtime Error: Global '%s' has no Value slot.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, makePointer(sym->value, NULL));
+                break;
+            }
+            case OP_GET_GLOBAL_ADDRESS16: {
+                uint16_t name_idx = READ_SHORT(vm);
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL_ADDRESS16.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for GET_GLOBAL_ADDRESS16 (idx=%u, type=%s).",
+                                 name_idx, varTypeToString(varNameVal.type));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
 
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
                 if (!sym) {
@@ -1494,6 +1522,22 @@ comparison_error_label:
                 push(vm, makeCopyOfValue(sym->value));
                 break;
             }
+            case OP_GET_GLOBAL16: {
+                uint16_t name_idx = READ_SHORT(vm);
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL16.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { return INTERPRET_RUNTIME_ERROR; }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(sym->value));
+                break;
+            }
             case OP_SET_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
@@ -1533,6 +1577,56 @@ comparison_error_label:
                 
                 } else {
                     // This is the logic for all other types (dynamic strings, numbers, etc.)
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&value_from_stack);
+                }
+
+                freeValue(&value_from_stack);
+
+                break;
+            }
+            case OP_SET_GLOBAL16: {
+                uint16_t name_idx = READ_SHORT(vm);
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL16.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for SET_GLOBAL16.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    sym->value = (Value*)malloc(sizeof(Value));
+                    if (!sym->value) {
+                        runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL16.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
+                }
+
+                Value value_from_stack = pop(vm);
+
+                if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
+                    const char* source_str = "";
+                    char char_buf[2] = {0};
+
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        char_buf[0] = value_from_stack.c_val;
+                        source_str = char_buf;
+                    }
+
+                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
+                    sym->value->s_val[sym->value->max_length] = '\0';
+
+                } else {
                     freeValue(sym->value);
                     *(sym->value) = makeCopyOfValue(&value_from_stack);
                 }

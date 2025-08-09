@@ -161,6 +161,9 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         }
         case OP_CONSTANT16:
         case OP_GET_FIELD_ADDRESS16:
+        case OP_GET_GLOBAL16:
+        case OP_SET_GLOBAL16:
+        case OP_GET_GLOBAL_ADDRESS16:
             return 3; // 1 byte opcode + 2-byte operand
         case OP_JUMP:
         case OP_JUMP_IF_FALSE:
@@ -365,6 +368,21 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             uint8_t name_index = chunk->code[offset + 1];
             printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 2;
+        }
+        case OP_GET_GLOBAL16: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
+            return offset + 3;
+        }
+        case OP_SET_GLOBAL16: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            printf("%-16s %4d '%s'\n", "OP_SET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
+            return offset + 3;
+        }
+        case OP_GET_GLOBAL_ADDRESS16: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            printf("%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS16", name_index, AS_STRING(chunk->constants[name_index]));
+            return offset + 3;
         }
         case OP_GET_LOCAL: {
             uint8_t slot = chunk->code[offset + 1];

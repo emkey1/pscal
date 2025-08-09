@@ -99,6 +99,28 @@ static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
     }
 }
 
+// Helper to emit global-variable opcodes that take a name index operand.
+// Selects 8-bit or 16-bit variants based on the index value.
+static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
+                              int name_idx, int line) {
+    if (name_idx < 0) {
+        fprintf(stderr, "L%d: Compiler error: negative name index.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    if (name_idx <= 0xFF) {
+        writeBytecodeChunk(chunk, op8, line);
+        writeBytecodeChunk(chunk, (uint8_t)name_idx, line);
+    } else if (name_idx <= 0xFFFF) {
+        writeBytecodeChunk(chunk, op16, line);
+        emitShort(chunk, (uint16_t)name_idx, line);
+    } else {
+        fprintf(stderr, "L%d: Compiler error: too many constants (%d). Limit is 65535.\n",
+                line, name_idx);
+        compiler_had_error = true;
+    }
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -456,8 +478,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             } else {
                 int nameIndex =  addStringConstant(chunk, varName);
-                writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL_ADDRESS, OP_GET_GLOBAL_ADDRESS16,
+                                   nameIndex, line);
             }
             break;
         }
@@ -1194,8 +1216,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+                emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16,
+                                   var_name_idx, line);
             }
 
             // 2. Setup loop context for handling 'break'
@@ -1208,8 +1230,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                                   var_name_idx, line);
             }
             
             compileRValue(end_node, chunk, getLine(end_node));
@@ -1228,8 +1250,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                                   var_name_idx, line);
             }
             int one_const_idx = addIntConstant(chunk, 1);
             emitConstant(chunk, one_const_idx, line);
@@ -1239,8 +1261,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                writeBytecodeChunk(chunk, OP_SET_GLOBAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_name_idx, line);
+                emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16,
+                                   var_name_idx, line);
             }
 
             // The value from the increment/decrement is still on the stack.
@@ -1588,8 +1610,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     // It's a global variable, so add its name to the constants
                     // using the new helper and emit OP_GET_GLOBAL.
                     int nameIndex = addStringConstant(chunk, varName);
-                    writeBytecodeChunk(chunk, OP_GET_GLOBAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                                       nameIndex, line);
                 }
             }
             break;
