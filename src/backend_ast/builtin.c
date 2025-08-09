@@ -777,7 +777,7 @@ Value vm_builtin_high(VM* vm, int arg_count, Value* args) {
 
     switch (t) {
         case TYPE_INTEGER: return makeInt(2147483647);
-        case TYPE_CHAR:    return makeChar(255);
+        case TYPE_CHAR:    return makeChar((unsigned char)255);
         case TYPE_BOOLEAN: return makeBoolean(true);
         case TYPE_BYTE:    return makeInt(255);
         case TYPE_WORD:    return makeInt(65535);
