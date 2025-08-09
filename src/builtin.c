@@ -2494,23 +2494,30 @@ Value executeBuiltinSucc(AST *node) {
             result = makeBoolean((int)(currentOrdinal + 1));
             break;
         case TYPE_ENUM:
-            { // Keep existing enum logic
-                 currentOrdinal = argVal.enum_val.ordinal;
-                 AST* typeDef = lookupType(argVal.enum_val.enum_name);
-                 if (!typeDef || (typeDef->type == AST_TYPE_REFERENCE && !(typeDef = typeDef->right))) {
-                     fprintf(stderr, "Runtime warning: Cannot determine enum definition for Succ() bounds check on type '%s'.\n", argVal.enum_val.enum_name ? argVal.enum_val.enum_name : "?");
-                     checkMax = false;
-                 } else if (typeDef->type == AST_ENUM_TYPE) {
-                      maxOrdinal = typeDef->child_count - 1;
-                      checkMax = true;
-                 } else {
-                      fprintf(stderr, "Runtime warning: Invalid type definition found for enum '%s' during Succ().\n", argVal.enum_val.enum_name ? argVal.enum_val.enum_name : "?");
-                      checkMax = false;
-                 }
-                 if (currentOrdinal >= maxOrdinal && checkMax) { goto succ_overflow; }
-                 Value nextEnum = makeEnum(argVal.enum_val.enum_name, (int)(currentOrdinal + 1));
-                 result = makeCopyOfValue(&nextEnum);
-                 freeValue(&nextEnum);
+            {
+                currentOrdinal = argVal.enum_val.ordinal;
+
+                if (!argVal.enum_val.enum_name) {
+                    fprintf(stderr, "Runtime error: Enum value missing type name in Succ().\n");
+                    freeValue(&argVal);
+                    EXIT_FAILURE_HANDLER();
+                }
+
+                AST *typeDef = lookupType(argVal.enum_val.enum_name);
+                if (typeDef && typeDef->type == AST_TYPE_REFERENCE) {
+                    typeDef = typeDef->right; // Resolve reference
+                }
+                if (!typeDef || typeDef->type != AST_ENUM_TYPE) {
+                    fprintf(stderr, "Runtime error: Cannot resolve enum type '%s' in Succ().\n",
+                            argVal.enum_val.enum_name);
+                    freeValue(&argVal);
+                    EXIT_FAILURE_HANDLER();
+                }
+
+                maxOrdinal = typeDef->child_count - 1;
+                if (currentOrdinal >= maxOrdinal) { goto succ_overflow; }
+
+                result = makeEnum(argVal.enum_val.enum_name, (int)(currentOrdinal + 1));
             }
             break;
          case TYPE_BYTE:

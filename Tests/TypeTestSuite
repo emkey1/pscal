@@ -435,8 +435,17 @@ begin
   AssertEqualInt(3, ord(cYellow), 'Ord(cYellow)');
   AssertEqualEnum(cRed, low(TColor), 'Low(TColor)');
   AssertEqualEnum(cYellow, high(TColor), 'High(TColor)');
+
+  // Succ on enum literals
   AssertEqualEnum(cGreen, succ(cRed), 'Succ(cRed)');
   AssertEqualEnum(cBlue, succ(cGreen), 'Succ(cGreen)');
+
+  // Succ on enum variables
+  testEnum := cRed;
+  testEnum := succ(testEnum);
+  AssertEqualEnum(cGreen, testEnum, 'Succ(testEnum=cRed)');
+  testEnum := succ(testEnum);
+  AssertEqualEnum(cBlue, testEnum, 'Succ(testEnum=cGreen)');
   // AssertEqualEnum(cBlue, pred(cYellow), 'Pred(cYellow)');
 
   // Test assignment using Ord (if supported)
