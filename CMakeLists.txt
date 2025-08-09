@@ -235,6 +235,9 @@ add_pscal_executable(pscal)
 add_pscal_executable(dscal)
 # add_pscal_executable(hscal) // Lets not build this normally
 
+# ---- Examples ----
+add_subdirectory(Examples)
+
 # ---- optional install ----
 include(GNUInstallDirs)
 install(TARGETS pscal dscal
