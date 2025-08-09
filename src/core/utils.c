@@ -1889,6 +1889,132 @@ Value* resolveLValueToPtr(AST* lvalueNode) {
     return NULL; // Should not be reached
 }
 
+// --- Set utility helpers (internal) ---
+static bool setContainsOrdinalUtil(const Value* setVal, long long ordinal) {
+    if (!setVal || setVal->type != TYPE_SET || !setVal->set_val.set_values) {
+        return false;
+    }
+    for (int i = 0; i < setVal->set_val.set_size; i++) {
+        if (setVal->set_val.set_values[i] == ordinal) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void addOrdinalToResultSetUtil(Value* resultVal, long long ordinal) {
+    if (!resultVal || resultVal->type != TYPE_SET) return;
+
+    if (setContainsOrdinalUtil(resultVal, ordinal)) {
+        return;
+    }
+
+    if (resultVal->set_val.set_size >= resultVal->max_length) {
+        int new_capacity = (resultVal->max_length == 0) ? 8 : resultVal->max_length * 2;
+        long long* new_values = realloc(resultVal->set_val.set_values, sizeof(long long) * new_capacity);
+        if (!new_values) {
+            fprintf(stderr, "FATAL: realloc failed in addOrdinalToResultSetUtil\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        resultVal->set_val.set_values = new_values;
+        resultVal->max_length = new_capacity;
+    }
+
+    resultVal->set_val.set_values[resultVal->set_val.set_size] = ordinal;
+    resultVal->set_val.set_size++;
+}
+
+// --- Set operations exported via utils.h ---
+Value setUnion(Value setA, Value setB) {
+    if (setA.type != TYPE_SET || setB.type != TYPE_SET) {
+        fprintf(stderr, "Internal Error: Non-set type passed to setUnion.\n");
+        return makeVoid();
+    }
+
+    Value result = makeValueForType(TYPE_SET, NULL, NULL);
+    result.max_length = setA.set_val.set_size + setB.set_val.set_size;
+    if (result.max_length > 0) {
+        result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
+        if (!result.set_val.set_values) {
+            fprintf(stderr, "Malloc failed for set union result\n");
+            result.max_length = 0;
+            EXIT_FAILURE_HANDLER();
+        }
+    } else {
+        result.set_val.set_values = NULL;
+    }
+    result.set_val.set_size = 0;
+
+    if (setA.set_val.set_values) {
+        for (int i = 0; i < setA.set_val.set_size; i++) {
+            addOrdinalToResultSetUtil(&result, setA.set_val.set_values[i]);
+        }
+    }
+    if (setB.set_val.set_values) {
+        for (int i = 0; i < setB.set_val.set_size; i++) {
+            addOrdinalToResultSetUtil(&result, setB.set_val.set_values[i]);
+        }
+    }
+
+    return result;
+}
+
+Value setDifference(Value setA, Value setB) {
+    if (setA.type != TYPE_SET || setB.type != TYPE_SET) {
+        return makeVoid();
+    }
+
+    Value result = makeValueForType(TYPE_SET, NULL, NULL);
+    result.max_length = setA.set_val.set_size;
+    if (result.max_length > 0) {
+        result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
+        if (!result.set_val.set_values) {
+            result.max_length = 0;
+            EXIT_FAILURE_HANDLER();
+        }
+    } else {
+        result.set_val.set_values = NULL;
+    }
+    result.set_val.set_size = 0;
+
+    if (setA.set_val.set_values) {
+        for (int i = 0; i < setA.set_val.set_size; i++) {
+            if (!setContainsOrdinalUtil(&setB, setA.set_val.set_values[i])) {
+                addOrdinalToResultSetUtil(&result, setA.set_val.set_values[i]);
+            }
+        }
+    }
+    return result;
+}
+
+Value setIntersection(Value setA, Value setB) {
+    if (setA.type != TYPE_SET || setB.type != TYPE_SET) {
+        return makeVoid();
+    }
+
+    Value result = makeValueForType(TYPE_SET, NULL, NULL);
+    result.max_length = (setA.set_val.set_size < setB.set_val.set_size) ? setA.set_val.set_size : setB.set_val.set_size;
+    if (result.max_length > 0) {
+        result.set_val.set_values = malloc(sizeof(long long) * result.max_length);
+        if (!result.set_val.set_values) {
+            result.max_length = 0;
+            EXIT_FAILURE_HANDLER();
+        }
+    } else {
+        result.set_val.set_values = NULL;
+    }
+    result.set_val.set_size = 0;
+
+    if (setA.set_val.set_values) {
+        for (int i = 0; i < setA.set_val.set_size; i++) {
+            if (setContainsOrdinalUtil(&setB, setA.set_val.set_values[i])) {
+                addOrdinalToResultSetUtil(&result, setA.set_val.set_values[i]);
+            }
+        }
+    }
+    return result;
+}
+
 // Helper function to map 0-15 to ANSI FG codes
 int map16FgColorToAnsi(int pscalColorCode, bool isBold) {
     int basePscalColor = pscalColorCode % 8;

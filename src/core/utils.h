@@ -158,4 +158,9 @@ int computeFlatOffset(Value *array, int *indices);
 Value makeCopyOfValue(const Value *src);
 Value* resolveLValueToPtr(AST* lvalueNode);
 
+// Set operations
+Value setUnion(Value setA, Value setB);
+Value setDifference(Value setA, Value setB);
+Value setIntersection(Value setA, Value setB);
+
 #endif // UTILS_H

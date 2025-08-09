@@ -540,6 +540,28 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             } \
         } \
         \
+        /* Set union/difference/intersection */ \
+        if (!op_is_handled) { \
+            if (a_val_popped.type == TYPE_SET && b_val_popped.type == TYPE_SET) { \
+                switch (current_instruction_code) { \
+                    case OP_ADD: \
+                        result_val = setUnion(a_val_popped, b_val_popped); \
+                        break; \
+                    case OP_SUBTRACT: \
+                        result_val = setDifference(a_val_popped, b_val_popped); \
+                        break; \
+                    case OP_MULTIPLY: \
+                        result_val = setIntersection(a_val_popped, b_val_popped); \
+                        break; \
+                    default: \
+                        runtimeError(vm, "Runtime Error: Unsupported set operation '%s'.", op_char_for_error_msg); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                } \
+                op_is_handled = true; \
+            } \
+        } \
+        \
         /* Numeric arithmetic (INTEGER/BYTE/WORD/REAL) */ \
         if (!op_is_handled) { \
             if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
