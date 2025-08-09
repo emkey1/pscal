@@ -8,7 +8,7 @@ As the code was written primarily by AI's I'm releasing this to the public domai
 
 Install:
 
-You will need cmake, curl, SDL2, and SDL2_ttf, though SDL graphics and sound support is optional.
+You will need cmake and curl. SDL2 and SDL2_ttf are only required when the `SDL` build option is enabled.
 
 Here's how to get them installed if needed...
 
@@ -110,6 +110,12 @@ mkdir build
 cd build
 cmake ..
 make
+```
+
+To build without SDL2 support, configure with:
+
+```
+cmake -DSDL=OFF ..
 ```
 
 Binaries will be in ../build/bin
