@@ -58,8 +58,9 @@ typedef enum {
     OP_INIT_LOCAL_ARRAY, // Initialize local array variable
     OP_INIT_LOCAL_FILE,  // Initialize local file variable
     OP_GET_LOCAL_ADDRESS,
-    
+
     OP_GET_FIELD_ADDRESS,
+    OP_GET_FIELD_ADDRESS16,
     OP_GET_ELEMENT_ADDRESS,
     OP_GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
     OP_SET_INDIRECT,

@@ -160,6 +160,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return current_pos - offset;
         }
         case OP_CONSTANT16:
+        case OP_GET_FIELD_ADDRESS16:
             return 3; // 1 byte opcode + 2-byte operand
         case OP_JUMP:
         case OP_JUMP_IF_FALSE:
@@ -401,6 +402,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 printf("<INVALID FIELD CONST>\n");
             }
             return offset + 2;
+        }
+        case OP_GET_FIELD_ADDRESS16: {
+            uint16_t const_idx = (uint16_t)(chunk->code[offset + 1] << 8) |
+                                 chunk->code[offset + 2];
+            printf("%-16s %4d ", "OP_GET_FIELD_ADDRESS16", const_idx);
+            if (const_idx < chunk->constants_count &&
+                chunk->constants[const_idx].type == TYPE_STRING) {
+                printf("'%s'\n", AS_STRING(chunk->constants[const_idx]));
+            } else {
+                printf("<INVALID FIELD CONST>\n");
+            }
+            return offset + 3;
         }
         case OP_GET_ELEMENT_ADDRESS: {
             uint8_t dims = chunk->code[offset + 1];

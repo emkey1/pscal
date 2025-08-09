@@ -467,8 +467,13 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             // Now, get the address of the specific field.
             int fieldNameIndex = addStringConstant(chunk, node->token->value);
-            writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-            writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+            if (fieldNameIndex <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
+                emitShort(chunk, (uint16_t)fieldNameIndex, line);
+            }
             break;
         }
         case AST_ARRAY_ACCESS: {
