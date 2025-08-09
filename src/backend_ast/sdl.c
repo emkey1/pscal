@@ -1218,7 +1218,10 @@ cleanup_update:
 
 Value executeBuiltinRenderCopy(AST *node) {
     if (node->child_count != 1) { /* error */ return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { /* error */ return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopy.\n");
+        return makeVoid();
+    }
 
     Value idVal = eval(node->children[0]);
     if (idVal.type != TYPE_INTEGER) { /* error */ freeValue(&idVal); return makeVoid(); }
@@ -1238,7 +1241,10 @@ Value executeBuiltinRenderCopy(AST *node) {
 
 Value executeBuiltinRenderCopyRect(AST *node) {
     if (node->child_count != 5) { /* error: ID, dx,dy,dw,dh */ return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { /* error */ return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopyRect.\n");
+        return makeVoid();
+    }
 
     Value idVal = eval(node->children[0]);
     Value dxVal = eval(node->children[1]);
@@ -2338,8 +2344,17 @@ Value vm_builtin_destroytexture(VM* vm, int arg_count, Value* args) {
 
 Value vm_builtin_rendercopyrect(VM* vm, int arg_count, Value* args) {
     if (arg_count != 5) { runtimeError(vm, "RenderCopyRect expects 5 arguments."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before RenderCopyRect."); return makeVoid(); }
+    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER ||
+        args[3].type != TYPE_INTEGER || args[4].type != TYPE_INTEGER) {
+        runtimeError(vm, "RenderCopyRect expects integer arguments (TextureID, DestX, DestY, DestW, DestH).");
+        return makeVoid();
+    }
     int textureID = (int)args[0].i_val;
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || !gSdlTextures[textureID]) return makeVoid();
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || !gSdlTextures[textureID]) {
+        runtimeError(vm, "RenderCopyRect called with invalid TextureID.");
+        return makeVoid();
+    }
     SDL_Rect dstRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
     SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, &dstRect);
     return makeVoid();
