@@ -624,10 +624,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
 
             if (declarations && declarations->type == AST_COMPOUND) {
-                // Pass 1: Compile variable declarations from the declaration block.
+                // Pass 1: Compile constant and variable declarations from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
-                    if (decl_child && decl_child->type == AST_VAR_DECL) {
+                    if (decl_child &&
+                        (decl_child->type == AST_VAR_DECL || decl_child->type == AST_CONST_DECL)) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
@@ -858,7 +859,41 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             }
             break;
         }
-        case AST_CONST_DECL:
+        case AST_CONST_DECL: {
+            if (current_function_compiler == NULL && node->token) {
+                int line = getLine(node);
+                int name_idx = addStringConstant(chunk, node->token->value);
+
+                Value const_val = evaluateCompileTimeValue(node->left);
+
+                // Insert into global symbol table so subsequent declarations can reference it.
+                insertGlobalSymbol(node->token->value, const_val.type, NULL);
+                Symbol* sym = lookupGlobalSymbol(node->token->value);
+                if (sym && sym->value) {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&const_val);
+                    sym->is_const = true;
+                }
+
+                emitDefineGlobal(chunk, name_idx, line);
+                VarType const_type = const_val.type;
+                writeBytecodeChunk(chunk, (uint8_t)const_type, line);
+
+                const char* type_name = varTypeToString(const_type);
+                emitConstantIndex16(chunk, addStringConstant(chunk, type_name), line);
+                if (const_type == TYPE_STRING) {
+                    int len = (const_val.s_val) ? (int)strlen(const_val.s_val) : 0;
+                    emitConstantIndex16(chunk, addIntConstant(chunk, len), line);
+                }
+
+                int const_val_idx = addConstantToChunk(chunk, &const_val);
+                emitConstant(chunk, const_val_idx, line);
+                emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16, name_idx, line);
+                resolveGlobalVariableIndex(chunk, node->token->value, line);
+                freeValue(&const_val);
+            }
+            break;
+        }
         case AST_TYPE_DECL:
         case AST_USES_CLAUSE:
             break;

@@ -384,6 +384,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             return current_offset;
         }
         case OP_DEFINE_GLOBAL16: {
+            // Variable or constant definition using a 16-bit name index.
             uint16_t name_idx = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
             VarType declaredType = (VarType)chunk->code[offset + 3];
             printf("%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL16", name_idx);
