@@ -2312,7 +2312,8 @@ Value executeBuiltinLow(AST *node) {
         // For simplicity let's return 0 for now as MIN_INT isn't defined
         // return makeInt(0);
     } else if (strcasecmp(typeName, "char") == 0) {
-        return makeChar((char)0); // Low(Char) is ASCII 0
+        // Low(Char) is ASCII NUL (ordinal 0) and must stay TYPE_CHAR
+        return makeChar(0);
     } else if (strcasecmp(typeName, "boolean") == 0) {
         return makeBoolean(0); // Low(Boolean) is False (ordinal 0)
     } else if (strcasecmp(typeName, "byte") == 0) {
