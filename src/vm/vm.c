@@ -1744,6 +1744,20 @@ comparison_error_label:
                 *target_slot = makeValueForType(TYPE_FILE, NULL, NULL);
                 break;
             }
+            case OP_INIT_LOCAL_POINTER: {
+                uint8_t slot = READ_BYTE();
+                uint16_t type_name_idx = READ_SHORT(vm);
+                AST* type_def = NULL;
+                Value type_name_val = vm->chunk->constants[type_name_idx];
+                if (type_name_val.type == TYPE_STRING && type_name_val.s_val && type_name_val.s_val[0] != '\0') {
+                    type_def = lookupType(type_name_val.s_val);
+                }
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = makeValueForType(TYPE_POINTER, type_def, NULL);
+                break;
+            }
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
