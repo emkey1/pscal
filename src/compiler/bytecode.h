@@ -49,6 +49,7 @@ typedef enum {
     //       [type_name_const_idx] [len_const_idx if var_type_enum == TYPE_STRING]
     //         // len_const_idx references an integer constant; 0 means dynamic length
     OP_DEFINE_GLOBAL,
+    OP_DEFINE_GLOBAL16, // 16-bit name index variant of OP_DEFINE_GLOBAL
     OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
     OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
     OP_GET_GLOBAL_ADDRESS,

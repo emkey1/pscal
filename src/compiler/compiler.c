@@ -121,6 +121,11 @@ static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
     }
 }
 
+// Helper to emit OP_DEFINE_GLOBAL or OP_DEFINE_GLOBAL16 depending on index size.
+static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line) {
+    emitGlobalNameIdx(chunk, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL16, name_idx, line);
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -663,8 +668,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     AST* varNameNode = node->children[i];
                     if (varNameNode && varNameNode->token) {
                         int var_name_idx = addStringConstant(chunk, varNameNode->token->value);
-                        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, getLine(varNameNode));
-                        writeBytecodeChunk(chunk, (uint8_t)var_name_idx, getLine(varNameNode));
+                        emitDefineGlobal(chunk, var_name_idx, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)node->var_type, getLine(varNameNode)); // The overall type (e.g., TYPE_ARRAY)
 
                         if (node->var_type == TYPE_ARRAY) {

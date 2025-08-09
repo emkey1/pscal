@@ -195,6 +195,27 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             }
             return (current_pos - offset); // Return the total calculated length
         }
+        case OP_DEFINE_GLOBAL16: {
+            // Similar to OP_DEFINE_GLOBAL but with a 16-bit name index.
+            int current_pos = offset + 1; // after opcode
+            if (current_pos + 2 >= chunk->count) return 1; // ensure enough bytes for name and type
+            VarType declaredType = (VarType)chunk->code[offset + 3];
+            current_pos = offset + 4; // position after type byte
+
+            if (declaredType == TYPE_ARRAY) {
+                if (current_pos < chunk->count) {
+                    uint8_t dimension_count = chunk->code[current_pos++];
+                    current_pos += dimension_count * 2; // bounds indices
+                    current_pos += 2; // element var type and element type name index
+                }
+            } else {
+                current_pos++; // type name index
+                if (declaredType == TYPE_STRING) {
+                    current_pos++; // length constant index
+                }
+            }
+            return (current_pos - offset);
+        }
         default:
             return 1; // All other opcodes are 1 byte.
     }
@@ -341,6 +362,59 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 if (current_offset < chunk->count) {
                     uint8_t type_name_idx = chunk->code[current_offset++];
                     if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
+                        printf("('%s')", chunk->constants[type_name_idx].s_val);
+                    }
+                    if (declaredType == TYPE_STRING && current_offset < chunk->count) {
+                        uint8_t len_idx = chunk->code[current_offset++];
+                        if (len_idx < chunk->constants_count && chunk->constants[len_idx].type == TYPE_INTEGER) {
+                            printf(" len=%lld", chunk->constants[len_idx].i_val);
+                        }
+                    }
+                }
+            }
+            printf("\n");
+            return current_offset;
+        }
+        case OP_DEFINE_GLOBAL16: {
+            uint16_t name_idx = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            VarType declaredType = (VarType)chunk->code[offset + 3];
+            printf("%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL16", name_idx);
+            if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
+                printf("'%s' ", chunk->constants[name_idx].s_val);
+            } else {
+                printf("INVALID_NAME_IDX ");
+            }
+            printf("Type:%s ", varTypeToString(declaredType));
+            int current_offset = offset + 4;
+            if (declaredType == TYPE_ARRAY) {
+                if (current_offset < chunk->count) {
+                    uint8_t dimension_count = chunk->code[current_offset++];
+                    printf("Dims:%d [", dimension_count);
+                    for (int i=0; i < dimension_count; i++) {
+                        if (current_offset + 1 < chunk->count) {
+                            uint8_t lower_idx = chunk->code[current_offset++];
+                            uint8_t upper_idx = chunk->code[current_offset++];
+                            printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val,
+                                   (i == dimension_count - 1) ? "" : ", ");
+                        }
+                    }
+                    printf("] of ");
+                    if (current_offset < chunk->count) {
+                        VarType elem_var_type = (VarType)chunk->code[current_offset++];
+                        printf("%s ", varTypeToString(elem_var_type));
+                        if (current_offset < chunk->count) {
+                            uint8_t elem_name_idx = chunk->code[current_offset++];
+                            if (elem_name_idx < chunk->constants_count && chunk->constants[elem_name_idx].type == TYPE_STRING) {
+                                printf("('%s')", chunk->constants[elem_name_idx].s_val);
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (current_offset < chunk->count) {
+                    uint8_t type_name_idx = chunk->code[current_offset++];
+                    if (type_name_idx > 0 && type_name_idx < chunk->constants_count &&
+                        chunk->constants[type_name_idx].type == TYPE_STRING) {
                         printf("('%s')", chunk->constants[type_name_idx].s_val);
                     }
                     if (declaredType == TYPE_STRING && current_offset < chunk->count) {

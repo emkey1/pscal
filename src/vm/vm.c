@@ -315,6 +315,142 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     return sym;
 }
 
+// Shared logic for OP_DEFINE_GLOBAL and OP_DEFINE_GLOBAL16.
+// Assumes the name has already been read (as Value) and the IP is positioned
+// at the declared type byte.
+static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
+    VarType declaredType = (VarType)READ_BYTE();
+
+    if (declaredType == TYPE_ARRAY) {
+        uint8_t dimension_count = READ_BYTE();
+        if (dimension_count == 0) {
+            runtimeError(vm, "VM Error: Array defined with zero dimensions for '%s'.", varNameVal.s_val);
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
+        int* lower_bounds = malloc(sizeof(int) * dimension_count);
+        int* upper_bounds = malloc(sizeof(int) * dimension_count);
+        if (!lower_bounds || !upper_bounds) {
+            runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+            if (lower_bounds) free(lower_bounds);
+            if (upper_bounds) free(upper_bounds);
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
+        for (int i = 0; i < dimension_count; i++) {
+            uint8_t lower_idx = READ_BYTE();
+            uint8_t upper_idx = READ_BYTE();
+            Value lower_val = vm->chunk->constants[lower_idx];
+            Value upper_val = vm->chunk->constants[upper_idx];
+            if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+                runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
+                free(lower_bounds); free(upper_bounds);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            lower_bounds[i] = (int)lower_val.i_val;
+            upper_bounds[i] = (int)upper_val.i_val;
+        }
+
+        VarType elem_var_type = (VarType)READ_BYTE();
+        uint8_t elem_name_idx = READ_BYTE();
+        Value elem_name_val = vm->chunk->constants[elem_name_idx];
+        AST* elem_type_def = NULL;
+        if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+            elem_type_def = lookupType(elem_name_val.s_val);
+        }
+
+        Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds,
+                                      elem_var_type, elem_type_def);
+        free(lower_bounds);
+        free(upper_bounds);
+
+        Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+        if (sym == NULL) {
+            sym = (Symbol*)malloc(sizeof(Symbol));
+            if (!sym) {
+                runtimeError(vm, "VM Error: Malloc failed for Symbol struct for global array '%s'.", varNameVal.s_val);
+                freeValue(&array_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            sym->name = strdup(varNameVal.s_val);
+            if (!sym->name) {
+                runtimeError(vm, "VM Error: Malloc failed for symbol name for global array '%s'.", varNameVal.s_val);
+                free(sym); freeValue(&array_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            toLowerString(sym->name);
+            sym->type = declaredType;
+            sym->type_def = NULL;
+            sym->value = (Value*)malloc(sizeof(Value));
+            if (!sym->value) {
+                runtimeError(vm, "VM Error: Malloc failed for Value struct for global array '%s'.", varNameVal.s_val);
+                free(sym->name); free(sym); freeValue(&array_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            *(sym->value) = array_val;
+            sym->is_alias = false;
+            sym->is_const = false;
+            sym->is_local_var = false;
+            sym->next = NULL;
+            hashTableInsert(vm->vmGlobalSymbols, sym);
+        } else {
+            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+            freeValue(sym->value);
+            *(sym->value) = array_val;
+        }
+    } else {
+        uint8_t type_name_idx = READ_BYTE();
+        int str_len = 0;
+        if (declaredType == TYPE_STRING) {
+            uint8_t len_idx = READ_BYTE();
+            Value len_val = vm->chunk->constants[len_idx];
+            if (len_val.type == TYPE_INTEGER) {
+                str_len = (int)len_val.i_val;
+            }
+        }
+        Value typeNameVal = vm->chunk->constants[type_name_idx];
+        AST* type_def_node = NULL;
+        if (declaredType == TYPE_STRING && str_len > 0) {
+            Token* strTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0);
+            type_def_node = newASTNode(AST_VARIABLE, strTok);
+            setTypeAST(type_def_node, TYPE_STRING);
+            freeToken(strTok);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%d", str_len);
+            Token* lenTok = newToken(TOKEN_INTEGER_CONST, buf, 0, 0);
+            AST* lenNode = newASTNode(AST_NUMBER, lenTok);
+            setTypeAST(lenNode, TYPE_INTEGER);
+            freeToken(lenTok);
+            setRight(type_def_node, lenNode);
+        } else if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
+            type_def_node = lookupType(typeNameVal.s_val);
+            if (declaredType == TYPE_ENUM && type_def_node == NULL) {
+                runtimeError(vm, "VM Error: Enum type '%s' not found for global '%s'.", typeNameVal.s_val, varNameVal.s_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+        }
+
+        if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+            runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
+        Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+        if (sym == NULL) {
+            sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_node);
+            if (!sym) {
+                runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            hashTableInsert(vm->vmGlobalSymbols, sym);
+        } else {
+            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+        }
+    }
+
+    return INTERPRET_OK;
+}
+
 // --- Main Interpretation Loop ---
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
@@ -1375,140 +1511,14 @@ comparison_error_label:
              }
             case OP_DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
-                VarType declaredType = (VarType)READ_BYTE();
-
-                if (declaredType == TYPE_ARRAY) {
-                    uint8_t dimension_count = READ_BYTE();
-                    if (dimension_count == 0) {
-                        runtimeError(vm, "VM Error: Array defined with zero dimensions for '%s'.", varNameVal.s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-
-                    int* lower_bounds = malloc(sizeof(int) * dimension_count);
-                    int* upper_bounds = malloc(sizeof(int) * dimension_count);
-                    if (!lower_bounds || !upper_bounds) {
-                        runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
-                        // Ensure cleanup in case of allocation failure
-                        if(lower_bounds) free(lower_bounds);
-                        if(upper_bounds) free(upper_bounds);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-
-                    for(int i = 0; i < dimension_count; i++) {
-                        uint8_t lower_idx = READ_BYTE();
-                        uint8_t upper_idx = READ_BYTE();
-                        Value lower_val = vm->chunk->constants[lower_idx];
-                        Value upper_val = vm->chunk->constants[upper_idx];
-                        if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
-                             runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
-                             free(lower_bounds); free(upper_bounds);
-                             return INTERPRET_RUNTIME_ERROR;
-                        }
-                        lower_bounds[i] = (int)lower_val.i_val;
-                        upper_bounds[i] = (int)upper_val.i_val;
-                    }
-
-                    VarType elem_var_type = (VarType)READ_BYTE();
-
-                    uint8_t elem_name_idx = READ_BYTE();
-                    Value elem_name_val = vm->chunk->constants[elem_name_idx];
-                    AST* elem_type_def = NULL;
-
-                    if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
-                        elem_type_def = lookupType(elem_name_val.s_val);
-                    }
-
-                    Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
-
-                    free(lower_bounds); // Free the dynamically allocated array for lower bounds
-                    free(upper_bounds); // Free the dynamically allocated array for upper bounds
-
-                    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                    if (sym == NULL) {
-                        sym = (Symbol*)malloc(sizeof(Symbol));
-                        if (!sym) {
-                            runtimeError(vm, "VM Error: Malloc failed for Symbol struct for global array '%s'.", varNameVal.s_val);
-                            freeValue(&array_val); return INTERPRET_RUNTIME_ERROR;
-                        }
-                        sym->name = strdup(varNameVal.s_val);
-                        if (!sym->name) {
-                            runtimeError(vm, "VM Error: Malloc failed for symbol name for global array '%s'.", varNameVal.s_val);
-                            free(sym); freeValue(&array_val); return INTERPRET_RUNTIME_ERROR;
-                        }
-                        toLowerString(sym->name);
-
-                        sym->type = declaredType;
-                        sym->type_def = NULL;
-                        sym->value = (Value*)malloc(sizeof(Value));
-                        if (!sym->value) {
-                             runtimeError(vm, "VM Error: Malloc failed for Value struct for global array '%s'.", varNameVal.s_val);
-                             free(sym->name); free(sym); freeValue(&array_val); return INTERPRET_RUNTIME_ERROR;
-                        }
-
-                        *(sym->value) = array_val;
-
-                        sym->is_alias = false;
-                        sym->is_const = false;
-                        sym->is_local_var = false;
-                        sym->next = NULL;
-
-                        hashTableInsert(vm->vmGlobalSymbols, sym);
-                    } else {
-                        runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
-                        freeValue(sym->value);
-                        *(sym->value) = array_val;
-                    }
-
-                } else {
-                    uint8_t type_name_idx = READ_BYTE();
-                    int str_len = 0;
-                    if (declaredType == TYPE_STRING) {
-                        uint8_t len_idx = READ_BYTE();
-                        Value len_val = vm->chunk->constants[len_idx];
-                        if (len_val.type == TYPE_INTEGER) {
-                            str_len = (int)len_val.i_val;
-                        }
-                    }
-                    Value typeNameVal = vm->chunk->constants[type_name_idx];
-                    AST* type_def_node = NULL;
-
-                    if (declaredType == TYPE_STRING && str_len > 0) {
-                        Token* strTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0);
-                        type_def_node = newASTNode(AST_VARIABLE, strTok);
-                        setTypeAST(type_def_node, TYPE_STRING);
-                        freeToken(strTok);
-                        char buf[32];
-                        snprintf(buf, sizeof(buf), "%d", str_len);
-                        Token* lenTok = newToken(TOKEN_INTEGER_CONST, buf, 0, 0);
-                        AST* lenNode = newASTNode(AST_NUMBER, lenTok);
-                        setTypeAST(lenNode, TYPE_INTEGER);
-                        freeToken(lenTok);
-                        setRight(type_def_node, lenNode);
-                    } else if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
-                        type_def_node = lookupType(typeNameVal.s_val);
-                        if (declaredType == TYPE_ENUM && type_def_node == NULL) {
-                            runtimeError(vm, "VM Error: Enum type '%s' not found for global '%s'.", typeNameVal.s_val, varNameVal.s_val);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                    }
-
-                    if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-                         runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
-                         return INTERPRET_RUNTIME_ERROR;
-                    }
-
-                    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
-                    if (sym == NULL) {
-                        sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_node);
-                        if (!sym) {
-                             runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
-                             return INTERPRET_RUNTIME_ERROR;
-                        }
-                        hashTableInsert(vm->vmGlobalSymbols, sym);
-                    } else {
-                         runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
-                    }
-                }
+                InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                if (r != INTERPRET_OK) return r;
+                break;
+            }
+            case OP_DEFINE_GLOBAL16: {
+                Value varNameVal = READ_CONSTANT16();
+                InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                if (r != INTERPRET_OK) return r;
                 break;
             }
             case OP_GET_GLOBAL: {
