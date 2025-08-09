@@ -1046,6 +1046,45 @@ comparison_error_label:
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
             }
+            case OP_GET_FIELD_ADDRESS16: {
+                uint16_t field_name_idx = READ_SHORT(vm);
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        Value popped_base_val = pop(vm);
+                        freeValue(&popped_base_val);
+                        push(vm, makePointer(&current->value, NULL));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
             case OP_GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
 
