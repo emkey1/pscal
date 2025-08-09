@@ -217,7 +217,10 @@ Value vm_builtin_succ(VM* vm, int arg_count, Value* args) {
                 runtimeError(vm, "Succ enum overflow.");
                 return makeVoid();
             }
-            return makeEnum(arg.enum_val.enum_name, ordinal + 1);
+            Value result = makeEnum(arg.enum_val.enum_name, ordinal + 1);
+            result.enum_meta = arg.enum_meta;
+            result.base_type_node = arg.base_type_node;
+            return result;
         }
         default:
             runtimeError(vm, "Succ requires an ordinal type argument. Got %s.", varTypeToString(arg.type));
@@ -3632,21 +3635,28 @@ Value executeBuiltinSucc(AST *node) {
             result = makeBoolean((int)(currentOrdinal + 1));
             break;
         case TYPE_ENUM:
-            { // Keep existing enum logic
+            {
                  currentOrdinal = argVal.enum_val.ordinal;
-                 AST* typeDef = lookupType(argVal.enum_val.enum_name);
-                 if (!typeDef || (typeDef->type == AST_TYPE_REFERENCE && !(typeDef = typeDef->right))) {
-                     fprintf(stderr, "Runtime warning: Cannot determine enum definition for Succ() bounds check on type '%s'.\n", argVal.enum_val.enum_name ? argVal.enum_val.enum_name : "?");
-                     checkMax = false;
-                 } else if (typeDef->type == AST_ENUM_TYPE) {
-                      maxOrdinal = typeDef->child_count - 1;
-                      checkMax = true;
+                 if (argVal.enum_meta) {
+                     maxOrdinal = argVal.enum_meta->member_count - 1;
+                     checkMax = true;
                  } else {
-                      fprintf(stderr, "Runtime warning: Invalid type definition found for enum '%s' during Succ().\n", argVal.enum_val.enum_name ? argVal.enum_val.enum_name : "?");
-                      checkMax = false;
+                     AST* typeDef = lookupType(argVal.enum_val.enum_name);
+                     if (!typeDef || (typeDef->type == AST_TYPE_REFERENCE && !(typeDef = typeDef->right))) {
+                         fprintf(stderr, "Runtime warning: Cannot determine enum definition for Succ() bounds check on type '%s'.\n", argVal.enum_val.enum_name ? argVal.enum_val.enum_name : "?");
+                         checkMax = false;
+                     } else if (typeDef->type == AST_ENUM_TYPE) {
+                         maxOrdinal = typeDef->child_count - 1;
+                         checkMax = true;
+                     } else {
+                         fprintf(stderr, "Runtime warning: Invalid type definition found for enum '%s' during Succ().\n", argVal.enum_val.enum_name ? argVal.enum_val.enum_name : "?");
+                         checkMax = false;
+                     }
                  }
                  if (currentOrdinal >= maxOrdinal && checkMax) { goto succ_overflow; }
                  Value nextEnum = makeEnum(argVal.enum_val.enum_name, (int)(currentOrdinal + 1));
+                 nextEnum.enum_meta = argVal.enum_meta;
+                 nextEnum.base_type_node = argVal.base_type_node;
                  result = makeCopyOfValue(&nextEnum);
                  freeValue(&nextEnum);
             }

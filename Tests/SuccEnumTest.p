@@ -13,5 +13,6 @@ end;
 
 begin
   AssertEqualEnum(cGreen, succ(cRed), 'Succ(cRed)');
+  AssertEqualEnum(cBlue, succ(cGreen), 'Succ(cGreen)');
   AssertEqualEnum(cYellow, succ(cBlue), 'Succ(cBlue)');
 end.
