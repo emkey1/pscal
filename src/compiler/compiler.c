@@ -924,9 +924,6 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         }
         case AST_CONST_DECL: {
             if (current_function_compiler == NULL && node->token) {
-                int line = getLine(node);
-                int name_idx = addStringConstant(chunk, node->token->value);
-
                 Value const_val = evaluateCompileTimeValue(node->left);
 
                 // Insert into global symbol table so subsequent declarations can reference it.
@@ -938,21 +935,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     sym->is_const = true;
                 }
 
-                emitDefineGlobal(chunk, name_idx, line);
-                VarType const_type = const_val.type;
-                writeBytecodeChunk(chunk, (uint8_t)const_type, line);
-
-                const char* type_name = varTypeToString(const_type);
-                emitConstantIndex16(chunk, addStringConstant(chunk, type_name), line);
-                if (const_type == TYPE_STRING) {
-                    int len = (const_val.s_val) ? (int)strlen(const_val.s_val) : 0;
-                    emitConstantIndex16(chunk, addIntConstant(chunk, len), line);
-                }
-
-                int const_val_idx = addConstantToChunk(chunk, &const_val);
-                emitConstant(chunk, const_val_idx, line);
-                emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16, name_idx, line);
-                resolveGlobalVariableIndex(chunk, node->token->value, line);
+                // Constants are resolved at compile time, so no bytecode emission is needed.
                 freeValue(&const_val);
             }
             break;
