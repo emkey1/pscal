@@ -2,7 +2,6 @@
 #include "backend_ast/builtin.h"
 #include "frontend/parser.h"
 #include "core/utils.h"
-#include "backend_ast/interpreter.h"
 #include "symbol/symbol.h"
 #ifdef SDL
 #include "backend_ast/sdl.h"
@@ -11,6 +10,9 @@
 #include "globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
+
+// Forward declaration for eval from interpreter
+Value eval(AST *node);
 
 // Standard library includes remain the same
 #include <math.h>

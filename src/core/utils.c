@@ -2,6 +2,7 @@
 #include "globals.h"
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include "parser.h"  // so that Procedure and TypeEntry are defined
 #include "backend_ast/interpreter.h"  // so that Procedure and TypeEntry are defined
 #include "compiler/compiler.h"
@@ -1622,6 +1623,130 @@ void printValueToStream(Value v, FILE *stream) {
             break;
     }
 }
+Value makeCopyOfValue(const Value *src) {
+    Value v;
+    v = *src;  // shallow copy to start
+
+    switch (src->type) {
+        case TYPE_STRING:
+            if (src->max_length > 0) {
+                v.s_val = malloc(src->max_length + 1);
+                if (!v.s_val) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (string)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                if (src->s_val) {
+                    strncpy(v.s_val, src->s_val, src->max_length);
+                    v.s_val[src->max_length] = '\0';
+                } else {
+                    v.s_val[0] = '\0';
+                }
+                v.max_length = src->max_length;
+            } else if (src->s_val) {
+                size_t len = strlen(src->s_val);
+                v.s_val = malloc(len + 1);
+                if (!v.s_val) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (string)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                strcpy(v.s_val, src->s_val);
+            } else {
+                v.s_val = NULL;
+            }
+            break;
+        case TYPE_ENUM:
+            v.enum_val.enum_name = src->enum_val.enum_name ? strdup(src->enum_val.enum_name) : NULL;
+            if (src->enum_val.enum_name && !v.enum_val.enum_name) {
+                 fprintf(stderr, "Memory allocation failed in makeCopyOfValue (enum name strdup)\n");
+                 EXIT_FAILURE_HANDLER();
+            }
+            break;
+        case TYPE_RECORD: {
+            FieldValue *head = NULL, *tail = NULL;
+            for (FieldValue *cur = src->record_val; cur; cur = cur->next) {
+                FieldValue *copy = malloc(sizeof(FieldValue));
+                copy->name = strdup(cur->name);
+                copy->value = makeCopyOfValue(&cur->value);
+                copy->next = NULL;
+                if (tail)
+                    tail->next = copy;
+                else
+                    head = copy;
+                tail = copy;
+            }
+            v.record_val = head;
+            break;
+        }
+        case TYPE_ARRAY: {
+            int total = 1;
+            v.dimensions = src->dimensions;
+
+            if (v.dimensions > 0 && src->lower_bounds && src->upper_bounds) {
+                v.lower_bounds = malloc(sizeof(int) * src->dimensions);
+                v.upper_bounds = malloc(sizeof(int) * src->dimensions);
+                if (!v.lower_bounds || !v.upper_bounds) { /* Handle error */ }
+
+                for (int i = 0; i < src->dimensions; i++) {
+                    v.lower_bounds[i] = src->lower_bounds[i];
+                    v.upper_bounds[i] = src->upper_bounds[i];
+                    int size_i = (v.upper_bounds[i] - v.lower_bounds[i] + 1);
+                    if (size_i <= 0) { total = 0; break; }
+                    if (__builtin_mul_overflow(total, size_i, &total)) { total = -1; break; }
+                }
+            } else {
+                total = 0;
+                v.lower_bounds = NULL;
+                v.upper_bounds = NULL;
+            }
+
+            v.array_val = NULL;
+            if (total > 0 && src->array_val) {
+                 v.array_val = malloc(sizeof(Value) * total);
+                 if (!v.array_val) { /* Handle error */ }
+                 for (int i = 0; i < total; i++) {
+                     v.array_val[i] = makeCopyOfValue(&src->array_val[i]);
+                 }
+            } else if (total < 0) {
+                 fprintf(stderr, "Error: Array size overflow during copy.\n");
+                 v.dimensions = 0;
+                 free(v.lower_bounds); v.lower_bounds = NULL;
+                 free(v.upper_bounds); v.upper_bounds = NULL;
+            }
+
+            v.element_type_def = src->element_type_def;
+            v.element_type = src->element_type;
+
+            break;
+        }
+        case TYPE_CHAR:
+            break;
+        case TYPE_SET:
+            v.set_val.set_values = NULL;
+            v.set_val.set_size = 0;
+
+            if (src->set_val.set_size > 0 && src->set_val.set_values != NULL) {
+                size_t array_size_bytes = sizeof(long long) * src->set_val.set_size;
+                v.set_val.set_values = malloc(array_size_bytes);
+                if (!v.set_val.set_values) {
+                    freeValue(&v);
+                    fprintf(stderr,
+                            "Memory allocation failed in makeCopyOfValue (set)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                if (!v.set_val.set_values) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (set values)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                memcpy(v.set_val.set_values, src->set_val.set_values, array_size_bytes);
+                v.set_val.set_size = src->set_val.set_size;
+            }
+            break;
+        default:
+            break;
+    }
+
+    return v;
+}
 
 int calculateArrayTotalSize(const Value* array_val) {
     if (!array_val || array_val->type != TYPE_ARRAY || array_val->dimensions == 0) {
@@ -1653,6 +1778,115 @@ int computeFlatOffset(Value *array, int *indices) {
         multiplier *= (array->upper_bounds[i] - array->lower_bounds[i] + 1);
     }
     return offset;
+}
+Value* resolveLValueToPtr(AST* lvalueNode) {
+    if (!lvalueNode) {
+        fprintf(stderr, "Runtime error: Cannot resolve NULL lvalue node.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    switch (lvalueNode->type) {
+        case AST_VARIABLE: {
+            Symbol* sym = lookupSymbol(lvalueNode->token->value); // Handles not found error
+            if (sym->is_const) {
+                 fprintf(stderr, "Runtime error: Cannot modify constant symbol '%s'.\n", sym->name);
+                 EXIT_FAILURE_HANDLER();
+            }
+            if (!sym->value) {
+                 fprintf(stderr, "Runtime error: Symbol '%s' has NULL value pointer.\n", sym->name);
+                 EXIT_FAILURE_HANDLER();
+            }
+            return sym->value; // Return pointer to the symbol's value storage
+        }
+
+        case AST_ARRAY_ACCESS: {
+            Value* baseValuePtr = resolveLValueToPtr(lvalueNode->left);
+            if (!baseValuePtr) { /* Error handled in recursive call */ EXIT_FAILURE_HANDLER(); }
+
+            if (baseValuePtr->type == TYPE_ARRAY) {
+                if (!baseValuePtr->array_val) { /* Error: Array not initialized */ }
+                if (lvalueNode->child_count != baseValuePtr->dimensions) { /* Error: Index count mismatch */ }
+
+                int* indices = malloc(sizeof(int) * baseValuePtr->dimensions);
+                if (!indices) { /* Mem Error */ }
+                for (int i = 0; i < lvalueNode->child_count; i++) {
+                    assert(i < baseValuePtr->dimensions);
+                    Value idxVal = eval(lvalueNode->children[i]);
+                    if (idxVal.type != TYPE_INTEGER) { /* Index Type Error */ free(indices); freeValue(&idxVal); EXIT_FAILURE_HANDLER(); }
+                    indices[i] = (int)idxVal.i_val;
+                    freeValue(&idxVal);
+                }
+
+                int offset = computeFlatOffset(baseValuePtr, indices);
+                int total_size = 1;
+                for (int i = 0; i < baseValuePtr->dimensions; i++) { total_size *= (baseValuePtr->upper_bounds[i] - baseValuePtr->lower_bounds[i] + 1); }
+                 if (offset < 0 || offset >= total_size) { /* Bounds Error */ free(indices); EXIT_FAILURE_HANDLER(); }
+
+                free(indices);
+
+                return &(baseValuePtr->array_val[offset]);
+
+            } else if (baseValuePtr->type == TYPE_STRING) {
+                return baseValuePtr;
+            } else {
+                fprintf(stderr, "Runtime error: Attempted array/string access on non-array/string type (%s).\n", varTypeToString(baseValuePtr->type));
+                EXIT_FAILURE_HANDLER();
+            }
+            break;
+        }
+
+        case AST_FIELD_ACCESS: {
+            Value* baseValuePtr = resolveLValueToPtr(lvalueNode->left);
+             if (!baseValuePtr) { /* Error handled in recursive call */ EXIT_FAILURE_HANDLER(); }
+
+            if (baseValuePtr->type != TYPE_RECORD) {
+                 fprintf(stderr, "Runtime error: Field access on non-record type (%s).\n", varTypeToString(baseValuePtr->type));
+                 EXIT_FAILURE_HANDLER();
+            }
+             if (!baseValuePtr->record_val) {
+                  fprintf(stderr, "Runtime error: Record accessed before initialization or after being freed.\n");
+                  EXIT_FAILURE_HANDLER();
+             }
+
+            const char* targetFieldName = lvalueNode->token ? lvalueNode->token->value : NULL;
+            if (!targetFieldName) { /* Invalid AST node error */ }
+
+            FieldValue* currentField = baseValuePtr->record_val;
+            while (currentField) {
+                if (currentField->name && strcmp(currentField->name, targetFieldName) == 0) {
+                    return &(currentField->value);
+                }
+                currentField = currentField->next;
+            }
+
+            fprintf(stderr, "Runtime error: Field '%s' not found in record.\n", targetFieldName);
+            EXIT_FAILURE_HANDLER();
+            break;
+        }
+        case AST_DEREFERENCE: {
+            Value pointerValue = eval(lvalueNode->left);
+
+            if (pointerValue.type != TYPE_POINTER) {
+                fprintf(stderr, "Runtime error: Attempting to dereference a non-pointer type (%s) in LValue.\n", varTypeToString(pointerValue.type));
+                freeValue(&pointerValue);
+                EXIT_FAILURE_HANDLER();
+            }
+
+            if (pointerValue.ptr_val == NULL) {
+                fprintf(stderr, "Runtime error: Attempting assignment via a nil pointer.\n");
+                EXIT_FAILURE_HANDLER();
+            }
+
+            Value* targetValuePtr = pointerValue.ptr_val;
+
+            return targetValuePtr;
+        }
+
+        default:
+            fprintf(stderr, "Runtime error: Invalid lvalue node type (%s) for assignment target resolution.\n", astTypeToString(lvalueNode->type));
+            EXIT_FAILURE_HANDLER();
+    }
+    return NULL; // Should not be reached
 }
 
 // Helper function to map 0-15 to ANSI FG codes
