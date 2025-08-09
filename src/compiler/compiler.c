@@ -374,14 +374,60 @@ Value evaluateCompileTimeValue(AST* node) {
                     right_val.type != TYPE_VOID && right_val.type != TYPE_UNKNOWN) {
 
                     if (left_val.type == TYPE_INTEGER && right_val.type == TYPE_INTEGER) {
-                        if (node->token->type == TOKEN_INT_DIV) {
-                            if (right_val.i_val == 0) {
-                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                            } else {
-                                result = makeInt(left_val.i_val / right_val.i_val);
-                            }
-                        } else if (node->token->type == TOKEN_PLUS) {
-                            result = makeInt(left_val.i_val + right_val.i_val);
+                        switch (node->token->type) {
+                            case TOKEN_INT_DIV:
+                            case TOKEN_SLASH: // Treat '/' as integer division for const eval when both operands are integers
+                                if (right_val.i_val == 0) {
+                                    fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                                } else {
+                                    result = makeInt(left_val.i_val / right_val.i_val);
+                                }
+                                break;
+                            case TOKEN_PLUS:
+                                result = makeInt(left_val.i_val + right_val.i_val);
+                                break;
+                            case TOKEN_MINUS:
+                                result = makeInt(left_val.i_val - right_val.i_val);
+                                break;
+                            case TOKEN_MUL:
+                                result = makeInt(left_val.i_val * right_val.i_val);
+                                break;
+                            case TOKEN_MOD:
+                                if (right_val.i_val == 0) {
+                                    fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                                } else {
+                                    result = makeInt(left_val.i_val % right_val.i_val);
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                    } else if (left_val.type == TYPE_REAL || right_val.type == TYPE_REAL) {
+                        double a = (left_val.type == TYPE_REAL) ? left_val.r_val : (double)left_val.i_val;
+                        double b = (right_val.type == TYPE_REAL) ? right_val.r_val : (double)right_val.i_val;
+                        switch (node->token->type) {
+                            case TOKEN_PLUS:
+                                result = makeReal(a + b);
+                                break;
+                            case TOKEN_MINUS:
+                                result = makeReal(a - b);
+                                break;
+                            case TOKEN_MUL:
+                                result = makeReal(a * b);
+                                break;
+                            case TOKEN_SLASH:
+                                if (b == 0.0) {
+                                    fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                                } else {
+                                    result = makeReal(a / b);
+                                }
+                                break;
+                            case TOKEN_INT_DIV:
+                            case TOKEN_MOD:
+                                fprintf(stderr, "Compile-time Error: Invalid operator for real constant expression.\n");
+                                break;
+                            default:
+                                break;
                         }
                     }
                 }
