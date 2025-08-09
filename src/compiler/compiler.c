@@ -763,7 +763,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     
                                     // Use the new helper for the lower bound
                                     if (lower_b.type == TYPE_INTEGER) {
-                                        writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                        emitConstantIndex16(chunk, addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
                                     } else {
                                         fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                         compiler_had_error = true;
@@ -772,7 +772,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     
                                     // Use the new helper for the upper bound
                                     if (upper_b.type == TYPE_INTEGER) {
-                                        writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                        emitConstantIndex16(chunk, addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
                                     } else {
                                         fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                         compiler_had_error = true;
@@ -782,8 +782,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
                                     compiler_had_error = true;
-                                    writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                    writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                    emitShort(chunk, 0, getLine(varNameNode));
+                                    emitShort(chunk, 0, getLine(varNameNode));
                                 }
                             }
 
@@ -876,7 +876,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 Value upper_b = evaluateCompileTimeValue(subrange->right);
 
                                 if (lower_b.type == TYPE_INTEGER) {
-                                    writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                     compiler_had_error = true;
@@ -884,7 +884,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 freeValue(&lower_b);
 
                                 if (upper_b.type == TYPE_INTEGER) {
-                                    writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                     compiler_had_error = true;
@@ -894,8 +894,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             } else {
                                 fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
                                 compiler_had_error = true;
-                                writeBytecodeChunk(chunk, 0, getLine(varNameNode));
-                                writeBytecodeChunk(chunk, 0, getLine(varNameNode));
+                                emitShort(chunk, 0, getLine(varNameNode));
+                                emitShort(chunk, 0, getLine(varNameNode));
                             }
                         }
 

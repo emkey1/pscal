@@ -338,8 +338,13 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
         }
 
         for (int i = 0; i < dimension_count; i++) {
-            uint8_t lower_idx = READ_BYTE();
-            uint8_t upper_idx = READ_BYTE();
+            uint16_t lower_idx = READ_SHORT(vm);
+            uint16_t upper_idx = READ_SHORT(vm);
+            if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
+                runtimeError(vm, "VM Error: Array bound constant index out of range for '%s'.", varNameVal.s_val);
+                free(lower_bounds); free(upper_bounds);
+                return INTERPRET_RUNTIME_ERROR;
+            }
             Value lower_val = vm->chunk->constants[lower_idx];
             Value upper_val = vm->chunk->constants[upper_idx];
             if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
@@ -1704,8 +1709,13 @@ comparison_error_label:
                 }
 
                 for (int i = 0; i < dimension_count; i++) {
-                    uint8_t lower_idx = READ_BYTE();
-                    uint8_t upper_idx = READ_BYTE();
+                    uint16_t lower_idx = READ_SHORT(vm);
+                    uint16_t upper_idx = READ_SHORT(vm);
+                    if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
+                        runtimeError(vm, "VM Error: Array bound constant index out of range.");
+                        free(lower_bounds); free(upper_bounds);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                     Value lower_val = vm->chunk->constants[lower_idx];
                     Value upper_val = vm->chunk->constants[upper_idx];
                     if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {

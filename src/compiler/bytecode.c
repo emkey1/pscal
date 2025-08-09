@@ -157,7 +157,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             current_pos++; // slot
             if (current_pos >= chunk->count) return 1;
             uint8_t dimension_count = chunk->code[current_pos++];
-            current_pos += dimension_count * 2; // bounds indices
+            current_pos += dimension_count * 4; // bounds indices (two 16-bit indices per dimension)
             current_pos += 2; // elem type and elem type name index
             return current_pos - offset;
         }
@@ -185,7 +185,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             if (declaredType == TYPE_ARRAY) {
                 if (current_pos < chunk->count) {
                     uint8_t dimension_count = chunk->code[current_pos++];
-                    current_pos += dimension_count * 2; // Skip over all the bounds indices
+                    current_pos += dimension_count * 4; // Skip over all the bounds indices
                     current_pos += 2; // Skip element VarType and element type name index
                 }
             } else {
@@ -208,7 +208,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             if (declaredType == TYPE_ARRAY) {
                 if (current_pos < chunk->count) {
                     uint8_t dimension_count = chunk->code[current_pos++];
-                    current_pos += dimension_count * 2; // bounds indices
+                    current_pos += dimension_count * 4; // bounds indices
                     current_pos += 2; // element var type and element type name index
                 }
             } else {
@@ -343,10 +343,13 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     uint8_t dimension_count = chunk->code[current_offset++];
                     printf("Dims:%d [", dimension_count);
                     for (int i=0; i < dimension_count; i++) {
-                        if (current_offset + 1 < chunk->count) {
-                            uint8_t lower_idx = chunk->code[current_offset++];
-                            uint8_t upper_idx = chunk->code[current_offset++];
-                            printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val, (i == dimension_count - 1) ? "" : ", ");
+                        if (current_offset + 3 < chunk->count) {
+                            uint16_t lower_idx = (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                            current_offset += 2;
+                            uint16_t upper_idx = (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                            current_offset += 2;
+                            printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val,
+                                   (i == dimension_count - 1) ? "" : ", ");
                         }
                     }
                     printf("] of ");
@@ -400,9 +403,11 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     uint8_t dimension_count = chunk->code[current_offset++];
                     printf("Dims:%d [", dimension_count);
                     for (int i=0; i < dimension_count; i++) {
-                        if (current_offset + 1 < chunk->count) {
-                            uint8_t lower_idx = chunk->code[current_offset++];
-                            uint8_t upper_idx = chunk->code[current_offset++];
+                        if (current_offset + 3 < chunk->count) {
+                            uint16_t lower_idx = (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                            current_offset += 2;
+                            uint16_t upper_idx = (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                            current_offset += 2;
                             printf("%lld..%lld%s", chunk->constants[lower_idx].i_val, chunk->constants[upper_idx].i_val,
                                    (i == dimension_count - 1) ? "" : ", ");
                         }
@@ -485,7 +490,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             uint8_t slot = chunk->code[offset + 1];
             uint8_t dim_count = chunk->code[offset + 2];
             printf("%-16s Slot:%d Dims:%d\n", "OP_INIT_LOCAL_ARRAY", slot, dim_count);
-            return offset + 5 + dim_count * 2;
+            return offset + 5 + dim_count * 4;
         }
         case OP_INIT_LOCAL_FILE: {
             uint8_t slot = chunk->code[offset + 1];
