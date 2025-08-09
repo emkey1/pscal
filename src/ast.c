@@ -489,9 +489,9 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                      // }
                  } else {
                       // This 'else' might be less likely if all builtins are in procedure_table.
-                      // However, getBuiltinReturnType can be a fallback if lookupProcedure fails for a known C-level builtin.
+                      // However, getBuiltInFunctionReturnType can be a fallback if lookupProcedure fails for a known C-level builtin.
                       if (node->token) {
-                           node->var_type = getBuiltinReturnType(node->token->value);
+                           node->var_type = getBuiltInFunctionReturnType(node);
                            if (node->var_type == TYPE_VOID && isBuiltin(node->token->value)) {
                                // It's a known built-in procedure, VOID is correct.
                            } else if (node->var_type == TYPE_VOID) {
@@ -590,8 +590,11 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
     }
     // ... (final variable check as before, if necessary) ...
 }
-VarType getBuiltinReturnType(const char* name) {
-     // Simplified version - add more built-in *functions* here
+VarType getBuiltInFunctionReturnType(AST *callNode) {
+     if (!callNode || !callNode->token) return TYPE_VOID;
+     const char *name = callNode->token->value;
+
+     // Built-ins with fixed return types
      if (strcasecmp(name, "chr")==0) return TYPE_CHAR;
      if (strcasecmp(name, "ord")==0) return TYPE_INTEGER;
      if (strcasecmp(name, "length")==0) return TYPE_INTEGER;
@@ -614,15 +617,35 @@ VarType getBuiltinReturnType(const char* name) {
      if (strcasecmp(name, "paramcount")==0) return TYPE_INTEGER;
      if (strcasecmp(name, "paramstr")==0) return TYPE_STRING;
      if (strcasecmp(name, "readkey")==0) return TYPE_CHAR; // Or String[1]?
-     if (strcasecmp(name,"low")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
-     if (strcasecmp(name,"high")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
-     if (strcasecmp(name,"succ")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
-     if (strcasecmp(name,"pred")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
      if (strcasecmp(name,"upcase")==0) return TYPE_CHAR;
      if (strcasecmp(name,"screencols")==0) return TYPE_INTEGER;
      if (strcasecmp(name,"screenrows")==0) return TYPE_INTEGER;
      if (strcasecmp(name,"wherex")==0) return TYPE_INTEGER;
      if (strcasecmp(name,"wherey")==0) return TYPE_INTEGER;
+
+     // Built-ins where return type depends on first argument
+     if (strcasecmp(name,"succ")==0 || strcasecmp(name,"low")==0 || strcasecmp(name,"high")==0) {
+         if (callNode->child_count > 0 && callNode->children && callNode->children[0]) {
+             VarType argType = callNode->children[0]->var_type;
+             switch (argType) {
+                 case TYPE_ENUM:
+                 case TYPE_CHAR:
+                 case TYPE_BOOLEAN:
+                 case TYPE_BYTE:
+                 case TYPE_WORD:
+                 case TYPE_INTEGER:
+                     return argType;
+                 case TYPE_ARRAY:
+                     if (strcasecmp(name,"low")==0 || strcasecmp(name,"high")==0) return TYPE_INTEGER;
+                     break;
+                 default:
+                     break;
+             }
+         }
+         return TYPE_INTEGER; // Fallback ordinal type
+     }
+     if (strcasecmp(name,"pred")==0) return TYPE_INTEGER; // Placeholder, depends on arg type
+
      // Add other functions...
      return TYPE_VOID; // Default for procedures or unknown
 }
