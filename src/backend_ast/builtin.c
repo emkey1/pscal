@@ -3707,7 +3707,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "initgraph", "initsoundsystem", "inittextsystem", "mstreamfree",
         "mstreamloadfromfile", "mstreamsavetofile", "new", "outtextxy",
         "playsound", "putpixel", "quitsoundsystem", "quittextsystem",
-        "randomize", "read", "readln", "reset", "rewrite", "setalphablend",
+        "randomize", "read", "readln", "rendercopy", "rendercopyex", "rendercopyrect", "reset", "rewrite", "setalphablend",
          "setcolor", "setrendertarget", "setrgbcolor",
          "textbackground", "textbackgrounde", "textcolor",
          "textcolore", "updatescreen", "updatetexture", "waitkeyevent",
