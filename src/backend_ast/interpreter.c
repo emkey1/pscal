@@ -2548,7 +2548,20 @@ Value makeCopyOfValue(const Value *src) {
 
     switch (src->type) {
         case TYPE_STRING:
-            if (src->s_val) {
+            if (src->max_length > 0) {
+                v.s_val = malloc(src->max_length + 1);
+                if (!v.s_val) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (string)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                if (src->s_val) {
+                    strncpy(v.s_val, src->s_val, src->max_length);
+                    v.s_val[src->max_length] = '\0';
+                } else {
+                    v.s_val[0] = '\0';
+                }
+                v.max_length = src->max_length;
+            } else if (src->s_val) {
                 size_t len = strlen(src->s_val);
                 v.s_val = malloc(len + 1);
                 if (!v.s_val) {
