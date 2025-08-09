@@ -127,10 +127,10 @@ end;
 procedure AssertEqualChar(expected, actual: char; testName: string);
 begin
   write('START: ', testName, ': ');
-  if expected = actual then
+  if ord(expected) = ord(actual) then
     writeln('PASS')
   else
-    writeln('FAIL (expected: ''', expected, ''', got: ''', actual, ''')');
+    writeln('FAIL (expected ord: ', ord(expected), ', got ord: ', ord(actual), ')');
 end;
 
 procedure AssertEqualBool(expected, actual: boolean; testName: string);
@@ -309,6 +309,7 @@ begin
 
   // Low / High / Succ / Pred (if implemented)
   AssertEqualChar(#0, low(char), 'Low(char)');   // #0 is ASCII NUL
+  AssertEqualInt(0, ord(low(char)), 'Ord(Low(Char))');
   AssertEqualChar(#255, high(char), 'High(char)'); // Depends on char implementation (often 8-bit)
   AssertEqualChar('B', succ('A'), 'Succ(A)');
   // AssertEqualChar('A', pred('B'), 'Pred(B)'); // Uncomment if Pred is implemented
