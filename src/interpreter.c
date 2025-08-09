@@ -2388,34 +2388,50 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 AST *target_lvalue_node = node->children[i];
                 if (!target_lvalue_node) {fprintf(stderr,"NULL LValue node in READLN\n"); EXIT_FAILURE_HANDLER();}
 
-                char buffer[DEFAULT_STRING_CAPACITY];
+                // --- Read an entire line into a dynamically sized buffer ---
+                char *buffer = NULL;
+                size_t bufsize = 0;
+                size_t len = 0;
+                int ch;
 
-                // Read raw input line using fgets
-                if (fgets(buffer, sizeof(buffer), input) == NULL) {
-                    if (feof(input)) buffer[0] = '\0';
-                    else { fprintf(stderr,"Read error during READLN\n"); buffer[0] = '\0'; }
+                while (1) {
+                    ch = fgetc(input);
+                    if (ch == EOF) {
+                        if (feof(input)) break; // End of file -> empty buffer
+                        else { fprintf(stderr, "Read error during READLN\n"); break; }
+                    }
+                    if (ch == '\n') break; // newline terminates line
+                    if (ch == '\r') { // handle CRLF
+                        int next = fgetc(input);
+                        if (next != '\n' && next != EOF) ungetc(next, input);
+                        break;
+                    }
+                    if (len + 1 >= bufsize) {
+                        size_t newSize = bufsize ? bufsize * 2 : DEFAULT_STRING_CAPACITY;
+                        char *tmp = realloc(buffer, newSize);
+                        if (!tmp) { free(buffer); fprintf(stderr, "Malloc failed in READLN\n"); EXIT_FAILURE_HANDLER(); }
+                        buffer = tmp;
+                        bufsize = newSize;
+                    }
+                    buffer[len++] = (char)ch;
                 }
-                buffer[strcspn(buffer, "\n\r")] = 0; // Remove trailing newline/CR
+                if (!buffer) {
+                    buffer = malloc(1);
+                    if (!buffer) { fprintf(stderr, "Malloc failed in READLN (empty)\n"); EXIT_FAILURE_HANDLER(); }
+                    buffer[0] = '\0';
+                } else {
+                    buffer[len] = '\0';
+                }
 
                 // --- Determine target type BEFORE creating value ---
-                // This is essential for correct conversion from string buffer.
-                // Requires looking up the type of the lvalue target. (Simplified below)
-                VarType targetType = TYPE_VOID; // Default / Unknown
-                // --- Placeholder: Determine target type (needs proper implementation) ---
-                 if (target_lvalue_node->type == AST_VARIABLE) {
-                     Symbol* targetSym = lookupSymbol(target_lvalue_node->token->value);
-                     if(targetSym) targetType = targetSym->type;
-                 } else if (target_lvalue_node->type == AST_FIELD_ACCESS) {
-                     // Need to find field definition to get type - complex
-                     // For now, assume STRING based on example context
-                     targetType = TYPE_STRING;
-                 } else if (target_lvalue_node->type == AST_ARRAY_ACCESS) {
-                     // Need to find array definition and element type - complex
-                     // For now, assume STRING based on example context
-                      targetType = TYPE_STRING;
-                 }
-                 // --- End Placeholder ---
-
+                Value *targetPtr = resolveLValueToPtr(target_lvalue_node);
+                if (!targetPtr) { free(buffer); EXIT_FAILURE_HANDLER(); }
+                VarType targetType = targetPtr->type;
+                if (target_lvalue_node->type == AST_ARRAY_ACCESS &&
+                    targetPtr->type == TYPE_STRING && target_lvalue_node->child_count == 1) {
+                    // String index -> char target
+                    targetType = TYPE_CHAR;
+                }
 
                 // --- Convert buffer to appropriate Value type ---
                 Value newValue;
@@ -2438,13 +2454,12 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                         // Simplified: treat non-zero integer string as true
                         newValue = makeBoolean(atoi(buffer) != 0);
                         break;
-                    // Add other target types as needed
                     default:
                          fprintf(stderr, "Runtime error: Cannot readln into variable of type %s\n", varTypeToString(targetType));
+                         free(buffer);
                          EXIT_FAILURE_HANDLER();
                          break; // Keep compiler happy
                 }
-                // ---
 
                 // --- Assign the new value using the corrected helper function ---
                 #ifdef DEBUG
@@ -2452,12 +2467,10 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                         buffer, varTypeToString(newValue.type), astTypeToString(target_lvalue_node->type));
                 #endif
                 assignValueToLValue(target_lvalue_node, newValue); // This now does deep copy
-                // ---
 
-                // --- Free the temporary newValue struct's content ---
-                // since assignValueToLValue made its own deep copy.
-                freeValue(&newValue);
-                // ---
+                // --- Free temporary structures ---
+                freeValue(&newValue); // assignValueToLValue made its own copy
+                free(buffer);
             }
 
             // Consume rest of line if no variable arguments were processed
