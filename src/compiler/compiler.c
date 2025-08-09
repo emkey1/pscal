@@ -99,6 +99,16 @@ static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
     }
 }
 
+// Emits a 16-bit constant pool index without selecting an opcode.
+static void emitConstantIndex16(BytecodeChunk* chunk, int constant_index, int line) {
+    if (constant_index < 0 || constant_index > 0xFFFF) {
+        fprintf(stderr, "L%d: Compiler error: constant index out of range (%d).\n", line, constant_index);
+        compiler_had_error = true;
+        return;
+    }
+    emitShort(chunk, (uint16_t)constant_index, line);
+}
+
 // Helper to emit global-variable opcodes that take a name index operand.
 // Selects 8-bit or 16-bit variants based on the index value.
 static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
@@ -734,7 +744,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                  */
                                 type_name = actual_type_def_node->token->value;
                             }
-                            writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, type_name), getLine(varNameNode));
+                            emitConstantIndex16(chunk, addStringConstant(chunk, type_name), getLine(varNameNode));
 
                             if (node->var_type == TYPE_STRING) {
                                 int max_len = 0;
@@ -745,7 +755,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     }
                                     freeValue(&len_val);
                                 }
-                                writeBytecodeChunk(chunk, (uint8_t)addIntConstant(chunk, max_len), getLine(varNameNode));
+                                emitConstantIndex16(chunk, addIntConstant(chunk, max_len), getLine(varNameNode));
                             }
                         }
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));

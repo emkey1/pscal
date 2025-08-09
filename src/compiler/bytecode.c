@@ -187,10 +187,11 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                     current_pos += 2; // Skip element VarType and element type name index
                 }
             } else {
-                // Simple types store the type name index and, for strings, an extra length constant.
-                current_pos++; // type name index
+                // Simple types store a 16-bit type name index and, for strings,
+                // an extra 16-bit length constant.
+                current_pos += 2; // type name index (16-bit)
                 if (declaredType == TYPE_STRING) {
-                    current_pos++; // length constant index
+                    current_pos += 2; // length constant index (16-bit)
                 }
             }
             return (current_pos - offset); // Return the total calculated length
@@ -209,9 +210,9 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                     current_pos += 2; // element var type and element type name index
                 }
             } else {
-                current_pos++; // type name index
+                current_pos += 2; // type name index (16-bit)
                 if (declaredType == TYPE_STRING) {
-                    current_pos++; // length constant index
+                    current_pos += 2; // length constant index (16-bit)
                 }
             }
             return (current_pos - offset);
@@ -359,13 +360,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     }
                 }
             } else {
-                if (current_offset < chunk->count) {
-                    uint8_t type_name_idx = chunk->code[current_offset++];
-                    if (type_name_idx > 0 && type_name_idx < chunk->constants_count && chunk->constants[type_name_idx].type == TYPE_STRING) {
+                if (current_offset + 1 < chunk->count) {
+                    uint16_t type_name_idx =
+                        (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                    current_offset += 2;
+                    if (type_name_idx > 0 && type_name_idx < chunk->constants_count &&
+                        chunk->constants[type_name_idx].type == TYPE_STRING) {
                         printf("('%s')", chunk->constants[type_name_idx].s_val);
                     }
-                    if (declaredType == TYPE_STRING && current_offset < chunk->count) {
-                        uint8_t len_idx = chunk->code[current_offset++];
+                    if (declaredType == TYPE_STRING && current_offset + 1 < chunk->count) {
+                        uint16_t len_idx =
+                            (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                        current_offset += 2;
                         if (len_idx < chunk->constants_count && chunk->constants[len_idx].type == TYPE_INTEGER) {
                             printf(" len=%lld", chunk->constants[len_idx].i_val);
                         }
@@ -411,14 +417,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     }
                 }
             } else {
-                if (current_offset < chunk->count) {
-                    uint8_t type_name_idx = chunk->code[current_offset++];
+                if (current_offset + 1 < chunk->count) {
+                    uint16_t type_name_idx =
+                        (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                    current_offset += 2;
                     if (type_name_idx > 0 && type_name_idx < chunk->constants_count &&
                         chunk->constants[type_name_idx].type == TYPE_STRING) {
                         printf("('%s')", chunk->constants[type_name_idx].s_val);
                     }
-                    if (declaredType == TYPE_STRING && current_offset < chunk->count) {
-                        uint8_t len_idx = chunk->code[current_offset++];
+                    if (declaredType == TYPE_STRING && current_offset + 1 < chunk->count) {
+                        uint16_t len_idx =
+                            (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                        current_offset += 2;
                         if (len_idx < chunk->constants_count && chunk->constants[len_idx].type == TYPE_INTEGER) {
                             printf(" len=%lld", chunk->constants[len_idx].i_val);
                         }
