@@ -114,6 +114,16 @@ make
 
 Binaries will be in ../build/bin
 
+### Building without SDL
+
+To build without SDL support, run:
+
+```
+mkdir build && cd build && cmake -DSDL=OFF .. && make
+```
+
+SDL-dependent examples and tests will be skipped when this flag is off.
+
 You will also need to do something similar to the following to get units and the code in Examples/ and Tests/ to work...
 
 ```
