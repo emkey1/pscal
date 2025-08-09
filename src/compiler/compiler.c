@@ -11,7 +11,6 @@
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID
-#include "backend_ast/interpreter.h" // For makeCopyOfValue()
 #include "compiler/bytecode.h"
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now

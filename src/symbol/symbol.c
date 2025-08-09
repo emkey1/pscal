@@ -7,7 +7,6 @@
 #include "frontend/lexer.h"
 #include "core/utils.h"
 #include "globals.h"
-#include "backend_ast/interpreter.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
