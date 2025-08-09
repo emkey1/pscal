@@ -308,7 +308,7 @@ begin
   AssertEqualChar('1', upcase('1'), 'Upcase(1)');
 
   // Low / High / Succ / Pred (if implemented)
-  AssertEqualChar(#0, low(char), 'Low(char)');   // #0 is ASCII NUL
+  AssertEqualChar(chr(0), low(char), 'Low(char)');   // chr(0) is ASCII NUL
   AssertEqualChar(#255, high(char), 'High(char)'); // Depends on char implementation (often 8-bit)
   AssertEqualInt(0, ord(low(char)), 'Ord(Low(char))');
   AssertEqualInt(255, ord(high(char)), 'Ord(High(char))');
