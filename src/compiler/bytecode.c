@@ -393,7 +393,13 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case OP_GET_FIELD_ADDRESS: {
             uint8_t const_idx = chunk->code[offset + 1];
-            printf("%-16s %4d '%s'\n", "OP_GET_FIELD_ADDRESS", const_idx, AS_STRING(chunk->constants[const_idx]));
+            printf("%-16s %4d ", "OP_GET_FIELD_ADDRESS", const_idx);
+            if (const_idx < chunk->constants_count &&
+                chunk->constants[const_idx].type == TYPE_STRING) {
+                printf("'%s'\n", AS_STRING(chunk->constants[const_idx]));
+            } else {
+                printf("<INVALID FIELD CONST>\n");
+            }
             return offset + 2;
         }
         case OP_GET_ELEMENT_ADDRESS: {
