@@ -399,10 +399,11 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             *(sym->value) = array_val;
         }
     } else {
-        uint8_t type_name_idx = READ_BYTE();
+        uint16_t type_name_idx = READ_SHORT(vm);
         int str_len = 0;
+        uint16_t len_idx = 0;
         if (declaredType == TYPE_STRING) {
-            uint8_t len_idx = READ_BYTE();
+            len_idx = READ_SHORT(vm);
             Value len_val = vm->chunk->constants[len_idx];
             if (len_val.type == TYPE_INTEGER) {
                 str_len = (int)len_val.i_val;
