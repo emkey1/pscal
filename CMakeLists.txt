@@ -127,13 +127,19 @@ set(PSCAL_SOURCES
     src/frontend/lexer.c src/frontend/parser.c src/frontend/ast.c
     src/symbol/symbol.c
     src/backend_ast/interpreter.c src/backend_ast/builtin.c
-    src/backend_ast/builtin_network_api.c src/backend_ast/sdl.c src/backend_ast/audio.c
-
-    # --- Add new files for bytecode compiler and VM here ---
-    src/compiler/bytecode.c src/compiler/compiler.c   
-
-    src/vm/vm.c             # Add when you create it
+    src/backend_ast/builtin_network_api.c
+    src/compiler/bytecode.c src/compiler/compiler.c
+    src/vm/vm.c
 )
+
+# --- Conditionally add SDL source files ---
+if(SDL)
+    list(APPEND PSCAL_SOURCES
+        src/backend_ast/sdl.c
+        src/backend_ast/audio.c
+    )
+endif()
+
 
 # ---- Executable Targets Function ----
 function(add_pscal_executable target_name)
@@ -233,4 +239,3 @@ add_pscal_executable(dscal)
 include(GNUInstallDirs)
 install(TARGETS pscal dscal
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-
