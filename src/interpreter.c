@@ -525,8 +525,8 @@ Value executeProcedureCall(AST *node) {
         else { retVal = makeCopyOfValue(finalResultSym->value); }
 
         restoreLocalEnv(&snapshot);
+        exit_requested = 0; // Reset exit flag after returning from function body
         current_function_symbol = NULL;
-        exit_requested = 0; // Reset exit flag when leaving routine
         return retVal;
 
     } else { // AST_PROCEDURE_DECL
@@ -537,7 +537,7 @@ Value executeProcedureCall(AST *node) {
         executeWithScope(proc_decl_ast->right, false);
 
         restoreLocalEnv(&snapshot);
-        exit_requested = 0; // Reset exit flag when leaving routine
+        exit_requested = 0; // Reset exit flag after procedure body
         return makeVoid();
     }
 }
