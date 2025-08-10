@@ -1566,26 +1566,34 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
 
             if (isBuiltin(calleeName)) {
-                BuiltinRoutineType type = getBuiltinType(calleeName);
-                if (type == BUILTIN_TYPE_PROCEDURE || type == BUILTIN_TYPE_FUNCTION) {
-                    char normalized_name[MAX_SYMBOL_LENGTH];
-                    strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
-                    normalized_name[sizeof(normalized_name) - 1] = '\0';
-                    toLowerString(normalized_name);
-                    int nameIndex = addStringConstant(chunk, normalized_name);
-                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-
-                    // If it was a function, its return value is on the stack. Pop it.
-                    if (type == BUILTIN_TYPE_FUNCTION) {
-                        writeBytecodeChunk(chunk, OP_POP, line);
+                if (strcasecmp(calleeName, "exit") == 0) {
+                    if (node->child_count > 0) {
+                        fprintf(stderr, "L%d: exit does not take arguments.\n", line);
+                        compiler_had_error = true;
                     }
+                    writeBytecodeChunk(chunk, OP_EXIT, line);
                 } else {
-                    // This case handles if a name is in the isBuiltin list but not in getBuiltinType,
-                    // which would be an internal inconsistency.
-                    fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in procedure or function.\n", line, calleeName);
-                    compiler_had_error = true;
+                    BuiltinRoutineType type = getBuiltinType(calleeName);
+                    if (type == BUILTIN_TYPE_PROCEDURE || type == BUILTIN_TYPE_FUNCTION) {
+                        char normalized_name[MAX_SYMBOL_LENGTH];
+                        strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
+                        normalized_name[sizeof(normalized_name) - 1] = '\0';
+                        toLowerString(normalized_name);
+                        int nameIndex = addStringConstant(chunk, normalized_name);
+                        writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+
+                        // If it was a function, its return value is on the stack. Pop it.
+                        if (type == BUILTIN_TYPE_FUNCTION) {
+                            writeBytecodeChunk(chunk, OP_POP, line);
+                        }
+                    } else {
+                        // This case handles if a name is in the isBuiltin list but not in getBuiltinType,
+                        // which would be an internal inconsistency.
+                        fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in procedure or function.\n", line, calleeName);
+                        compiler_had_error = true;
+                    }
                 }
             } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
                 int nameIndex = addStringConstant(chunk, calleeName);

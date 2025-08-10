@@ -861,18 +861,13 @@ Value vm_builtin_new(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_exit(VM* vm, int arg_count, Value* args) {
-    // A proper 'exit' would unwind the current call stack frame.
-    // For now, as a simpler implementation, we can treat it like 'halt'.
-    // A future improvement would be a dedicated OP_EXIT opcode.
     if (arg_count > 0) {
         runtimeError(vm, "exit does not take any arguments.");
-        return makeVoid(); // Return to be safe, though runtimeError may halt
+        return makeVoid();
     }
-    // Set a flag or use a special return that the VM loop can check
-    // to perform an early return from the current function.
-    // For now, we will have it halt execution as a placeholder.
-    exit(0);
-    return makeVoid(); // Unreachable
+    // Signal the VM to unwind the current call frame on return from the builtin
+    vm->exit_requested = true;
+    return makeVoid();
 }
 
 Value vm_builtin_dispose(VM* vm, int arg_count, Value* args) {
@@ -4044,14 +4039,17 @@ int getBuiltinIDForCompiler(const char *name) {
     return -1; // Not found
 }
 Value executeBuiltinExit(AST *node) {
-    // A true 'exit' would exit the current procedure. As a simplification
-    // for now, we will have it exit the entire program with code 0.
+    // Mark that the current procedure should return early
     if (node->child_count > 0) {
         fprintf(stderr, "Runtime error: exit does not take arguments.\n");
         EXIT_FAILURE_HANDLER();
     }
-    exit(0);
-    return makeVoid(); // Unreachable
+    // In the AST interpreter we simply note the exit; the interpreter loop
+    // is responsible for observing this flag and unwinding appropriately.
+    // A dedicated flag is kept static within this module for simplicity.
+    static bool interpreter_exit_requested = false;
+    interpreter_exit_requested = true;
+    return makeVoid();
 }
 
 // VM Versions

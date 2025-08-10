@@ -10,6 +10,7 @@
 #include "compiler/bytecode.h" // For BytecodeChunk and Value (via its include of types.h)
 #include "core/types.h"        // For Value explicitly, though bytecode.h should bring it in
 #include "symbol/symbol.h"     // For HashTable, if VM manages globals using it directly
+#include <stdbool.h>
 
 // --- VM Configuration ---
 #define VM_STACK_MAX 8192       // Maximum number of Values on the operand stack
@@ -63,9 +64,11 @@ typedef struct VM_s {
     HashTable* procedureTable; // store procedure table for disassembly
     
     HostFn host_functions[MAX_HOST_FUNCTIONS];
-    
+
     CallFrame frames[VM_CALL_STACK_MAX];
     int frameCount;
+
+    bool exit_requested;      // Indicates a builtin requested early exit from the current frame
 
 } VM;
 
