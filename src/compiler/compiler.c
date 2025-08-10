@@ -193,18 +193,27 @@ static bool compareTypeNodes(AST* a, AST* b) {
     }
 }
 
-// Determine if argument node's type matches the parameter type.
+// Determine if an argument node's type matches the full parameter type node.
+//
+// Both sides may reference type aliases, so we resolve them before comparison.
+// `arg_node->type_def` provides the full type of the argument (including any
+// array structure) which allows for structural comparisons, especially when
+// checking VAR parameters that are themselves arrays.
 static bool typesMatch(AST* param_type, AST* arg_node) {
     if (!param_type || !arg_node) return false;
+
     AST* param_actual = resolveTypeAlias(param_type);
-    if (!param_actual) return false;
-    if (param_actual->var_type != arg_node->var_type) return false;
+    AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+    if (!param_actual || !arg_actual) return false;
+
+    if (param_actual->var_type != arg_actual->var_type) return false;
+
     if (param_actual->var_type == TYPE_ARRAY ||
         param_actual->var_type == TYPE_RECORD ||
         param_actual->var_type == TYPE_POINTER) {
-        AST* arg_type = resolveTypeAlias(arg_node->type_def);
-        return compareTypeNodes(param_actual, arg_type);
+        return compareTypeNodes(param_actual, arg_actual);
     }
+
     return true;
 }
 
@@ -1609,13 +1618,37 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         AST* param_node = proc_symbol->type_def->children[i];
                         AST* arg_node = node->children[i];
                         if (!param_node || !arg_node) continue;
-                        AST* param_type = param_node->right ? param_node->right : (param_node->type_def ? param_node->type_def : param_node);
-                        if (!typesMatch(param_type, arg_node)) {
-                            fprintf(stderr,
-                                    "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
-                                    line, i + 1, calleeName,
-                                    varTypeToString(param_node->var_type),
-                                    varTypeToString(arg_node->var_type));
+
+                        // VAR parameters preserve their full TYPE_ARRAY node so that
+                        // structural comparisons (like array bounds) remain possible.
+                        AST* param_type = param_node->type_def;
+                        bool match = typesMatch(param_type, arg_node);
+                        if (!match) {
+                            AST* param_actual = resolveTypeAlias(param_type);
+                            AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+                            if (param_actual && arg_actual) {
+                                if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type != TYPE_ARRAY) {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %d to '%s' expects an array but got %s.\n",
+                                            line, i + 1, calleeName,
+                                            varTypeToString(arg_actual->var_type));
+                                } else if (param_actual->var_type != TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %d to '%s' expects %s but got an array.\n",
+                                            line, i + 1, calleeName,
+                                            varTypeToString(param_actual->var_type));
+                                } else {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
+                                            line, i + 1, calleeName,
+                                            varTypeToString(param_actual->var_type),
+                                            varTypeToString(arg_actual->var_type));
+                                }
+                            } else {
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %d to '%s' has incompatible type.\n",
+                                        line, i + 1, calleeName);
+                            }
                             compiler_had_error = true;
                             param_mismatch = true;
                             break;
