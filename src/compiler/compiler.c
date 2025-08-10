@@ -1571,6 +1571,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         fprintf(stderr, "L%d: exit does not take arguments.\n", line);
                         compiler_had_error = true;
                     }
+
+                    int slot = -1;
+                    if (current_function_compiler) {
+                        slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+                    }
+                    if (slot != -1) {
+                        writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+                    }
                     writeBytecodeChunk(chunk, OP_EXIT, line);
                 } else {
                     BuiltinRoutineType type = getBuiltinType(calleeName);
