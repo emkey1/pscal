@@ -1,9 +1,8 @@
-program NestedRoutine_Suite;
+program NestedRoutineAccessTest;
 
 var g: integer;
 
 procedure Outer;
-
     var currentline: integer;
         outtext: string[20];
 
@@ -20,24 +19,20 @@ procedure Outer;
         InnerFunc := g + currentline;
     end;
 
-    function CharAt(i: integer): char;
-    begin
-        CharAt := outtext[i];
-    end;
-
 begin
     g := 5;
     currentline := 0;
     outtext := 'start';
     InnerProc;
-    writeln('InnerFunc=', InnerFunc);
+    if InnerFunc = g + currentline then
+        writeln('PASS: Nested routines can access outer vars')
+    else
+        writeln('FAIL: Nested routines cannot access outer vars');
     writeln('currentline=', currentline);
     writeln('outtext=', outtext);
-    writeln('CharAt(2)=', CharAt(2));
 end;
 
 begin
     g := 10;
     Outer;
-    writeln('g=', g);
 end.

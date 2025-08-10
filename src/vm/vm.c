@@ -1301,7 +1301,8 @@ comparison_error_label:
                 uint8_t dimension_count = READ_BYTE();
 
                 if (dimension_count == 1) {
-                    Value* base_ptr = vm->stackTop - 1;
+                    // The index is on top of the stack, so the base pointer is just below it
+                    Value* base_ptr = vm->stackTop - 2;
                     if (base_ptr->type == TYPE_POINTER) {
                         Value* base_val = (Value*)base_ptr->ptr_val;
                         if (base_val && base_val->type == TYPE_STRING) {
