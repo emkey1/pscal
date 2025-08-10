@@ -692,6 +692,29 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         EXIT_FAILURE_HANDLER();
     }
 
+    // Ensure parameter declarations in the copied AST retain full array type information
+    if (sym->type_def && proc_decl_ast_original) {
+        int param_count = sym->type_def->child_count;
+        if (proc_decl_ast_original->child_count < param_count) {
+            param_count = proc_decl_ast_original->child_count;
+        }
+        for (int i = 0; i < param_count; i++) {
+            AST *orig_param = proc_decl_ast_original->children[i];
+            AST *copied_param = sym->type_def->children[i];
+            if (!orig_param || !copied_param) continue;
+            if (orig_param->var_type == TYPE_ARRAY) {
+                copied_param->var_type = TYPE_ARRAY;
+                if (!copied_param->right && orig_param->right) {
+                    copied_param->right = copyAST(orig_param->right);
+                    if (copied_param->right) {
+                        copied_param->right->parent = copied_param;
+                    }
+                }
+                copied_param->type_def = copied_param->right;
+            }
+        }
+    }
+
     // Determine the symbol's type based on the original AST declaration node's var_type
     if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
         // For functions, 'proc_decl_ast_original->var_type' should have been set
@@ -1658,14 +1681,26 @@ AST *paramList(Parser *parser) {
 
             param_decl->children[0]->parent = param_decl;
 
-            param_decl->var_type = originalTypeNode->var_type;
-            param_decl->by_ref = byRef;
-
-            // --- Use copyAST for the type node ---
+            // Make a unique copy of the parsed type node for this parameter
             AST* typeNodeCopy = copyAST(originalTypeNode);
-            if (!typeNodeCopy) { fprintf(stderr, "Memory allocation failed copying type node in paramList\n"); freeAST(group); freeAST(compound); freeAST(param_decl); freeAST(originalTypeNode); EXIT_FAILURE_HANDLER(); }
-            setRight(param_decl, typeNodeCopy); // Link VAR_DECL to the UNIQUE copy
-            // ---
+            if (!typeNodeCopy) {
+                fprintf(stderr, "Memory allocation failed copying type node in paramList\n");
+                freeAST(group);
+                freeAST(compound);
+                freeAST(param_decl);
+                freeAST(originalTypeNode);
+                EXIT_FAILURE_HANDLER();
+            }
+
+            setRight(param_decl, typeNodeCopy);      // Store the full type on the right pointer
+            param_decl->type_def = typeNodeCopy;      // Mirror on type_def for later lookups
+
+            // Ensure the VAR_DECL reflects the array nature of the parameter
+            param_decl->var_type = typeNodeCopy->var_type;
+            param_decl->by_ref = byRef;
+            if (typeNodeCopy->var_type == TYPE_ARRAY) {
+                param_decl->var_type = TYPE_ARRAY;
+            }
 
             addChild(compound, param_decl);
         }
