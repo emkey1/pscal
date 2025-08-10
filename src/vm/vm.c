@@ -1358,10 +1358,42 @@ comparison_error_label:
 
                 Value operand = pop(vm);
                 Value* array_val_ptr = NULL;
+                Value temp_wrapper;
+                bool using_wrapper = false;
 
                 if (operand.type == TYPE_POINTER) {
-                    array_val_ptr = (Value*)operand.ptr_val;
-                    if (!array_val_ptr || array_val_ptr->type != TYPE_ARRAY) {
+                    Value* candidate = (Value*)operand.ptr_val;
+                    if (candidate && candidate->type == TYPE_ARRAY) {
+                        array_val_ptr = candidate;
+                    } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                        AST* arrayType = operand.base_type_node;
+                        int dims = arrayType->child_count;
+                        temp_wrapper.type = TYPE_ARRAY;
+                        temp_wrapper.dimensions = dims;
+                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
+                        temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
+                        if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
+                            runtimeError(vm, "VM Error: Malloc failed for temporary array wrapper bounds.");
+                            if (temp_wrapper.lower_bounds) free(temp_wrapper.lower_bounds);
+                            if (temp_wrapper.upper_bounds) free(temp_wrapper.upper_bounds);
+                            free(indices);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        for (int i = 0; i < dims; i++) {
+                            int lb = 0, ub = -1;
+                            AST* sub = arrayType->children[i];
+                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
+                                lb = sub->left->i_val;
+                                ub = sub->right->i_val;
+                            }
+                            temp_wrapper.lower_bounds[i] = lb;
+                            temp_wrapper.upper_bounds[i] = ub;
+                        }
+                        array_val_ptr = &temp_wrapper;
+                        using_wrapper = true;
+                    } else {
                         runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
                         free(indices);
                         freeValue(&operand);
@@ -1383,6 +1415,10 @@ comparison_error_label:
                 if (offset < 0 || offset >= total_size) {
                     runtimeError(vm, "VM Error: Array element index out of bounds.");
                     if (operand.type == TYPE_POINTER) freeValue(&operand);
+                    if (using_wrapper) {
+                        free(temp_wrapper.lower_bounds);
+                        free(temp_wrapper.upper_bounds);
+                    }
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -1390,6 +1426,10 @@ comparison_error_label:
 
                 if (operand.type == TYPE_POINTER) {
                     freeValue(&operand);
+                }
+                if (using_wrapper) {
+                    free(temp_wrapper.lower_bounds);
+                    free(temp_wrapper.upper_bounds);
                 }
 
                 break;
