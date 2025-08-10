@@ -989,22 +989,41 @@ Value vm_builtin_close(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) { runtimeError(vm, "Eof requires 1 argument."); return makeBoolean(true); }
-    
-    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
-        runtimeError(vm, "Eof: Argument must be a VAR file parameter.");
+    FILE* stream = stdin;
+
+    if (arg_count == 0) {
+        if (vm->vmGlobalSymbols) {
+            Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
+            if (inputSym && inputSym->value &&
+                inputSym->value->type == TYPE_FILE &&
+                inputSym->value->f_val) {
+                stream = inputSym->value->f_val;
+            }
+        }
+    } else if (arg_count == 1) {
+        if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+            runtimeError(vm, "Eof: Argument must be a VAR file parameter.");
+            return makeBoolean(true);
+        }
+        Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
+        if (fileVarLValue->type != TYPE_FILE) {
+            runtimeError(vm, "Argument to Eof must be a file variable.");
+            return makeBoolean(true);
+        }
+        if (!fileVarLValue->f_val) {
+            return makeBoolean(true); // Closed file is treated as EOF
+        }
+        stream = fileVarLValue->f_val;
+    } else {
+        runtimeError(vm, "Eof expects 0 or 1 arguments.");
         return makeBoolean(true);
     }
-    Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
 
-    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Eof must be a file variable."); return makeBoolean(true); }
-    if (!fileVarLValue->f_val) { return makeBoolean(true); } // File not open is considered EOF
-    
-    int c = fgetc(fileVarLValue->f_val);
+    int c = fgetc(stream);
     if (c == EOF) {
         return makeBoolean(true);
     }
-    ungetc(c, fileVarLValue->f_val); // Push character back
+    ungetc(c, stream); // Push character back
     return makeBoolean(false);
 }
 
@@ -1948,20 +1967,33 @@ Value executeBuiltinRewrite(AST *node) {
 
 
 Value executeBuiltinEOF(AST *node) {
-    if (node->child_count != 1) {
-        fprintf(stderr, "Runtime error: eof expects 1 argument.\n");
+    FILE *f = stdin;
+
+    if (node->child_count == 0) {
+        Symbol* inputSym = lookupSymbol("input");
+        if (inputSym && inputSym->value &&
+            inputSym->value->type == TYPE_FILE &&
+            inputSym->value->f_val) {
+            f = inputSym->value->f_val;
+        }
+    } else if (node->child_count == 1) {
+        Value fileVal = eval(node->children[0]);
+        if (fileVal.type != TYPE_FILE) {
+            fprintf(stderr, "Runtime error: eof argument must be a file variable.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        if (fileVal.f_val == NULL) {
+            fprintf(stderr, "Runtime error: file is not open.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        f = fileVal.f_val;
+        freeValue(&fileVal);
+    } else {
+        fprintf(stderr, "Runtime error: eof expects 0 or 1 argument.\n");
         EXIT_FAILURE_HANDLER();
     }
-    Value fileVal = eval(node->children[0]);
-    if (fileVal.type != TYPE_FILE) {
-        fprintf(stderr, "Runtime error: eof argument must be a file variable.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-    if (fileVal.f_val == NULL) {
-        fprintf(stderr, "Runtime error: file is not open.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-    int is_eof = feof(fileVal.f_val);
+
+    int is_eof = feof(f);
     return makeInt(is_eof);
 }
 
@@ -3050,9 +3082,10 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         if (strcasecmp(name, "eof") == 0) {
             dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
             AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_FILE);
-            p1->by_ref = 1; // **FIX**: eof requires VAR parameter
+            p1->by_ref = 1; // eof allows optional VAR file parameter
             Token* pn1 = newToken(TOKEN_IDENTIFIER, "_eof_fvar", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
             dummy->children[0] = p1; dummy->child_count = 1;
+            dummy->i_val = 0; // zero required parameters
         }
         Token* retTok = newToken(TOKEN_IDENTIFIER, "boolean", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_BOOLEAN); setRight(dummy, retNode); dummy->var_type = TYPE_BOOLEAN;
