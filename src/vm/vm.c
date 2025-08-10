@@ -1356,17 +1356,23 @@ comparison_error_label:
                     freeValue(&index_val);
                 }
 
-                Value* pointer_to_array_val = vm->stackTop - 1;
-                if (pointer_to_array_val->type != TYPE_POINTER) {
+                Value operand = pop(vm);
+                Value* array_val_ptr = NULL;
+
+                if (operand.type == TYPE_POINTER) {
+                    array_val_ptr = (Value*)operand.ptr_val;
+                    if (!array_val_ptr || array_val_ptr->type != TYPE_ARRAY) {
+                        runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                        free(indices);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (operand.type == TYPE_ARRAY) {
+                    array_val_ptr = &operand;
+                } else {
                     runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
                     free(indices);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                Value* array_val_ptr = (Value*)pointer_to_array_val->ptr_val;
-                if (array_val_ptr->type != TYPE_ARRAY) {
-                    runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
-                    free(indices);
+                    freeValue(&operand);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -1376,13 +1382,16 @@ comparison_error_label:
                 int total_size = calculateArrayTotalSize(array_val_ptr);
                 if (offset < 0 || offset >= total_size) {
                     runtimeError(vm, "VM Error: Array element index out of bounds.");
+                    if (operand.type == TYPE_POINTER) freeValue(&operand);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Value popped_array_pointer_val = pop(vm);
-                freeValue(&popped_array_pointer_val);
-
                 push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+
+                if (operand.type == TYPE_POINTER) {
+                    freeValue(&operand);
+                }
+
                 break;
             }
             case OP_SET_INDIRECT: {
