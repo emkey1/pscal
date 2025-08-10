@@ -1536,6 +1536,51 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
 
+            bool param_mismatch = false;
+            if (proc_symbol && proc_symbol->type_def) {
+                int expected = proc_symbol->type_def->child_count;
+                if (node->child_count != expected) {
+                    fprintf(stderr, "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
+                            line, calleeName, expected, node->child_count);
+                    compiler_had_error = true;
+                    param_mismatch = true;
+                } else {
+                    for (int i = 0; i < node->child_count; i++) {
+                        AST* param_node = proc_symbol->type_def->children[i];
+                        AST* arg_node = node->children[i];
+                        if (!param_node || !arg_node) continue;
+                        if (param_node->var_type != arg_node->var_type) {
+                            fprintf(stderr,
+                                    "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
+                                    line, i + 1, calleeName,
+                                    varTypeToString(param_node->var_type),
+                                    varTypeToString(arg_node->var_type));
+                            compiler_had_error = true;
+                            param_mismatch = true;
+                            break;
+                        }
+                        if (param_node->by_ref) {
+                            bool is_lvalue = (arg_node->type == AST_VARIABLE ||
+                                              arg_node->type == AST_FIELD_ACCESS ||
+                                              arg_node->type == AST_ARRAY_ACCESS ||
+                                              arg_node->type == AST_DEREFERENCE);
+                            if (!is_lvalue) {
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %d to '%s' must be a variable (VAR parameter).\n",
+                                        line, i + 1, calleeName);
+                                compiler_had_error = true;
+                                param_mismatch = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (param_mismatch) {
+                break;
+            }
+
             // (Argument compilation logic remains the same...)
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
