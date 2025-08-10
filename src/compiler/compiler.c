@@ -148,6 +148,66 @@ static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line) {
     emitGlobalNameIdx(chunk, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL16, name_idx, line);
 }
 
+// Resolve type references to their concrete definitions.
+static AST* resolveTypeAlias(AST* type_node) {
+    while (type_node && type_node->type == AST_TYPE_REFERENCE && type_node->token && type_node->token->value) {
+        AST* looked = lookupType(type_node->token->value);
+        if (!looked || looked == type_node) break;
+        type_node = looked;
+    }
+    return type_node;
+}
+
+// Compare two type AST nodes structurally.
+static bool compareTypeNodes(AST* a, AST* b) {
+    a = resolveTypeAlias(a);
+    b = resolveTypeAlias(b);
+    if (!a || !b) return a == b;
+    if (a->var_type != b->var_type) return false;
+    switch (a->var_type) {
+        case TYPE_ARRAY:
+            if (a->child_count != b->child_count) return false;
+            for (int i = 0; i < a->child_count; i++) {
+                AST* ar = a->children[i];
+                AST* br = b->children[i];
+                if (!ar || !br || !ar->left || !br->left || !ar->right || !br->right) return false;
+                if (ar->left->i_val != br->left->i_val || ar->right->i_val != br->right->i_val) return false;
+            }
+            return compareTypeNodes(a->right, b->right);
+        case TYPE_RECORD:
+            if (a->child_count != b->child_count) return false;
+            for (int i = 0; i < a->child_count; i++) {
+                AST* af = a->children[i];
+                AST* bf = b->children[i];
+                if (!af || !bf || af->child_count == 0 || bf->child_count == 0) return false;
+                const char* an = af->children[0]->token ? af->children[0]->token->value : NULL;
+                const char* bn = bf->children[0]->token ? bf->children[0]->token->value : NULL;
+                if ((an && bn && strcasecmp(an, bn) != 0) || (an && !bn) || (!an && bn)) return false;
+                if (!compareTypeNodes(af->right, bf->right)) return false;
+            }
+            return true;
+        case TYPE_POINTER:
+            return compareTypeNodes(a->right, b->right);
+        default:
+            return true;
+    }
+}
+
+// Determine if argument node's type matches the parameter type.
+static bool typesMatch(AST* param_type, AST* arg_node) {
+    if (!param_type || !arg_node) return false;
+    AST* param_actual = resolveTypeAlias(param_type);
+    if (!param_actual) return false;
+    if (param_actual->var_type != arg_node->var_type) return false;
+    if (param_actual->var_type == TYPE_ARRAY ||
+        param_actual->var_type == TYPE_RECORD ||
+        param_actual->var_type == TYPE_POINTER) {
+        AST* arg_type = resolveTypeAlias(arg_node->type_def);
+        return compareTypeNodes(param_actual, arg_type);
+    }
+    return true;
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -1549,7 +1609,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         AST* param_node = proc_symbol->type_def->children[i];
                         AST* arg_node = node->children[i];
                         if (!param_node || !arg_node) continue;
-                        if (param_node->var_type != arg_node->var_type) {
+                        AST* param_type = param_node->right ? param_node->right : (param_node->type_def ? param_node->type_def : param_node);
+                        if (!typesMatch(param_type, arg_node)) {
                             fprintf(stderr,
                                     "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
                                     line, i + 1, calleeName,
