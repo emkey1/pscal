@@ -786,7 +786,36 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
     AST *prog_name_node = newASTNode(AST_VARIABLE, progNameCopied);
     freeToken(progNameCopied); // newASTNode makes its own copy
 
-    DEBUG_PRINT("buildProgramAST: About to eat SEMICOLON (after prog name). Current: %s ('%s')\n", main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE", main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+    if (main_parser->current_token && main_parser->current_token->type == TOKEN_LPAREN) {
+        DEBUG_PRINT("buildProgramAST: About to eat LPAREN after program name. Current: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                    main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+        eat(main_parser, TOKEN_LPAREN);
+
+        while (main_parser->current_token && main_parser->current_token->type == TOKEN_IDENTIFIER) {
+            DEBUG_PRINT("buildProgramAST: About to eat IDENTIFIER in program file list. Current: %s ('%s')\n",
+                        main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                        main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+            eat(main_parser, TOKEN_IDENTIFIER);
+            if (main_parser->current_token && main_parser->current_token->type == TOKEN_COMMA) {
+                DEBUG_PRINT("buildProgramAST: About to eat COMMA in program file list. Current: %s ('%s')\n",
+                            main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                            main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+                eat(main_parser, TOKEN_COMMA);
+            } else {
+                break;
+            }
+        }
+
+        DEBUG_PRINT("buildProgramAST: About to eat RPAREN after program file list. Current: %s ('%s')\n",
+                    main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                    main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
+        eat(main_parser, TOKEN_RPAREN);
+    }
+
+    DEBUG_PRINT("buildProgramAST: About to eat SEMICOLON (after prog name). Current: %s ('%s')\n",
+                main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
+                main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
     eat(main_parser, TOKEN_SEMICOLON);
 
     AST *uses_clause = NULL;
