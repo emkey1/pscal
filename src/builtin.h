@@ -39,6 +39,7 @@ Value executeBuiltinReal(AST *node);
 Value executeBuiltinRealToStr(AST *node); 
 
 // System
+Value executeBuiltinExit(AST *node); // Exit current routine only (use halt to terminate program)
 Value executeBuiltinHalt(AST *node);
 Value executeBuiltinInc(AST *node);
 Value executeBuiltinRandomize(AST *node);

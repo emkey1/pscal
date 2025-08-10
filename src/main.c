@@ -201,6 +201,7 @@ int runProgram(const char *source, const char *programName) {
     registerBuiltinFunction("close",     AST_PROCEDURE_DECL, NULL); // File I/O: Closes a file.
     registerBuiltinFunction("copy",      AST_FUNCTION_DECL, NULL); // String: Copies substring.
     registerBuiltinFunction("halt",      AST_PROCEDURE_DECL, NULL); // System: Exits program.
+    registerBuiltinFunction("exit",      AST_PROCEDURE_DECL, NULL); // System: Exit current routine
     registerBuiltinFunction("inc",       AST_PROCEDURE_DECL, NULL); // System: Increments ordinal variable.
     registerBuiltinFunction("ioresult",  AST_FUNCTION_DECL, NULL); // File I/O: Returns status of last I/O op.
     registerBuiltinFunction("length",    AST_FUNCTION_DECL, NULL); // String: Returns length of string.

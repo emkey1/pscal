@@ -41,6 +41,8 @@ bool gCurrentBgIsExt       = false;   // Flag for extended 256-color background 
 
 // Flag used by builtins like GraphLoop to signal a quit request from the user.
 int break_requested = 0;
+// Flag used by builtin 'exit' to request unwinding the current routine (not program termination).
+int exit_requested = 0;
 
 
 #ifdef DEBUG

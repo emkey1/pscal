@@ -46,6 +46,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"drawpolygon", executeBuiltinDrawPolygon},
     {"drawrect",  executeBuiltinDrawRect},
     {"eof",       executeBuiltinEOF},
+    {"exit",      executeBuiltinExit},
     {"exp",       executeBuiltinExp},
     {"fillcircle", executeBuiltinFillCircle},
     {"fillrect", executeBuiltinFillRect},
@@ -1077,6 +1078,26 @@ Value executeBuiltinChr(AST *node) {
 }
 
 // System
+// exit: exit the current routine (unwinding to caller). Use halt to terminate the whole program.
+Value executeBuiltinExit(AST *node) {
+    if (node->child_count > 1) {
+        fprintf(stderr, "Runtime error: exit expects at most 1 argument.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (node->child_count == 1) {
+        Value arg = eval(node->children[0]);
+        if (current_function_symbol && current_function_symbol->value) {
+            freeValue(current_function_symbol->value);
+            *(current_function_symbol->value) = makeCopyOfValue(&arg);
+        }
+        freeValue(&arg);
+    }
+
+    exit_requested = 1;
+    return makeVoid();
+}
+
 Value executeBuiltinHalt(AST *node) {
     long long code = 0;
     Value arg; // Declare outside conditional block
