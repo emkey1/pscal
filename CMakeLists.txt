@@ -1,6 +1,7 @@
 # CMakeLists.txt – top of your repo
 cmake_minimum_required(VERSION 3.24)
 project(pscal C)
+enable_testing()
 
 # ---- Version Generation Logic ----
 string(TIMESTAMP CURRENT_YEAR "%Y")
@@ -242,3 +243,5 @@ add_subdirectory(Examples)
 include(GNUInstallDirs)
 install(TARGETS pscal dscal
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+add_test(NAME pscal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_tests.sh)
