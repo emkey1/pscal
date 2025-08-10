@@ -1,8 +1,6 @@
 Pscal implements a substantial subset of the original Pascal language specification, along with a few extensions.  Notable things it does not support are nested functions/procedure.  It is also completely free of object oriented constructs by design.  Sorry, not a fan of that programming paradigm.
 
-The most notable thing about pscal is that while I've been directing the development and the doing the debugging, the large majority of the code has been written by various AI's. Anyone who has tried to work on a medium to large sized project with AI will know that at least as of the time I'm writing this that is no easy task.  Limited context windows and other limitations quickly lead to unpredictable results and constant code breakage.  The OpenAI models have been especially bad at this, though I haven't tried o3 or o4-mini yet.
-
-The bulk of my recent development has been by way of Google's Gemeni 2.5 Pro.  Which has for the most part been a breath of fresh air.  It's not perfect, but it's better than the vast majority of human programmers even at the current scale of pscal, which is about 8K lines as I write this README.
+The most notable thing about pscal is that while I've been directing the development and doing the debugging, the large majority of the code has been written by various AI's. Anyone who has tried to work on a medium to large sized project with AI will know that at least as of the time I'm writing this that is no easy task.  Limited context windows and other limitations quickly lead to unpredictable results and constant code breakage.  Until recently the OpenAI models have been especially bad at this, I'm now using OpenAI's codex and I'm VERY impressed.  The state of the art in AI continues to move forward at a break neck pace.
 
 Pscal uses cmake, but I've only just started learning that particular tool.  I do my development on an M1 MacBook Pro, primarily using (shudder) Xcode.
 
@@ -10,7 +8,7 @@ As the code was written primarily by AI's I'm releasing this to the public domai
 
 Install:
 
-You will need cmake, curl, SDL2, and SDL2_ttf.
+You will need cmake and curl. SDL2 and SDL2_ttf are only required when the `SDL` build option is enabled.
 
 Here's how to get them installed if needed...
 
@@ -114,7 +112,23 @@ cmake ..
 make
 ```
 
-Binaries will be in ../bin
+To build without SDL2 support, configure with:
+
+```
+cmake -DSDL=OFF ..
+```
+
+Binaries will be in ../build/bin
+
+### Building without SDL
+
+To build without SDL support, run:
+
+```
+mkdir build && cd build && cmake -DSDL=OFF .. && make
+```
+
+SDL-dependent examples and tests will be skipped when this flag is off.
 
 You will also need to do something similar to the following to get units and the code in Examples/ and Tests/ to work...
 

@@ -254,6 +254,30 @@ begin
   readln(f, tmp);
   close(f);
   AssertEqualStr('File Test', tmp, 'File I/O Test');
+
+  { Regression: write multi-character string and read it back }
+  assign(f, '/tmp/testfile.txt');
+  rewrite(f);
+  write(f, 'HelloWorld');
+  close(f);
+
+  assign(f, '/tmp/testfile.txt');
+  reset(f);
+  readln(f, tmp);
+  close(f);
+  AssertEqualStr('HelloWorld', tmp, 'Write/Read Roundtrip');
+
+  { Regression: writeln multi-character string and read it back }
+  assign(f, '/tmp/testfile.txt');
+  rewrite(f);
+  writeln(f, 'AnotherString');
+  close(f);
+
+  assign(f, '/tmp/testfile.txt');
+  reset(f);
+  readln(f, tmp);
+  close(f);
+  AssertEqualStr('AnotherString', tmp, 'Writeln/Readln Roundtrip');
 end;
 
 {---------------------------------------------------------------------

@@ -1,0 +1,68 @@
+program FindPrimes;
+
+var
+  upperLimit: integer;
+
+{
+  This is the main procedure that orchestrates finding and printing primes.
+  It contains a nested helper function, IsPrime, which is only visible
+  and usable within the scope of FindPrimesUpTo.
+}
+procedure FindPrimesUpTo(limit: integer);
+var
+  i: integer; // Loop variable for the outer procedure
+
+  {
+    This function is nested inside FindPrimesUpTo. Its only job is to
+    determine if a single number 'n' is prime. It is not visible to
+    the main program block.
+  }
+  function IsPrime(n: integer): boolean;
+  var
+    divisor: integer; // Loop variable local to IsPrime
+    maxDivisor: integer;
+  begin
+    if n < 2 then
+    begin
+      IsPrime := false; // Numbers less than 2 are not prime
+      exit;
+    end;
+
+    IsPrime := true; // Assume it's prime until a divisor is found
+    maxDivisor := trunc(sqrt(n));
+
+    for divisor := 2 to maxDivisor do
+    begin
+      if (n mod divisor) = 0 then
+      begin
+        IsPrime := false; // Found a divisor, so it's not prime
+        exit;             // Exit the function early
+      end;
+    end;
+  end;
+
+begin // Body of FindPrimesUpTo
+  writeln('Prime numbers found up to ', limit, ':');
+  for i := 2 to limit do
+  begin
+    // Call the nested helper function
+    if IsPrime(i) then
+      write(i, ' ');
+  end;
+  writeln; // for a final newline
+end;
+
+
+// --- Main Program Block ---
+begin
+  write('Find all prime numbers up to: ');
+  readln(upperLimit);
+
+  if upperLimit < 2 then
+    writeln('There are no prime numbers less than 2.')
+  else
+    FindPrimesUpTo(upperLimit);
+
+  writeln;
+  writeln('Done.');
+end.

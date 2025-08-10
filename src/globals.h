@@ -6,8 +6,10 @@
 #include <stdlib.h> // For exit, EXIT_FAILURE
 
 #include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
-#include "sdl.h"   // For SDL related externs or types if any directly in globals.h
+#ifdef SDL
+#include "backend_ast/sdl.h"   // For SDL related externs or types if any directly in globals.h
                    // (It's better if specific SDL globals are in sdl.h and sdl.c)
+#endif
 
 // --- EXIT_FAILURE_HANDLER Macro ---
 #ifdef SUPPRESS_EXIT
@@ -39,6 +41,7 @@ extern HashTable *localSymbols;
 extern Symbol *current_function_symbol;
 
 extern HashTable *procedure_table; // Procedure table is now a HashTable
+extern HashTable *current_procedure_table; // Pointer to current procedure scope
 extern TypeEntry *type_table;      // TypeEntry definition comes from types.h
 
 // --- CRT State Variables ---

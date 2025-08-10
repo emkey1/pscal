@@ -1,8 +1,11 @@
 #!/bin/bash
-BIN="$HOME/.bin"          # all your executables live here
-TESTS="$HOME/git/pscal/Tests"  # all your .p / .pas files live here
+# Set PSCAL to use a different interpreter, e.g.,
+#   PSCAL=/path/to/pscal ./tall
 
-PSCAL="$BIN/pscal"       # plain interpreter
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TESTS="${TESTS:-$ROOT/Tests}"  # all your .p / .pas files live here
+
+PSCAL="${PSCAL:-$ROOT/build/bin/pscal}"       # plain interpreter
 
 for f in "$TESTS/TestSuite7.p" \
          "$TESTS/MathSuite01.p" \
@@ -11,7 +14,10 @@ do
   [ -r "$f" ] || echo "Missing test file: $f"
 done
 
-[ -x "$PSCAL" ] || echo "pscal binary not found/executable: $PSCAL"
+if [[ ! -x "$PSCAL" ]]; then
+  echo "pscal binary not found or not executable: $PSCAL" >&2
+  exit 1
+fi
 
 run () {
   local label=$1; shift

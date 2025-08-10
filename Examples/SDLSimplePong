@@ -49,8 +49,8 @@ var
 
 begin
   // --- Initialization ---
-  WindowWidth := 640;
-  WindowHeight := 480;
+  WindowWidth := 800;
+  WindowHeight := 600;
   InitGraph(WindowWidth, WindowHeight, 'Pscal Simple Pong');
 
   // --- Text System Initialization ---
@@ -77,7 +77,7 @@ begin
   ScoreComputer := 0;
   MaxScore := 5;
 
-  ComputerPaddleSpeed := 5;
+  ComputerPaddleSpeed := 4; // 3 = easy to beat, 5 = impossible/difficult
 
   KeepRunning := True;
 
@@ -122,7 +122,7 @@ begin
     if ComputerPaddleY < 0 then
       ComputerPaddleY := 0;
     if ComputerPaddleY > WindowHeight - PaddleHeight then
-      ComputerPaddleY := WindowPaddleHeight - PaddleHeight; // FIX: Should be WindowHeight - PaddleHeight
+      ComputerPaddleY := WindowHeight - PaddleHeight;
 
     // Collision Detection (Ball with Top/Bottom Walls)
     if (BallY <= 0) or (BallY + BallSize >= WindowHeight) then

@@ -1,0 +1,2215 @@
+// src/vm/vm.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdbool.h> // For bool, true, false
+
+#include "vm/vm.h"
+#include "compiler/bytecode.h"
+#include "core/types.h"
+#include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
+#include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
+#include "globals.h"
+#include "backend_ast/audio.h"
+#include "frontend/parser.h"
+#include "frontend/ast.h"
+#include <termios.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "backend_ast/builtin.h"
+#include "backend_ast/audio.h"
+
+#define MAX_WRITELN_ARGS_VM 32
+
+// --- VM Helper Functions ---
+static void resetStack(VM* vm) {
+    vm->stackTop = vm->stack;
+}
+
+void vm_dump_stack_info_detailed(VM* vm, const char* context_message) {
+    if (!vm) return; // Safety check
+
+    fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
+    fprintf(stderr, "Stack Size: %ld, Frame Count: %d\n", vm->stackTop - vm->stack, vm->frameCount);
+    fprintf(stderr, "Stack Contents (bottom to top):\n");
+    for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+        fprintf(stderr, "  [ ");
+        // Assuming printValueToStream is available from core/utils.h
+        printValueToStream(*slot, stderr);
+        fprintf(stderr, " ]\n");
+    }
+    fprintf(stderr, "--------------------------\n");
+}
+
+// --- Helper function to dump stack and frame info ---
+void vm_dump_stack_info(VM* vm) {
+    long current_offset = vm->ip - vm->chunk->code;
+    int line = (current_offset > 0 && current_offset <= vm->chunk->count) ? vm->chunk->lines[current_offset - 1] : 0;
+
+    fprintf(stderr, "[VM_DEBUG] Offset: %04ld, Line: %4d, Stack Size: %ld, Frame Count: %d\n",
+            current_offset, line, vm->stackTop - vm->stack, vm->frameCount);
+
+    // Disassemble and print the current instruction
+    if (current_offset < vm->chunk->count) {
+        disassembleInstruction(vm->chunk, current_offset, vm->procedureTable);
+    } else {
+        fprintf(stderr, "         (End of bytecode or invalid offset)\n");
+    }
+
+    // Print stack contents for more detailed debugging:
+    fprintf(stderr, "[VM_DEBUG] Stack Contents: ");
+    for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+        fprintf(stderr, "[");
+        printValueToStream(*slot, stderr);
+        fprintf(stderr, "] ");
+    }
+    fprintf(stderr, "\n");
+}
+
+static bool vmSetContains(const Value* setVal, const Value* itemVal) {
+    if (!setVal || setVal->type != TYPE_SET || !itemVal) {
+        return false;
+    }
+
+    long long item_ord;
+    bool item_is_ordinal = false;
+
+    // Get ordinal value of the item
+    switch (itemVal->type) {
+        case TYPE_INTEGER:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_BOOLEAN:
+            item_ord = itemVal->i_val;
+            item_is_ordinal = true;
+            break;
+        case TYPE_CHAR:
+            item_ord = (long long)itemVal->c_val;
+            item_is_ordinal = true;
+            break;
+        case TYPE_ENUM:
+            item_ord = (long long)itemVal->enum_val.ordinal;
+            item_is_ordinal = true;
+            break;
+        default:
+            item_is_ordinal = false;
+            break;
+    }
+
+    if (!item_is_ordinal) return false; // Item is not of a type that can be in a set
+
+    // Search for the ordinal value in the set's values array
+    if (!setVal->set_val.set_values) return false;
+    for (int i = 0; i < setVal->set_val.set_size; i++) {
+        if (setVal->set_val.set_values[i] == item_ord) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Scans all global symbols and the entire VM value stack to find and nullify
+// any pointers that are aliases of a memory address that is being disposed.
+void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
+    // 1. Scan global symbols using the existing hash table helper
+    if (vm->vmGlobalSymbols) {
+        nullifyPointerAliasesByAddrValue(vm->vmGlobalSymbols, disposedAddrValue);
+    }
+
+    // 2. Scan the entire VM value stack for local variables and parameters
+    //    across all active call frames.
+    for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+        if (slot->type == TYPE_POINTER && (uintptr_t)slot->ptr_val == disposedAddrValue) {
+            slot->ptr_val = NULL; // This is an alias, set it to nil.
+        }
+    }
+}
+
+// runtimeError - Assuming your existing one is fine.
+void runtimeError(VM* vm, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+
+    // Get approximate instruction offset and line for the error
+    size_t instruction_offset = 0;
+    int error_line = 0;
+    if (vm && vm->chunk && vm->ip && vm->chunk->code && vm->chunk->lines) {
+        // The instruction that *caused* the error is usually the one *before* vm->ip
+        if (vm->ip > vm->chunk->code) {
+            instruction_offset = (vm->ip - vm->chunk->code) - 1;
+            if (instruction_offset < (size_t)vm->chunk->count) {
+                error_line = vm->chunk->lines[instruction_offset];
+            }
+        } else if (vm->chunk->count > 0) { // Special case: error on the very first byte
+            instruction_offset = 0;
+            error_line = vm->chunk->lines[0];
+        }
+    }
+    fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+
+    // --- NEW: Dump crash context (instructions and full stack) ---
+    fprintf(stderr, "\n--- VM Crash Context ---\n");
+    fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
+    fprintf(stderr, "Code Base: %p\n", (void*)vm->chunk->code);
+
+    // Dump current instruction (at vm->ip)
+    fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
+    if (vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
+        // disassembleInstruction will advance vm->ip temporarily.
+        // We want to disassemble at vm->ip's current position.
+        // Temporarily store vm->ip and restore it if disassembleInstruction modifies it.
+        // However, disassembleInstruction itself returns the new offset, so safer to pass the current IP's offset.
+        disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
+    } else {
+        fprintf(stderr, "  (IP is out of bytecode bounds: %p)\n", (void*)vm->ip);
+    }
+
+    // Dump preceding instructions for context
+    int start_dump_offset = (int)instruction_offset - 10; // Dump last 10 instructions
+    if (start_dump_offset < 0) start_dump_offset = 0;
+
+    fprintf(stderr, "\nLast Instructions Executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
+    for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
+        offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+    }
+    if (start_dump_offset == (int)instruction_offset) {
+        fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
+    }
+
+    // Dump full stack contents
+    vm_dump_stack_info_detailed(vm, "Full Stack at Crash");
+
+    // --- END NEW DUMP ---
+
+    // resetStack(vm); // Keep this commented out for post-mortem analysis purposes if you want to inspect stack in debugger
+    // ... (rest of runtimeError function, calls EXIT_FAILURE_HANDLER()) ...
+}
+
+static void push(VM* vm, Value value) { // Using your original name 'push'
+    if (vm->stackTop - vm->stack >= VM_STACK_MAX) {
+        runtimeError(vm, "VM Error: Stack overflow.");
+        return;
+    }
+    *vm->stackTop = value;
+    vm->stackTop++;
+}
+
+static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
+    if (!table) return NULL;
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        for (Symbol* s = table->buckets[i]; s; s = s->next) {
+            if (s->is_defined && s->bytecode_address == address) {
+                return s;
+            }
+            if (s->type_def && s->type_def->symbol_table) {
+                Symbol* nested = findProcedureByAddress((HashTable*)s->type_def->symbol_table, address);
+                if (nested) return nested;
+            }
+        }
+    }
+    return NULL;
+}
+
+static Value pop(VM* vm) {
+    if (vm->stackTop == vm->stack) {
+        runtimeError(vm, "VM Error: Stack underflow (pop from empty stack).");
+        return makeNil();
+    }
+    vm->stackTop--;
+    Value result = *vm->stackTop; // Make a copy of the value to return.
+
+    // Overwrite the just-popped slot with a safe NIL value to invalidate it
+    // and prevent dangling pointers if the returned copy's contents are freed.
+    *vm->stackTop = makeNil();
+
+    return result; // Return the copy, which the caller is now responsible for.
+}
+
+/*
+static Value peek(VM* vm, int distance) { // Using your original name 'peek'
+    if (vm->stackTop - vm->stack < distance + 1) {
+        runtimeError(vm, "VM Error: Stack underflow (peek too deep).");
+        return makeNil();
+    }
+    return vm->stackTop[-(distance + 1)];
+}
+ */
+
+// --- Host Function C Implementations ---
+static Value vm_host_quit_requested(VM* vm) {
+    // break_requested is extern int from globals.h, defined in globals.c
+    // makeBoolean is from core/utils.h
+    return makeBoolean(break_requested);
+}
+
+// --- Host Function Registration ---
+bool register_host_function(VM* vm, HostFunctionID id, HostFn fn) {
+    if (!vm) return false;
+    if (id >= HOST_FN_COUNT || id < 0) {
+        fprintf(stderr, "VM Error: HostFunctionID %d out of bounds during registration.\n", id);
+        return false;
+    }
+    vm->host_functions[id] = fn;
+    return true;
+}
+
+// --- VM Initialization and Cleanup ---
+void initVM(VM* vm) { // As in all.txt, with frameCount
+    if (!vm) return;
+    resetStack(vm);
+    vm->chunk = NULL;
+    vm->ip = NULL;
+    vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
+    vm->procedureTable = NULL;
+
+    vm->frameCount = 0; // <--- INITIALIZE frameCount
+
+    vm->exit_requested = false;
+
+    for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
+        vm->host_functions[i] = NULL;
+    }
+    if (!register_host_function(vm, HOST_FN_QUIT_REQUESTED, vm_host_quit_requested)) { // from all.txt
+        fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void freeVM(VM* vm) {
+    if (!vm) return;
+    if (vm->vmGlobalSymbols) {
+        // Assuming freeHashTable also frees the Symbols and their Values correctly.
+        // If not, you might need to iterate and free Values if they contain heap data
+        // not managed by freeValue calls during Symbol freeing.
+        freeHashTable(vm->vmGlobalSymbols); //
+        vm->vmGlobalSymbols = NULL;
+    }
+    // No explicit freeing of vm->host_functions array itself as it's part of VM struct.
+    // If HostFn structs themselves allocated memory, that would need handling.
+}
+
+// Unwind the current call frame. If there are no more frames, the VM should halt.
+// The 'halted' flag is set to true when the VM has returned from the top-level frame.
+static InterpretResult returnFromCall(VM* vm, bool* halted) {
+    if (vm->frameCount == 0) {
+        if (vm->stackTop > vm->stack) {
+            Value final_return_val = pop(vm);
+            freeValue(&final_return_val);
+        }
+        if (halted) *halted = true;
+        return INTERPRET_OK;
+    }
+
+    CallFrame* currentFrame = &vm->frames[vm->frameCount - 1];
+    bool has_result = (currentFrame->function_symbol != NULL) &&
+                      (currentFrame->function_symbol->type != TYPE_VOID);
+
+    Value safeReturnValue = makeVoid();
+    if (has_result) {
+        if (vm->stackTop <= currentFrame->slots) {
+            runtimeError(vm, "Stack underflow on function return.");
+            if (halted) *halted = true;
+            return INTERPRET_RUNTIME_ERROR;
+        }
+        Value returnValue = pop(vm);
+        safeReturnValue = makeCopyOfValue(&returnValue);
+        freeValue(&returnValue);
+    }
+
+    for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
+        freeValue(slot);
+    }
+
+    vm->ip = currentFrame->return_address;
+    vm->stackTop = currentFrame->slots;
+
+    if (currentFrame->upvalues) {
+        free(currentFrame->upvalues);
+        currentFrame->upvalues = NULL;
+    }
+    vm->frameCount--;
+
+    if (has_result) {
+        push(vm, safeReturnValue);
+    } else {
+        freeValue(&safeReturnValue);
+    }
+
+    if (halted) *halted = false;
+    return INTERPRET_OK;
+}
+
+// --- Bytecode Reading Macros ---
+// Your existing READ_BYTE and READ_CONSTANT macros are fine as they implicitly use 'vm' from runVM scope
+#define READ_BYTE() (*vm->ip++)
+#define READ_CONSTANT() (vm->chunk->constants[READ_BYTE()])
+#define READ_CONSTANT16() (vm->chunk->constants[READ_SHORT(vm)])
+
+// Helper function to read a 16-bit short. It will use the READ_BYTE() macro.
+static inline uint16_t READ_SHORT(VM* vm_param) { // Pass vm explicitly here
+    uint8_t msb = (*vm_param->ip++); // Explicitly use vm_param
+    uint8_t lsb = (*vm_param->ip++); // Explicitly use vm_param
+    return (uint16_t)(msb << 8) | lsb;
+}
+
+#define READ_HOST_ID() ((HostFunctionID)READ_BYTE())
+
+// --- Symbol Management (VM specific) ---
+static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init) {
+    if (!name || name[0] == '\0') { /* ... */ return NULL; }
+    Symbol *sym = (Symbol*)malloc(sizeof(Symbol));
+    if (!sym) { /* ... */ return NULL; }
+    sym->name = strdup(name);
+    if (!sym->name) { /* ... */ free(sym); return NULL; }
+    toLowerString(sym->name);
+
+    sym->type = type;
+    sym->type_def = type_def_for_value_init; // Store the provided type definition AST
+    sym->value = (Value*)malloc(sizeof(Value));
+    if (!sym->value) { /* ... */ free(sym->name); free(sym); return NULL; }
+
+    // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
+    *(sym->value) = makeValueForType(type, type_def_for_value_init, sym);
+
+    sym->is_alias = false;
+    sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
+                           // If VM needs to know about them, another mechanism or flag is needed.
+    sym->is_local_var = false;
+    sym->next = NULL;
+    sym->upvalue_count = 0;
+    return sym;
+}
+
+// Shared logic for OP_DEFINE_GLOBAL and OP_DEFINE_GLOBAL16.
+// Assumes the name has already been read (as Value) and the IP is positioned
+// at the declared type byte.
+static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
+    VarType declaredType = (VarType)READ_BYTE();
+
+    if (declaredType == TYPE_ARRAY) {
+        uint8_t dimension_count = READ_BYTE();
+        if (dimension_count == 0) {
+            runtimeError(vm, "VM Error: Array defined with zero dimensions for '%s'.", varNameVal.s_val);
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
+        int* lower_bounds = malloc(sizeof(int) * dimension_count);
+        int* upper_bounds = malloc(sizeof(int) * dimension_count);
+        if (!lower_bounds || !upper_bounds) {
+            runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+            if (lower_bounds) free(lower_bounds);
+            if (upper_bounds) free(upper_bounds);
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
+        for (int i = 0; i < dimension_count; i++) {
+            uint16_t lower_idx = READ_SHORT(vm);
+            uint16_t upper_idx = READ_SHORT(vm);
+            if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
+                runtimeError(vm, "VM Error: Array bound constant index out of range for '%s'.", varNameVal.s_val);
+                free(lower_bounds); free(upper_bounds);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            Value lower_val = vm->chunk->constants[lower_idx];
+            Value upper_val = vm->chunk->constants[upper_idx];
+            if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+                runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
+                free(lower_bounds); free(upper_bounds);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            lower_bounds[i] = (int)lower_val.i_val;
+            upper_bounds[i] = (int)upper_val.i_val;
+        }
+
+        VarType elem_var_type = (VarType)READ_BYTE();
+        uint8_t elem_name_idx = READ_BYTE();
+        Value elem_name_val = vm->chunk->constants[elem_name_idx];
+        AST* elem_type_def = NULL;
+        if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+            elem_type_def = lookupType(elem_name_val.s_val);
+        }
+
+        Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds,
+                                      elem_var_type, elem_type_def);
+        free(lower_bounds);
+        free(upper_bounds);
+
+        Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+        if (sym == NULL) {
+            sym = (Symbol*)malloc(sizeof(Symbol));
+            if (!sym) {
+                runtimeError(vm, "VM Error: Malloc failed for Symbol struct for global array '%s'.", varNameVal.s_val);
+                freeValue(&array_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            sym->name = strdup(varNameVal.s_val);
+            if (!sym->name) {
+                runtimeError(vm, "VM Error: Malloc failed for symbol name for global array '%s'.", varNameVal.s_val);
+                free(sym); freeValue(&array_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            toLowerString(sym->name);
+            sym->type = declaredType;
+            sym->type_def = NULL;
+            sym->value = (Value*)malloc(sizeof(Value));
+            if (!sym->value) {
+                runtimeError(vm, "VM Error: Malloc failed for Value struct for global array '%s'.", varNameVal.s_val);
+                free(sym->name); free(sym); freeValue(&array_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            *(sym->value) = array_val;
+            sym->is_alias = false;
+            sym->is_const = false;
+            sym->is_local_var = false;
+            sym->next = NULL;
+            hashTableInsert(vm->vmGlobalSymbols, sym);
+        } else {
+            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+            freeValue(sym->value);
+            *(sym->value) = array_val;
+        }
+    } else {
+        uint16_t type_name_idx = READ_SHORT(vm);
+        int str_len = 0;
+        uint16_t len_idx = 0;
+        if (declaredType == TYPE_STRING) {
+            len_idx = READ_SHORT(vm);
+            Value len_val = vm->chunk->constants[len_idx];
+            if (len_val.type == TYPE_INTEGER) {
+                str_len = (int)len_val.i_val;
+            }
+        }
+        Value typeNameVal = vm->chunk->constants[type_name_idx];
+        AST* type_def_node = NULL;
+        if (declaredType == TYPE_STRING && str_len > 0) {
+            Token* strTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0);
+            type_def_node = newASTNode(AST_VARIABLE, strTok);
+            setTypeAST(type_def_node, TYPE_STRING);
+            freeToken(strTok);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%d", str_len);
+            Token* lenTok = newToken(TOKEN_INTEGER_CONST, buf, 0, 0);
+            AST* lenNode = newASTNode(AST_NUMBER, lenTok);
+            setTypeAST(lenNode, TYPE_INTEGER);
+            freeToken(lenTok);
+            setRight(type_def_node, lenNode);
+        } else if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
+            type_def_node = lookupType(typeNameVal.s_val);
+            if (declaredType == TYPE_ENUM && type_def_node == NULL) {
+                runtimeError(vm, "VM Error: Enum type '%s' not found for global '%s'.", typeNameVal.s_val, varNameVal.s_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+        }
+
+        if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+            runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
+        Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+        if (sym == NULL) {
+            sym = createSymbolForVM(varNameVal.s_val, declaredType, type_def_node);
+            if (!sym) {
+                runtimeError(vm, "VM Error: Failed to create symbol for global '%s'.", varNameVal.s_val);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            hashTableInsert(vm->vmGlobalSymbols, sym);
+        } else {
+            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+        }
+    }
+
+    return INTERPRET_OK;
+}
+
+// --- Main Interpretation Loop ---
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures) {
+    if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
+
+    vm->chunk = chunk;
+    vm->ip = vm->chunk->code;
+
+    vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
+    vm->procedureTable = procedures; // <--- STORED procedureTable
+
+    #ifdef DEBUG
+    if (dumpExec) { // from all.txt
+        printf("\n--- VM Initial State ---\n");
+        printf("IP: %p (offset 0)\n", (void*)vm->ip);
+        printf("Stack top: %p (empty)\n", (void*)vm->stackTop);
+        printf("Chunk code: %p, Chunk constants: %p\n", (void*)vm->chunk->code, (void*)vm->chunk->constants);
+        printf("Global symbol table (for VM): %p\n", (void*)vm->vmGlobalSymbols);
+        printf("Procedure table (for disassembly): %p\n", (void*)vm->procedureTable); // Debug print
+        printf("------------------------\n");
+    }
+    #endif
+
+#define BINARY_OP(op_char_for_error_msg, current_instruction_code) \
+    do { \
+        Value b_val_popped = pop(vm); \
+        Value a_val_popped = pop(vm); \
+        Value result_val; \
+        bool op_is_handled = false; \
+        \
+        /* String/char concatenation for OP_ADD */ \
+        if (current_instruction_code == OP_ADD) { \
+            if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
+                (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
+                char a_buffer[2] = {0}; \
+                char b_buffer[2] = {0}; \
+                const char* s_a = NULL; \
+                const char* s_b = NULL; \
+                if (IS_STRING(a_val_popped)) { \
+                    s_a = AS_STRING(a_val_popped) ? AS_STRING(a_val_popped) : ""; \
+                } else { \
+                    a_buffer[0] = AS_CHAR(a_val_popped); \
+                    s_a = a_buffer; \
+                } \
+                if (IS_STRING(b_val_popped)) { \
+                    s_b = AS_STRING(b_val_popped) ? AS_STRING(b_val_popped) : ""; \
+                } else { \
+                    b_buffer[0] = AS_CHAR(b_val_popped); \
+                    s_b = b_buffer; \
+                } \
+                size_t len_a = strlen(s_a); \
+                size_t len_b = strlen(s_b); \
+                size_t total_len = len_a + len_b; \
+                char* temp_concat_buffer = (char*)malloc(total_len + 1); \
+                if (!temp_concat_buffer) { \
+                    runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
+                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                    return INTERPRET_RUNTIME_ERROR; \
+                } \
+                memcpy(temp_concat_buffer, s_a, len_a); \
+                memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                temp_concat_buffer[total_len] = '\0'; \
+                result_val = makeString(temp_concat_buffer); \
+                free(temp_concat_buffer); \
+                op_is_handled = true; \
+            } \
+        } \
+        \
+        /* Char +/- intlike */ \
+        if (!op_is_handled) { \
+            if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
+                if (a_val_popped.type == TYPE_CHAR && IS_INTLIKE(b_val_popped)) { \
+                    char result_char = (current_instruction_code == OP_ADD) ? \
+                                       (AS_CHAR(a_val_popped) + (char)as_i64(b_val_popped)) : \
+                                       (AS_CHAR(a_val_popped) - (char)as_i64(b_val_popped)); \
+                    result_val = makeChar(result_char); \
+                    op_is_handled = true; \
+                } else if (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_CHAR && current_instruction_code == OP_ADD) { \
+                    char result_char = (char)(as_i64(a_val_popped) + AS_CHAR(b_val_popped)); \
+                    result_val = makeChar(result_char); \
+                    op_is_handled = true; \
+                } \
+            } \
+        } \
+        \
+        /* Set union/difference/intersection */ \
+        if (!op_is_handled) { \
+            if (a_val_popped.type == TYPE_SET && b_val_popped.type == TYPE_SET) { \
+                switch (current_instruction_code) { \
+                    case OP_ADD: \
+                        result_val = setUnion(a_val_popped, b_val_popped); \
+                        break; \
+                    case OP_SUBTRACT: \
+                        result_val = setDifference(a_val_popped, b_val_popped); \
+                        break; \
+                    case OP_MULTIPLY: \
+                        result_val = setIntersection(a_val_popped, b_val_popped); \
+                        break; \
+                    default: \
+                        runtimeError(vm, "Runtime Error: Unsupported set operation '%s'.", op_char_for_error_msg); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                } \
+                op_is_handled = true; \
+            } \
+        } \
+        \
+        /* Numeric arithmetic (INTEGER/BYTE/WORD/REAL) */ \
+        if (!op_is_handled) { \
+            if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
+                if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
+                    double fa = as_f64(a_val_popped); \
+                    double fb = as_f64(b_val_popped); \
+                    if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
+                        runtimeError(vm, "Runtime Error: Division by zero."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    switch (current_instruction_code) { \
+                        case OP_ADD:      result_val = makeReal(fa + fb); break; \
+                        case OP_SUBTRACT: result_val = makeReal(fa - fb); break; \
+                        case OP_MULTIPLY: result_val = makeReal(fa * fb); break; \
+                        case OP_DIVIDE:   result_val = makeReal(fa / fb); break; \
+                        default: \
+                            runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for real numbers.", current_instruction_code); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                } else { \
+                    long long ia = as_i64(a_val_popped); \
+                    long long ib = as_i64(b_val_popped); \
+                    if (current_instruction_code == OP_DIVIDE && ib == 0) { \
+                        runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    switch (current_instruction_code) { \
+                        case OP_ADD:      result_val = makeInt(ia + ib); break; \
+                        case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
+                        case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
+                        case OP_DIVIDE:   result_val = makeReal((double)ia / (double)ib); break; \
+                        default: \
+                            runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                } \
+                op_is_handled = true; \
+            } \
+        } \
+        \
+        if (!op_is_handled) { \
+            runtimeError(vm, "Runtime Error: Operands must be numbers for arithmetic operation '%s' (or strings/chars for '+'). Got %s and %s", \
+                         op_char_for_error_msg, varTypeToString(a_val_popped.type), varTypeToString(b_val_popped.type)); \
+            freeValue(&a_val_popped); \
+            freeValue(&b_val_popped); \
+            return INTERPRET_RUNTIME_ERROR; \
+        } \
+        push(vm, result_val); \
+        freeValue(&a_val_popped); \
+        freeValue(&b_val_popped); \
+    } while (false)
+
+    uint8_t instruction_val;
+    for (;;) {
+/* #ifdef DEBUG
+        if (dumpExec) {
+            fprintf(stderr,"VM Stack: ");
+            for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+                fprintf(stderr,"[ ");
+                printValueToStream(*slot, stderr);
+                fprintf(stderr," ]");
+            }
+            fprintf(stderr,"\n");
+            disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
+        }
+        #endif */
+        //vm_dump_stack_info(vm); // Call new helper at the start of each instruction
+
+        instruction_val = READ_BYTE();
+        switch (instruction_val) {
+            case OP_RETURN: {
+                bool halted = false;
+                InterpretResult res = returnFromCall(vm, &halted);
+                if (res != INTERPRET_OK) return res;
+                if (halted) return INTERPRET_OK;
+                break;
+            }
+            case OP_EXIT: {
+                bool halted = false;
+                InterpretResult res = returnFromCall(vm, &halted);
+                if (res != INTERPRET_OK) return res;
+                if (halted) return INTERPRET_OK;
+                break;
+            }
+            case OP_CONSTANT: {
+                Value constant = READ_CONSTANT();
+                push(vm, makeCopyOfValue(&constant));
+                break;
+            }
+                
+            case OP_CONSTANT16: {
+                uint16_t idx = READ_SHORT(vm);
+                if (idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Constant index %u out of bounds for OP_CONSTANT16.", idx);
+                   return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(&vm->chunk->constants[idx]));
+                break;
+            }
+
+            case OP_GET_CHAR_ADDRESS: {
+                Value index_val = pop(vm);
+                Value* string_ptr_val = vm->stackTop - 1; // Peek at the string pointer
+
+                if (string_ptr_val->type != TYPE_POINTER || !string_ptr_val->ptr_val || ((Value*)string_ptr_val->ptr_val)->type != TYPE_STRING) {
+                    runtimeError(vm, "VM Error: Base for character index is not a pointer to a string.");
+                    freeValue(&index_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (index_val.type != TYPE_INTEGER) {
+                    runtimeError(vm, "VM Error: String index must be an integer.");
+                    freeValue(&index_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                long long pscal_index = index_val.i_val;
+                freeValue(&index_val);
+
+                Value* string_val = (Value*)string_ptr_val->ptr_val;
+                const char* str = string_val->s_val ? string_val->s_val : "";
+                size_t len = strlen(str);
+
+                if (pscal_index < 1 || (size_t)pscal_index > len) {
+                    runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Pop the old string address pointer from the stack
+                Value popped_string_ptr = pop(vm);
+                freeValue(&popped_string_ptr);
+
+                // Push a new pointer directly to the character's memory location
+                // We use a special marker in base_type_node to identify this as a char pointer
+                push(vm, makePointer(&string_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
+                break;
+            }
+            case OP_GET_GLOBAL_ADDRESS: {
+                uint8_t name_idx = READ_BYTE();
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL_ADDRESS.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for GET_GLOBAL_ADDRESS (idx=%u, type=%s).",
+                                 name_idx, varTypeToString(varNameVal.type));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Optional sanity log (keep while debugging)
+                // fprintf(stderr, "[VM_DEBUG] GET_GLOBAL_ADDRESS '%s'\n", varNameVal.s_val);
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    runtimeError(vm, "Runtime Error: Global '%s' has no Value slot.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, makePointer(sym->value, NULL));
+                break;
+            }
+            case OP_GET_GLOBAL_ADDRESS16: {
+                uint16_t name_idx = READ_SHORT(vm);
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL_ADDRESS16.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for GET_GLOBAL_ADDRESS16 (idx=%u, type=%s).",
+                                 name_idx, varTypeToString(varNameVal.type));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    runtimeError(vm, "Runtime Error: Global '%s' has no Value slot.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, makePointer(sym->value, NULL));
+                break;
+            }
+            case OP_GET_LOCAL_ADDRESS: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                push(vm, makePointer(&frame->slots[slot], NULL));
+                break;
+            }
+            case OP_ADD:      BINARY_OP("+", instruction_val); break;
+            case OP_SUBTRACT: BINARY_OP("-", instruction_val); break;
+            case OP_MULTIPLY: BINARY_OP("*", instruction_val); break;
+            case OP_DIVIDE:   BINARY_OP("/", instruction_val); break;
+
+            case OP_NEGATE: {
+                Value val_popped = pop(vm);
+                Value result_val;
+                if (IS_INTEGER(val_popped)) result_val = makeInt(-AS_INTEGER(val_popped));
+                else if (IS_REAL(val_popped)) result_val = makeReal(-AS_REAL(val_popped));
+                else {
+                    runtimeError(vm, "Runtime Error: Operand for negate must be a number.");
+                    freeValue(&val_popped);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, result_val);
+                freeValue(&val_popped);
+                break;
+            }
+            case OP_NOT: {
+                Value val_popped = pop(vm);
+                if (!IS_BOOLEAN(val_popped) && !IS_INTEGER(val_popped)) { // <<< FIX: Allow INTEGER
+                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or integer.");
+                    freeValue(&val_popped);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                bool bool_val = IS_BOOLEAN(val_popped) ? AS_BOOLEAN(val_popped) : (AS_INTEGER(val_popped) != 0); // <<< FIX: Coerce INTEGER to BOOLEAN
+                push(vm, makeBoolean(!bool_val));
+                freeValue(&val_popped);
+                break;
+            }
+            case OP_SWAP: {
+                if (vm->stackTop - vm->stack < 2) {
+                    runtimeError(vm, "VM Error: Not enough values on stack to swap.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                // Perform an in-place swap of the top two Value structs on the stack.
+                Value temp = vm->stackTop[-1];
+                vm->stackTop[-1] = vm->stackTop[-2];
+                vm->stackTop[-2] = temp;
+                break;
+            }
+            case OP_DUP: {
+                if (vm->stackTop == vm->stack) {
+                    runtimeError(vm, "VM Error: Stack underflow (dup from empty stack).");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(&vm->stackTop[-1]));
+                break;
+            }
+            case OP_AND:
+            case OP_OR: {
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                Value result_val;
+
+                if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
+                    bool ba = AS_BOOLEAN(a_val);
+                    bool bb = AS_BOOLEAN(b_val);
+                    if (instruction_val == OP_AND) {
+                        result_val = makeBoolean(ba && bb);
+                    } else {
+                        result_val = makeBoolean(ba || bb);
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val))  {
+                    long long ia = AS_INTEGER(a_val);
+                    long long ib = AS_INTEGER(b_val);
+                    if (instruction_val == OP_AND) {
+                        result_val = makeInt(ia & ib);
+                    } else {
+                        result_val = makeInt(ia | ib);
+                    }
+                } else {
+                    runtimeError(vm, "Runtime Error: Operands for AND/OR must be both Boolean or both Integer. Got %s and %s.",
+                                 varTypeToString(a_val.type), varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, result_val);
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
+            case OP_INT_DIV: {
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                    long long ia = AS_INTEGER(a_val);
+                    long long ib = AS_INTEGER(b_val);
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Integer division by zero.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeInt(ia / ib));
+                } else {
+                    runtimeError(vm, "Runtime Error: Operands for 'div' must be integers. Got %s and %s.",
+                                 varTypeToString(a_val.type), varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
+            case OP_MOD: {
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                    long long ia = AS_INTEGER(a_val);
+                    long long ib = AS_INTEGER(b_val);
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Modulo by zero.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeInt(ia % ib));
+                } else {
+                    runtimeError(vm, "Runtime Error: Operands for 'mod' must be integers. Got %s and %s.",
+                                 varTypeToString(a_val.type), varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
+            case OP_SHL:
+            case OP_SHR: {
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                    long long ia = AS_INTEGER(a_val);
+                    long long ib = AS_INTEGER(b_val);
+                    if (ib < 0) {
+                        runtimeError(vm, "Runtime Error: Shift amount cannot be negative.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (instruction_val == OP_SHL) {
+                        push(vm, makeInt(ia << ib));
+                    } else {
+                        push(vm, makeInt(ia >> ib));
+                    }
+                } else {
+                    runtimeError(vm, "Runtime Error: Operands for 'shl' and 'shr' must be integers. Got %s and %s.",
+                                 varTypeToString(a_val.type), varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
+            case OP_EQUAL:
+            case OP_NOT_EQUAL:
+            case OP_GREATER:
+            case OP_GREATER_EQUAL:
+            case OP_LESS:
+            case OP_LESS_EQUAL: {
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                Value result_val;
+                bool comparison_succeeded = false;
+
+                // Numeric comparison (Integers and Reals)
+                if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
+                    if (a_val.type == TYPE_REAL || b_val.type == TYPE_REAL) {
+                        double fa = as_f64(a_val);
+                        double fb = as_f64(b_val);
+                        switch (instruction_val) {
+                            case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
+                            case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
+                            case OP_GREATER:       result_val = makeBoolean(fa >  fb); break;
+                            case OP_GREATER_EQUAL: result_val = makeBoolean(fa >= fb); break;
+                            case OP_LESS:          result_val = makeBoolean(fa <  fb); break;
+                            case OP_LESS_EQUAL:    result_val = makeBoolean(fa <= fb); break;
+                            default: goto comparison_error_label;
+                        }
+                    } else {
+                        long long ia = as_i64(a_val);
+                        long long ib = as_i64(b_val);
+                        switch (instruction_val) {
+                            case OP_EQUAL:         result_val = makeBoolean(ia == ib); break;
+                            case OP_NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
+                            case OP_GREATER:       result_val = makeBoolean(ia >  ib); break;
+                            case OP_GREATER_EQUAL: result_val = makeBoolean(ia >= ib); break;
+                            case OP_LESS:          result_val = makeBoolean(ia <  ib); break;
+                            case OP_LESS_EQUAL:    result_val = makeBoolean(ia <= ib); break;
+                            default: goto comparison_error_label;
+                        }
+                    }
+                    comparison_succeeded = true;
+                } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
+                    char char_val;
+                    const char* str_val;
+
+                    if (IS_CHAR(a_val)) {
+                        char_val = AS_CHAR(a_val);
+                        str_val = AS_STRING(b_val);
+                    } else {
+                        char_val = AS_CHAR(b_val);
+                        str_val = AS_STRING(a_val);
+                    }
+
+                    if (strlen(str_val) == 1 && str_val[0] == char_val) {
+                        result_val = makeBoolean(instruction_val == OP_EQUAL);
+                    } else {
+                        result_val = makeBoolean(instruction_val != OP_EQUAL);
+                    }
+                    comparison_succeeded = true;
+                }
+                // String comparison
+                else if (IS_STRING(a_val) && IS_STRING(b_val)) {
+                    const char* sa = AS_STRING(a_val) ? AS_STRING(a_val) : "";
+                    const char* sb = AS_STRING(b_val) ? AS_STRING(b_val) : "";
+                    int cmp = strcmp(sa, sb);
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean(cmp == 0); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean(cmp != 0); break;
+                        case OP_GREATER:       result_val = makeBoolean(cmp > 0);  break;
+                        case OP_GREATER_EQUAL: result_val = makeBoolean(cmp >= 0); break;
+                        case OP_LESS:          result_val = makeBoolean(cmp < 0);  break;
+                        case OP_LESS_EQUAL:    result_val = makeBoolean(cmp <= 0); break;
+                        default:
+                            runtimeError(vm, "VM Error: Unexpected string comparison opcode %d.", instruction_val);
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                } else if ((IS_CHAR(a_val) && IS_INTEGER(b_val)) || (IS_INTEGER(a_val) && IS_CHAR(b_val))) {
+                    char char_val = IS_CHAR(a_val) ? AS_CHAR(a_val) : AS_CHAR(b_val);
+                    long long int_val = IS_INTEGER(a_val) ? AS_INTEGER(a_val) : AS_INTEGER(b_val);
+
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean((long long)char_val == int_val); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean((long long)char_val != int_val); break;
+                        case OP_GREATER:       result_val = makeBoolean((long long)char_val > int_val);  break;
+                        case OP_GREATER_EQUAL: result_val = makeBoolean((long long)char_val >= int_val); break;
+                        case OP_LESS:          result_val = makeBoolean((long long)char_val < int_val);  break;
+                        case OP_LESS_EQUAL:    result_val = makeBoolean((long long)char_val <= int_val); break;
+                        default:
+                            runtimeError(vm, "VM Error: Unexpected char/integer comparison opcode %d.", instruction_val);
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
+                // Char comparison
+                else if (IS_CHAR(a_val) && IS_CHAR(b_val)) {
+                    char ca = AS_CHAR(a_val);
+                    char cb = AS_CHAR(b_val);
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean(ca == cb); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean(ca != cb); break;
+                        case OP_GREATER:       result_val = makeBoolean(ca > cb);  break;
+                        case OP_GREATER_EQUAL: result_val = makeBoolean(ca >= cb); break;
+                        case OP_LESS:          result_val = makeBoolean(ca < cb);  break;
+                        case OP_LESS_EQUAL:    result_val = makeBoolean(ca <= cb); break;
+                        default:
+                            runtimeError(vm, "VM Error: Unexpected char comparison opcode %d.", instruction_val);
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
+                    char char_val;
+                    const char* str_val;
+                    if (IS_CHAR(a_val)) { char_val = AS_CHAR(a_val); str_val = AS_STRING(b_val); }
+                    else { char_val = AS_CHAR(b_val); str_val = AS_STRING(a_val); }
+
+                    size_t slen = str_val ? strlen(str_val) : 0;
+
+                    bool eq;
+                    if (slen == 1) {
+                        eq = (str_val[0] == char_val);
+                    } else if (slen == 0) {
+                        // Treat empty string as #0 char for equality tests
+                        eq = (char_val == '\0');
+                    } else {
+                        eq = false;
+                    }
+
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean(eq); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean(!eq); break;
+                        case OP_GREATER:
+                        case OP_GREATER_EQUAL:
+                        case OP_LESS:
+                        case OP_LESS_EQUAL:
+                            runtimeError(vm, "Runtime Error: Relational comparison between CHAR and STRING is not supported.");
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                        default:
+                            runtimeError(vm, "VM Error: Unexpected char/string comparison opcode %d.", instruction_val);
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
+                // Boolean comparison
+                else if ((IS_BOOLEAN(a_val) && (IS_BOOLEAN(b_val) || IS_INTEGER(b_val))) ||
+                         (IS_INTEGER(a_val) && IS_BOOLEAN(b_val))) {
+                          bool ba = IS_BOOLEAN(a_val) ? AS_BOOLEAN(a_val) : (AS_INTEGER(a_val) != 0);
+                          bool bb = IS_BOOLEAN(b_val) ? AS_BOOLEAN(b_val) : (AS_INTEGER(b_val) != 0);
+                    switch (instruction_val) {
+                        case OP_EQUAL:         result_val = makeBoolean(ba == bb); break;
+                        case OP_NOT_EQUAL:     result_val = makeBoolean(ba != bb); break;
+                        case OP_GREATER:       result_val = makeBoolean(ba > bb);  break;
+                        case OP_GREATER_EQUAL: result_val = makeBoolean(ba >= bb); break;
+                        case OP_LESS:          result_val = makeBoolean(ba < bb);  break;
+                        case OP_LESS_EQUAL:    result_val = makeBoolean(ba <= bb); break;
+                        default:
+                            runtimeError(vm, "VM Error: Unexpected boolean comparison opcode %d.", instruction_val);
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
+                // ENUM comparison
+                else if (a_val.type == TYPE_ENUM && b_val.type == TYPE_ENUM) {
+                    const char *name_a = a_val.enum_val.enum_name;
+                    const char *name_b = b_val.enum_val.enum_name;
+                    bool types_match = (name_a && name_b && strcmp(name_a, name_b) == 0);
+                    int ord_a = a_val.enum_val.ordinal;
+                    int ord_b = b_val.enum_val.ordinal;
+
+                    if (instruction_val == OP_EQUAL) {
+                        result_val = makeBoolean(types_match && (ord_a == ord_b));
+                    } else if (instruction_val == OP_NOT_EQUAL) {
+                        result_val = makeBoolean(!types_match || (ord_a != ord_b));
+                    } else {
+                        if (!types_match) {
+                            runtimeError(vm,
+                                         "Runtime Error: Cannot compare different ENUM types ('%s' vs '%s') with relational operator.",
+                                         name_a ? name_a : "<anon>",
+                                         name_b ? name_b : "<anon>");
+                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                        }
+                        switch (instruction_val) {
+                            case OP_GREATER:       result_val = makeBoolean(ord_a > ord_b);  break;
+                            case OP_GREATER_EQUAL: result_val = makeBoolean(ord_a >= ord_b); break;
+                            case OP_LESS:          result_val = makeBoolean(ord_a < ord_b);  break;
+                            case OP_LESS_EQUAL:    result_val = makeBoolean(ord_a <= ord_b); break;
+                            default:
+                                runtimeError(vm, "VM Error: Unexpected enum comparison opcode %d.", instruction_val);
+                                freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                        }
+                    }
+                    comparison_succeeded = true;
+                }
+                // Pointer and NIL comparison
+                else if ((a_val.type == TYPE_POINTER || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_POINTER || b_val.type == TYPE_NIL)) {
+                    bool ptrs_equal = false;
+                    if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
+                        ptrs_equal = true;
+                    } else if (a_val.type == TYPE_NIL && b_val.type == TYPE_POINTER) {
+                        ptrs_equal = (b_val.ptr_val == NULL);
+                    } else if (a_val.type == TYPE_POINTER && b_val.type == TYPE_NIL) {
+                        ptrs_equal = (a_val.ptr_val == NULL);
+                    } else {
+                        ptrs_equal = (a_val.ptr_val == b_val.ptr_val);
+                    }
+
+                    if (instruction_val == OP_EQUAL) {
+                        result_val = makeBoolean(ptrs_equal);
+                    } else if (instruction_val == OP_NOT_EQUAL) {
+                        result_val = makeBoolean(!ptrs_equal);
+                    } else {
+                        runtimeError(vm, "Runtime Error: Invalid operator for pointer comparison. Only '=' and '<>' are allowed. Got opcode %d.", instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
+
+comparison_error_label:
+                if (comparison_succeeded) {
+                    push(vm, result_val);
+                } else {
+                    const char* op_str = "unknown_comparison_op";
+                    switch (instruction_val) {
+                        case OP_EQUAL:         op_str = "="; break;
+                        case OP_NOT_EQUAL:     op_str = "<>"; break;
+                        case OP_GREATER:       op_str = ">";  break;
+                        case OP_GREATER_EQUAL: op_str = ">="; break;
+                        case OP_LESS:          op_str = "<";  break;
+                        case OP_LESS_EQUAL:    op_str = "<="; break;
+                        default: op_str = "unknown_comparison_op_code"; break;
+                    }
+
+                    runtimeError(vm, "Runtime Error: Operands not comparable for operator '%s'. Left operand: %s, Right operand: %s.",
+                                                 op_str,
+                                                 varTypeToString(a_val.type),
+                                                 varTypeToString(b_val.type));
+                    freeValue(&a_val); freeValue(&b_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&a_val);
+                freeValue(&b_val);
+                break;
+            }
+            case OP_GET_FIELD_ADDRESS: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        Value popped_base_val = pop(vm);
+                        freeValue(&popped_base_val);
+                        push(vm, makePointer(&current->value, NULL));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case OP_GET_FIELD_ADDRESS16: {
+                uint16_t field_name_idx = READ_SHORT(vm);
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        Value popped_base_val = pop(vm);
+                        freeValue(&popped_base_val);
+                        push(vm, makePointer(&current->value, NULL));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case OP_GET_ELEMENT_ADDRESS: {
+                uint8_t dimension_count = READ_BYTE();
+
+                if (dimension_count == 1) {
+                    // The index is on top of the stack, so the base pointer is just below it
+                    Value* base_ptr = vm->stackTop - 2;
+                    if (base_ptr->type == TYPE_POINTER) {
+                        Value* base_val = (Value*)base_ptr->ptr_val;
+                        if (base_val && base_val->type == TYPE_STRING) {
+                            Value index_val = pop(vm);
+                            if (index_val.type != TYPE_INTEGER) {
+                                runtimeError(vm, "VM Error: String index must be an integer.");
+                                freeValue(&index_val);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            long long pscal_index = index_val.i_val;
+                            freeValue(&index_val);
+
+                            Value popped_base_ptr_val = pop(vm);
+                            freeValue(&popped_base_ptr_val);
+
+                            size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
+                            if (pscal_index < 1 || (size_t)pscal_index > len) {
+                                runtimeError(vm, "Runtime Error: String index (%lld) out of bounds for string of length %zu.", pscal_index, len);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+
+                            // Push a special pointer to the character's memory location
+                            push(vm, makePointer(&base_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
+                            break; // Exit the case
+                        }
+                    }
+                }
+
+                int* indices = malloc(sizeof(int) * dimension_count);
+                if (!indices) { runtimeError(vm, "VM Error: Malloc failed for array indices."); return INTERPRET_RUNTIME_ERROR; }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    Value index_val = pop(vm);
+                    if (index_val.type != TYPE_INTEGER) {
+                        runtimeError(vm, "VM Error: Array index must be an integer.");
+                        free(indices); freeValue(&index_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    freeValue(&index_val);
+                }
+
+                Value operand = pop(vm);
+                Value* array_val_ptr = NULL;
+
+                if (operand.type == TYPE_POINTER) {
+                    array_val_ptr = (Value*)operand.ptr_val;
+                    if (!array_val_ptr || array_val_ptr->type != TYPE_ARRAY) {
+                        runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                        free(indices);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (operand.type == TYPE_ARRAY) {
+                    array_val_ptr = &operand;
+                } else {
+                    runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
+                    free(indices);
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int offset = computeFlatOffset(array_val_ptr, indices);
+                free(indices);
+
+                int total_size = calculateArrayTotalSize(array_val_ptr);
+                if (offset < 0 || offset >= total_size) {
+                    runtimeError(vm, "VM Error: Array element index out of bounds.");
+                    if (operand.type == TYPE_POINTER) freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+
+                if (operand.type == TYPE_POINTER) {
+                    freeValue(&operand);
+                }
+
+                break;
+            }
+            case OP_SET_INDIRECT: {
+                Value value_to_set = pop(vm);
+                Value pointer_to_lvalue = pop(vm);
+
+                if (pointer_to_lvalue.type != TYPE_POINTER) {
+                    runtimeError(vm, "VM Error: SET_INDIRECT requires an address on the stack.");
+                    freeValue(&value_to_set);
+                    freeValue(&pointer_to_lvalue);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (pointer_to_lvalue.base_type_node == (AST*)0xDEADBEEF) { // Check for our special char pointer
+                    char* char_target_addr = (char*)pointer_to_lvalue.ptr_val;
+                    if (char_target_addr == NULL) {
+                        runtimeError(vm, "VM Error: Attempting to assign to a NULL character address.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    if (value_to_set.type == TYPE_CHAR) {
+                        *char_target_addr = value_to_set.c_val;
+                    } else if (value_to_set.type == TYPE_STRING) {
+                        if (value_to_set.s_val && strlen(value_to_set.s_val) == 1) {
+                            *char_target_addr = value_to_set.s_val[0];
+                        } else {
+                            runtimeError(vm, "VM Error: Cannot assign multi-character or empty string to a single character location.");
+                            freeValue(&value_to_set);
+                            freeValue(&pointer_to_lvalue);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                    } else {
+                        runtimeError(vm, "VM Error: Type mismatch for character assignment. Expected CHAR or single-char STRING, got %s.", varTypeToString(value_to_set.type));
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else { // This is the start of your existing logic for other types
+                    Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
+                    if (!target_lvalue_ptr) {
+                        runtimeError(vm, "VM Error: SET_INDIRECT called with a nil LValue pointer.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    // (Your existing logic for handling fixed-length strings, pointers, reals, etc. goes here)
+                    if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length <= 0) {
+                        if (value_to_set.type == TYPE_CHAR) {
+                            freeValue(target_lvalue_ptr);
+                            target_lvalue_ptr->s_val = (char*)malloc(2);
+                            if (!target_lvalue_ptr->s_val) {
+                                runtimeError(vm, "VM Error: Malloc failed for CHAR to STRING assignment.");
+                            } else {
+                                target_lvalue_ptr->s_val[0] = value_to_set.c_val;
+                                target_lvalue_ptr->s_val[1] = '\0';
+                            }
+                            target_lvalue_ptr->type = TYPE_STRING;
+                            target_lvalue_ptr->max_length = -1;
+                        } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                            freeValue(target_lvalue_ptr);
+                            target_lvalue_ptr->s_val = strdup(value_to_set.s_val);
+                            if (!target_lvalue_ptr->s_val) {
+                                runtimeError(vm, "VM Error: strdup failed for string assignment.");
+                                target_lvalue_ptr->s_val = NULL;
+                            }
+                            target_lvalue_ptr->type = TYPE_STRING;
+                            target_lvalue_ptr->max_length = -1;
+                        } else {
+                            runtimeError(vm, "Type mismatch: Cannot assign this type to a dynamic string.");
+                        }
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
+                        if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                            strncpy(target_lvalue_ptr->s_val, value_to_set.s_val, target_lvalue_ptr->max_length);
+                            target_lvalue_ptr->s_val[target_lvalue_ptr->max_length] = '\0'; // Ensure null termination
+                        } else if (value_to_set.type == TYPE_CHAR) {
+                            target_lvalue_ptr->s_val[0] = value_to_set.c_val;
+                            target_lvalue_ptr->s_val[1] = '\0';
+                        } else {
+                            runtimeError(vm, "Type mismatch: Cannot assign this type to a fixed-length string.");
+                        }
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_POINTER && (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
+                        target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
+                        if (value_to_set.type == TYPE_POINTER) {
+                             target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
+                        }
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
+                        target_lvalue_ptr->r_val = (double)value_to_set.i_val;
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
+                        if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
+                            runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
+                        }
+                        target_lvalue_ptr->i_val = value_to_set.i_val & 0xFF;
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_WORD && value_to_set.type == TYPE_INTEGER) {
+                        if (value_to_set.i_val < 0 || value_to_set.i_val > 65535) {
+                            runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
+                        }
+                        target_lvalue_ptr->i_val = value_to_set.i_val & 0xFFFF;
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_INTEGER &&
+                             (value_to_set.type == TYPE_BYTE || value_to_set.type == TYPE_WORD || value_to_set.type == TYPE_BOOLEAN)) {
+                        target_lvalue_ptr->i_val = value_to_set.i_val;
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_INTEGER && value_to_set.type == TYPE_CHAR) {
+                        target_lvalue_ptr->i_val = (long long)value_to_set.c_val;
+                    }
+                    else {
+                        freeValue(target_lvalue_ptr);
+                        *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
+                    }
+                }
+
+                freeValue(&value_to_set);
+                freeValue(&pointer_to_lvalue);
+                break;
+            }
+            case OP_IN: {
+                Value set_val = pop(vm);
+                Value item_val = pop(vm);
+
+                if (set_val.type != TYPE_SET) {
+                    runtimeError(vm, "Right operand of IN must be a set.");
+                    freeValue(&item_val);
+                    freeValue(&set_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                bool result = vmSetContains(&set_val, &item_val);
+
+                freeValue(&item_val);
+                freeValue(&set_val);
+
+                push(vm, makeBoolean(result));
+                break;
+            }
+
+            case OP_GET_INDIRECT: {
+                Value pointer_val = pop(vm);
+                if (pointer_val.type != TYPE_POINTER) {
+                    runtimeError(vm, "VM Error: GET_INDIRECT requires an address on the stack.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (pointer_val.base_type_node == (AST*)0xDEADBEEF) { // Check for our special char pointer
+                    char* char_target_addr = (char*)pointer_val.ptr_val;
+                    if (char_target_addr == NULL) {
+                        runtimeError(vm, "VM Error: Attempting to dereference a NULL character address.");
+                        freeValue(&pointer_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    // It's a character pointer, so create and push a CHAR Value.
+                    push(vm, makeChar(*char_target_addr));
+                } else {
+                    Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
+                    if (target_lvalue_ptr == NULL) {
+                        runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeCopyOfValue(target_lvalue_ptr));
+                }
+                freeValue(&pointer_val);
+                break;
+            }
+
+            case OP_GET_CHAR_FROM_STRING: {
+                 Value index_val = pop(vm);
+                 Value base_val = pop(vm); // Can be string or char
+
+                 if (index_val.type != TYPE_INTEGER) {
+                     runtimeError(vm, "VM Error: String/Char index must be an integer.");
+                     freeValue(&index_val); freeValue(&base_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+
+                 long long pscal_index = index_val.i_val;
+                 char result_char;
+
+                 if (base_val.type == TYPE_STRING) {
+                     const char* str = base_val.s_val ? base_val.s_val : "";
+                     size_t len = strlen(str);
+                     if (pscal_index < 1 || (size_t)pscal_index > len) {
+                         runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     result_char = str[pscal_index - 1];
+                 } else if (base_val.type == TYPE_CHAR) {
+                     if (pscal_index != 1) {
+                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     result_char = base_val.c_val;
+                 } else {
+                     runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
+                     freeValue(&index_val); freeValue(&base_val);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+
+                 push(vm, makeChar(result_char));
+
+                 freeValue(&index_val);
+                 freeValue(&base_val);
+                 break;
+             }
+            case OP_DEFINE_GLOBAL: {
+                Value varNameVal = READ_CONSTANT();
+                InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                if (r != INTERPRET_OK) return r;
+                break;
+            }
+            case OP_DEFINE_GLOBAL16: {
+                Value varNameVal = READ_CONSTANT16();
+                InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                if (r != INTERPRET_OK) return r;
+                break;
+            }
+            case OP_GET_GLOBAL: {
+                Value varNameVal = READ_CONSTANT();
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { return INTERPRET_RUNTIME_ERROR; }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(sym->value));
+                break;
+            }
+            case OP_GET_GLOBAL16: {
+                uint16_t name_idx = READ_SHORT(vm);
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL16.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) { return INTERPRET_RUNTIME_ERROR; }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(sym->value));
+                break;
+            }
+            case OP_SET_GLOBAL: {
+                Value varNameVal = READ_CONSTANT();
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for SET_GLOBAL.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    sym->value = (Value*)malloc(sizeof(Value));
+                    if (!sym->value) {
+                        runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
+                }
+
+                Value value_from_stack = pop(vm);
+
+                if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
+                    // This is the special case for fixed-length strings.
+                    const char* source_str = "";
+                    char char_buf[2] = {0};
+
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        char_buf[0] = value_from_stack.c_val;
+                        source_str = char_buf;
+                    } // No else needed; invalid types will be handled by the logic below if necessary.
+                    
+                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
+                    sym->value->s_val[sym->value->max_length] = '\0'; // Ensure null termination.
+                
+                } else {
+                    // This is the logic for all other types (dynamic strings, numbers, etc.)
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&value_from_stack);
+                }
+
+                freeValue(&value_from_stack);
+
+                break;
+            }
+            case OP_SET_GLOBAL16: {
+                uint16_t name_idx = READ_SHORT(vm);
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL16.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value varNameVal = vm->chunk->constants[name_idx];
+                if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
+                    runtimeError(vm, "VM Error: Invalid var name constant for SET_GLOBAL16.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (!sym->value) {
+                    sym->value = (Value*)malloc(sizeof(Value));
+                    if (!sym->value) {
+                        runtimeError(vm, "VM Error: Malloc failed for symbol value in SET_GLOBAL16.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
+                }
+
+                Value value_from_stack = pop(vm);
+
+                if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
+                    const char* source_str = "";
+                    char char_buf[2] = {0};
+
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        char_buf[0] = value_from_stack.c_val;
+                        source_str = char_buf;
+                    }
+
+                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
+                    sym->value->s_val[sym->value->max_length] = '\0';
+
+                } else {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&value_from_stack);
+                }
+
+                freeValue(&value_from_stack);
+
+                break;
+            }
+            case OP_GET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                push(vm, makeCopyOfValue(&frame->slots[slot]));
+                break;
+            }
+            case OP_SET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                Value value_from_stack = pop(vm);
+
+                // --- START CORRECTED LOGIC ---
+                if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                    // Special case: Assignment to a fixed-length string.
+                    const char* source_str = "";
+                    char char_buf[2] = {0};
+
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        char_buf[0] = value_from_stack.c_val;
+                        source_str = char_buf;
+                    }
+                    
+                    strncpy(target_slot->s_val, source_str, target_slot->max_length);
+                    target_slot->s_val[target_slot->max_length] = '\0';
+
+                } else {
+                    // This is the logic for all other types, including dynamic strings,
+                    // numbers, records, etc., which requires a deep copy.
+                    freeValue(target_slot);
+                    *target_slot = makeCopyOfValue(&value_from_stack);
+                }
+                // --- END CORRECTED LOGIC ---
+
+                // Free the temporary value that was popped from the stack.
+                freeValue(&value_from_stack);
+                break;
+            }
+            case OP_GET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->upvalue_count) {
+                    runtimeError(vm, "VM Error: Upvalue index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(frame->upvalues[slot]));
+                break;
+            }
+            case OP_SET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->upvalue_count) {
+                    runtimeError(vm, "VM Error: Upvalue index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = frame->upvalues[slot];
+                Value value_from_stack = pop(vm);
+
+                if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                    const char* source_str = "";
+                    char char_buf[2] = {0};
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        char_buf[0] = value_from_stack.c_val;
+                        source_str = char_buf;
+                    }
+                    strncpy(target_slot->s_val, source_str, target_slot->max_length);
+                    target_slot->s_val[target_slot->max_length] = '\0';
+                } else {
+                    freeValue(target_slot);
+                    *target_slot = makeCopyOfValue(&value_from_stack);
+                }
+                freeValue(&value_from_stack);
+                break;
+            }
+            case OP_GET_UPVALUE_ADDRESS: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->upvalue_count) {
+                    runtimeError(vm, "VM Error: Upvalue index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makePointer(frame->upvalues[slot], NULL));
+                break;
+            }
+            case OP_INIT_LOCAL_ARRAY: {
+                uint8_t slot = READ_BYTE();
+                uint8_t dimension_count = READ_BYTE();
+                if (dimension_count == 0) {
+                    runtimeError(vm, "VM Error: Array defined with zero dimensions for local variable.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                if (!lower_bounds || !upper_bounds) {
+                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                    if (lower_bounds) free(lower_bounds);
+                    if (upper_bounds) free(upper_bounds);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    uint16_t lower_idx = READ_SHORT(vm);
+                    uint16_t upper_idx = READ_SHORT(vm);
+                    if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
+                        runtimeError(vm, "VM Error: Array bound constant index out of range.");
+                        free(lower_bounds); free(upper_bounds);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    Value lower_val = vm->chunk->constants[lower_idx];
+                    Value upper_val = vm->chunk->constants[upper_idx];
+                    if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+                        runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
+                        free(lower_bounds); free(upper_bounds);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    lower_bounds[i] = (int)lower_val.i_val;
+                    upper_bounds[i] = (int)upper_val.i_val;
+                }
+
+                VarType elem_var_type = (VarType)READ_BYTE();
+                uint8_t elem_name_idx = READ_BYTE();
+                Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                AST* elem_type_def = NULL;
+                if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+                    elem_type_def = lookupType(elem_name_val.s_val);
+                }
+
+                Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+
+                free(lower_bounds);
+                free(upper_bounds);
+
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = array_val;
+                break;
+            }
+            case OP_INIT_LOCAL_FILE: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = makeValueForType(TYPE_FILE, NULL, NULL);
+                break;
+            }
+            case OP_INIT_LOCAL_POINTER: {
+                uint8_t slot = READ_BYTE();
+                uint16_t type_name_idx = READ_SHORT(vm);
+                AST* type_def = NULL;
+                Value type_name_val = vm->chunk->constants[type_name_idx];
+                if (type_name_val.type == TYPE_STRING && type_name_val.s_val && type_name_val.s_val[0] != '\0') {
+                    type_def = lookupType(type_name_val.s_val);
+                }
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = makeValueForType(TYPE_POINTER, type_def, NULL);
+                break;
+            }
+            case OP_JUMP_IF_FALSE: {
+                uint16_t offset_val = READ_SHORT(vm);
+                Value condition_value = pop(vm);
+                bool jump_condition_met = false;
+
+                if (IS_BOOLEAN(condition_value)) {
+                    jump_condition_met = !AS_BOOLEAN(condition_value);
+                } else {
+                    runtimeError(vm, "VM Error: IF condition must be a Boolean.");
+                    freeValue(&condition_value);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                freeValue(&condition_value);
+
+                if (jump_condition_met) {
+                    vm->ip += (int16_t)offset_val;
+                }
+                break;
+            }
+            case OP_JUMP: {
+                uint16_t offset = READ_SHORT(vm);
+                vm->ip += (int16_t)offset;
+                break;
+            }
+            case OP_WRITE_LN:
+            case OP_WRITE: {
+                uint8_t argCount = READ_BYTE();
+                if (argCount > MAX_WRITELN_ARGS_VM) {
+                    runtimeError(vm, "VM Error: Too many arguments for WRITE/WRITELN (max %d).", MAX_WRITELN_ARGS_VM);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FILE *output_stream = stdout;
+                int start_index = 0;
+
+                // First arg may be FILE or ^FILE; route output accordingly.
+                if (argCount > 0) {
+                    Value first = vm->stackTop[-argCount];
+                    const Value* f = &first;
+                    if (first.type == TYPE_POINTER && first.ptr_val) f = (const Value*)first.ptr_val;
+                    if (f->type == TYPE_FILE) {
+                        if (!f->f_val) {
+                            runtimeError(vm, "File not open for writing.");
+                            // pop & clean args then bail...
+                            for (int i = 0; i < argCount; i++) freeValue(&vm->stackTop[-i-1]);
+                            vm->stackTop -= argCount;
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        output_stream = f->f_val;
+                        start_index = 1;
+                    }
+                }
+
+                Value args_to_print[MAX_WRITELN_ARGS_VM];
+                int print_arg_count = argCount - start_index;
+
+                // Pop the printable arguments into a temporary array.
+                for (int i = 0; i < print_arg_count; i++) {
+                    args_to_print[print_arg_count - 1 - i] = pop(vm);
+                }
+                if (start_index > 0) {
+                    // DO NOT free the file here; ownership stays with the variable.
+                    Value file_arg = pop(vm);
+                    if (file_arg.type != TYPE_FILE) freeValue(&file_arg);
+                }
+
+                bool color_was_applied = false; // Flag to track if we change the color
+
+                // Apply console colors only if writing to stdout and colors are not default.
+                if (output_stream == stdout) {
+                    // Check if the current color settings are the default ones.
+                    bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
+                                             !gCurrentTextBold && !gCurrentColorIsExt && !gCurrentBgIsExt);
+
+                    if (!is_default_state) {
+                        color_was_applied = true; // Mark that we're applying custom colors.
+                        char escape_sequence[64] = "\x1B[";
+                        char code_str[64];
+                        bool first_attr = true;
+                        if (gCurrentColorIsExt) {
+                            snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
+                        } else {
+                            if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                            snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
+                        }
+                        if (!first_attr) strcat(escape_sequence, ";");
+                        strcat(escape_sequence, code_str);
+                        strcat(escape_sequence, ";");
+                        if (gCurrentBgIsExt) {
+                            snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
+                        } else {
+                            snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
+                        }
+                        strcat(escape_sequence, code_str);
+                        strcat(escape_sequence, "m");
+                        fprintf(output_stream, "%s", escape_sequence);
+                    }
+                }
+
+                // Print the arguments (strings as full buffers; chars as a single byte)
+                for (int i = 0; i < print_arg_count; i++) {
+                    Value val = args_to_print[i];
+                    if (val.type == TYPE_STRING) {
+                        if (output_stream == stdout) {
+                            fputs(val.s_val ? val.s_val : "", output_stream);
+                        } else {
+                            size_t len = val.s_val ? strlen(val.s_val) : 0;
+                            fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
+                        }
+                        freeValue(&val);
+                    } else if (val.type == TYPE_CHAR) {
+                        fputc(val.c_val, output_stream);
+                        freeValue(&val);
+                    } else {
+                        printValueToStream(val, output_stream);
+                        freeValue(&val);
+                    }
+                }
+
+                if (instruction_val == OP_WRITE_LN) {
+                    fprintf(output_stream, "\n");
+                }
+
+                // Reset console colors only if they were applied in this call.
+                if (color_was_applied) {
+                    fprintf(output_stream, "\x1B[0m");
+                }
+
+                fflush(output_stream);
+                break;
+            }
+            case OP_POP: {
+                Value popped_val = pop(vm);
+                freeValue(&popped_val);
+                break;
+            }
+            case OP_CALL_BUILTIN: {
+                uint8_t name_const_idx = READ_BYTE();
+                uint8_t arg_count = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < arg_count) {
+                    runtimeError(vm, "VM Stack underflow for built-in arguments.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* args = vm->stackTop - arg_count;
+                const char* builtin_name_original_case = AS_STRING(vm->chunk->constants[name_const_idx]);
+
+                // Convert builtin_name to lowercase for lookup in the dispatch table
+                char builtin_name_lower[MAX_ID_LENGTH + 1]; // Use a buffer large enough for builtin names
+                strncpy(builtin_name_lower, builtin_name_original_case, MAX_ID_LENGTH);
+                builtin_name_lower[MAX_ID_LENGTH] = '\0'; // Ensure null termination
+                toLowerString(builtin_name_lower); // toLowerString is in utils.h/c
+
+                VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
+
+                if (handler) {
+                    Value result = handler(vm, arg_count, args);
+
+                    // Pop arguments from the stack and free their contents
+                    // This is crucial to prevent stack corruption.
+                    vm->stackTop -= arg_count;
+                    for (int i = 0; i < arg_count; i++) {
+                        // The actual Value structs are on the stack and will be overwritten,
+                        // but we need to free any heap data they point to (like strings).
+                        freeValue(&args[i]);
+                    }
+
+                    if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
+                        push(vm, result);
+                    } else {
+                        freeValue(&result);
+                    }
+                } else {
+                    runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
+                    // Cleanup stack even on error
+                    vm->stackTop -= arg_count;
+                    for (int i = 0; i < arg_count; i++) {
+                        freeValue(&args[i]);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vm->exit_requested) {
+                    vm->exit_requested = false;
+                    bool halted = false;
+                    InterpretResult res = returnFromCall(vm, &halted);
+                    if (res != INTERPRET_OK) return res;
+                    if (halted) return INTERPRET_OK;
+                }
+                break;
+            }
+            case OP_CALL: {
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Operands: name_idx (1 byte), target_address (2 bytes), declared_arity (1 byte)
+                uint8_t name_idx_ignored = READ_BYTE(); // Read and discard the name index
+                (void)name_idx_ignored; // Suppress unused variable warning
+                uint16_t target_address = READ_SHORT(vm);
+                uint8_t declared_arity = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < declared_arity) {
+                    runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %d, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity;
+
+                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+                if (!proc_symbol) {
+                    runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
+                    vm->frameCount--;
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                frame->function_symbol = proc_symbol;
+                frame->locals_count = proc_symbol->locals_count;
+                frame->upvalue_count = proc_symbol->upvalue_count;
+                frame->upvalues = NULL;
+
+                if (proc_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    CallFrame* caller = (vm->frameCount >= 2) ? &vm->frames[vm->frameCount - 2] : NULL;
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                        if (!caller) {
+                            runtimeError(vm, "VM Error: No enclosing frame for upvalue.");
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        if (proc_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = caller->slots + proc_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = caller->upvalues[proc_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < proc_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                vm->ip = vm->chunk->code + target_address;
+                break;
+            }
+
+            case OP_HALT:
+                return INTERPRET_OK;
+            case OP_CALL_HOST: {
+                HostFunctionID host_id = READ_HOST_ID();
+                if (host_id >= HOST_FN_COUNT || vm->host_functions[host_id] == NULL) {
+                    runtimeError(vm, "Invalid host function ID %d or function not registered.", host_id);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                HostFn func = vm->host_functions[host_id];
+                Value result = func(vm);
+                push(vm, result);
+                break;
+            }
+            case OP_FORMAT_VALUE: {
+                uint8_t width = READ_BYTE();
+                uint8_t precision_raw = READ_BYTE();
+                int precision = (precision_raw == 0xFF) ? -1 : precision_raw;
+
+                Value raw_val = pop(vm);
+
+                char buf[DEFAULT_STRING_CAPACITY];
+                buf[0] = '\0';
+
+                if (raw_val.type == TYPE_REAL) {
+                    if (precision >= 0) {
+                        snprintf(buf, sizeof(buf), "%*.*f", width, precision, raw_val.r_val);
+                    } else {
+                        snprintf(buf, sizeof(buf), "%*.*E", width, PASCAL_DEFAULT_FLOAT_PRECISION, raw_val.r_val);
+                    }
+                } else if (raw_val.type == TYPE_INTEGER || raw_val.type == TYPE_BYTE || raw_val.type == TYPE_WORD) {
+                    snprintf(buf, sizeof(buf), "%*lld", width, raw_val.i_val);
+                } else if (raw_val.type == TYPE_STRING) {
+                    const char* source_str = raw_val.s_val ? raw_val.s_val : "";
+                    snprintf(buf, sizeof(buf), "%*.*s", width, (int)strlen(source_str), source_str);
+                } else if (raw_val.type == TYPE_BOOLEAN) {
+                    const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
+                    snprintf(buf, sizeof(buf), "%*s", width, bool_str);
+                } else if (raw_val.type == TYPE_CHAR) {
+                    snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
+                } else {
+                    snprintf(buf, sizeof(buf), "%*s", width, "?");
+                }
+
+                freeValue(&raw_val);
+
+                push(vm, makeString(buf));
+                break;
+            }
+
+            default:
+                runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
+                return INTERPRET_RUNTIME_ERROR;
+        }
+        next_instruction:;
+    }
+    return INTERPRET_OK;
+}
