@@ -313,8 +313,14 @@ static void addBreakJump(BytecodeChunk* chunk, int line) {
     }
     Loop* current_loop = &loop_stack[loop_depth];
     current_loop->break_count++;
-    current_loop->break_jumps = realloc(current_loop->break_jumps, sizeof(int) * current_loop->break_count);
-    
+    int* temp = realloc(current_loop->break_jumps, sizeof(int) * current_loop->break_count);
+    if (!temp) {
+        fprintf(stderr, "L%d: Compiler error: memory allocation failed for break jumps.\\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    current_loop->break_jumps = temp;
+
     writeBytecodeChunk(chunk, OP_JUMP, line);
     current_loop->break_jumps[current_loop->break_count - 1] = chunk->count; // Store offset of the operand
     emitShort(chunk, 0xFFFF, line); // Placeholder
