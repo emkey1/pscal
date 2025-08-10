@@ -34,6 +34,7 @@ HashTable *createHashTable(void) {
     for (int i = 0; i < HASHTABLE_SIZE; ++i) {
         table->buckets[i] = NULL;
     }
+    table->parent = NULL; // No parent by default
     DEBUG_PRINT("[DEBUG SYMBOL] Created HashTable at %p with %d buckets.\n", (void*)table, HASHTABLE_SIZE);
     return table;
 }
@@ -179,13 +180,14 @@ Symbol *lookupGlobalSymbol(const char *name) {
 
 // Helper to search only in the local symbol table (now a HashTable).
 Symbol *lookupLocalSymbol(const char *name) {
-    DEBUG_PRINT("[DEBUG SYMBOL] lookupLocalSymbol: Searching for '%s' in localSymbols %p.\n", name, (void*)localSymbols);
-    // Use the internal hash table lookup helper
-    if (!localSymbols) { // Defensive check if local table is not initialized (valid state during global scope)
-         DEBUG_PRINT("[DEBUG SYMBOL] lookupLocalSymbol: localSymbols is NULL, symbol '%s' not found locally.\n", name);
-         return NULL;
+    DEBUG_PRINT("[DEBUG SYMBOL] lookupLocalSymbol: Searching for '%s' starting at localSymbols %p.\n", name, (void*)localSymbols);
+    HashTable *tbl = localSymbols;
+    while (tbl) {
+        Symbol *sym = hashTableLookup(tbl, name);
+        if (sym) return sym;
+        tbl = tbl->parent;
     }
-    return hashTableLookup(localSymbols, name);
+    return NULL;
 }
 
 /**
@@ -428,6 +430,7 @@ void saveLocalEnv(SymbolEnvSnapshot *snap) {
 
     // Create a new empty hash table for the new local scope.
     localSymbols = createHashTable();
+    localSymbols->parent = snap->head;
     DEBUG_PRINT("[DEBUG SYMBOL] Saved local env %p, created new empty local env %p.\n", (void*)snap->head, (void*)localSymbols);
 }
 
@@ -470,6 +473,35 @@ void popLocalEnv(void) {
     // Set the local symbol table pointer to NULL.
     localSymbols = NULL;
     DEBUG_PRINT("[DEBUG SYMBOL] popLocalEnv: localSymbols set to NULL.\n");
+}
+
+// --- Scoped Procedure Table Management ---
+
+/** Pushes a new procedure table onto the scope stack and returns it. */
+HashTable *pushProcedureTable(void) {
+    HashTable *new_table = createHashTable();
+    new_table->parent = current_procedure_table;
+    current_procedure_table = new_table;
+    return new_table;
+}
+
+/** Restores the previous procedure table. If free_table is true, frees the popped table. */
+void popProcedureTable(bool free_table) {
+    if (!current_procedure_table) return;
+    HashTable *old = current_procedure_table;
+    current_procedure_table = current_procedure_table->parent;
+    if (free_table) {
+        freeHashTable(old);
+    }
+}
+
+/** Looks up a procedure by name in the current procedure table scope chain. */
+Symbol *lookupProcedure(const char *name) {
+    for (HashTable *tbl = current_procedure_table; tbl; tbl = tbl->parent) {
+        Symbol *sym = hashTableLookup(tbl, name);
+        if (sym) return sym;
+    }
+    return NULL;
 }
 
 // --- Other Symbol Table Functions (Implementation changes) ---

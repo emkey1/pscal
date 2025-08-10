@@ -217,14 +217,6 @@ void eatInternal(Parser *parser, TokenType type) {
     }
 }
 
-Symbol *lookupProcedure(const char *name_to_lookup) { // << CHANGED return type
-    if (!procedure_table || !name_to_lookup) {
-        return NULL;
-    }
-    // hashTableLookup returns Symbol*, no cast needed.
-    return hashTableLookup(procedure_table, name_to_lookup);
-}
-
 // parse_write_argument: parses an expression optionally followed by formatting specifiers.
 // The syntax is: <expression> [ : <fieldWidth> [ : <decimalPlaces> ] ]
 AST *parseWriteArguments(Parser *parser) {
@@ -605,7 +597,7 @@ void errorParser(Parser *parser, const char *msg) {
     EXIT_FAILURE_HANDLER();
 }
 
-void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc) {
+void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc, HashTable *proc_table_param) {
     // Create the name for the symbol table. This might involve mangling
     // with unit_context_name_param_for_addproc if it's not NULL.
     // For simplicity, let's assume for now the name is directly from the token,
@@ -655,7 +647,7 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         name_for_table = mangled_name; // Use the new mangled name
     }
 
-    Symbol* existing_sym = hashTableLookup(procedure_table, name_for_table);
+    Symbol* existing_sym = proc_table_param ? hashTableLookup(proc_table_param, name_for_table) : NULL;
     if (existing_sym) {
         // An entry from the interface already exists. Update it with the implementation's AST.
         #ifdef DEBUG
@@ -727,12 +719,10 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     sym->arity = 0;             // Will be updated later for user functions if needed.
     sym->locals_count = 0;      // Will be updated later.
 
-    if (procedure_table) {
-        hashTableInsert(procedure_table, sym);
+    if (proc_table_param) {
+        hashTableInsert(proc_table_param, sym);
     } else {
-        // This should not happen if main initializes procedure_table
-        fprintf(stderr, "CRITICAL Error: procedure_table hash table not initialized before addProcedure call.\n");
-        // Proper cleanup if not inserting
+        fprintf(stderr, "CRITICAL Error: procedure table parameter is NULL before addProcedure call.\n");
         if (sym->name) free(sym->name);
         if (sym->type_def) freeAST(sym->type_def);
         free(sym);
@@ -742,8 +732,8 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     // Optional Debug Print
     #ifdef DEBUG
     if (dumpExec) {
-        fprintf(stderr, "[DEBUG parser.c addProcedure] Added routine '%s' to procedure_table. Copied AST node at %p. Symbol type: %s\n",
-                sym->name, (void*)sym->type_def, varTypeToString(sym->type));
+        fprintf(stderr, "[DEBUG parser.c addProcedure] Added routine '%s' to procedure table %p. Copied AST node at %p. Symbol type: %s\n",
+                sym->name, (void*)proc_table_param, (void*)sym->type_def, varTypeToString(sym->type));
     }
     #endif
 }
@@ -976,14 +966,17 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         freeAST(params);
     }
 
+    HashTable *outer_table = current_procedure_table;
+    HashTable *my_table = NULL;
     if (!in_interface) {
+        my_table = pushProcedureTable();
         #ifdef DEBUG
         fprintf(stderr, "[DEBUG PROC_DECL_BODY] Expecting SEMICOLON after header for '%s'. Current token: Type=%s, Value='%s'\n",
                 node->token->value,
                 parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
                 parser->current_token && parser->current_token->value ? parser->current_token->value : "NULL");
         #endif
-        eat(parser, TOKEN_SEMICOLON); // This is the EAT that your log says is failing
+        eat(parser, TOKEN_SEMICOLON);
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
@@ -991,8 +984,10 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setRight(node, blockNode);
+        node->symbol_table = (Symbol*)my_table;
+        popProcedureTable(false);
     }
-    addProcedure(node, parser->current_unit_name_context);
+    addProcedure(node, parser->current_unit_name_context, outer_table);
     if (copiedProcNameToken)
         freeToken(copiedProcNameToken);
 
@@ -1538,6 +1533,8 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
     node->var_type = returnType->var_type; // Set the function's var_type to its return type
 
     // Handle implementation part (body) if not in an interface section
+    HashTable *outer_table = current_procedure_table;
+    HashTable *my_table = NULL;
     if (!in_interface) {
 #ifdef DEBUG
         fprintf(stderr, "[DEBUG FUNC_DECL_BODY] Expecting SEMICOLON after header for function '%s'. Current token: %s ('%s')\n",
@@ -1546,21 +1543,22 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
                 (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
         fflush(stderr);
 #endif
-        eat(parser, TOKEN_SEMICOLON); // Semicolon after function header "function Name(params): RetType;"
-        
+        my_table = pushProcedureTable();
+        eat(parser, TOKEN_SEMICOLON);
+
         AST *local_declarations = declarations(parser, false);
-        AST *compound_body = compoundStatement(parser); // compoundStatement eats its own BEGIN and END.
-                                                        // It expects a final '.' or a ';' if nested.
-                                                        // For a function body, it should end with END;
-        
+        AST *compound_body = compoundStatement(parser);
+
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
         addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
-        setExtra(node, blockNode); // Function body block in 'extra'
+        setExtra(node, blockNode);
+        node->symbol_table = (Symbol*)my_table;
+        popProcedureTable(false);
     }
-    
-    addProcedure(node, parser->current_unit_name_context); // Registers the function
+
+    addProcedure(node, parser->current_unit_name_context, outer_table); // Registers the function
     
     // copiedFuncNameToken was used by newASTNode which made its own copy if needed,
     // or took ownership if newASTNode doesn't copy.

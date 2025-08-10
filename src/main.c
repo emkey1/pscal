@@ -59,6 +59,7 @@ void initSymbolSystem(void) {
         fprintf(stderr, "FATAL: Failed to create procedure hash table.\n");
         EXIT_FAILURE_HANDLER();
     }
+    current_procedure_table = procedure_table;
     DEBUG_PRINT("[DEBUG MAIN] Created procedure hash table %p.\n", (void*)procedure_table);
 #ifdef SDL
     InitializeTextureSystem();

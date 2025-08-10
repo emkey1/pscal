@@ -40,6 +40,7 @@ typedef struct Symbol_s Symbol;
 #define HASHTABLE_SIZE 256
 struct SymbolTable_s {
     Symbol *buckets[HASHTABLE_SIZE];
+    struct SymbolTable_s *parent; /* For scoped procedure tables */
 };
 typedef struct SymbolTable_s HashTable;
 
@@ -77,5 +78,10 @@ void hashTableInsert(HashTable *table, Symbol *symbol);
 
 // --- Other related prototypes ---
 void nullifyPointerAliasesByAddrValue(HashTable* table, uintptr_t disposedAddrValue);
+
+// --- Scoped procedure table helpers ---
+HashTable *pushProcedureTable(void);
+void popProcedureTable(bool free_table);
+Symbol *lookupProcedure(const char *name);
 
 #endif // symbol_h

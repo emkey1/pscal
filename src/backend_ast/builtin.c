@@ -3403,7 +3403,7 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType, const char*
     configureBuiltinDummyAST(dummy, name);
 
     // --- Add to procedure table and free dummy AST ---
-    addProcedure(dummy, unit_context_name_param_for_addproc);
+    addProcedure(dummy, unit_context_name_param_for_addproc, procedure_table);
     freeAST(dummy); // This will free the dummy node and its tree (params, return type node)
 }
 

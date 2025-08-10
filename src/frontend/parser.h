@@ -15,8 +15,7 @@ typedef struct {
 
 AST *parsePointerType(Parser *parser);
 
-void addProcedure(AST *proc_decl, const char* unit_context_name);
-Symbol *lookupProcedure(const char *name_to_lookup);
+void addProcedure(AST *proc_decl, const char* unit_context_name, HashTable *proc_table);
 
 // Full parser API
 AST *buildProgramAST(Parser *parser, BytecodeChunk* chunk);
@@ -50,7 +49,6 @@ AST *expr(Parser *parser);
 AST *term(Parser *parser);
 AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk); 
 AST *enumDeclaration(Parser *parser);
-Symbol *lookupProcedure(const char *name_to_lookup);
 
 // Other stuff
 void errorParser(Parser *parser, const char *msg);

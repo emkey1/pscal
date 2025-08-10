@@ -1,6 +1,7 @@
 #include "backend_ast/interpreter.h"
 #include "backend_ast/builtin.h"
 #include "symbol/symbol.h"
+#include "frontend/parser.h"
 #include "core/utils.h"
 #include "globals.h"
 #include <stdio.h>
@@ -234,10 +235,8 @@ Value executeProcedureCall(AST *node) {
     }
     toLowerString(lower_name_for_lookup); // Helper function to convert string to lowercase
 
-    // Perform lookup in the global procedure_table
-    if (procedure_table) {
-        procSymbol = hashTableLookup(procedure_table, lower_name_for_lookup);
-    }
+    // Perform lookup in the current procedure table chain
+    procSymbol = lookupProcedure(lower_name_for_lookup);
 
     if (!procSymbol) {
         fprintf(stderr, "Runtime error: routine '%s' (looked up as '%s') not found in procedure hash table.\n",
@@ -335,6 +334,7 @@ Value executeProcedureCall(AST *node) {
 
     SymbolEnvSnapshot snapshot;
     saveLocalEnv(&snapshot); // Save caller's local environment
+    pushProcedureTable();
 
     // Bind arguments to local symbols in the new scope
     for (int i = 0; i < num_params; i++) { // Iterate from 0 to num_params-1
@@ -484,9 +484,10 @@ Value executeProcedureCall(AST *node) {
         executeWithScope(proc_decl_ast->extra, false);
 
         Symbol* finalResultSym = lookupLocalSymbol("result");
-        if (!finalResultSym || !finalResultSym->value) { /* ... */ restoreLocalEnv(&snapshot); current_function_symbol = NULL; EXIT_FAILURE_HANDLER(); }
+        if (!finalResultSym || !finalResultSym->value) { /* ... */ popProcedureTable(true); restoreLocalEnv(&snapshot); current_function_symbol = NULL; EXIT_FAILURE_HANDLER(); }
         else { retVal = makeCopyOfValue(finalResultSym->value); }
 
+        popProcedureTable(true);
         restoreLocalEnv(&snapshot);
         current_function_symbol = NULL;
         return retVal;
@@ -497,7 +498,8 @@ Value executeProcedureCall(AST *node) {
             restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
         }
         executeWithScope(proc_decl_ast->right, false);
-        
+
+        popProcedureTable(true);
         restoreLocalEnv(&snapshot);
         return makeVoid();
     }
@@ -621,21 +623,13 @@ static void processLocalDeclarations(AST* declarationsNode) {
             }
             case AST_PROCEDURE_DECL:
             case AST_FUNCTION_DECL: {
-                // If these are encountered here, it means they are nested inside a block's
-                // general declarations section, rather than at the top level of a unit/program
-                // where they are typically added to procedure_table by the parser.
-                // For now, standard Pascal doesn't have true nested local routines that hide outer ones.
-                // If these are global (e.g. in program block), they should have been handled by parser.
-                // If local, this indicates a nested structure not fully supported or a parser bug.
 #ifdef DEBUG
-                fprintf(stderr, "[DEBUG processLocalDeclarations] Encountered nested PROCEDURE/FUNCTION '%s' in %s declarations. Parser should handle top-level routines.\n",
+                fprintf(stderr, "[DEBUG processLocalDeclarations] Registering nested routine '%s' in %s scope.\n",
                         declNode->token ? declNode->token->value : "?",
                         is_processing_global_declarations ? "global" : "local");
                 fflush(stderr);
 #endif
-                // Optionally, if you want to support adding them to procedure_table from here:
-                // addProcedure(declNode, is_processing_global_declarations ? NULL : current_scope_name_if_available);
-                // But typically, addProcedure is called during the main parsing of routine declarations.
+                addProcedure(declNode, NULL, current_procedure_table);
                 break;
             }
             default:

@@ -41,6 +41,7 @@ extern HashTable *localSymbols;
 extern Symbol *current_function_symbol;
 
 extern HashTable *procedure_table; // Procedure table is now a HashTable
+extern HashTable *current_procedure_table; // Pointer to current procedure scope
 extern TypeEntry *type_table;      // TypeEntry definition comes from types.h
 
 // --- CRT State Variables ---
