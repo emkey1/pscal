@@ -654,6 +654,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     current_function_compiler = NULL;
     
     preloadSmallIndexStrings(outputChunk);
+    current_procedure_table = procedure_table;
 
     if (rootNode->type == AST_PROGRAM) {
         // The `USES` clause has already been handled during parsing.
@@ -992,7 +993,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         toLowerString(name_for_lookup);
     }
     
-    proc_symbol = lookupSymbolIn(procedure_table, name_for_lookup);
+    proc_symbol = lookupProcedure(name_for_lookup);
 
     if (!proc_symbol) {
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
@@ -1050,9 +1051,14 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     proc_symbol->locals_count = fc.local_count - proc_symbol->arity;
     
     // Step 4: Compile the function body.
+    HashTable *saved_table = current_procedure_table;
+    if (func_decl_node->symbol_table) {
+        current_procedure_table = (HashTable*)func_decl_node->symbol_table;
+    }
     if (blockNode) {
         compileNode(blockNode, chunk, getLine(blockNode));
     }
+    current_procedure_table = saved_table;
 
     // Step 5: Emit the return instruction.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
@@ -1421,14 +1427,14 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             toLowerString(callee_lower);
 
             // First, try direct (unqualified) lookup
-            proc_symbol_lookup = lookupSymbolIn(procedure_table, callee_lower);
+            proc_symbol_lookup = lookupProcedure(callee_lower);
 
             // If it fails and we are inside a unit, try a qualified lookup
             if (!proc_symbol_lookup && current_compilation_unit_name) {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, callee_lower);
                 toLowerString(qualified_name_lower);
-                proc_symbol_lookup = lookupSymbolIn(procedure_table, qualified_name_lower);
+                proc_symbol_lookup = lookupProcedure(qualified_name_lower);
             }
             
             // This is the variable that will hold the symbol we actually work with.
@@ -1886,13 +1892,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             func_name_lower[sizeof(func_name_lower) - 1] = '\0';
             toLowerString(func_name_lower);
 
-            func_symbol_lookup = lookupSymbolIn(procedure_table, func_name_lower);
+            func_symbol_lookup = lookupProcedure(func_name_lower);
             
             if (!func_symbol_lookup && current_compilation_unit_name) {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, func_name_lower);
                 toLowerString(qualified_name_lower);
-                func_symbol_lookup = lookupSymbolIn(procedure_table, qualified_name_lower);
+                func_symbol_lookup = lookupProcedure(qualified_name_lower);
             }
             
             Symbol* func_symbol = func_symbol_lookup;
@@ -2063,7 +2069,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 const char* proc_name = name_val.s_val;
                 
                 // Look up the real symbol, following any aliases.
-                Symbol* symbol_to_patch = lookupSymbolIn(procedure_table, proc_name);
+                Symbol* symbol_to_patch = lookupProcedure(proc_name);
                 if (symbol_to_patch && symbol_to_patch->is_alias) {
                     symbol_to_patch = symbol_to_patch->real_symbol;
                 }
