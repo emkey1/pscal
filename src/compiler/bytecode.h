@@ -95,8 +95,9 @@ typedef enum {
     OP_CALL,          // For user-defined procedure/function calls.
                       // Operands: 1-byte name_idx, 2-byte address, 1-byte arg count
     OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
+    OP_EXIT,          // Early exit from the current function without halting the VM
     OP_FORMAT_VALUE   // Format the value on top of the stack. Operands: width (byte), precision (byte)
-    
+
 } OpCode;
 
 // --- Bytecode Chunk Structure ---

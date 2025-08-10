@@ -268,6 +268,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
+    vm->exit_requested = false;
+
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
     }
@@ -288,6 +290,57 @@ void freeVM(VM* vm) {
     }
     // No explicit freeing of vm->host_functions array itself as it's part of VM struct.
     // If HostFn structs themselves allocated memory, that would need handling.
+}
+
+// Unwind the current call frame. If there are no more frames, the VM should halt.
+// The 'halted' flag is set to true when the VM has returned from the top-level frame.
+static InterpretResult returnFromCall(VM* vm, bool* halted) {
+    if (vm->frameCount == 0) {
+        if (vm->stackTop > vm->stack) {
+            Value final_return_val = pop(vm);
+            freeValue(&final_return_val);
+        }
+        if (halted) *halted = true;
+        return INTERPRET_OK;
+    }
+
+    CallFrame* currentFrame = &vm->frames[vm->frameCount - 1];
+    bool has_result = (currentFrame->function_symbol != NULL) &&
+                      (currentFrame->function_symbol->type != TYPE_VOID);
+
+    Value safeReturnValue = makeVoid();
+    if (has_result) {
+        if (vm->stackTop <= currentFrame->slots) {
+            runtimeError(vm, "Stack underflow on function return.");
+            if (halted) *halted = true;
+            return INTERPRET_RUNTIME_ERROR;
+        }
+        Value returnValue = pop(vm);
+        safeReturnValue = makeCopyOfValue(&returnValue);
+        freeValue(&returnValue);
+    }
+
+    for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
+        freeValue(slot);
+    }
+
+    vm->ip = currentFrame->return_address;
+    vm->stackTop = currentFrame->slots;
+
+    if (currentFrame->upvalues) {
+        free(currentFrame->upvalues);
+        currentFrame->upvalues = NULL;
+    }
+    vm->frameCount--;
+
+    if (has_result) {
+        push(vm, safeReturnValue);
+    } else {
+        freeValue(&safeReturnValue);
+    }
+
+    if (halted) *halted = false;
+    return INTERPRET_OK;
 }
 
 // --- Bytecode Reading Macros ---
@@ -654,58 +707,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         instruction_val = READ_BYTE();
         switch (instruction_val) {
             case OP_RETURN: {
-                // Returning from the top-level script (no frame to unwind)
-                if (vm->frameCount == 0) {
-                    // If the script accidentally left a value on the stack, discard it.
-                    if (vm->stackTop > vm->stack) {
-                        Value final_return_val = pop(vm);
-                        freeValue(&final_return_val);
-                    }
-                    return INTERPRET_OK;
-                }
-
-                // Current frame we’re returning from
-                CallFrame* currentFrame = &vm->frames[vm->frameCount - 1];
-
-                // Does this callee have a return value?
-                bool has_result =
-                    (currentFrame->function_symbol != NULL) &&
-                    (currentFrame->function_symbol->type != TYPE_VOID);
-
-                // Only pop a return value if the callee actually returns one.
-                Value safeReturnValue = makeVoid();
-                if (has_result) {
-                    if (vm->stackTop <= currentFrame->slots) {
-                        runtimeError(vm, "Stack underflow on function return.");
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    Value returnValue = pop(vm);
-                    safeReturnValue = makeCopyOfValue(&returnValue);
-                    freeValue(&returnValue);
-                }
-
-                // Free locals still on the stack (whatever remains in this frame)
-                for (Value* slot = currentFrame->slots; slot < vm->stackTop; slot++) {
-                    freeValue(slot);
-                }
-
-                // Restore caller state
-                vm->ip = currentFrame->return_address;
-                vm->stackTop = currentFrame->slots;
-
-                // Pop frame
-                if (currentFrame->upvalues) {
-                    free(currentFrame->upvalues);
-                    currentFrame->upvalues = NULL;
-                }
-                vm->frameCount--;
-
-                // Deliver function result (procedures push nothing)
-                if (has_result) {
-                    push(vm, safeReturnValue);
-                } else {
-                    freeValue(&safeReturnValue);
-                }
+                bool halted = false;
+                InterpretResult res = returnFromCall(vm, &halted);
+                if (res != INTERPRET_OK) return res;
+                if (halted) return INTERPRET_OK;
+                break;
+            }
+            case OP_EXIT: {
+                bool halted = false;
+                InterpretResult res = returnFromCall(vm, &halted);
+                if (res != INTERPRET_OK) return res;
+                if (halted) return INTERPRET_OK;
                 break;
             }
             case OP_CONSTANT: {
@@ -2066,6 +2078,13 @@ comparison_error_label:
                         freeValue(&args[i]);
                     }
                     return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vm->exit_requested) {
+                    vm->exit_requested = false;
+                    bool halted = false;
+                    InterpretResult res = returnFromCall(vm, &halted);
+                    if (res != INTERPRET_OK) return res;
+                    if (halted) return INTERPRET_OK;
                 }
                 break;
             }

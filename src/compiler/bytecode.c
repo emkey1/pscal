@@ -176,6 +176,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 3; // 1-byte opcode + 2-byte operand
         case OP_CALL:
             return 5; // 1-byte opcode + 1-byte name_idx + 2-byte addr + 1-byte arity
+        case OP_EXIT:
+            return 1;
         case OP_DEFINE_GLOBAL: {
             // This instruction has a variable length.
             int current_pos = offset + 1; // Position after the opcode
@@ -617,6 +619,9 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case OP_HALT:
             printf("OP_HALT\n");
+            return offset + 1;
+        case OP_EXIT:
+            printf("OP_EXIT\n");
             return offset + 1;
         case OP_FORMAT_VALUE: {
             uint8_t width = chunk->code[offset+1];
