@@ -64,6 +64,10 @@ typedef enum {
     OP_INIT_LOCAL_POINTER, // Initialize local pointer variable
     OP_GET_LOCAL_ADDRESS,
 
+    OP_GET_UPVALUE,
+    OP_SET_UPVALUE,
+    OP_GET_UPVALUE_ADDRESS,
+
     OP_GET_FIELD_ADDRESS,
     OP_GET_FIELD_ADDRESS16,
     OP_GET_ELEMENT_ADDRESS,

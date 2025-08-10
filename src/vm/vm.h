@@ -46,6 +46,8 @@ typedef struct {
                                 // Note: Storing Symbol* is one way; alternatively, OP_CALL could carry locals_count,
                                 // or OP_RETURN could be generic if stack is always reset to frame->slots.
     uint8_t locals_count;       // Number of local variables (excluding params)
+    uint8_t upvalue_count;
+    Value** upvalues;
 } CallFrame;
 
 // --- Virtual Machine Structure ---
