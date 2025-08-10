@@ -526,6 +526,7 @@ Value executeProcedureCall(AST *node) {
 
         restoreLocalEnv(&snapshot);
         current_function_symbol = NULL;
+        exit_requested = 0; // Reset exit flag when leaving routine
         return retVal;
 
     } else { // AST_PROCEDURE_DECL
@@ -534,8 +535,9 @@ Value executeProcedureCall(AST *node) {
             restoreLocalEnv(&snapshot); EXIT_FAILURE_HANDLER();
         }
         executeWithScope(proc_decl_ast->right, false);
-        
+
         restoreLocalEnv(&snapshot);
+        exit_requested = 0; // Reset exit flag when leaving routine
         return makeVoid();
     }
 }
@@ -1734,7 +1736,7 @@ bool valueMatchesLabel(Value caseVal, AST *label) {
 
 //ExecStatus executeWithScope(AST *node, bool is_global_scope) { // Example new signature
 void executeWithScope(AST *node, bool is_global_scope)  {
-    if (!node)
+    if (exit_requested || !node)
         return;
     DEBUG_PRINT(">> Executing AST node: type=%s, token='%s'\n",
                 astTypeToString(node->type), node->token ? node->token->value : "NULL");
@@ -1749,6 +1751,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             break; // Break out of the switch statement
         case AST_PROGRAM:
             executeWithScope(node->right, true);
+            if (exit_requested) return;
             break;
         case AST_ASSIGN: {
             // 1. Evaluate Right-Hand Side
@@ -1926,6 +1929,7 @@ void executeWithScope(AST *node, bool is_global_scope)  {
 
                        if (labelMatched) {
                            executeWithScope(branch->right, false);
+                           if (exit_requested) { freeValue(&caseValue); return; }
                            branchMatched = 1;
                            break;
                        }
@@ -1933,10 +1937,11 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                    // If no branch matched, execute the else branch if it exists.
                    if (!branchMatched && node->extra) {
                        executeWithScope(node->extra, false);
+                       if (exit_requested) { freeValue(&caseValue); return; }
                    }
-            
+
                    freeValue(&caseValue);
-            
+
                    break;
         }
         case AST_BLOCK: {
@@ -1978,11 +1983,12 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             // Then execute compound statement (body of the block)
             // Children[1] of AST_BLOCK is the AST_COMPOUND node containing statements.
             if (node->child_count >= 2 && node->children[1] != NULL) {
-                if (node->children[1]->type == AST_COMPOUND || node->children[1]->type == AST_NOOP) {
-                    // The 'is_global_scope' for the statements within this block is
-                    // determined by the block itself.
+                    if (node->children[1]->type == AST_COMPOUND || node->children[1]->type == AST_NOOP) {
+                        // The 'is_global_scope' for the statements within this block is
+                        // determined by the block itself.
                     executeWithScope(node->children[1], node->is_global_scope);
-                } else {
+                    if (exit_requested) return;
+                    } else {
 #ifdef DEBUG
                     fprintf(stderr, "[DEBUG executeWithScope AST_BLOCK] Warning: Expected compound statement (AST_COMPOUND or AST_NOOP) as second child of AST_BLOCK, but got %s.\n",
                             astTypeToString(node->children[1]->type));
@@ -2012,7 +2018,8 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 }
                 // Pass down the current scope context.
                 executeWithScope(node->children[i], node->is_global_scope);
-                
+                if (exit_requested) return;
+
                 // Check for break statement propagation
                 if (break_requested) {
                     // If the parent of this compound statement is a loop, we need to stop executing statements in this compound
@@ -2036,10 +2043,13 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             
             freeValue(&cond);
             
-            if (is_true)
+            if (is_true) {
                 executeWithScope(node->right, false);
-            else if (node->extra)
+                if (exit_requested) return;
+            } else if (node->extra) {
                 executeWithScope(node->extra, false);
+                if (exit_requested) return;
+            }
             break;
         }
         case AST_WHILE: {
@@ -2086,6 +2096,9 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                   #endif
                  break_requested = 0; // Reset break flag *before* executing body
                  executeWithScope(node->right, false); // Execute body
+                 if (exit_requested) {
+                      break; // Exit loop due to exit request
+                 }
                  if (break_requested) {
                       #ifdef DEBUG
                       fprintf(stderr, "[DEBUG WHILE] Break requested inside loop body. Exiting loop.\n");
@@ -2101,7 +2114,10 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             do {
                 break_requested = 0; // Reset global flag before executing body statements
                 executeWithScope(node->left, false); // Execute body statements
-                
+                if (exit_requested) {
+                    break; // Exit loop due to exit request
+                }
+
                 // Check if break occurred within the body
                 if (break_requested) {
                     DEBUG_PRINT("[DEBUG] REPEAT loop body exited due to break.\n");
@@ -2191,6 +2207,9 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 break_requested = 0;
 
                 executeWithScope(node->extra, false); // Execute loop body (from extra - Correct)
+                if (exit_requested) {
+                     break; // Exit loop due to exit request
+                }
 
                 // Check break flag after executing body
                 if (break_requested) {
