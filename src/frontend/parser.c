@@ -326,6 +326,24 @@ AST *lvalue(Parser *parser) {
 // parseArrayType: Calls expression for bounds
 AST *parseArrayType(Parser *parser) {
     eat(parser, TOKEN_ARRAY);
+    // Support open array parameters of the form "array of <type>" by
+    // skipping bound parsing when no index list is provided.
+    if (parser->current_token && parser->current_token->type == TOKEN_OF) {
+        eat(parser, TOKEN_OF);
+        AST *elemType = typeSpecifier(parser, 1);
+        if (!elemType || elemType->type == AST_NOOP) {
+            errorParser(parser, "Invalid element type for array");
+            return NULL;
+        }
+        AST *node = newASTNode(AST_ARRAY_TYPE, NULL);
+        setTypeAST(node, TYPE_ARRAY);
+        node->children = NULL;
+        node->child_count = 0;
+        node->child_capacity = 0;
+        setRight(node, elemType);
+        return node;
+    }
+
     if (!parser->current_token || parser->current_token->type != TOKEN_LBRACKET) {
         errorParser(parser, "Expected '[' after ARRAY"); // Corrected error message
         return NULL;
