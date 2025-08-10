@@ -203,14 +203,19 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     if (!param_type || !arg_node) return false;
 
     AST* param_actual = resolveTypeAlias(param_type);
-    AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
-    if (!param_actual || !arg_actual) return false;
+    if (!param_actual) return false;
 
-    if (param_actual->var_type != arg_actual->var_type) return false;
+    AST* arg_actual = NULL;
+    if (arg_node->type_def) {
+        arg_actual = resolveTypeAlias(arg_node->type_def);
+    }
 
-    if (param_actual->var_type == TYPE_ARRAY ||
-        param_actual->var_type == TYPE_RECORD ||
-        param_actual->var_type == TYPE_POINTER) {
+    VarType arg_vartype = arg_actual ? arg_actual->var_type : arg_node->var_type;
+    if (param_actual->var_type != arg_vartype) return false;
+
+    if (arg_actual && (param_actual->var_type == TYPE_ARRAY ||
+                       param_actual->var_type == TYPE_RECORD ||
+                       param_actual->var_type == TYPE_POINTER)) {
         return compareTypeNodes(param_actual, arg_actual);
     }
 
@@ -1621,7 +1626,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
-                        AST* param_type = param_node->type_def;
+                        AST* param_type = param_node->type_def ? param_node->type_def : param_node;
                         bool match = typesMatch(param_type, arg_node);
                         if (!match) {
                             AST* param_actual = resolveTypeAlias(param_type);
