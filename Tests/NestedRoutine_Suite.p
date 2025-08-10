@@ -20,6 +20,11 @@ procedure Outer;
         InnerFunc := g + currentline;
     end;
 
+    function CharAt(i: integer): char;
+    begin
+        CharAt := outtext[i];
+    end;
+
 begin
     g := 5;
     currentline := 0;
@@ -28,6 +33,7 @@ begin
     writeln('InnerFunc=', InnerFunc);
     writeln('currentline=', currentline);
     writeln('outtext=', outtext);
+    writeln('CharAt(2)=', CharAt(2));
 end;
 
 begin
