@@ -198,6 +198,22 @@ static void push(VM* vm, Value value) { // Using your original name 'push'
     vm->stackTop++;
 }
 
+static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
+    if (!table) return NULL;
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        for (Symbol* s = table->buckets[i]; s; s = s->next) {
+            if (s->is_defined && s->bytecode_address == address) {
+                return s;
+            }
+            if (s->type_def && s->type_def->symbol_table) {
+                Symbol* nested = findProcedureByAddress((HashTable*)s->type_def->symbol_table, address);
+                if (nested) return nested;
+            }
+        }
+    }
+    return NULL;
+}
+
 static Value pop(VM* vm) {
     if (vm->stackTop == vm->stack) {
         runtimeError(vm, "VM Error: Stack underflow (pop from empty stack).");
@@ -311,6 +327,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
                            // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
     sym->next = NULL;
+    sym->upvalue_count = 0;
     return sym;
 }
 
@@ -677,6 +694,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 vm->stackTop = currentFrame->slots;
 
                 // Pop frame
+                if (currentFrame->upvalues) {
+                    free(currentFrame->upvalues);
+                    currentFrame->upvalues = NULL;
+                }
                 vm->frameCount--;
 
                 // Deliver function result (procedures push nothing)
@@ -1737,6 +1758,54 @@ comparison_error_label:
                 freeValue(&value_from_stack);
                 break;
             }
+            case OP_GET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->upvalue_count) {
+                    runtimeError(vm, "VM Error: Upvalue index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeCopyOfValue(frame->upvalues[slot]));
+                break;
+            }
+            case OP_SET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->upvalue_count) {
+                    runtimeError(vm, "VM Error: Upvalue index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = frame->upvalues[slot];
+                Value value_from_stack = pop(vm);
+
+                if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                    const char* source_str = "";
+                    char char_buf[2] = {0};
+                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    } else if (value_from_stack.type == TYPE_CHAR) {
+                        char_buf[0] = value_from_stack.c_val;
+                        source_str = char_buf;
+                    }
+                    strncpy(target_slot->s_val, source_str, target_slot->max_length);
+                    target_slot->s_val[target_slot->max_length] = '\0';
+                } else {
+                    freeValue(target_slot);
+                    *target_slot = makeCopyOfValue(&value_from_stack);
+                }
+                freeValue(&value_from_stack);
+                break;
+            }
+            case OP_GET_UPVALUE_ADDRESS: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->upvalue_count) {
+                    runtimeError(vm, "VM Error: Upvalue index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makePointer(frame->upvalues[slot], NULL));
+                break;
+            }
             case OP_INIT_LOCAL_ARRAY: {
                 uint8_t slot = READ_BYTE();
                 uint8_t dimension_count = READ_BYTE();
@@ -2021,18 +2090,8 @@ comparison_error_label:
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
 
-                Symbol* proc_symbol = NULL;
-                if (vm->procedureTable) {
-                    for (int i = 0; i < HASHTABLE_SIZE; i++) {
-                        for (Symbol* s = vm->procedureTable->buckets[i]; s; s = s->next) {
-                            if (s->is_defined && s->bytecode_address == target_address) {
-                                proc_symbol = s;
-                                break;
-                            }
-                        }
-                        if (proc_symbol) break;
-                    }
-                }
+                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
                     vm->frameCount--;
@@ -2040,13 +2099,32 @@ comparison_error_label:
                 }
 
                 frame->function_symbol = proc_symbol;
-                
-                for (int i = 0; i < proc_symbol->locals_count; i++) {
-                     push(vm, makeNil());
-                 }
+                frame->locals_count = proc_symbol->locals_count;
+                frame->upvalue_count = proc_symbol->upvalue_count;
+                frame->upvalues = NULL;
 
-                 vm->ip = vm->chunk->code + target_address;
-                 break;
+                if (proc_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    CallFrame* caller = (vm->frameCount >= 2) ? &vm->frames[vm->frameCount - 2] : NULL;
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                        if (!caller) {
+                            runtimeError(vm, "VM Error: No enclosing frame for upvalue.");
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        if (proc_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = caller->slots + proc_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = caller->upvalues[proc_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < proc_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                vm->ip = vm->chunk->code + target_address;
+                break;
             }
 
             case OP_HALT:

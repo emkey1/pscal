@@ -33,6 +33,11 @@ struct Symbol_s {
     uint8_t locals_count;         // Number of local variables (excluding parameters)
     int slot_index;             // Index into the procedure's locals frame (-1 if not a local) // <--- THIS LINE IS UNCHANGED BUT CONFIRMED
     struct Symbol_s* real_symbol; // If this is an alias, this points to the real symbol
+    uint8_t upvalue_count;
+    struct {
+        uint8_t index;
+        bool isLocal;
+    } upvalues[256];
 };
 
 typedef struct Symbol_s Symbol;

@@ -142,6 +142,9 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case OP_SET_LOCAL:
         case OP_GET_GLOBAL_ADDRESS:
         case OP_GET_LOCAL_ADDRESS:
+        case OP_GET_UPVALUE:
+        case OP_SET_UPVALUE:
+        case OP_GET_UPVALUE_ADDRESS:
         case OP_GET_FIELD_ADDRESS:
         case OP_GET_ELEMENT_ADDRESS:
         case OP_GET_CHAR_ADDRESS:
@@ -483,6 +486,21 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_SET_LOCAL: {
             uint8_t slot = chunk->code[offset + 1];
             printf("%-16s %4d (slot)\n", "OP_SET_LOCAL", slot);
+            return offset + 2;
+        }
+        case OP_GET_UPVALUE: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_GET_UPVALUE", slot);
+            return offset + 2;
+        }
+        case OP_SET_UPVALUE: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_SET_UPVALUE", slot);
+            return offset + 2;
+        }
+        case OP_GET_UPVALUE_ADDRESS: {
+            uint8_t slot = chunk->code[offset + 1];
+            printf("%-16s %4d (slot)\n", "OP_GET_UPVALUE_ADDRESS", slot);
             return offset + 2;
         }
         case OP_INIT_LOCAL_ARRAY: {

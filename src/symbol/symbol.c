@@ -280,6 +280,7 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     new_symbol->bytecode_address = 0; // Starting address (offset) in the bytecode chunk
     new_symbol->arity = 0; // Number of parameters
     new_symbol->locals_count = 0; // Number of local variables (excluding parameters)
+    new_symbol->upvalue_count = 0;
 
     // Allocate the Value struct itself
     new_symbol->value = malloc(sizeof(Value));
@@ -401,6 +402,7 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
     sym->is_local_var = is_variable_declaration; // Mark as local variable for correct cleanup
     sym->is_const = false; // Local variables are not constants initially
     sym->next = NULL; // Will be linked by hashTableInsert
+    sym->upvalue_count = 0;
 
 
     // <<< MODIFIED: Insert into the local hash table >>>

@@ -22,6 +22,7 @@ typedef struct {
     char* name;
     int depth; // Scope depth
     bool is_ref;
+    bool is_captured;
 } CompilerLocal;
 
 #define MAX_LOOP_DEPTH 16 // Max nested loops
@@ -37,10 +38,21 @@ static Loop loop_stack[MAX_LOOP_DEPTH];
 static int loop_depth = -1; // -1 means we are not in a loop
 
 typedef struct {
+    uint8_t index;
+    bool isLocal;
+    bool is_ref;
+} CompilerUpvalue;
+
+#define MAX_UPVALUES 256
+
+typedef struct FunctionCompilerState {
     CompilerLocal locals[MAX_GLOBALS]; // Re-use MAX_GLOBALS for max locals per function
     int local_count;
     int scope_depth;
     const char* name;
+    struct FunctionCompilerState* enclosing;
+    CompilerUpvalue upvalues[MAX_UPVALUES];
+    int upvalue_count;
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
@@ -161,6 +173,8 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->local_count = 0;
     fc->scope_depth = 0;
     fc->name = NULL;
+    fc->enclosing = NULL;
+    fc->upvalue_count = 0;
 }
 
 static void startLoop(int start_address) {
@@ -235,6 +249,7 @@ static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool
     local->name = strdup(name);
     local->depth = fc->scope_depth;
     local->is_ref = is_ref;
+    local->is_captured = false;
 }
 
 static int resolveLocal(FunctionCompilerState* fc, const char* name) {
@@ -245,6 +260,43 @@ static int resolveLocal(FunctionCompilerState* fc, const char* name) {
             return i;
         }
     }
+    return -1;
+}
+
+static int addUpvalue(FunctionCompilerState* fc, uint8_t index, bool isLocal, bool is_ref) {
+    for (int i = 0; i < fc->upvalue_count; i++) {
+        CompilerUpvalue* up = &fc->upvalues[i];
+        if (up->index == index && up->isLocal == isLocal) {
+            return i;
+        }
+    }
+    if (fc->upvalue_count >= MAX_UPVALUES) {
+        fprintf(stderr, "Compiler error: Too many upvalues in function.\n");
+        compiler_had_error = true;
+        return 0;
+    }
+    fc->upvalues[fc->upvalue_count].index = index;
+    fc->upvalues[fc->upvalue_count].isLocal = isLocal;
+    fc->upvalues[fc->upvalue_count].is_ref = is_ref;
+    return fc->upvalue_count++;
+}
+
+static int resolveUpvalue(FunctionCompilerState* fc, const char* name) {
+    if (!fc->enclosing) return -1;
+
+    int localIndex = resolveLocal(fc->enclosing, name);
+    if (localIndex != -1) {
+        fc->enclosing->locals[localIndex].is_captured = true;
+        bool is_ref = fc->enclosing->locals[localIndex].is_ref;
+        return addUpvalue(fc, (uint8_t)localIndex, true, is_ref);
+    }
+
+    int upvalueIndex = resolveUpvalue(fc->enclosing, name);
+    if (upvalueIndex != -1) {
+        bool is_ref = fc->enclosing->upvalues[upvalueIndex].is_ref;
+        return addUpvalue(fc, (uint8_t)upvalueIndex, false, is_ref);
+    }
+
     return -1;
 }
 
@@ -554,9 +606,24 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 }
             } else {
-                int nameIndex =  addStringConstant(chunk, varName);
-                emitGlobalNameIdx(chunk, OP_GET_GLOBAL_ADDRESS, OP_GET_GLOBAL_ADDRESS16,
-                                   nameIndex, line);
+                int upvalue_slot = -1;
+                if (current_function_compiler) {
+                    upvalue_slot = resolveUpvalue(current_function_compiler, varName);
+                }
+                if (upvalue_slot != -1) {
+                    bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
+                    if (up_is_ref) {
+                        writeBytecodeChunk(chunk, OP_GET_UPVALUE, line);
+                        writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
+                    } else {
+                        writeBytecodeChunk(chunk, OP_GET_UPVALUE_ADDRESS, line);
+                        writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
+                    }
+                } else {
+                    int nameIndex =  addStringConstant(chunk, varName);
+                    emitGlobalNameIdx(chunk, OP_GET_GLOBAL_ADDRESS, OP_GET_GLOBAL_ADDRESS16,
+                                       nameIndex, line);
+                }
             }
             break;
         }
@@ -970,6 +1037,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
     FunctionCompilerState fc;
     initFunctionCompiler(&fc);
+    fc.enclosing = current_function_compiler;
     current_function_compiler = &fc;
 
     // --- FIX: Declare all variables at the top of the function ---
@@ -1004,6 +1072,18 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
 
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
+
+    if (current_procedure_table != procedure_table) {
+        if (!hashTableLookup(procedure_table, proc_symbol->name)) {
+            Symbol* alias = malloc(sizeof(Symbol));
+            *alias = *proc_symbol;
+            alias->name = strdup(proc_symbol->name);
+            alias->is_alias = true;
+            alias->real_symbol = proc_symbol;
+            alias->next = NULL;
+            hashTableInsert(procedure_table, alias);
+        }
+    }
 
     // Step 1: Add parameters to the local scope FIRST.
     if (func_decl_node->children) {
@@ -1068,10 +1148,18 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     writeBytecodeChunk(chunk, OP_RETURN, line);
     
     // Step 6: Cleanup.
+    if (proc_symbol) {
+        proc_symbol->upvalue_count = fc.upvalue_count;
+        for (int i = 0; i < fc.upvalue_count; i++) {
+            proc_symbol->upvalues[i].index = fc.upvalues[i].index;
+            proc_symbol->upvalues[i].isLocal = fc.upvalues[i].isLocal;
+        }
+    }
+
     for(int i = 0; i < fc.local_count; i++) {
         free(fc.locals[i].name);
     }
-    current_function_compiler = NULL;
+    current_function_compiler = fc.enclosing;
 }
 
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
@@ -1689,7 +1777,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     local_slot = resolveLocal(current_function_compiler, varName);
                 }
-                
+
                 if (local_slot != -1) {
                     is_ref = current_function_compiler->locals[local_slot].is_ref;
                 }
@@ -1710,19 +1798,27 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
                 }
             } else {
-                // Check if it's a compile-time constant first.
-                Value* const_val_ptr = findCompilerConstant(varName);
-                if (const_val_ptr) {
-                    // <<<< FIX for compile-time constant >>>>
-                    // Pass the pointer to the constant value directly.
-                    emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                int upvalue_slot = -1;
+                if (current_function_compiler) {
+                    upvalue_slot = resolveUpvalue(current_function_compiler, varName);
+                }
+                if (upvalue_slot != -1) {
+                    bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
+                    writeBytecodeChunk(chunk, OP_GET_UPVALUE, line);
+                    writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
+                    if (up_is_ref) {
+                        writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                    }
                 } else {
-                    // <<<< FIX for global variable >>>>
-                    // It's a global variable, so add its name to the constants
-                    // using the new helper and emit OP_GET_GLOBAL.
-                    int nameIndex = addStringConstant(chunk, varName);
-                    emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
-                                       nameIndex, line);
+                    // Check if it's a compile-time constant first.
+                    Value* const_val_ptr = findCompilerConstant(varName);
+                    if (const_val_ptr) {
+                        emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                    } else {
+                        int nameIndex = addStringConstant(chunk, varName);
+                        emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                                           nameIndex, line);
+                    }
                 }
             }
             break;
