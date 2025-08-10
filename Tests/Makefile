@@ -11,7 +11,9 @@ CompileTimeBounds.p SuccEnumTest.p NestedRoutine_Suite.p NestedRoutineAccessTest
 ProgramFileList.p EofDefaultInput.p
 
 # Tests that are expected to fail compilation
-FAIL_TESTS = ArgumentOrderMismatch.p ArgumentTypeMismatch.p ArrayArgumentMismatch.p
+FAIL_TESTS = ArgumentOrderMismatch.p \
+             ArgumentTypeMismatch.p \
+             ArrayArgumentMismatch.p
 
 # SDL-specific tests
 SDL_TESTS = SDLFeaturesTest SDLRenderCopyTest.p
