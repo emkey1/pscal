@@ -67,6 +67,7 @@ extern List *inserted_global_names;
 #endif
 
 extern int break_requested;
+extern int exit_requested; // Flag set by builtin 'exit' to unwind the current routine
 
 #define DEFAULT_STRING_CAPACITY 255
 

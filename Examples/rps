@@ -1,0 +1,62 @@
+#!/usr/bin/env pscal
+program RockPaperScissors;
+
+uses CRT;
+
+var
+  playerChoice, computerChoice: char;
+  playAgain: char;
+
+function ChoiceToString(c: char): string;
+begin
+  case c of
+    'R': ChoiceToString := 'Rock';
+    'P': ChoiceToString := 'Paper';
+    'S': ChoiceToString := 'Scissors';
+  else
+    ChoiceToString := 'Unknown';
+  end;
+end;
+
+function RandomChoice: char;
+begin
+  case Random(3) of
+    0: RandomChoice := 'R';
+    1: RandomChoice := 'P';
+  else
+    RandomChoice := 'S';
+  end;
+end;
+
+begin
+  Randomize;
+  repeat
+    ClrScr;
+    writeln('Rock Paper Scissors');
+    writeln('--------------------');
+    writeln('Enter R, P, or S and press enter:');
+    readln(playerChoice);
+    playerChoice := UpCase(playerChoice);
+
+    computerChoice := RandomChoice;
+
+    writeln('You chose: ', ChoiceToString(playerChoice));
+    writeln('Computer chose: ', ChoiceToString(computerChoice));
+
+    if playerChoice = computerChoice then
+      writeln('It''s a tie!')
+    else if (playerChoice = 'R') and (computerChoice = 'S') or
+            (playerChoice = 'P') and (computerChoice = 'R') or
+            (playerChoice = 'S') and (computerChoice = 'P') then
+      writeln('You win!')
+    else
+      writeln('Computer wins!');
+
+    writeln;
+    write('Play again? (Y/N): ');
+    readln(playAgain);
+    playAgain := UpCase(playAgain);
+  until playAgain <> 'Y';
+
+  writeln('Thanks for playing!');
+end.
