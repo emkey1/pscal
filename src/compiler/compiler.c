@@ -1153,6 +1153,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         for (int i = 0; i < fc.upvalue_count; i++) {
             proc_symbol->upvalues[i].index = fc.upvalues[i].index;
             proc_symbol->upvalues[i].isLocal = fc.upvalues[i].isLocal;
+            proc_symbol->upvalues[i].is_ref = fc.upvalues[i].is_ref;
         }
     }
 

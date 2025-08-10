@@ -37,6 +37,7 @@ struct Symbol_s {
     struct {
         uint8_t index;
         bool isLocal;
+        bool is_ref;          // Indicates whether the captured variable is a reference (VAR param)
     } upvalues[256];
 };
 
