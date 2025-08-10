@@ -27,18 +27,33 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
+// Internal function shared by stack dump helpers
+static void vm_dump_stack_internal(VM* vm, bool detailed) {
+    if (!vm) return;
+
+    if (detailed) {
+        for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+            fprintf(stderr, "  [ ");
+            printValueToStream(*slot, stderr);
+            fprintf(stderr, " ]\n");
+        }
+    } else {
+        for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+            fprintf(stderr, "[");
+            printValueToStream(*slot, stderr);
+            fprintf(stderr, "] ");
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
 void vm_dump_stack_info_detailed(VM* vm, const char* context_message) {
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
     fprintf(stderr, "Stack Size: %ld, Frame Count: %d\n", vm->stackTop - vm->stack, vm->frameCount);
     fprintf(stderr, "Stack Contents (bottom to top):\n");
-    for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
-        fprintf(stderr, "  [ ");
-        // Assuming printValueToStream is available from core/utils.h
-        printValueToStream(*slot, stderr);
-        fprintf(stderr, " ]\n");
-    }
+    vm_dump_stack_internal(vm, true);
     fprintf(stderr, "--------------------------\n");
 }
 
@@ -59,12 +74,7 @@ void vm_dump_stack_info(VM* vm) {
 
     // Print stack contents for more detailed debugging:
     fprintf(stderr, "[VM_DEBUG] Stack Contents: ");
-    for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
-        fprintf(stderr, "[");
-        printValueToStream(*slot, stderr);
-        fprintf(stderr, "] ");
-    }
-    fprintf(stderr, "\n");
+    vm_dump_stack_internal(vm, false);
 }
 
 static bool vmSetContains(const Value* setVal, const Value* itemVal) {
