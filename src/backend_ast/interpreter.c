@@ -334,6 +334,15 @@ Value executeProcedureCall(AST *node) {
 
     SymbolEnvSnapshot snapshot;
     saveLocalEnv(&snapshot); // Save caller's local environment
+#ifdef DEBUG
+    DEBUG_PRINT("[DEBUG EXEC_PROC] New local env %p chained to parent %p for '%s'\n",
+                (void*)localSymbols,
+                localSymbols ? (void*)localSymbols->parent : NULL,
+                name_to_lookup);
+    Symbol *dbg_sym = lookupSymbol("currentline");
+    DEBUG_PRINT("[DEBUG EXEC_PROC] lookupSymbol('currentline') before declarations: %s\n",
+                dbg_sym ? "found" : "not found");
+#endif
     pushProcedureTable();
 
     // Bind arguments to local symbols in the new scope
@@ -606,6 +615,12 @@ static void processLocalDeclarations(AST* declarationsNode) {
                         insertGlobalSymbol(varName, declNode->var_type, typeNode);
                     } else {
                         insertLocalSymbol(varName, declNode->var_type, typeNode, true);
+#ifdef DEBUG
+                        Symbol *chk = lookupLocalSymbol(varName);
+                        DEBUG_PRINT("[DEBUG processLocalDeclarations] Post-insert lookup for '%s': %s\n",
+                                    varName,
+                                    chk ? "found" : "NOT FOUND");
+#endif
                     }
                     // Value initialization (including base_type_node for pointers)
                     // is handled within insertGlobalSymbol/insertLocalSymbol via makeValueForType.
