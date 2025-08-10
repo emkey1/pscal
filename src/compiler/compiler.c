@@ -211,6 +211,11 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     AST* param_actual = resolveTypeAlias(param_type);
     if (!param_actual) return false;
 
+    // Resolve the argument's actual type as well.  The argument node carries a
+    // full type definition in `type_def`, which may itself be a type alias.
+    AST* arg_actual = resolveTypeAlias(arg_node->type_def);
+    if (!arg_actual) return false;
+
 
     // Arrays require structural comparison via compareTypeNodes. This allows
     // open-array parameters (with unspecified bounds) to accept arrays of any
