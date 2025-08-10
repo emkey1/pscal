@@ -507,22 +507,39 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 field_found_annotate:;
                 break;
             }
-             case AST_ARRAY_ACCESS: {
-                  node->var_type = TYPE_VOID;
-                  if(node->left) {
-                      if (node->left->var_type == TYPE_ARRAY && node->left->type_def) {
-                           AST* arrayDefNode = node->left->type_def;
-                           if (arrayDefNode && arrayDefNode->type == AST_TYPE_REFERENCE) arrayDefNode = arrayDefNode->right;
-                           if (arrayDefNode && arrayDefNode->type == AST_ARRAY_TYPE && arrayDefNode->right) {
-                               node->var_type = arrayDefNode->right->var_type;
-                               node->type_def = arrayDefNode->right;
-                           }
-                      } else if (node->left->var_type == TYPE_STRING) {
-                           node->var_type = TYPE_CHAR;
-                      }
-                  }
-                 break;
-             }
+            case AST_ARRAY_ACCESS: {
+                node->var_type = TYPE_VOID;
+                node->type_def = NULL;
+                if (node->left) {
+                    // Start from the type definition of the array expression on the left
+                    AST *arrayType = node->left->type_def;
+
+                    // Resolve any type references (aliases) to get to the actual type node
+                    while (arrayType && arrayType->type == AST_TYPE_REFERENCE) {
+                        arrayType = arrayType->right;
+                    }
+
+                    // If we're indexing into an array, pull out its element type
+                    if (arrayType && arrayType->type == AST_ARRAY_TYPE) {
+                        AST *elemType = arrayType->right;
+
+                        // Again resolve any aliases on the element type
+                        while (elemType && elemType->type == AST_TYPE_REFERENCE) {
+                            elemType = elemType->right;
+                        }
+
+                        if (elemType) {
+                            node->var_type = elemType->var_type;
+                            node->type_def = elemType;
+                        }
+                    } else if (node->left->var_type == TYPE_STRING) {
+                        // Special case: indexing into a string yields a char
+                        node->var_type = TYPE_CHAR;
+                        node->type_def = lookupType("char");
+                    }
+                }
+                break;
+            }
             // Adding types for literals if not set by parser (though parser usually does)
             case AST_NUMBER:
                 node->var_type = (node->token && node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER;
@@ -563,6 +580,7 @@ AST *copyAST(AST *node) {
     // Do NOT copy unit_list or symbol_table unless you intend to deep copy them
     newNode->unit_list = NULL;
     newNode->symbol_table = NULL;
+    newNode->type_def = NULL;
     
     // Handle children first
     AST *copiedLeft = copyAST(node->left);
@@ -592,6 +610,14 @@ AST *copyAST(AST *node) {
 
     newNode->extra = copiedExtra;
     if (newNode->extra) newNode->extra->parent = newNode;
+
+    // Mirror the original node's type_def pointer without deep copying to
+    // preserve canonical type nodes and avoid recursion.
+    if (node->type_def) {
+        newNode->type_def = (node->type_def == node->right)
+                               ? newNode->right
+                               : node->type_def;
+    }
     
     // Children copy logic remains the same
     if (node->child_count > 0 && node->children) {
