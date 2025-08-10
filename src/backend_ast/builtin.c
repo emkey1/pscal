@@ -4078,10 +4078,7 @@ Value executeBuiltinExit(AST *node) {
         EXIT_FAILURE_HANDLER();
     }
     // In the AST interpreter we simply note the exit; the interpreter loop
-    // is responsible for observing this flag and unwinding appropriately.
-    // A dedicated flag is kept static within this module for simplicity.
-    static bool interpreter_exit_requested = false;
-    interpreter_exit_requested = true;
+    // is responsible for unwinding appropriately.
     return makeVoid();
 }
 
