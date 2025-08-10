@@ -214,7 +214,34 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     // Resolve the argument's actual type as well.  The argument node carries a
     // full type definition in `type_def`, which may itself be a type alias.
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
-    if (!arg_actual) return false;
+    if (!arg_actual) {
+        /*
+         * Many argument nodes – particularly literals and computed
+         * expressions like `n + 1` – do not carry a full type
+         * definition in `type_def`.  In those cases we can fall back to
+         * the simple `var_type` annotation that `annotateTypes` already
+         * provides.  This is sufficient for primitive types such as
+         * integers, reals, booleans, chars and strings.  Reject more
+         * complex types (arrays, records, pointers, sets) if we lack a
+         * structural type definition to compare against.
+         */
+        switch (param_actual->var_type) {
+            case TYPE_INTEGER:
+            case TYPE_REAL:
+            case TYPE_BOOLEAN:
+            case TYPE_CHAR:
+            case TYPE_STRING:
+            case TYPE_BYTE:
+            case TYPE_WORD:
+            case TYPE_ENUM:
+            case TYPE_FILE:
+            case TYPE_MEMORYSTREAM:
+            case TYPE_NIL:
+                return param_actual->var_type == arg_node->var_type;
+            default:
+                return false; // Need structural info for arrays/records/etc.
+        }
+    }
 
 
     // Arrays require structural comparison via compareTypeNodes. This allows
