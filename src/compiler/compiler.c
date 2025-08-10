@@ -166,6 +166,12 @@ static bool compareTypeNodes(AST* a, AST* b) {
     if (a->var_type != b->var_type) return false;
     switch (a->var_type) {
         case TYPE_ARRAY:
+            // If the parameter's array has unspecified bounds (no children),
+            // skip comparing bounds and only ensure the element types match.
+            if (a->child_count == 0 || !a->children) {
+                return compareTypeNodes(a->right, b->right);
+            }
+
             if (a->child_count != b->child_count) return false;
             for (int i = 0; i < a->child_count; i++) {
                 AST* ar = a->children[i];
@@ -203,14 +209,22 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     if (!param_type || !arg_node) return false;
 
     AST* param_actual = resolveTypeAlias(param_type);
-    AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
-    if (!param_actual || !arg_actual) return false;
+    if (!param_actual) return false;
+
+
+    // Arrays require structural comparison via compareTypeNodes. This allows
+    // open-array parameters (with unspecified bounds) to accept arrays of any
+    // bound as long as the element types match.
+    if (param_actual->var_type == TYPE_ARRAY) {
+        if (arg_actual->var_type != TYPE_ARRAY) return false;
+        return compareTypeNodes(param_actual, arg_actual);
+    }
 
     if (param_actual->var_type != arg_actual->var_type) return false;
 
-    if (param_actual->var_type == TYPE_ARRAY ||
-        param_actual->var_type == TYPE_RECORD ||
+    if (param_actual->var_type == TYPE_RECORD ||
         param_actual->var_type == TYPE_POINTER) {
+
         return compareTypeNodes(param_actual, arg_actual);
     }
 
@@ -1621,7 +1635,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
-                        AST* param_type = param_node->type_def;
+                        AST* param_type = param_node->type_def ? param_node->type_def : param_node;
                         bool match = typesMatch(param_type, arg_node);
                         if (!match) {
                             AST* param_actual = resolveTypeAlias(param_type);
