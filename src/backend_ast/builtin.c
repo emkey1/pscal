@@ -78,6 +78,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"getticks", vm_builtin_getticks},
     {"graphloop", vm_builtin_graphloop},
 #endif
+    {"gotoxy", vm_builtin_gotoxy},
     {"halt", vm_builtin_halt},
     {"high", vm_builtin_high},
     {"inc", vm_builtin_inc},
@@ -414,6 +415,18 @@ Value vm_builtin_quitrequested(VM* vm, int arg_count, Value* args) {
     }
     // Access the global flag and return it as a Pscal boolean
     return makeBoolean(break_requested != 0);
+}
+
+Value vm_builtin_gotoxy(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER) {
+        runtimeError(vm, "GotoXY expects 2 integer arguments.");
+        return makeVoid();
+    }
+    long long x = AS_INTEGER(args[0]);
+    long long y = AS_INTEGER(args[1]);
+    printf("\x1B[%lld;%lldH", y, x);
+    fflush(stdout);
+    return makeVoid();
 }
 
 Value vm_builtin_textcolor(VM* vm, int arg_count, Value* args) {
@@ -1405,6 +1418,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"getticks", executeBuiltinGetTicks},
     {"graphloop", executeBuiltinGraphLoop},
 #endif
+    {"gotoxy", executeBuiltinGotoXY},
     {"halt",      executeBuiltinHalt},
     {"high",      executeBuiltinHigh},
     {"inc",       executeBuiltinInc},
@@ -1474,6 +1488,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"sqrt",      executeBuiltinSqrt},
     {"succ",      executeBuiltinSucc},
     {"tan",       executeBuiltinTan},
+    {"gotoxy",    executeBuiltinGotoXY},
     {"textbackground", executeBuiltinTextBackground},
     {"textbackgrounde", executeBuiltinTextBackgroundE},
     {"textcolor", executeBuiltinTextColor},
@@ -3216,6 +3231,35 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->child_count = 3;
         dummy->var_type = TYPE_VOID;
     }
+    else if (strcasecmp(name, "textcolor") == 0 ||
+             strcasecmp(name, "textbackground") == 0 ||
+             strcasecmp(name, "textcolore") == 0 ||
+             strcasecmp(name, "textbackgrounde") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_color", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "gotoxy") == 0) {
+        dummy->child_capacity = 2;
+        dummy->children = malloc(sizeof(AST*) * 2);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_x", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1);
+        dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_y", 0, 0); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2, v2);
+        dummy->children[1] = p2;
+        dummy->child_count = 2;
+        dummy->var_type = TYPE_VOID;
+    }
     // --- Special case functions (Random, Sqr) ---
     else if (strcasecmp(name, "random") == 0) {
         dummy->child_count = 0;
@@ -3750,7 +3794,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "assign", "cleardevice", "close", "closegraph", "dec", "delay",
         "destroytexture", "dispose", "drawcircle", "drawline",
         "drawpolygon", "drawrect", "exit", "fillcircle", "fillrect",
-        "getmousestate", "gettextsize", "graphloop", "halt", "inc",
+        "getmousestate", "gettextsize", "gotoxy", "graphloop", "halt", "inc",
         "initgraph", "initsoundsystem", "inittextsystem", "mstreamfree",
         "mstreamloadfromfile", "mstreamsavetofile", "new", "outtextxy",
         "playsound", "putpixel", "quitsoundsystem", "quittextsystem",
@@ -3770,6 +3814,28 @@ BuiltinRoutineType getBuiltinType(const char *name) {
 
     // If not found in either list
     return BUILTIN_TYPE_NONE;
+}
+
+Value executeBuiltinGotoXY(AST *node) {
+    if (node->child_count != 2) {
+        fprintf(stderr, "Runtime error: GotoXY expects 2 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    Value xVal = eval(node->children[0]);
+    Value yVal = eval(node->children[1]);
+    if ((xVal.type != TYPE_INTEGER && xVal.type != TYPE_BYTE) ||
+        (yVal.type != TYPE_INTEGER && yVal.type != TYPE_BYTE)) {
+        freeValue(&xVal);
+        freeValue(&yVal);
+        EXIT_FAILURE_HANDLER();
+    }
+    long long x = xVal.i_val;
+    long long y = yVal.i_val;
+    freeValue(&xVal);
+    freeValue(&yVal);
+    printf("\x1B[%lld;%lldH", y, x);
+    fflush(stdout);
+    return makeVoid();
 }
 
 Value executeBuiltinTextColorE(AST *node) {

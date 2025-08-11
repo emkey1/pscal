@@ -204,6 +204,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Succ", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Tan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GotoXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackground", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextColor", AST_PROCEDURE_DECL, NULL);

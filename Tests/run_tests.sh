@@ -10,6 +10,12 @@ if [ ! -x "$PSCAL_BIN" ]; then
   exit 1
 fi
 
+CRT_UNIT="$ROOT_DIR/lib/crtvt.pl"
+if [ -f "$CRT_UNIT" ]; then
+  install -d /usr/local/Pscal/lib
+  cp "$CRT_UNIT" /usr/local/Pscal/lib/crt.pl
+fi
+
 NEGATIVE_TESTS=(
   "ArgumentOrderMismatch.p"
   "ArgumentTypeMismatch.p"
