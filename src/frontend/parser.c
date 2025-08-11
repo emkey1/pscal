@@ -2615,10 +2615,11 @@ AST *factor(Parser *parser) {
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_STRING_CONST) {
+        int isChar = (initialToken->value && initialToken->value[1] == '\0');
         Token* c = copyToken(initialToken);
         eat(parser, initialTokenType); // Eat the string token
         node = newASTNode(AST_STRING, c); freeToken(c);
-        setTypeAST(node, TYPE_STRING);
+        setTypeAST(node, isChar ? TYPE_CHAR : TYPE_STRING);
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_IDENTIFIER) {
