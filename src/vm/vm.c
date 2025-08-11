@@ -1322,51 +1322,56 @@ comparison_error_label:
             case OP_GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
 
-                if (dimension_count == 1) {
-                    // The index is on top of the stack, so the base pointer is just below it
-                    Value* base_ptr = vm->stackTop - 2;
-                    if (base_ptr->type == TYPE_POINTER) {
-                        Value* base_val = (Value*)base_ptr->ptr_val;
-                        if (base_val && base_val->type == TYPE_STRING) {
-                            Value index_val = pop(vm);
-                            if (index_val.type != TYPE_INTEGER) {
-                                runtimeError(vm, "VM Error: String index must be an integer.");
-                                freeValue(&index_val);
-                                return INTERPRET_RUNTIME_ERROR;
-                            }
-                            long long pscal_index = index_val.i_val;
+                // Pop the base operand first so type checking does not
+                // depend on stack offsets.
+                Value operand = pop(vm);
+
+                // Special handling for strings when there is exactly one
+                // index.  We avoid referencing stackTop-2 by working with the
+                // popped operand directly and reusing it if it represents a
+                // string.
+                if (dimension_count == 1 && operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        Value index_val = pop(vm);
+                        if (index_val.type != TYPE_INTEGER) {
+                            runtimeError(vm, "VM Error: String index must be an integer.");
                             freeValue(&index_val);
-
-                            Value popped_base_ptr_val = pop(vm);
-                            freeValue(&popped_base_ptr_val);
-
-                            size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
-                            if (pscal_index < 1 || (size_t)pscal_index > len) {
-                                runtimeError(vm, "Runtime Error: String index (%lld) out of bounds for string of length %zu.", pscal_index, len);
-                                return INTERPRET_RUNTIME_ERROR;
-                            }
-
-                            // Push a special pointer to the character's memory location
-                            push(vm, makePointer(&base_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
-                            break; // Exit the case
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
                         }
+                        long long pscal_index = index_val.i_val;
+                        freeValue(&index_val);
+
+                        size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
+                        if (pscal_index < 1 || (size_t)pscal_index > len) {
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                                         pscal_index, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        // Push a special pointer to the character's memory location
+                        push(vm, makePointer(&base_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
+                        freeValue(&operand);
+                        break; // Exit the case
                     }
                 }
 
                 int* indices = malloc(sizeof(int) * dimension_count);
-                if (!indices) { runtimeError(vm, "VM Error: Malloc failed for array indices."); return INTERPRET_RUNTIME_ERROR; }
+                if (!indices) { runtimeError(vm, "VM Error: Malloc failed for array indices."); freeValue(&operand); return INTERPRET_RUNTIME_ERROR; }
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
                     if (index_val.type != TYPE_INTEGER) {
                         runtimeError(vm, "VM Error: Array index must be an integer.");
-                        free(indices); freeValue(&index_val); return INTERPRET_RUNTIME_ERROR;
+                        free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
                     }
                     indices[dimension_count - 1 - i] = (int)index_val.i_val;
                     freeValue(&index_val);
                 }
 
-                Value operand = pop(vm);
                 Value* array_val_ptr = NULL;
                 Value temp_wrapper;
                 bool using_wrapper = false;
