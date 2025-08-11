@@ -3237,6 +3237,34 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
     }
+    // --- Simple procedures (Delay, Halt, GetMouseState, etc.) ---
+    else if (strcasecmp(name, "delay") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_milliseconds", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "halt") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL);
+        setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_exitCode", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1; // optional argument, compiler allows 0 or 1
+        dummy->i_val = 0; // zero required parameters
+        dummy->var_type = TYPE_VOID;
+    }
     // --- Procedures with specific params (getmousestate, etc.) ---
     else if (strcasecmp(name, "getmousestate") == 0) {
         dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
