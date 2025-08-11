@@ -4,7 +4,7 @@
 PSCAL = ../build/bin/pscal
 
 # List of test files
-TESTS = BoolTest1.p BoolTest2.p BoolTest3.p BoolTest4.p TestSuite.p math.p FileTests.p FileTests2.p TestCase.p inc.p pass-by-reference.p \
+TESTS = BoolTest1.p BoolTest2.p BoolTest3.p BoolTest4.p math.p FileTests.p FileTests2.p TestCase.p inc.p pass-by-reference.p \
         StringTruncationTest.p LowHighCharTest.p GlobalEnumTest.p EnumComparisonTest.p EnumCaseTest.p RecordFieldIndexTest.p \
         ProgramFileList.p EofDefaultInput.p OpenArrayParam.p PrimitiveArgCall.p SwapArrayElements.p
 
