@@ -485,11 +485,22 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                  * resolved above, infer it from the argument so enum literals
                  * retain their declared type.
                  */
-                if (node->token && node->child_count > 0 && node->children[0] &&
-                    (strcasecmp(node->token->value, "succ") == 0 ||
-                     strcasecmp(node->token->value, "pred") == 0)) {
-                    node->var_type = node->children[0]->var_type;
-                    node->type_def = node->children[0]->type_def;
+                if (node->token && node->child_count > 0 && node->children[0]) {
+                    const char* builtin_name = node->token->value;
+                    if (strcasecmp(builtin_name, "succ") == 0 ||
+                        strcasecmp(builtin_name, "pred") == 0 ||
+                        strcasecmp(builtin_name, "low")  == 0 ||
+                        strcasecmp(builtin_name, "high") == 0) {
+                        AST* arg = node->children[0];
+                        AST* resolved = (arg->token) ? lookupType(arg->token->value) : NULL;
+                        if (resolved) {
+                            node->var_type = resolved->var_type;
+                            node->type_def = resolved;
+                        } else {
+                            node->var_type = arg->var_type;
+                            node->type_def = arg->type_def;
+                        }
+                    }
                 }
                 break;
             }
