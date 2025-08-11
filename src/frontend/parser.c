@@ -687,6 +687,9 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
             existing_sym->type = proc_decl_ast_original->var_type;
         }
 
+        // Ensure arity matches the declaration's parameter count
+        existing_sym->arity = proc_decl_ast_original->child_count;
+
         // The update is complete. Free the constructed name and return.
         free(name_for_table);
         return;
@@ -759,7 +762,7 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     sym->next = NULL;
     sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
     sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
-    sym->arity = 0;             // Will be updated later for user functions if needed.
+    sym->arity = proc_decl_ast_original->child_count; // Store parameter count for builtins and declarations
     sym->locals_count = 0;      // Will be updated later.
 
     if (proc_table_param) {
