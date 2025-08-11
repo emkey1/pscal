@@ -514,6 +514,17 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                         if (resolved) {
                             node->var_type = resolved->var_type;
                             node->type_def = resolved;
+                        } else if (arg->token && arg->token->value) {
+                            const char* tn = arg->token->value;
+                            if      (strcasecmp(tn, "integer") == 0) node->var_type = TYPE_INTEGER;
+                            else if (strcasecmp(tn, "char")    == 0) node->var_type = TYPE_CHAR;
+                            else if (strcasecmp(tn, "boolean") == 0) node->var_type = TYPE_BOOLEAN;
+                            else if (strcasecmp(tn, "byte")    == 0) node->var_type = TYPE_BYTE;
+                            else if (strcasecmp(tn, "word")    == 0) node->var_type = TYPE_WORD;
+                            else {
+                                node->var_type = arg->var_type;
+                                node->type_def = arg->type_def;
+                            }
                         } else {
                             node->var_type = arg->var_type;
                             node->type_def = arg->type_def;
