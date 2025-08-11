@@ -214,6 +214,7 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     // Resolve the argument's actual type as well.  The argument node carries a
     // full type definition in `type_def`, which may itself be a type alias.
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
+    VarType arg_vt = arg_actual ? arg_actual->var_type : arg_node->var_type;
     if (!arg_actual) {
         /*
          * Many argument nodes – particularly literals and computed
@@ -227,9 +228,17 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
          */
         switch (param_actual->var_type) {
             case TYPE_INTEGER:
+                return arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
+                       arg_vt == TYPE_WORD    || arg_vt == TYPE_ENUM ||
+                       arg_vt == TYPE_CHAR;
             case TYPE_REAL:
-            case TYPE_BOOLEAN:
+                return arg_vt == TYPE_REAL   || arg_vt == TYPE_INTEGER ||
+                       arg_vt == TYPE_BYTE   || arg_vt == TYPE_WORD    ||
+                       arg_vt == TYPE_ENUM   || arg_vt == TYPE_CHAR;
             case TYPE_CHAR:
+                return arg_vt == TYPE_CHAR   || arg_vt == TYPE_INTEGER ||
+                       arg_vt == TYPE_BYTE   || arg_vt == TYPE_WORD;
+            case TYPE_BOOLEAN:
             case TYPE_STRING:
             case TYPE_BYTE:
             case TYPE_WORD:
@@ -237,7 +246,7 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
             case TYPE_FILE:
             case TYPE_MEMORYSTREAM:
             case TYPE_NIL:
-                return param_actual->var_type == arg_node->var_type;
+                return param_actual->var_type == arg_vt;
             default:
                 return false; // Need structural info for arrays/records/etc.
         }
@@ -248,19 +257,32 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     // open-array parameters (with unspecified bounds) to accept arrays of any
     // bound as long as the element types match.
     if (param_actual->var_type == TYPE_ARRAY) {
-        if (arg_actual->var_type != TYPE_ARRAY) return false;
+        if (arg_vt != TYPE_ARRAY) return false;
         return compareTypeNodes(param_actual, arg_actual);
     }
-
-    if (param_actual->var_type != arg_actual->var_type) return false;
 
     if (param_actual->var_type == TYPE_RECORD ||
         param_actual->var_type == TYPE_POINTER) {
-
+        if (arg_vt != param_actual->var_type) return false;
         return compareTypeNodes(param_actual, arg_actual);
     }
 
-    return true;
+    if (param_actual->var_type == arg_vt) return true;
+
+    switch (param_actual->var_type) {
+        case TYPE_INTEGER:
+            return arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD ||
+                   arg_vt == TYPE_ENUM || arg_vt == TYPE_CHAR;
+        case TYPE_REAL:
+            return arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
+                   arg_vt == TYPE_WORD    || arg_vt == TYPE_ENUM ||
+                   arg_vt == TYPE_CHAR;
+        case TYPE_CHAR:
+            return arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
+                   arg_vt == TYPE_WORD;
+        default:
+            return false;
+    }
 }
 
 // --- Forward Declarations for Recursive Compilation ---
