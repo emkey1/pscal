@@ -1719,6 +1719,8 @@ Value makeCopyOfValue(const Value *src) {
             break;
         }
         case TYPE_CHAR:
+            v.c_val = src->c_val;
+            v.max_length = 1;
             break;
         case TYPE_SET:
             v.set_val.set_values = NULL;

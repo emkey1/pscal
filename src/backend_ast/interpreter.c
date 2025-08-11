@@ -28,11 +28,12 @@ static bool getOrdinalValue(Value val, long long *out_ord) {
             return true;
         case TYPE_STRING:
             if (val.s_val && strlen(val.s_val) == 1) {
-                return (long long)val.s_val[0]; // Return if it's a single char
+                *out_ord = (long long)val.s_val[0]; // Single char string
+                return true;
             }
             // If not a single char string, it's an error for ordinal context
             fprintf(stderr, "Runtime Error: Cannot get ordinal value of multi-character string.\n");
-            return 0; // Or some error indicator / exit
+            return false; // Not a single character
         default:
             return false; // Not a recognized ordinal type or valid single-char string
     }
@@ -2368,76 +2369,48 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                 AST *target_lvalue_node = node->children[i];
                 if (!target_lvalue_node) {fprintf(stderr,"NULL LValue node in READLN\n"); EXIT_FAILURE_HANDLER();}
 
-                char buffer[DEFAULT_STRING_CAPACITY];
+                // Determine target type via resolveLValueToPtr
+                Value *target_ptr = resolveLValueToPtr(target_lvalue_node);
+                VarType targetType = target_ptr ? target_ptr->type : TYPE_VOID;
 
-                // Read raw input line using fgets
+                if (targetType == TYPE_CHAR) {
+                    int ch = fgetc(input);
+                    if (ch == EOF) { fprintf(stderr,"Runtime error: unexpected EOF in READLN char\n"); EXIT_FAILURE_HANDLER(); }
+                    Value newValue = makeChar((char)ch);
+                    assignValueToLValue(target_lvalue_node, newValue);
+                    freeValue(&newValue);
+                    continue;
+                }
+
+                char buffer[DEFAULT_STRING_CAPACITY];
                 if (fgets(buffer, sizeof(buffer), input) == NULL) {
                     if (feof(input)) buffer[0] = '\0';
                     else { fprintf(stderr,"Read error during READLN\n"); buffer[0] = '\0'; }
                 }
                 buffer[strcspn(buffer, "\n\r")] = 0; // Remove trailing newline/CR
 
-                // --- Determine target type BEFORE creating value ---
-                // This is essential for correct conversion from string buffer.
-                // Requires looking up the type of the lvalue target. (Simplified below)
-                VarType targetType = TYPE_VOID; // Default / Unknown
-                // --- Placeholder: Determine target type (needs proper implementation) ---
-                 if (target_lvalue_node->type == AST_VARIABLE) {
-                     Symbol* targetSym = lookupSymbol(target_lvalue_node->token->value);
-                     if(targetSym) targetType = targetSym->type;
-                 } else if (target_lvalue_node->type == AST_FIELD_ACCESS) {
-                     // Need to find field definition to get type - complex
-                     // For now, assume STRING based on example context
-                     targetType = TYPE_STRING;
-                 } else if (target_lvalue_node->type == AST_ARRAY_ACCESS) {
-                     // Need to find array definition and element type - complex
-                     // For now, assume STRING based on example context
-                      targetType = TYPE_STRING;
-                 }
-                 // --- End Placeholder ---
-
-
-                // --- Convert buffer to appropriate Value type ---
                 Value newValue;
-                memset(&newValue, 0, sizeof(Value)); // Initialize
-
+                memset(&newValue, 0, sizeof(Value));
                 switch(targetType) {
                     case TYPE_STRING:
                         newValue = makeString(buffer);
                         break;
                     case TYPE_INTEGER:
-                        newValue = makeInt(atoll(buffer)); // Use atoll for long long
+                        newValue = makeInt(atoll(buffer));
                         break;
                     case TYPE_REAL:
                         newValue = makeReal(atof(buffer));
                         break;
-                    case TYPE_CHAR:
-                        newValue = makeChar(buffer[0]); // Take first char
-                        break;
                     case TYPE_BOOLEAN:
-                        // Simplified: treat non-zero integer string as true
                         newValue = makeBoolean(atoi(buffer) != 0);
                         break;
-                    // Add other target types as needed
                     default:
-                         fprintf(stderr, "Runtime error: Cannot readln into variable of type %s\n", varTypeToString(targetType));
-                         EXIT_FAILURE_HANDLER();
-                         break; // Keep compiler happy
+                        fprintf(stderr, "Runtime error: Cannot readln into variable of type %s\n", varTypeToString(targetType));
+                        EXIT_FAILURE_HANDLER();
+                        break;
                 }
-                // ---
-
-                // --- Assign the new value using the corrected helper function ---
-                #ifdef DEBUG
-                fprintf(stderr, "[DEBUG READLN] Assigning buffer content '%s' (as type %s) to lvalue node type %s\n",
-                        buffer, varTypeToString(newValue.type), astTypeToString(target_lvalue_node->type));
-                #endif
-                assignValueToLValue(target_lvalue_node, newValue); // This now does deep copy
-                // ---
-
-                // --- Free the temporary newValue struct's content ---
-                // since assignValueToLValue made its own deep copy.
+                assignValueToLValue(target_lvalue_node, newValue);
                 freeValue(&newValue);
-                // ---
             }
 
             // Consume rest of line if no variable arguments were processed
@@ -2463,52 +2436,67 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             }
             for (int i = startIndex; i < node->child_count; i++) {
                 AST *target = node->children[i];
-                char buffer[DEFAULT_STRING_CAPACITY];
-                if (fscanf(input, "%254s", buffer) != 1) {
-                    fprintf(stderr, "Runtime error: unable to read input from file.\n");
-                    EXIT_FAILURE_HANDLER();
-                }
+
+                // Determine target type
+                FieldValue *fv = NULL;
+                Symbol *sym = NULL;
+                VarType targetType = TYPE_VOID;
+
                 if (target->type == AST_FIELD_ACCESS) {
                     Value recVal = eval(target->left);
                     if (recVal.type != TYPE_RECORD) {
                         fprintf(stderr, "Runtime error: field access on non-record type.\n");
                         EXIT_FAILURE_HANDLER();
                     }
-                    FieldValue *fv = recVal.record_val;
-                    int found = 0;
-                    while (fv) {
-                        if (strcmp(fv->name, target->token->value) == 0) {
-                            found = 1;
-                            if (fv->value.type == TYPE_INTEGER)
-                                fv->value = makeInt(atoi(buffer));
-                            else if (fv->value.type == TYPE_REAL)
-                                fv->value = makeReal(atof(buffer));
-                            else if (fv->value.type == TYPE_STRING)
-                                fv->value = makeString(buffer);
-                            break;
-                        }
+                    fv = recVal.record_val;
+                    while (fv && strcmp(fv->name, target->token->value) != 0) {
                         fv = fv->next;
                     }
-                    if (!found) {
+                    if (!fv) {
                         fprintf(stderr, "Runtime error: field '%s' not found in record.\n", target->token->value);
                         EXIT_FAILURE_HANDLER();
                     }
+                    targetType = fv->value.type;
                 } else {
-                    Symbol *sym = lookupSymbol(target->token->value);
+                    sym = lookupSymbol(target->token->value);
                     if (!sym) {
                         fprintf(stderr, "Runtime error: variable '%s' not declared.\n", target->token->value);
                         EXIT_FAILURE_HANDLER();
                     }
-                    if (sym->type == TYPE_INTEGER)
-                        updateSymbol(target->token->value, makeInt(atoi(buffer)));
-                    else if (sym->type == TYPE_REAL)
-                        updateSymbol(target->token->value, makeReal(atof(buffer)));
-                    else if (sym->type == TYPE_STRING)
-                        updateSymbol(target->token->value, makeString(buffer));
-                    else if (sym->type == TYPE_CHAR) {
-                        char ch = (buffer[0] != '\0') ? buffer[0] : ' ';
-                        updateSymbol(target->token->value, makeChar(ch));
+                    targetType = sym->type;
+                }
+
+                if (targetType == TYPE_CHAR) {
+                    int ch = fgetc(input);
+                    if (ch == EOF) { fprintf(stderr, "Runtime error: unable to read char from input.\n"); EXIT_FAILURE_HANDLER(); }
+                    if (fv) {
+                        fv->value = makeChar((char)ch);
+                    } else {
+                        updateSymbol(target->token->value, makeChar((char)ch));
                     }
+                    continue;
+                }
+
+                char buffer[DEFAULT_STRING_CAPACITY];
+                if (fscanf(input, "%254s", buffer) != 1) {
+                    fprintf(stderr, "Runtime error: unable to read input from file.\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+
+                if (fv) {
+                    if (targetType == TYPE_INTEGER)
+                        fv->value = makeInt(atoi(buffer));
+                    else if (targetType == TYPE_REAL)
+                        fv->value = makeReal(atof(buffer));
+                    else if (targetType == TYPE_STRING)
+                        fv->value = makeString(buffer);
+                } else {
+                    if (targetType == TYPE_INTEGER)
+                        updateSymbol(target->token->value, makeInt(atoi(buffer)));
+                    else if (targetType == TYPE_REAL)
+                        updateSymbol(target->token->value, makeReal(atof(buffer)));
+                    else if (targetType == TYPE_STRING)
+                        updateSymbol(target->token->value, makeString(buffer));
                 }
             }
             break;
