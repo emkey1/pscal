@@ -773,14 +773,20 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, OP_GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
                 break; // We are done with this case
             } else {
-                // Standard array access: push array base address, then all indices.
-                compileLValue(node->left, chunk, getLine(node->left)); // Push address of array variable (Value*)
+                // Standard array access: push index expressions first so the
+                // array base address ends up on top of the stack.  This order
+                // matches OP_GET_ELEMENT_ADDRESS's expectation (it pops the base
+                // first, then each index).
 
-                // Compile all index expressions. Their values will be on the stack.
+                // Compile all index expressions. Their values will be on the stack
+                // below the array base.
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                
+
+                // Finally, push the address of the array variable (Value*).
+                compileLValue(node->left, chunk, getLine(node->left));
+
                 // Now, get the address of the specific element.
                 writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
