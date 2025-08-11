@@ -23,6 +23,17 @@ bool isNodeInTypeTable(AST* nodeToFind) {
     return false; // Not found
 }
 
+// Resolve type references to their concrete definitions.
+static AST* resolveTypeAlias(AST* type_node) {
+    while (type_node && type_node->type == AST_TYPE_REFERENCE &&
+           type_node->token && type_node->token->value) {
+        AST* looked = lookupType(type_node->token->value);
+        if (!looked || looked == type_node) break;
+        type_node = looked;
+    }
+    return type_node;
+}
+
 AST *newASTNode(ASTNodeType type, Token *token) {
     AST *node = malloc(sizeof(AST));
     if (!node) { fprintf(stderr, "Memory allocation error in new_ast_node\n"); EXIT_FAILURE_HANDLER(); }
@@ -492,7 +503,14 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                         strcasecmp(builtin_name, "low")  == 0 ||
                         strcasecmp(builtin_name, "high") == 0) {
                         AST* arg = node->children[0];
-                        AST* resolved = (arg->token) ? lookupType(arg->token->value) : NULL;
+                        AST* resolved = NULL;
+                        if (arg->token) {
+                            resolved = lookupType(arg->token->value);
+                        }
+                        if (!resolved) {
+                            resolved = arg->type_def;
+                        }
+                        resolved = resolveTypeAlias(resolved);
                         if (resolved) {
                             node->var_type = resolved->var_type;
                             node->type_def = resolved;
