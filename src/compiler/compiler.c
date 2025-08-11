@@ -277,6 +277,25 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
         return compareTypeNodes(param_actual, arg_actual);
     }
 
+    if (param_actual->var_type == TYPE_ENUM && arg_vt == TYPE_ENUM) {
+        /*
+         * Both sides are enums.  Ensure they refer to the same declared
+         * enumeration type.  `resolveTypeAlias` gives us the underlying
+         * AST node for each enum definition, so pointer comparison (or
+         * name comparison as a fallback) suffices.
+         */
+        AST* param_enum = resolveTypeAlias(param_actual);
+        AST* arg_enum   = resolveTypeAlias(arg_actual);
+        if (param_enum && arg_enum) {
+            if (param_enum == arg_enum) return true;
+            const char* pname = param_enum->token ? param_enum->token->value : NULL;
+            const char* aname = arg_enum->token ? arg_enum->token->value : NULL;
+            if (pname && aname && strcasecmp(pname, aname) == 0) return true;
+            return false;
+        }
+        return true; // If we lack type defs, fall back to base match
+    }
+
     if (param_actual->var_type == arg_vt) return true;
 
     switch (param_actual->var_type) {

@@ -381,7 +381,16 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 if (!varName) { node->var_type = TYPE_VOID; break; }
                 AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
                 if (declNode) {
-                    if (declNode->type == AST_VAR_DECL) {
+                    if (declNode->type == AST_ENUM_TYPE) {
+                        /*
+                         * Enumeration literals (e.g., cRed) are inserted into the
+                         * global symbol table with their enum type definition as
+                         * the declaration node.  Recognise this and propagate the
+                         * enum type to the identifier.
+                         */
+                        node->var_type = TYPE_ENUM;
+                        node->type_def = declNode;
+                    } else if (declNode->type == AST_VAR_DECL) {
                         node->var_type = declNode->var_type;
                         node->type_def = declNode->right;
                     } else if (declNode->type == AST_CONST_DECL) {
@@ -454,24 +463,36 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 break;
             case AST_PROCEDURE_CALL: {
                  Symbol *procSymbol = node->token ? lookupProcedure(node->token->value) : NULL;
-                 if (procSymbol) {
-                     node->var_type = procSymbol->type;
-                 } else {
-                      if (node->token) {
-                           node->var_type = getBuiltinReturnType(node->token->value);
-                           if (node->var_type == TYPE_VOID && isBuiltin(node->token->value)) {
-                               // Known built-in procedure
-                           } else if (node->var_type == TYPE_VOID) {
-                                #ifdef DEBUG
-                                fprintf(stderr, "[Annotate Warning] Call to undeclared procedure/function '%s'.\n", node->token->value);
-                                #endif
-                           }
-                      } else {
-                           node->var_type = TYPE_VOID;
-                      }
-                 }
-                 break;
-             }
+                if (procSymbol) {
+                    node->var_type = procSymbol->type;
+                } else {
+                     if (node->token) {
+                          node->var_type = getBuiltinReturnType(node->token->value);
+                          if (node->var_type == TYPE_VOID && isBuiltin(node->token->value)) {
+                              // Known built-in procedure
+                          } else if (node->var_type == TYPE_VOID) {
+                               #ifdef DEBUG
+                               fprintf(stderr, "[Annotate Warning] Call to undeclared procedure/function '%s'.\n", node->token->value);
+                               #endif
+                          }
+                     } else {
+                          node->var_type = TYPE_VOID;
+                     }
+                }
+                /*
+                 * Some builtins (e.g., succ/pred) return the same type as
+                 * their first argument.  If no explicit return type was
+                 * resolved above, infer it from the argument so enum literals
+                 * retain their declared type.
+                 */
+                if (node->token && node->child_count > 0 && node->children[0] &&
+                    (strcasecmp(node->token->value, "succ") == 0 ||
+                     strcasecmp(node->token->value, "pred") == 0)) {
+                    node->var_type = node->children[0]->var_type;
+                    node->type_def = node->children[0]->type_def;
+                }
+                break;
+            }
             case AST_FIELD_ACCESS: {
                 node->var_type = TYPE_VOID;
                 if (node->left && node->left->var_type == TYPE_RECORD && node->left->type_def) {
