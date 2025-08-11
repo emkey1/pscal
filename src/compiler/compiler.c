@@ -2003,7 +2003,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (local_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
-                if (is_ref) {
+                if (is_ref && node->var_type != TYPE_ARRAY) {
                     writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
                 }
             } else {
@@ -2015,7 +2015,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
                     writeBytecodeChunk(chunk, OP_GET_UPVALUE, line);
                     writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
-                    if (up_is_ref) {
+                    if (up_is_ref && node->var_type != TYPE_ARRAY) {
                         writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
                     }
                 } else {
