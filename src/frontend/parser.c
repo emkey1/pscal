@@ -2649,15 +2649,24 @@ AST *factor(Parser *parser) {
              if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) { errorParser(parser,"Expected ) after args"); return node;}
              eat(parser, TOKEN_RPAREN); // Eat ')'
 
-             // If this is a builtin low/high call on 'char', mark result type as char
-             if (node->token && isBuiltin(node->token->value) && node->child_count == 1) {
-                 if (strcasecmp(node->token->value, "low") == 0 || strcasecmp(node->token->value, "high") == 0) {
-                     AST* arg0 = node->children[0];
-                     if (arg0 && arg0->token && strcasecmp(arg0->token->value, "char") == 0) {
-                         setTypeAST(node, TYPE_CHAR);
-                     }
-                 }
-             }
+            // Builtin low/high should return the same type as their argument.
+            // Previously we only special-cased `char`, leaving other types as VOID,
+            // which later triggered "expects type INTEGER but got VOID" errors
+            // when low/high were used in expressions.  Infer the type from the
+            // provided type identifier so callers see the correct return type.
+            if (node->token && isBuiltin(node->token->value) && node->child_count == 1) {
+                if (strcasecmp(node->token->value, "low") == 0 ||
+                    strcasecmp(node->token->value, "high") == 0) {
+                    AST* arg0 = node->children[0];
+                    if (arg0 && arg0->type == AST_VARIABLE && arg0->token) {
+                        AST* typeDef = lookupType(arg0->token->value);
+                        if (typeDef) {
+                            if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
+                            setTypeAST(node, typeDef->var_type);
+                        }
+                    }
+                }
+            }
              // Type annotation will set the function's return type later
         }
         // Check if lvalue returned a simple variable that might be a parameter-less function
