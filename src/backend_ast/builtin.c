@@ -3184,6 +3184,10 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         AST* p1 = newASTNode(AST_VAR_DECL, NULL);
         if (strcasecmp(name, "new") == 0 || strcasecmp(name, "dispose") == 0) {
             setTypeAST(p1, TYPE_POINTER);
+            AST* ptrType = newASTNode(AST_POINTER_TYPE, NULL); // Generic pointer (no subtype)
+            setTypeAST(ptrType, TYPE_POINTER);
+            p1->type_def = ptrType;
+            setRight(p1, ptrType);
         } else {
             setTypeAST(p1, TYPE_INTEGER); // Placeholder for any ordinal
         }
