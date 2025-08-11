@@ -2493,9 +2493,17 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 }
 
                 const char* proc_name = name_val.s_val;
-                
-                // Look up the real symbol, following any aliases.
-                Symbol* symbol_to_patch = lookupProcedure(proc_name);
+
+                // The procedure table stores all routine names in lowercase.
+                // Convert the looked-up name to lowercase before searching.
+                char lookup_name[MAX_SYMBOL_LENGTH];
+                strncpy(lookup_name, proc_name, sizeof(lookup_name) - 1);
+                lookup_name[sizeof(lookup_name) - 1] = '\0';
+                toLowerString(lookup_name);
+
+                // Directly search the global procedure table instead of relying on
+                // lookupProcedure(), which depends on current_procedure_table.
+                Symbol* symbol_to_patch = hashTableLookup(procedure_table, lookup_name);
                 if (symbol_to_patch && symbol_to_patch->is_alias) {
                     symbol_to_patch = symbol_to_patch->real_symbol;
                 }
