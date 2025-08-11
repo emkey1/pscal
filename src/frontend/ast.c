@@ -414,22 +414,23 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                          if (declNode->right) node->var_type = declNode->right->var_type;
                          else node->var_type = TYPE_VOID;
                      } else { node->var_type = TYPE_VOID; }
-                 } else {
-                      AST* typeDef = lookupType(varName);
-                      if (typeDef) {
-                           node->var_type = TYPE_VOID;
-                           #ifdef DEBUG
-                           fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
-                           #endif
-                      } else {
-                           #ifdef DEBUG
-                           if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
-                                fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
-                           }
-                           #endif
-                           node->var_type = TYPE_VOID;
-                      }
-                 }
+                } else {
+                       AST* typeDef = lookupType(varName);
+                       if (typeDef) {
+                            node->var_type = typeDef->var_type;
+                            node->type_def = typeDef;
+                            #ifdef DEBUG
+                            fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
+                            #endif
+                       } else {
+                            #ifdef DEBUG
+                            if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
+                                 fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
+                            }
+                            #endif
+                            node->var_type = TYPE_VOID;
+                       }
+                }
                  if (strcasecmp(varName, "result") == 0 && childScopeNode && childScopeNode->type == AST_FUNCTION_DECL) {
                       if(childScopeNode->right) node->var_type = childScopeNode->right->var_type;
                       else node->var_type = TYPE_VOID;
@@ -566,6 +567,35 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                     } else { /* ... debug warnings ... */ }
                 } else if (node->left) { /* ... debug warnings ... */ }
                 field_found_annotate:;
+                break;
+            }
+            case AST_DEREFERENCE: {
+                node->var_type = TYPE_VOID;
+                node->type_def = NULL;
+                if (node->left && node->left->type_def) {
+                    AST *ptrType = resolveTypeAlias(node->left->type_def);
+                    if (ptrType && ptrType->type == AST_POINTER_TYPE && ptrType->right) {
+                        AST *baseType = resolveTypeAlias(ptrType->right);
+                        if (baseType && baseType->type == AST_VARIABLE && baseType->token && baseType->token->value) {
+                            AST *looked = lookupType(baseType->token->value);
+                            if (looked) baseType = looked;
+                        }
+                        if (baseType) {
+                            if (baseType->var_type == TYPE_VOID && baseType->token && baseType->token->value) {
+                                const char* tn = baseType->token->value;
+                                if      (strcasecmp(tn, "integer") == 0) baseType->var_type = TYPE_INTEGER;
+                                else if (strcasecmp(tn, "real")    == 0) baseType->var_type = TYPE_REAL;
+                                else if (strcasecmp(tn, "string")  == 0) baseType->var_type = TYPE_STRING;
+                                else if (strcasecmp(tn, "char")    == 0) baseType->var_type = TYPE_CHAR;
+                                else if (strcasecmp(tn, "boolean") == 0) baseType->var_type = TYPE_BOOLEAN;
+                                else if (strcasecmp(tn, "byte")    == 0) baseType->var_type = TYPE_BYTE;
+                                else if (strcasecmp(tn, "word")    == 0) baseType->var_type = TYPE_WORD;
+                            }
+                            node->var_type = baseType->var_type;
+                            node->type_def = baseType;
+                        }
+                    }
+                }
                 break;
             }
             case AST_ARRAY_ACCESS: {
