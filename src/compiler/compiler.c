@@ -797,10 +797,13 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     if (base_local == -1) {
                         int base_up = resolveUpvalue(current_function_compiler, base_name);
                         if (base_up != -1) {
-                            // Drop any temporary left behind when accessing the upvalue
-                            // so only the index and the array pointer remain.
-                            writeBytecodeChunk(chunk, OP_SWAP, line);
-                            writeBytecodeChunk(chunk, OP_POP, line);
+                            bool up_is_ref = current_function_compiler->upvalues[base_up].is_ref;
+                            if (!up_is_ref) {
+                                // Drop any temporary left behind when accessing the upvalue
+                                // so only the index and the array pointer remain.
+                                writeBytecodeChunk(chunk, OP_SWAP, line);
+                                writeBytecodeChunk(chunk, OP_POP, line);
+                            }
                         }
                     }
                 }
