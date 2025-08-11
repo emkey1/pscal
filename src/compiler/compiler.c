@@ -1687,12 +1687,22 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
-                if (node->child_count != expected) {
+                bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
+                if (is_inc_dec) {
+                    if (!(node->child_count == 1 || node->child_count == 2)) {
+                        fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
+                                line, calleeName, node->child_count);
+                        compiler_had_error = true;
+                        param_mismatch = true;
+                    }
+                } else if (node->child_count != expected) {
                     fprintf(stderr, "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
                             line, calleeName, expected, node->child_count);
                     compiler_had_error = true;
                     param_mismatch = true;
-                } else {
+                }
+
+                if (!param_mismatch) {
                     for (int i = 0; i < node->child_count; i++) {
                         AST* param_node = proc_symbol->type_def->children[i];
                         AST* arg_node = node->children[i];
@@ -2306,8 +2316,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         compiler_had_error = true;
                         for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
-                    } else if (func_symbol->arity != node->child_count) {
-                        fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n", line, original_display_name, func_symbol->arity, node->child_count);
+                    } else if ((strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)
+                               ? !(node->child_count == 1 || node->child_count == 2)
+                               : (func_symbol->arity != node->child_count)) {
+                        if (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0) {
+                            fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
+                                    line, original_display_name, node->child_count);
+                        } else {
+                            fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n",
+                                    line, original_display_name, func_symbol->arity, node->child_count);
+                        }
                         compiler_had_error = true;
                         for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
