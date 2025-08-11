@@ -3185,10 +3185,9 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
             AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
             addChild(p2, v2);
             dummy->children[1] = p2;
-            dummy->child_count = 2;
-        } else {
-            dummy->child_count = 1;
         }
+        // Only the first parameter is required; the second is optional.
+        dummy->child_count = 1;
         dummy->var_type = TYPE_VOID;
     }
     // --- Ordinal functions (Low, High, Succ) ---
