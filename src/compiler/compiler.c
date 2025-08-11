@@ -242,8 +242,9 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
                 if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
                 // If the parameter specifies no referenced subtype, accept any pointer.
                 return param_actual->right == NULL;
-            case TYPE_BOOLEAN:
             case TYPE_STRING:
+                return arg_vt == TYPE_STRING || arg_vt == TYPE_CHAR;
+            case TYPE_BOOLEAN:
             case TYPE_BYTE:
             case TYPE_WORD:
             case TYPE_ENUM:
@@ -311,6 +312,10 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
             break;
         case TYPE_CHAR:
             if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD)
+                return true;
+            break;
+        case TYPE_STRING:
+            if (arg_vt == TYPE_CHAR)
                 return true;
             break;
         default:

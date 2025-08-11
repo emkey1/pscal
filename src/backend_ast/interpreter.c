@@ -1107,6 +1107,9 @@ Value eval(AST *node) {
 #ifdef DEBUG
     DEBUG_PRINT("[DEBUG] eval AST_STRING: token value='%s'\n", node->token->value);
 #endif
+            if (node->var_type == TYPE_CHAR) {
+                return makeChar(node->token && node->token->value ? node->token->value[0] : '\0');
+            }
             return makeString(node->token->value);
         case AST_VARIABLE: {
             if (node->token && node->token->value && strcasecmp(node->token->value, "break_requested") == 0) {
