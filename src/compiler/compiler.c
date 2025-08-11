@@ -787,6 +787,24 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 // Finally, push the address of the array variable (Value*).
                 compileLValue(node->left, chunk, getLine(node->left));
 
+                // If the base resolves to an upvalue, ensure no extra temporary
+                // values remain above the array pointer.  We want the stack to be
+                // [..., index, array] before emitting OP_GET_ELEMENT_ADDRESS.
+                if (current_function_compiler && node->left &&
+                    node->left->type == AST_VARIABLE && node->left->token) {
+                    const char* base_name = node->left->token->value;
+                    int base_local = resolveLocal(current_function_compiler, base_name);
+                    if (base_local == -1) {
+                        int base_up = resolveUpvalue(current_function_compiler, base_name);
+                        if (base_up != -1) {
+                            // Drop any temporary left behind when accessing the upvalue
+                            // so only the index and the array pointer remain.
+                            writeBytecodeChunk(chunk, OP_SWAP, line);
+                            writeBytecodeChunk(chunk, OP_POP, line);
+                        }
+                    }
+                }
+
                 // Now, get the address of the specific element.
                 writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
