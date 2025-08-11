@@ -1798,9 +1798,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                             varTypeToString(arg_actual->var_type));
                                 }
                             } else {
+                                VarType expected_vt = param_actual ? param_actual->var_type : param_type->var_type;
+                                VarType actual_vt   = arg_actual ? arg_actual->var_type : arg_node->var_type;
                                 fprintf(stderr,
-                                        "L%d: Compiler Error: argument %d to '%s' has incompatible type.\n",
-                                        line, i + 1, calleeName);
+                                        "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
+                                        line, i + 1, calleeName,
+                                        varTypeToString(expected_vt),
+                                        varTypeToString(actual_vt));
                             }
                             compiler_had_error = true;
                             param_mismatch = true;
