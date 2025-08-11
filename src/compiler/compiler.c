@@ -296,22 +296,30 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
         return true; // If we lack type defs, fall back to base match
     }
 
-    if (param_actual->var_type == arg_vt) return true;
-
+    // Apply basic promotion rules when both sides have concrete types.
     switch (param_actual->var_type) {
         case TYPE_INTEGER:
-            return arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD ||
-                   arg_vt == TYPE_ENUM || arg_vt == TYPE_CHAR;
+            if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD ||
+                arg_vt == TYPE_ENUM || arg_vt == TYPE_CHAR)
+                return true;
+            break;
         case TYPE_REAL:
-            return arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
-                   arg_vt == TYPE_WORD    || arg_vt == TYPE_ENUM ||
-                   arg_vt == TYPE_CHAR;
+            if (arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
+                arg_vt == TYPE_WORD || arg_vt == TYPE_ENUM ||
+                arg_vt == TYPE_CHAR)
+                return true;
+            break;
         case TYPE_CHAR:
-            return arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
-                   arg_vt == TYPE_WORD;
+            if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD)
+                return true;
+            break;
         default:
-            return false;
+            break;
     }
+
+    if (param_actual->var_type == arg_vt) return true;
+
+    return false;
 }
 
 // --- Forward Declarations for Recursive Compilation ---
