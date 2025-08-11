@@ -172,14 +172,12 @@ static const size_t num_vm_builtins = sizeof(vm_builtin_dispatch_table) / sizeof
 // This function now comes AFTER the table and comparison function it uses.
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
     if (!name) return NULL;
-    VmBuiltinMapping *found = (VmBuiltinMapping *)bsearch(
-        name,
-        vm_builtin_dispatch_table,
-        num_vm_builtins,
-        sizeof(VmBuiltinMapping),
-        compareVmBuiltinMappings
-    );
-    return found ? found->handler : NULL;
+    for (size_t i = 0; i < num_vm_builtins; i++) {
+        if (strcasecmp(name, vm_builtin_dispatch_table[i].name) == 0) {
+            return vm_builtin_dispatch_table[i].handler;
+        }
+    }
+    return NULL;
 }
 
 Value vm_builtin_sqr(VM* vm, int arg_count, Value* args) {
@@ -2934,31 +2932,21 @@ Value executeBuiltinProcedure(AST *node) {
     fprintf(stderr, "[DEBUG DISPATCH] Looking up built-in: '%s'\n", original_name);
 #endif
 
-    // Use bsearch to find the handler
-    BuiltinMapping *found = (BuiltinMapping *)bsearch(
-        original_name,                      // Key to search for
-        builtin_dispatch_table,             // Array to search in
-        num_builtins,                       // Number of elements in the array
-        sizeof(BuiltinMapping),             // Size of each element
-        compareBuiltinMappings              // Comparison function
-    );
-
-    if (found) {
+    // Linearly search for the handler to avoid requiring a sorted table.
+    for (size_t i = 0; i < num_builtins; i++) {
+        if (strcasecmp(original_name, builtin_dispatch_table[i].name) == 0) {
 #ifdef DEBUG
-        fprintf(stderr, "[DEBUG DISPATCH] Found handler for '%s'. Calling function at %p.\n", original_name, (void*)found->handler);
+            fprintf(stderr, "[DEBUG DISPATCH] Found handler for '%s'. Calling function at %p.\n", original_name, (void*)builtin_dispatch_table[i].handler);
 #endif
-        // Call the found handler function
-        return found->handler(node);
-    } else {
-        // This should ideally not happen if isBuiltin() was checked beforehand,
-        // but handle it defensively.
-        fprintf(stderr, "Runtime error: Built-in procedure/function '%s' not found in dispatch table (but isBuiltin returned true?).\n", original_name);
-        // Maybe check Write/Writeln/Read/Readln here if they aren't in the table?
-        // For now, treat as an internal inconsistency.
-        EXIT_FAILURE_HANDLER();
-        // return makeVoid(); // Or return void if exiting is too harsh
+            return builtin_dispatch_table[i].handler(node);
+        }
     }
-    return(makeInt(0));
+
+    // This should ideally not happen if isBuiltin() was checked beforehand,
+    // but handle it defensively.
+    fprintf(stderr, "Runtime error: Built-in procedure/function '%s' not found in dispatch table (but isBuiltin returned true?).\n", original_name);
+    EXIT_FAILURE_HANDLER();
+    return makeInt(0);
 }
 
 static void configureBuiltinDummyAST(AST *dummy, const char *name) {
@@ -3882,26 +3870,20 @@ Value executeBuiltinKeyPressed(AST *node) {
 int isBuiltin(const char *name) {
     if (!name) return 0;
 
-    // Use bsearch to check if the name exists in the dispatch table
-    BuiltinMapping *found = (BuiltinMapping *)bsearch(
-                                                      name,                               // Key (function name)
-                                                      builtin_dispatch_table,             // Table to search
-                                                      num_builtins,                       // Number of elements
-                                                      sizeof(BuiltinMapping),             // Size of elements
-                                                      compareBuiltinMappings              // Comparison function
-                                                      );
-
-    // Additionally check for Write/Writeln/Read/Readln if they are handled
-    // directly in the interpreter and not in the dispatch table.
-    if (!found) {
-        if (strcasecmp(name, "write") == 0 || strcasecmp(name, "writeln") == 0 ||
-            strcasecmp(name, "read") == 0 || strcasecmp(name, "readln") == 0) {
-            return 1; // Treat these as built-in even if not dispatched
+    for (size_t i = 0; i < num_builtins; i++) {
+        if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
+            return 1;
         }
     }
 
+    // Additionally check for Write/Writeln/Read/Readln if they are handled
+    // directly in the interpreter and not in the dispatch table.
+    if (strcasecmp(name, "write") == 0 || strcasecmp(name, "writeln") == 0 ||
+        strcasecmp(name, "read") == 0 || strcasecmp(name, "readln") == 0) {
+        return 1;
+    }
 
-    return (found != NULL); // Return 1 if found, 0 otherwise
+    return 0;
 }
 
 // --- Low(X) ---
@@ -4503,16 +4485,10 @@ Value vm_builtin_delay(VM* vm, int arg_count, Value* args) {
 BuiltinHandler getBuiltinHandler(const char *name) {
     if (!name) return NULL;
 
-    BuiltinMapping *found = (BuiltinMapping *)bsearch(
-        name,
-        builtin_dispatch_table,
-        num_builtins,
-        sizeof(BuiltinMapping),
-        compareBuiltinMappings
-    );
-
-    if (found) {
-        return found->handler;
+    for (size_t i = 0; i < num_builtins; i++) {
+        if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
+            return builtin_dispatch_table[i].handler;
+        }
     }
     return NULL;
 }
