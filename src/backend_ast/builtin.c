@@ -3095,7 +3095,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
     }
-    else if (strcmp(name, "api_receive") == 0) {
+    else if (strcasecmp(name, "api_receive") == 0) {
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
         AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_MEMORYSTREAM); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_apirecv_ms", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
         dummy->children[0] = p1; dummy->child_count = 1;
@@ -3265,6 +3265,10 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->i_val = 0; // zero required parameters
         dummy->var_type = TYPE_VOID;
     }
+    else if (strcasecmp(name, "exit") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
     // --- Procedures with specific params (getmousestate, etc.) ---
     else if (strcasecmp(name, "getmousestate") == 0) {
         dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
@@ -3306,6 +3310,10 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->child_count = 2;
         dummy->var_type = TYPE_VOID;
     }
+    else if (strcasecmp(name, "randomize") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
     // --- Special case functions (Random, Sqr) ---
     else if (strcasecmp(name, "random") == 0) {
         dummy->child_count = 0;
@@ -3338,6 +3346,238 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
     }
 #ifdef SDL
     // --- SDL/Graphics functions and procedures ---
+    else if (strcasecmp(name, "updatescreen") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "cleardevice") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "closegraph") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "destroytexture") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_textureID", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "drawcircle") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames_dc[] = {"_centerX", "_centerY", "_radius"};
+        for (int i=0; i<3; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames_dc[i], 0, 0);
+            AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn);
+            addChild(p, v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "drawline") == 0 ||
+             strcasecmp(name, "drawrect") == 0 ||
+             strcasecmp(name, "fillrect") == 0) {
+        dummy->child_capacity = 4; dummy->children = malloc(sizeof(AST*) * 4);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames4[] = {"_x1", "_y1", "_x2", "_y2"};
+        for (int i=0; i<4; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames4[i], 0, 0);
+            AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn);
+            addChild(p, v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 4;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "fillcircle") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames_fc[] = {"_centerX", "_centerY", "_radius"};
+        for (int i=0; i<3; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames_fc[i], 0, 0);
+            AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn);
+            addChild(p, v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "graphloop") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_milliseconds", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "initgraph") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_width", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_height", 0, 0);
+        AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
+        addChild(p2, v2); dummy->children[1] = p2;
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_STRING);
+        Token* pn3 = newToken(TOKEN_IDENTIFIER, "_title", 0, 0);
+        AST* v3 = newASTNode(AST_VARIABLE, pn3); freeToken(pn3);
+        addChild(p3, v3); dummy->children[2] = p3;
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "inittextsystem") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_fontFile", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_fontSize", 0, 0);
+        AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
+        addChild(p2, v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "initsoundsystem") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "outtextxy") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_x", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_y", 0, 0);
+        AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
+        addChild(p2, v2); dummy->children[1] = p2;
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_STRING);
+        Token* pn3 = newToken(TOKEN_IDENTIFIER, "_text", 0, 0);
+        AST* v3 = newASTNode(AST_VARIABLE, pn3); freeToken(pn3);
+        addChild(p3, v3); dummy->children[2] = p3;
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "playsound") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_soundID", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "putpixel") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_x", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_y", 0, 0);
+        AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
+        addChild(p2, v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "quitsoundsystem") == 0 ||
+             strcasecmp(name, "quittextsystem") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "rendercopy") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_textureID", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "rendercopyrect") == 0) {
+        dummy->child_capacity = 5; dummy->children = malloc(sizeof(AST*) * 5);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames5[] = {"_textureID", "_dstX", "_dstY", "_dstW", "_dstH"};
+        for (int i=0; i<5; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames5[i], 0, 0);
+            AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn);
+            addChild(p, v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 5;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "setcolor") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*));
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_colorIndex", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1);
+        dummy->children[0] = p1;
+        dummy->child_count = 1;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "setrgbcolor") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames_rgb[] = {"_r", "_g", "_b"};
+        for (int i=0; i<3; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_INTEGER);
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames_rgb[i], 0, 0);
+            AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn);
+            addChild(p, v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 3;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "updatetexture") == 0) {
+        dummy->child_capacity = 2; dummy->children = malloc(sizeof(AST*) * 2);
+        if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_INTEGER);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_textureID", 0, 0);
+        AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1);
+        addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_ARRAY);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_pixelData", 0, 0);
+        AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2);
+        addChild(p2, v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        dummy->var_type = TYPE_VOID;
+    }
+    else if (strcasecmp(name, "waitkeyevent") == 0) {
+        dummy->child_count = 0;
+        dummy->var_type = TYPE_VOID;
+    }
     else if (strcasecmp(name, "loadimagetotexture") == 0) {
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*));
         AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING); Token* pn1 = newToken(TOKEN_IDENTIFIER, "_filePath", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1,v1);
