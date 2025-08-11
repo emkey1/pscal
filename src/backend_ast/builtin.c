@@ -23,6 +23,7 @@ Value eval(AST *node);
 #include <sys/ioctl.h> // For ioctl, FIONREAD (Terminal I/O)
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
+#include <string.h>  // For strlen, strdup
 
 // Comparison function for bsearch (case-insensitive) - MUST be defined before the table that uses it
 static int compareVmBuiltinMappings(const void *key, const void *element) {
@@ -1542,6 +1543,20 @@ void assignValueToLValue(AST *lvalueNode, Value newValue) {
 
         freeValue(&newValue); // Free the incoming value's contents
         return; // Assignment is done
+    }
+
+    if (target_ptr->type == TYPE_CHAR) {
+        if (newValue.type == TYPE_CHAR) {
+            target_ptr->c_val = newValue.c_val;
+        } else if (newValue.type == TYPE_STRING && newValue.s_val && strlen(newValue.s_val) == 1) {
+            target_ptr->c_val = newValue.s_val[0];
+        } else {
+            fprintf(stderr, "Runtime error: Cannot assign type %s to CHAR.\n", varTypeToString(newValue.type));
+            freeValue(&newValue);
+            EXIT_FAILURE_HANDLER();
+        }
+        freeValue(&newValue);
+        return;
     }
 
     // For all other types, use the original logic.
