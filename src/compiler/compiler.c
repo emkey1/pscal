@@ -238,6 +238,10 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
             case TYPE_CHAR:
                 return arg_vt == TYPE_CHAR   || arg_vt == TYPE_INTEGER ||
                        arg_vt == TYPE_BYTE   || arg_vt == TYPE_WORD;
+            case TYPE_POINTER:
+                if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
+                // If the parameter specifies no referenced subtype, accept any pointer.
+                return param_actual->right == NULL;
             case TYPE_BOOLEAN:
             case TYPE_STRING:
             case TYPE_BYTE:
@@ -261,9 +265,15 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
         return compareTypeNodes(param_actual, arg_actual);
     }
 
-    if (param_actual->var_type == TYPE_RECORD ||
-        param_actual->var_type == TYPE_POINTER) {
-        if (arg_vt != param_actual->var_type) return false;
+    if (param_actual->var_type == TYPE_RECORD) {
+        if (arg_vt != TYPE_RECORD) return false;
+        return compareTypeNodes(param_actual, arg_actual);
+    }
+
+    if (param_actual->var_type == TYPE_POINTER) {
+        if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
+        if (!param_actual->right) return true; // Generic pointer accepts any pointer
+        if (!arg_actual) return false;
         return compareTypeNodes(param_actual, arg_actual);
     }
 
