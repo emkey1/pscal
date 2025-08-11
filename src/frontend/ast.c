@@ -390,51 +390,62 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
             case AST_VARIABLE: {
                 const char* varName = node->token ? node->token->value : NULL;
                 if (!varName) { node->var_type = TYPE_VOID; break; }
-                AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
-                if (declNode) {
-                    if (declNode->type == AST_ENUM_TYPE) {
-                        /*
-                         * Enumeration literals (e.g., cRed) are inserted into the
-                         * global symbol table with their enum type definition as
-                         * the declaration node.  Recognise this and propagate the
-                         * enum type to the identifier.
-                         */
-                        node->var_type = TYPE_ENUM;
-                        node->type_def = declNode;
-                    } else if (declNode->type == AST_VAR_DECL) {
-                        node->var_type = declNode->var_type;
-                        node->type_def = declNode->right;
-                    } else if (declNode->type == AST_CONST_DECL) {
-                        node->var_type = declNode->var_type;
-                        if (node->var_type == TYPE_VOID && declNode->left) {
-                             node->var_type = declNode->left->var_type;
-                        }
-                        node->type_def = declNode->right;
-                    } else if (declNode->type == AST_FUNCTION_DECL) {
-                         if (declNode->right) node->var_type = declNode->right->var_type;
-                         else node->var_type = TYPE_VOID;
-                     } else { node->var_type = TYPE_VOID; }
+
+                // First, consult the global symbol table.  This handles variables
+                // and constants imported from units via linkUnit.
+                Symbol* sym = lookupGlobalSymbol(varName);
+                if (sym) {
+                    node->var_type = sym->type;
+                    node->type_def = sym->type_def;
                 } else {
-                       AST* typeDef = lookupType(varName);
-                       if (typeDef) {
+                    AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
+                    if (declNode) {
+                        if (declNode->type == AST_ENUM_TYPE) {
+                            /*
+                             * Enumeration literals (e.g., cRed) are inserted into the
+                             * global symbol table with their enum type definition as
+                             * the declaration node. Recognise this and propagate the
+                             * enum type to the identifier.
+                             */
+                            node->var_type = TYPE_ENUM;
+                            node->type_def = declNode;
+                        } else if (declNode->type == AST_VAR_DECL) {
+                            node->var_type = declNode->var_type;
+                            node->type_def = declNode->right;
+                        } else if (declNode->type == AST_CONST_DECL) {
+                            node->var_type = declNode->var_type;
+                            if (node->var_type == TYPE_VOID && declNode->left) {
+                                node->var_type = declNode->left->var_type;
+                            }
+                            node->type_def = declNode->right;
+                        } else if (declNode->type == AST_FUNCTION_DECL) {
+                            if (declNode->right) node->var_type = declNode->right->var_type;
+                            else node->var_type = TYPE_VOID;
+                        } else {
+                            node->var_type = TYPE_VOID;
+                        }
+                    } else {
+                        AST* typeDef = lookupType(varName);
+                        if (typeDef) {
                             node->var_type = typeDef->var_type;
                             node->type_def = typeDef;
                             #ifdef DEBUG
                             fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
                             #endif
-                       } else {
+                        } else {
                             #ifdef DEBUG
                             if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
-                                 fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
+                                fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
                             }
                             #endif
                             node->var_type = TYPE_VOID;
-                       }
+                        }
+                    }
                 }
-                 if (strcasecmp(varName, "result") == 0 && childScopeNode && childScopeNode->type == AST_FUNCTION_DECL) {
-                      if(childScopeNode->right) node->var_type = childScopeNode->right->var_type;
-                      else node->var_type = TYPE_VOID;
-                 }
+                if (strcasecmp(varName, "result") == 0 && childScopeNode && childScopeNode->type == AST_FUNCTION_DECL) {
+                    if (childScopeNode->right) node->var_type = childScopeNode->right->var_type;
+                    else node->var_type = TYPE_VOID;
+                }
                 break;
             }
             case AST_BINARY_OP: {

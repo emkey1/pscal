@@ -575,6 +575,8 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
 
             if (parsed_nested_unit_ast) {
                 linkUnit(parsed_nested_unit_ast, recursion_depth + 1);
+                // Annotate the unit AST so variables have proper types before compilation
+                annotateTypes(parsed_nested_unit_ast, NULL, parsed_nested_unit_ast);
                 // --- MODIFICATION: Compile implementation ---
                 compileUnitImplementation(parsed_nested_unit_ast, chunk);
                 freeAST(parsed_nested_unit_ast);
@@ -930,6 +932,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
 
                 if (parsed_unit_ast) {
                     linkUnit(parsed_unit_ast, 1);
+                    // Annotate types within the unit before compiling its implementation
+                    annotateTypes(parsed_unit_ast, NULL, parsed_unit_ast);
                     // --- MODIFICATION: Compile the implementation part ---
                     compileUnitImplementation(parsed_unit_ast, chunk);
                     // The temporary AST for the unit is no longer needed after linking and compiling
