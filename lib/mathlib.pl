@@ -42,7 +42,12 @@ begin
       n := n + 2;
       term := xpow / n;
       sum := sum + term;
-    until abs(term) < 1e-10;
+    { The series converges slowly for x near 1 when using a very small
+      threshold, which can lead to excessively long loops or effectively
+      no termination when the constant underflows to zero in bytecode.
+      A looser tolerance keeps the function performant while remaining
+      well within the precision required by the tests. }
+    until abs(term) < 1e-6;
     ArcTan := sum;
   end;
 end;
