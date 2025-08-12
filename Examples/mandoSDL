@@ -66,10 +66,10 @@ BEGIN
   // Main loop through each pixel
   FOR Py := 0 TO CurrentMaxY DO
   BEGIN
+    y0 := MaxIm - (Py * ScaleIm);
+    x0 := MinRe;
     FOR Px := 0 TO CurrentMaxX DO
     BEGIN
-      x0 := MinRe + (Px * ScaleRe);
-      y0 := MaxIm - (Py * ScaleIm);
 
       x := 0.0;
       y := 0.0;
@@ -98,6 +98,7 @@ BEGIN
       PutPixel(Px, Py);
 
       PixelsDone := PixelsDone + 1;
+      x0 := x0 + ScaleRe;
     END; // END FOR Px
 
     // Status Update Logic
