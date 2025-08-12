@@ -8,6 +8,7 @@ set(PSCAL_BIN ${CMAKE_BINARY_DIR}/bin/pscal)
 add_custom_target(run_basic_examples
     COMMAND ${CMAKE_COMMAND} -E echo "Running basic examples..."
     COMMAND ${PSCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/AreaCalculation.p
+    COMMAND ${PSCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/DosExample.p
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
