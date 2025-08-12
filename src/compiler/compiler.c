@@ -205,7 +205,7 @@ static bool compareTypeNodes(AST* a, AST* b) {
 // `arg_node->type_def` provides the full type of the argument (including any
 // array structure) which allows for structural comparisons, especially when
 // checking VAR parameters that are themselves arrays.
-static bool typesMatch(AST* param_type, AST* arg_node) {
+static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     if (!param_type || !arg_node) return false;
 
     AST* param_actual = resolveTypeAlias(param_type);
@@ -215,7 +215,18 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
     // full type definition in `type_def`, which may itself be a type alias.
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
     VarType arg_vt = arg_actual ? arg_actual->var_type : arg_node->var_type;
-    if (!arg_actual) {
+
+    // When coercion is not allowed, require an exact match of the base types
+    // before proceeding with any structural comparisons. Allow NIL for pointer
+    // parameters as a special case.
+    if (!allow_coercion) {
+        if (param_actual->var_type != arg_vt) {
+            if (param_actual->var_type == TYPE_POINTER && arg_vt == TYPE_NIL) {
+                return true;
+            }
+            return false;
+        }
+    } else if (!arg_actual) {
         /*
          * Many argument nodes – particularly literals and computed
          * expressions like `n + 1` – do not carry a full type
@@ -257,7 +268,6 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
         }
     }
 
-
     // Arrays require structural comparison via compareTypeNodes. This allows
     // open-array parameters (with unspecified bounds) to accept arrays of any
     // bound as long as the element types match.
@@ -297,34 +307,34 @@ static bool typesMatch(AST* param_type, AST* arg_node) {
         return true; // If we lack type defs, fall back to base match
     }
 
-    // Apply basic promotion rules when both sides have concrete types.
-    switch (param_actual->var_type) {
-        case TYPE_INTEGER:
-            if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD ||
-                arg_vt == TYPE_ENUM || arg_vt == TYPE_CHAR)
-                return true;
-            break;
-        case TYPE_REAL:
-            if (arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
-                arg_vt == TYPE_WORD || arg_vt == TYPE_ENUM ||
-                arg_vt == TYPE_CHAR)
-                return true;
-            break;
-        case TYPE_CHAR:
-            if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD)
-                return true;
-            break;
-        case TYPE_STRING:
-            if (arg_vt == TYPE_CHAR)
-                return true;
-            break;
-        default:
-            break;
+    if (allow_coercion) {
+        // Apply basic promotion rules when both sides have concrete types.
+        switch (param_actual->var_type) {
+            case TYPE_INTEGER:
+                if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD ||
+                    arg_vt == TYPE_ENUM || arg_vt == TYPE_CHAR)
+                    return true;
+                break;
+            case TYPE_REAL:
+                if (arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
+                    arg_vt == TYPE_WORD || arg_vt == TYPE_ENUM ||
+                    arg_vt == TYPE_CHAR)
+                    return true;
+                break;
+            case TYPE_CHAR:
+                if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD)
+                    return true;
+                break;
+            case TYPE_STRING:
+                if (arg_vt == TYPE_CHAR)
+                    return true;
+                break;
+            default:
+                break;
+        }
     }
 
-    if (param_actual->var_type == arg_vt) return true;
-
-    return false;
+    return param_actual->var_type == arg_vt;
 }
 
 // --- Forward Declarations for Recursive Compilation ---
@@ -1749,6 +1759,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
+            bool callee_is_builtin = isBuiltin(calleeName);
 
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
@@ -1785,7 +1796,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
                         AST* param_type = param_node->type_def ? param_node->type_def : param_node;
-                        bool match = typesMatch(param_type, arg_node);
+                        bool match = typesMatch(param_type, arg_node, callee_is_builtin);
                         if (!match) {
                             AST* param_actual = resolveTypeAlias(param_type);
                             AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
