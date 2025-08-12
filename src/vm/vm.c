@@ -2281,7 +2281,9 @@ comparison_error_label:
                     snprintf(buf, sizeof(buf), "%*lld", width, raw_val.i_val);
                 } else if (raw_val.type == TYPE_STRING) {
                     const char* source_str = raw_val.s_val ? raw_val.s_val : "";
-                    snprintf(buf, sizeof(buf), "%*.*s", width, (int)strlen(source_str), source_str);
+                    size_t len = strlen(source_str);
+                    int prec = (width > 0 && (size_t)width < len) ? width : (int)len;
+                    snprintf(buf, sizeof(buf), "%*.*s", width, prec, source_str);
                 } else if (raw_val.type == TYPE_BOOLEAN) {
                     const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
                     snprintf(buf, sizeof(buf), "%*s", width, bool_str);
