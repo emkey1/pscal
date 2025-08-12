@@ -543,14 +543,26 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
         
         for (int i = 0; i < listSize(unit_list_for_this_unit); i++) {
             char *nested_unit_name = listGet(unit_list_for_this_unit, i);
-            char *nested_unit_path = findUnitFile(nested_unit_name);
-            if (!nested_unit_path) { /* error */ }
+
+            char lower_nested_name[MAX_SYMBOL_LENGTH];
+            strncpy(lower_nested_name, nested_unit_name, MAX_SYMBOL_LENGTH - 1);
+            lower_nested_name[MAX_SYMBOL_LENGTH - 1] = '\0';
+            for (int k = 0; lower_nested_name[k]; k++) {
+                lower_nested_name[k] = tolower((unsigned char)lower_nested_name[k]);
+            }
+
+            char *nested_unit_path = findUnitFile(lower_nested_name);
+            if (!nested_unit_path) {
+                if (!isUnitDocumented(lower_nested_name)) {
+                    fprintf(stderr, "Warning: unit '%s' not found. Skipping.\n", nested_unit_name);
+                }
+                continue; // skip missing unit regardless
+            }
 
             char *unit_source_buffer = NULL;
-            // ... (read file into buffer) ...
             FILE *nested_file = fopen(nested_unit_path, "r");
             if (nested_file) {
-                 fseek(nested_file, 0, SEEK_END);
+                fseek(nested_file, 0, SEEK_END);
                 long nested_fsize = ftell(nested_file);
                 rewind(nested_file);
                 unit_source_buffer = malloc(nested_fsize + 1);
@@ -558,7 +570,11 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
                 fread(unit_source_buffer, 1, nested_fsize, nested_file);
                 unit_source_buffer[nested_fsize] = '\0';
                 fclose(nested_file);
-            } else { /* error */ }
+            } else {
+                fprintf(stderr, "Error opening unit file '%s'.\n", nested_unit_path);
+                free(nested_unit_path);
+                EXIT_FAILURE_HANDLER();
+            }
             free(nested_unit_path);
 
             Lexer nested_lexer;
@@ -904,12 +920,16 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 }
 
                 char *unit_file_path = findUnitFile(lower_used_unit_name);
-                if (!unit_file_path) { /* error handling */ }
-                
+                if (!unit_file_path) {
+                    if (!isUnitDocumented(lower_used_unit_name)) {
+                        fprintf(stderr, "Warning: unit '%s' not found. Skipping.\n", used_unit_name_str_from_list);
+                    }
+                    continue; // skip missing unit regardless
+                }
+
                 char* unit_source_buffer = NULL;
                 FILE *unit_file = fopen(unit_file_path, "r");
                 if(unit_file) {
-                    // ... (file reading logic) ...
                     fseek(unit_file, 0, SEEK_END);
                     long fsize = ftell(unit_file);
                     rewind(unit_file);
@@ -918,7 +938,11 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                     fread(unit_source_buffer, 1, fsize, unit_file);
                     unit_source_buffer[fsize] = '\0';
                     fclose(unit_file);
-                } else { /* error handling */ }
+                } else {
+                    fprintf(stderr, "Error opening unit file '%s'.\n", unit_file_path);
+                    free(unit_file_path);
+                    EXIT_FAILURE_HANDLER();
+                }
                 free(unit_file_path);
 
                 Lexer nested_lexer;

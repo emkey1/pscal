@@ -3,8 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <ctype.h>
 #include "parser.h"  // so that Procedure and TypeEntry are defined
 #include "backend_ast/interpreter.h"  // so that Procedure and TypeEntry are defined
+#include "documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -1165,6 +1167,15 @@ void debugASTFile(AST *node) {
     dumpAST(node, 0);
 }
 
+bool isUnitDocumented(const char *unit_name) {
+    for (size_t i = 0; i < documented_units_count; i++) {
+        if (strcmp(unit_name, documented_units[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 char *findUnitFile(const char *unit_name) {
     // Allow overriding the library search path via the PSCAL_LIB_DIR
     // environment variable.  If it is not provided, fall back to the
@@ -1187,7 +1198,12 @@ char *findUnitFile(const char *unit_name) {
     // Format full path safely
     snprintf(file_name, max_path_len, "%s/%s.pl", base_path, unit_name);
 
-    return file_name;
+    if (access(file_name, F_OK) == 0) {
+        return file_name; // Caller takes ownership
+    }
+
+    free(file_name);
+    return NULL; // Not found
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {

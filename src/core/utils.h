@@ -145,6 +145,7 @@ char *findUnitFile(const char *unit_name);
 void linkUnit(AST *unit_ast, int recursion_depth);
 Symbol *buildUnitSymbolTable(AST *interface_ast);
 void freeUnitSymbolTable(Symbol *symbol_table);
+bool isUnitDocumented(const char *unit_name);
 
 // General helpers
 // Helper function to map 0-15 to ANSI FG codes
