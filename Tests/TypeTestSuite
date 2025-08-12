@@ -252,7 +252,8 @@ begin
   testStringDynamic := 'A';
   c := 'B';
   testStringDynamic := c;
-  AssertEqualString('B', testStringDynamic, 'Assign Char to String');
+  s := 'B';
+  AssertEqualString(s, testStringDynamic, 'Assign Char to String');
 
 
   // Comparisons
@@ -263,7 +264,7 @@ begin
 
   // Copy
   tempStr := copy(testStringDynamic, 1, 1); // Should copy 'B'
-  AssertEqualString('B', tempStr, 'Copy(1,1)');
+  AssertEqualString(s, tempStr, 'Copy(1,1)');
   testStringDynamic := 'Programming';
   tempStr := copy(testStringDynamic, 4, 7); // 'grammin'
   AssertEqualString('grammin', tempStr, 'Copy(4,7)');
@@ -354,67 +355,89 @@ begin
 end;
 
 procedure TestByteType;
+var
+  tempInt: integer;
 begin
   writeln;
   writeln('--- Testing BYTE ---');
   testByte := 0;
-  AssertEqualInt(0, testByte, 'Byte Assign 0');
+  tempInt := testByte;
+  AssertEqualInt(0, tempInt, 'Byte Assign 0');
   testByte := 255;
-  AssertEqualInt(255, testByte, 'Byte Assign 255');
+  tempInt := testByte;
+  AssertEqualInt(255, tempInt, 'Byte Assign 255');
 
   // Arithmetic (should behave like integer within range)
   testByte := 100;
   testByte := testByte + 50;
-  AssertEqualInt(150, testByte, 'Byte Addition');
+  tempInt := testByte;
+  AssertEqualInt(150, tempInt, 'Byte Addition');
   testByte := testByte - 100;
-  AssertEqualInt(50, testByte, 'Byte Subtraction');
+  tempInt := testByte;
+  AssertEqualInt(50, tempInt, 'Byte Subtraction');
 
   // Test Ordinal Functions
-  AssertEqualInt(0, low(byte), 'Low(byte)');
-  AssertEqualInt(255, high(byte), 'High(byte)');
+  tempInt := low(byte);
+  AssertEqualInt(0, tempInt, 'Low(byte)');
+  tempInt := high(byte);
+  AssertEqualInt(255, tempInt, 'High(byte)');
   testByte := 10;
   Inc(testByte);
-  AssertEqualInt(11, testByte, 'Inc(Byte)');
+  tempInt := testByte;
+  AssertEqualInt(11, tempInt, 'Inc(Byte)');
   Dec(testByte, 5);
-  AssertEqualInt(6, testByte, 'Dec(Byte, 5)');
+  tempInt := testByte;
+  AssertEqualInt(6, tempInt, 'Dec(Byte, 5)');
   // AssertEqualInt(11, succ(byte(10)), 'Succ(Byte)'); // Type cast syntax likely needed
   // AssertEqualInt(9, pred(byte(10)), 'Pred(Byte)');
 
   // Assigning integer (should work if in range, behavior outside range depends on impl)
   testInt := 128;
   testByte := testInt;
-  AssertEqualInt(128, testByte, 'Assign Integer to Byte');
+  tempInt := testByte;
+  AssertEqualInt(128, tempInt, 'Assign Integer to Byte');
 end;
 
 procedure TestWordType;
+var
+  tempInt: integer;
 begin
   writeln;
   writeln('--- Testing WORD ---');
   testWord := 0;
-  AssertEqualInt(0, testWord, 'Word Assign 0');
+  tempInt := testWord;
+  AssertEqualInt(0, tempInt, 'Word Assign 0');
   testWord := 65535;
-  AssertEqualInt(65535, testWord, 'Word Assign 65535');
+  tempInt := testWord;
+  AssertEqualInt(65535, tempInt, 'Word Assign 65535');
 
   // Arithmetic
   testWord := 30000;
   testWord := testWord + 10000;
-  AssertEqualInt(40000, testWord, 'Word Addition');
+  tempInt := testWord;
+  AssertEqualInt(40000, tempInt, 'Word Addition');
   testWord := testWord - 20000;
-  AssertEqualInt(20000, testWord, 'Word Subtraction');
+  tempInt := testWord;
+  AssertEqualInt(20000, tempInt, 'Word Subtraction');
 
   // Test Ordinal Functions
-  AssertEqualInt(0, low(word), 'Low(word)');
-  AssertEqualInt(65535, high(word), 'High(word)');
+  tempInt := low(word);
+  AssertEqualInt(0, tempInt, 'Low(word)');
+  tempInt := high(word);
+  AssertEqualInt(65535, tempInt, 'High(word)');
   testWord := 1000;
   Inc(testWord);
-  AssertEqualInt(1001, testWord, 'Inc(Word)');
+  tempInt := testWord;
+  AssertEqualInt(1001, tempInt, 'Inc(Word)');
   Dec(testWord, 500);
-  AssertEqualInt(501, testWord, 'Dec(Word, 500)');
+  tempInt := testWord;
+  AssertEqualInt(501, tempInt, 'Dec(Word, 500)');
 
   // Assigning integer
   testInt := 50000;
   testWord := testInt;
-  AssertEqualInt(50000, testWord, 'Assign Integer to Word');
+  tempInt := testWord;
+  AssertEqualInt(50000, tempInt, 'Assign Integer to Word');
 end;
 
 procedure TestEnumType;
