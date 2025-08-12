@@ -39,7 +39,7 @@ BEGIN
 
   // Initial message to the terminal
   WriteLn('Calculating Mandelbrot set for a ', WindowWidth, 'x', WindowHeight, ' window.');
-  WriteLn('The graphics window will no appear until the calculation is complete');
+  WriteLn('The graphics window will not appear until the calculation is complete');
   WriteLn('and UpdateScreen is called.');
   WriteLn;
   WriteLn('Progress updates will be shown here in the terminal.');
