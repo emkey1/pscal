@@ -57,6 +57,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->i_val = 0; // Initialize i_val
     node->symbol_table = NULL; // Initialize symbol_table
     node->unit_list = NULL; // Initialize unit_list
+    node->type_def = NULL; // Ensure type definition pointer is initialized
 
     return node;
 }
