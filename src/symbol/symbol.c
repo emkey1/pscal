@@ -501,7 +501,9 @@ void popProcedureTable(bool free_table) {
 Symbol *lookupProcedure(const char *name) {
     for (HashTable *tbl = current_procedure_table; tbl; tbl = tbl->parent) {
         Symbol *sym = hashTableLookup(tbl, name);
-        if (sym) return sym;
+        if (sym) {
+            return sym->is_alias ? sym->real_symbol : sym;
+        }
     }
     return NULL;
 }
