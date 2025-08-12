@@ -1613,11 +1613,11 @@ void printValueToStream(Value v, FILE *stream) {
             }
             break;
         case TYPE_BYTE:
-             fprintf(stream, "BYTE(%lld)", v.i_val & 0xFF);
-             break;
+            fprintf(stream, "%lld", v.i_val & 0xFF);
+            break;
         case TYPE_WORD:
-             fprintf(stream, "WORD(%lld)", v.i_val & 0xFFFF);
-             break;
+            fprintf(stream, "%lld", v.i_val & 0xFFFF);
+            break;
         case TYPE_VOID:
             fprintf(stream, "<VOID_TYPE>");
             break;
