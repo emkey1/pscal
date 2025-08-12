@@ -1117,8 +1117,14 @@ Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
 
             case TYPE_STRING: {
                 char* tmp = strdup(p);
-                if (!tmp) { runtimeError(vm, "Out of memory in Readln."); last_io_error = 1; break; }
-                freeValue(dst);
+                if (!tmp) {
+                    runtimeError(vm, "Out of memory in Readln.");
+                    last_io_error = 1;
+                    break;
+                }
+                if (dst->type == TYPE_STRING && dst->s_val) {
+                    free(dst->s_val);
+                }
                 dst->type = TYPE_STRING;
                 dst->s_val = tmp;
                 i = arg_count; // consume the line; ignore trailing params
