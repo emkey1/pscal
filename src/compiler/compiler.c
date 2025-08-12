@@ -224,6 +224,12 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
             if (param_actual->var_type == TYPE_POINTER && arg_vt == TYPE_NIL) {
                 return true;
             }
+            // Treat CHAR and STRING as interchangeable without requiring
+            // coercion.  A CHAR is effectively a single-character STRING.
+            if ((param_actual->var_type == TYPE_STRING && arg_vt == TYPE_CHAR) ||
+                (param_actual->var_type == TYPE_CHAR   && arg_vt == TYPE_STRING)) {
+                return true;
+            }
             return false;
         }
     } else if (!arg_actual) {
