@@ -96,6 +96,7 @@ Token *number(Lexer *lexer) {
     size_t start = lexer->pos;
     bool is_hex = false;
     bool has_decimal = false;
+    bool has_exponent = false;
     
     int token_line = lexer->line; // Capture line/col BEFORE advancing further if number() advances
     int token_column = lexer->column - (lexer->pos - start); // Approximate start column of number
@@ -137,6 +138,26 @@ Token *number(Lexer *lexer) {
                     advance(lexer);
                 }
             }
+
+            // Exponent part (e.g., 1e-10 or 3.5E+5)
+            if (lexer->current_char == 'e' || lexer->current_char == 'E') {
+                has_exponent = true;
+                advance(lexer);
+
+                // Optional sign after 'e'
+                if (lexer->current_char == '+' || lexer->current_char == '-') {
+                    advance(lexer);
+                }
+
+                // Require at least one digit in exponent
+                if (!isdigit((unsigned char)lexer->current_char)) {
+                    goto make_number; // Invalid exponent, stop here
+                }
+
+                while (isdigit((unsigned char)lexer->current_char)) {
+                    advance(lexer);
+                }
+            }
         }
 
         if (!valid_number) {
@@ -156,7 +177,7 @@ make_number:
 
     if (is_hex) {
         token = newToken(TOKEN_HEX_CONST, num_str, token_line, token_column);
-    } else if (has_decimal) {
+    } else if (has_decimal || has_exponent) {
         token = newToken(TOKEN_REAL_CONST, num_str, token_line, token_column);
     } else {
         token = newToken(TOKEN_INTEGER_CONST, num_str, token_line, token_column);
