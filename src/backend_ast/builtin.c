@@ -1550,6 +1550,15 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"drawpolygon", executeBuiltinDrawPolygon},
     {"drawrect",  executeBuiltinDrawRect},
 #endif
+    {"dos_exec",   NULL},
+    {"dos_findfirst", NULL},
+    {"dos_findnext", NULL},
+    {"dos_getdate", NULL},
+    {"dos_getenv", NULL},
+    {"dos_getfattr", NULL},
+    {"dos_gettime", NULL},
+    {"dos_mkdir", NULL},
+    {"dos_rmdir", NULL},
     {"eof",       executeBuiltinEOF},
     {"exit",      executeBuiltinExit},
     {"exp",       executeBuiltinExp},
@@ -3238,6 +3247,43 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
     }
+    else if (strcasecmp(name, "dos_exec") == 0) {
+        dummy->child_capacity = 2;
+        dummy->children = malloc(sizeof(AST*) * 2); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_path", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_STRING);
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_cmd", 0, 0); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2, v2); dummy->children[1] = p2;
+        dummy->child_count = 2;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
+    else if (strcasecmp(name, "dos_findfirst") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_path", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1; dummy->child_count = 1;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcasecmp(name, "dos_findnext") == 0) {
+        dummy->child_count = 0;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcasecmp(name, "dos_getenv") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_varname", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1; dummy->child_count = 1;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+    }
+    else if (strcasecmp(name, "dos_getfattr") == 0) {
+        dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_path", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1; dummy->child_count = 1;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
     // --- Functions Returning BOOLEAN ---
     else if (strcasecmp(name, "keypressed") == 0 ||
              strcasecmp(name, "quitrequested") == 0 ||
@@ -3373,6 +3419,15 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
     }
     // --- Simple procedures (Delay, Halt, GetMouseState, etc.) ---
+    else if (strcasecmp(name, "dos_mkdir") == 0 || strcasecmp(name, "dos_rmdir") == 0) {
+        dummy->child_capacity = 1;
+        dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_path", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1;
+        dummy->child_count = 1;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_INTEGER); setRight(dummy, retNode); dummy->var_type = TYPE_INTEGER;
+    }
     else if (strcasecmp(name, "delay") == 0) {
         dummy->child_capacity = 1;
         dummy->children = malloc(sizeof(AST*));
@@ -3405,6 +3460,18 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->var_type = TYPE_VOID;
     }
     // --- Procedures with specific params (getmousestate, etc.) ---
+    else if (strcasecmp(name, "dos_getdate") == 0 || strcasecmp(name, "dos_gettime") == 0) {
+        dummy->child_capacity = 4;
+        dummy->children = malloc(sizeof(AST*) * 4); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        const char* pnames[] = {"_p1", "_p2", "_p3", "_p4"};
+        for (int i=0; i<4; ++i) {
+            AST* p = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p, TYPE_WORD); p->by_ref = 1;
+            Token* pn = newToken(TOKEN_IDENTIFIER, pnames[i], 0, 0); AST* v = newASTNode(AST_VARIABLE, pn); freeToken(pn); addChild(p, v);
+            dummy->children[i] = p;
+        }
+        dummy->child_count = 4;
+        dummy->var_type = TYPE_VOID;
+    }
     else if (strcasecmp(name, "getmousestate") == 0) {
         dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
         const char* pnames[] = {"_gms_x", "_gms_y", "_gms_b"};

@@ -11,8 +11,8 @@ type
 function FindFirst(Path: string): string; (* returns first entry name, empty when none *)
 function FindNext: string; (* returns next entry name *)
 function GetFAttr(Path: string): integer;
-procedure MkDir(Path: string);
-procedure RmDir(Path: string);
+function MkDir(Path: string): integer;
+function RmDir(Path: string): integer;
 function GetEnv(VarName: string): string;
 procedure GetDate(var Year, Month, Day, Dow: word);
 procedure GetTime(var Hour, Minute, Second, Sec100: word);
@@ -35,14 +35,14 @@ begin
   GetFAttr := dos_getfattr(Path);
 end;
 
-procedure MkDir(Path: string);
+function MkDir(Path: string): integer;
 begin
-  dos_mkdir(Path);
+  MkDir := dos_mkdir(Path);
 end;
 
-procedure RmDir(Path: string);
+function RmDir(Path: string): integer;
 begin
-  dos_rmdir(Path);
+  RmDir := dos_rmdir(Path);
 end;
 
 function GetEnv(VarName: string): string;
