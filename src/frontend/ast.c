@@ -667,11 +667,63 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
 }
 
 VarType getBuiltinReturnType(const char* name) {
-     if (strcasecmp(name, "chr")==0) return TYPE_CHAR;
-     if (strcasecmp(name, "ord")==0) return TYPE_INTEGER;
-     // ... (rest of your getBuiltinReturnType implementation) ...
-     if (strcasecmp(name,"wherey")==0) return TYPE_INTEGER;
-     return TYPE_VOID;
+    if (!name) return TYPE_VOID;
+
+    /*
+     * This function is used as a fallback when a built-in routine was not
+     * explicitly registered in the procedure table (for example, when running
+     * the front-end tools directly).  Previously it only recognised a couple
+     * of routines which meant many math functions defaulted to TYPE_VOID and
+     * produced "UNKNOWN_VAR_TYPE" compile errors.  Populate the mapping with
+     * the common built-ins so their return types can be inferred.
+     */
+
+    /* Character and ordinal helpers */
+    if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+
+    /* Math routines returning REAL */
+    if (strcasecmp(name, "cos")  == 0 ||
+        strcasecmp(name, "sin")  == 0 ||
+        strcasecmp(name, "tan")  == 0 ||
+        strcasecmp(name, "sqrt") == 0 ||
+        strcasecmp(name, "ln")   == 0 ||
+        strcasecmp(name, "exp")  == 0 ||
+        strcasecmp(name, "real") == 0) {
+        return TYPE_REAL;
+    }
+
+    /* Math routines returning INTEGER */
+    if (strcasecmp(name, "abs")       == 0 ||
+        strcasecmp(name, "round")     == 0 ||
+        strcasecmp(name, "trunc")     == 0 ||
+        strcasecmp(name, "random")    == 0 ||
+        strcasecmp(name, "ioresult")  == 0 ||
+        strcasecmp(name, "paramcount")== 0 ||
+        strcasecmp(name, "length")    == 0 ||
+        strcasecmp(name, "pos")       == 0 ||
+        strcasecmp(name, "screencols")== 0 ||
+        strcasecmp(name, "screenrows")== 0 ||
+        strcasecmp(name, "wherex")    == 0 ||
+        strcasecmp(name, "wherey")    == 0 ||
+        strcasecmp(name, "getmaxx")   == 0 ||
+        strcasecmp(name, "getmaxy")   == 0) {
+        return TYPE_INTEGER;
+    }
+
+    /* String producing helpers */
+    if (strcasecmp(name, "inttostr")  == 0 ||
+        strcasecmp(name, "realtostr") == 0 ||
+        strcasecmp(name, "paramstr")  == 0 ||
+        strcasecmp(name, "readkey")   == 0 ||
+        strcasecmp(name, "copy")      == 0) {
+        return TYPE_STRING;
+    }
+
+    /* UpCase returns a single character */
+    if (strcasecmp(name, "upcase") == 0) return TYPE_CHAR;
+
+    return TYPE_VOID;
 }
 
 AST *copyAST(AST *node) {
