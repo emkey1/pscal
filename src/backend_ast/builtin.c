@@ -35,6 +35,7 @@ static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
+    {"[2J", vm_builtin_clrscr},
     {"abs", vm_builtin_abs},
     {"api_receive", vm_builtin_api_receive},
     {"api_send", vm_builtin_api_send},
@@ -423,6 +424,19 @@ Value vm_builtin_quitrequested(VM* vm, int arg_count, Value* args) {
     }
     // Access the global flag and return it as a Pscal boolean
     return makeBoolean(break_requested != 0);
+}
+
+Value vm_builtin_clrscr(VM* vm, int arg_count, Value* args) {
+    FILE* out = stdout;
+    if (arg_count == 1 && args[0].type == TYPE_POINTER && args[0].ptr_val) {
+        Value* fileVarLValue = (Value*)args[0].ptr_val;
+        if (fileVarLValue->type == TYPE_FILE && fileVarLValue->f_val) {
+            out = fileVarLValue->f_val;
+        }
+    }
+    fputs("\x1B[2J", out);
+    fflush(out);
+    return makeVoid();
 }
 
 Value vm_builtin_gotoxy(VM* vm, int arg_count, Value* args) {

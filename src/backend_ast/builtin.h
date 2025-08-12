@@ -49,6 +49,7 @@ Value vm_builtin_paramcount(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_paramstr(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_wherex(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_wherey(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_clrscr(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_gotoxy(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_keypressed(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_readkey(struct VM_s* vm, int arg_count, Value* args);
