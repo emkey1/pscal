@@ -2343,16 +2343,22 @@ Value vm_builtin_destroytexture(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_rendercopyrect(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 5) { runtimeError(vm, "RenderCopyRect expects 5 arguments."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before RenderCopyRect."); return makeVoid(); }
+    if (arg_count != 5) {
+        fprintf(stderr, "Runtime error: RenderCopyRect expects 5 arguments.\n");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopyRect.\n");
+        return makeVoid();
+    }
     if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER ||
         args[3].type != TYPE_INTEGER || args[4].type != TYPE_INTEGER) {
-        runtimeError(vm, "RenderCopyRect expects integer arguments (TextureID, DestX, DestY, DestW, DestH).");
+        fprintf(stderr, "Runtime error: RenderCopyRect expects integer arguments (TextureID, DestX, DestY, DestW, DestH).\n");
         return makeVoid();
     }
     int textureID = (int)args[0].i_val;
     if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || !gSdlTextures[textureID]) {
-        runtimeError(vm, "RenderCopyRect called with invalid TextureID.");
+        fprintf(stderr, "Runtime error: RenderCopyRect called with invalid TextureID.\n");
         return makeVoid();
     }
     SDL_Rect dstRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
@@ -2699,31 +2705,49 @@ Value vm_builtin_outtextxy(VM* vm, int arg_count, Value* args) {
 }
 
 Value vm_builtin_rendercopy(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "RenderCopy expects 1 argument (TextureID: Integer)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before RenderCopy."); return makeVoid(); }
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        fprintf(stderr, "Runtime error: RenderCopy expects 1 argument (TextureID: Integer).\n");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopy.\n");
+        return makeVoid();
+    }
 
     int textureID = (int)args[0].i_val;
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) { runtimeError(vm, "RenderCopy called with invalid TextureID."); return makeVoid(); }
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        fprintf(stderr, "Runtime error: RenderCopy called with invalid TextureID.\n");
+        return makeVoid();
+    }
 
     SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, NULL);
     return makeVoid();
 }
 
 Value vm_builtin_rendercopyex(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 13) { runtimeError(vm, "RenderCopyEx expects 13 arguments."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before RenderCopyEx."); return makeVoid(); }
+    if (arg_count != 13) {
+        fprintf(stderr, "Runtime error: RenderCopyEx expects 13 arguments.\n");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before RenderCopyEx.\n");
+        return makeVoid();
+    }
 
     if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER ||
         args[3].type != TYPE_INTEGER || args[4].type != TYPE_INTEGER || args[5].type != TYPE_INTEGER ||
         args[6].type != TYPE_INTEGER || args[7].type != TYPE_INTEGER || args[8].type != TYPE_INTEGER ||
         args[9].type != TYPE_REAL || args[10].type != TYPE_INTEGER || args[11].type != TYPE_INTEGER ||
         args[12].type != TYPE_INTEGER) {
-        runtimeError(vm, "RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).");
+        fprintf(stderr, "Runtime error: RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).\n");
         return makeVoid();
     }
 
     int textureID = (int)args[0].i_val;
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) { runtimeError(vm, "RenderCopyEx called with invalid or unloaded TextureID."); return makeVoid(); }
+    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
+        fprintf(stderr, "Runtime error: RenderCopyEx called with invalid or unloaded TextureID.\n");
+        return makeVoid();
+    }
     SDL_Texture* texture = gSdlTextures[textureID];
 
     SDL_Rect srcRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
