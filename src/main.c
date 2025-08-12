@@ -167,6 +167,15 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("Dec", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dos_exec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_findfirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_findnext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_getenv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_getfattr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_mkdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_rmdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dos_getdate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dos_gettime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
