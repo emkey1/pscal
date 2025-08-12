@@ -541,6 +541,10 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                             node->var_type = arg->var_type;
                             node->type_def = arg->type_def;
                         }
+                    } else if (strcasecmp(builtin_name, "abs") == 0) {
+                        AST* arg = node->children[0];
+                        node->var_type = arg->var_type;
+                        node->type_def = arg->type_def;
                     }
                 }
                 break;
@@ -694,8 +698,12 @@ VarType getBuiltinReturnType(const char* name) {
     }
 
     /* Math routines returning INTEGER */
-    if (strcasecmp(name, "abs")       == 0 ||
-        strcasecmp(name, "round")     == 0 ||
+    /*
+     * `abs` is intentionally omitted here because it returns the same
+     * type as its argument.  Its return type is inferred during AST
+     * annotation based on the provided parameter.
+     */
+    if (strcasecmp(name, "round")     == 0 ||
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
         strcasecmp(name, "ioresult")  == 0 ||
