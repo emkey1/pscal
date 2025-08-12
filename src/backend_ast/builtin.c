@@ -25,13 +25,6 @@ Value eval(AST *node);
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
 #include <string.h>  // For strlen, strdup
 
-// Comparison function for bsearch (case-insensitive) - MUST be defined before the table that uses it
-static int compareVmBuiltinMappings(const void *key, const void *element) {
-    const char *target_name = (const char *)key;
-    const VmBuiltinMapping *mapping = (const VmBuiltinMapping *)element;
-    return strcasecmp(target_name, mapping->name);
-}
-
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
@@ -1371,14 +1364,6 @@ Value vm_builtin_real(VM* vm, int arg_count, Value* args) {
             runtimeError(vm, "Real() argument must be an Integer, Ordinal, or Real type. Got %s.", varTypeToString(arg.type));
             return makeReal(0.0);
     }
-}
-
-
-// Comparison function for bsearch (case-insensitive)
-static int compareBuiltinMappings(const void *key, const void *element) {
-    const char *target_name = (const char *)key;
-    const BuiltinMapping *mapping = (const BuiltinMapping *)element;
-    return strcasecmp(target_name, mapping->name);
 }
 
 static const BuiltinMapping builtin_dispatch_table[] = {
@@ -4407,7 +4392,7 @@ int getBuiltinIDForCompiler(const char *name) {
     // num_builtins is also static const.
     for (size_t i = 0; i < num_builtins; i++) {
         // Assuming BuiltinMapping struct has a 'name' field.
-        // Using strcasecmp for case-insensitive comparison, matching compareBuiltinMappings.
+        // Using strcasecmp for case-insensitive comparison
         if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
             return (int)i; // Found, return index
         }
