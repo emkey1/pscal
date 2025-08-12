@@ -1042,7 +1042,10 @@ Value vm_builtin_eof(VM* vm, int arg_count, Value* args) {
 Value vm_builtin_readln(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
-    bool first_arg_is_file_by_value = false;   // ***NEW***
+    bool first_arg_is_file_by_value = false;
+    // Clear any previous IO error so a successful read won't report stale
+    // failures from earlier operations (e.g. failed parse on a prior call).
+    last_io_error = 0;
 
     // 1) Determine input stream: allow FILE or ^FILE
     if (arg_count > 0) {
