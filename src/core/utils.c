@@ -1166,12 +1166,14 @@ void debugASTFile(AST *node) {
 }
 
 char *findUnitFile(const char *unit_name) {
-    const char *base_path;
+    const char *base_path = getenv("PSCAL_LIB_DIR");
+    if (base_path == NULL || *base_path == '\0') {
 #ifdef DEBUG
-    base_path = "/usr/local/Pscal/lib";
+        base_path = "/usr/local/Pscal/lib";
 #else
-    base_path = "/usr/local/Pscal/lib";
+        base_path = "/usr/local/Pscal/lib";
 #endif
+    }
 
     // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
     size_t max_path_len = strlen(base_path) + 1 + strlen(unit_name) + 3 + 1;
