@@ -24,6 +24,13 @@ Value eval(AST *node);
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
 #include <string.h>  // For strlen, strdup
+#include <dirent.h>  // For directory traversal
+#include <sys/stat.h> // For file attributes
+#include <stdlib.h>  // For system(), getenv, malloc
+#include <time.h>    // For date/time functions
+#include <sys/time.h> // For gettimeofday
+
+static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
@@ -52,6 +59,15 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"destroytexture", vm_builtin_destroytexture},
 #endif
     {"dispose", vm_builtin_dispose},
+    {"dos_exec", vm_builtin_dos_exec},
+    {"dos_findfirst", vm_builtin_dos_findfirst},
+    {"dos_findnext", vm_builtin_dos_findnext},
+    {"dos_getdate", vm_builtin_dos_getdate},
+    {"dos_getenv", vm_builtin_dos_getenv},
+    {"dos_getfattr", vm_builtin_dos_getfattr},
+    {"dos_gettime", vm_builtin_dos_gettime},
+    {"dos_mkdir", vm_builtin_dos_mkdir},
+    {"dos_rmdir", vm_builtin_dos_rmdir},
 #ifdef SDL
     {"drawcircle", vm_builtin_drawcircle}, // Moved
     {"drawline", vm_builtin_drawline}, // Moved
@@ -1166,6 +1182,143 @@ Value vm_builtin_random(VM* vm, int arg_count, Value* args) {
         return makeInt(rand() % n);
     }
     runtimeError(vm, "Random requires 0 arguments, or 1 integer argument.");
+    return makeVoid();
+}
+
+// --- VM BUILT-IN IMPLEMENTATIONS: DOS/OS ---
+
+Value vm_builtin_dos_getenv(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "dos_getenv expects 1 string argument.");
+        return makeString("");
+    }
+    const char* val = getenv(AS_STRING(args[0]));
+    if (!val) val = "";
+    return makeString(val);
+}
+
+Value vm_builtin_dos_exec(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+        runtimeError(vm, "dos_exec expects 2 string arguments.");
+        return makeInt(-1);
+    }
+    const char* path = AS_STRING(args[0]);
+    const char* cmdline = AS_STRING(args[1]);
+    size_t len = strlen(path) + strlen(cmdline) + 2;
+    char* cmd = malloc(len);
+    if (!cmd) {
+        runtimeError(vm, "dos_exec memory allocation failed.");
+        return makeInt(-1);
+    }
+    snprintf(cmd, len, "%s %s", path, cmdline);
+    int res = system(cmd);
+    free(cmd);
+    return makeInt(res);
+}
+
+Value vm_builtin_dos_mkdir(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "dos_mkdir expects 1 string argument.");
+        return makeInt(errno);
+    }
+    int rc = mkdir(AS_STRING(args[0]), 0777);
+    return makeInt(rc == 0 ? 0 : errno);
+}
+
+Value vm_builtin_dos_rmdir(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "dos_rmdir expects 1 string argument.");
+        return makeInt(errno);
+    }
+    int rc = rmdir(AS_STRING(args[0]));
+    return makeInt(rc == 0 ? 0 : errno);
+}
+
+Value vm_builtin_dos_findfirst(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "dos_findfirst expects 1 string argument.");
+        return makeString("");
+    }
+    if (dos_dir) { closedir(dos_dir); dos_dir = NULL; }
+    dos_dir = opendir(AS_STRING(args[0]));
+    if (!dos_dir) return makeString("");
+    struct dirent* ent;
+    while ((ent = readdir(dos_dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+            return makeString(ent->d_name);
+        }
+    }
+    closedir(dos_dir); dos_dir = NULL;
+    return makeString("");
+}
+
+Value vm_builtin_dos_findnext(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "dos_findnext expects 0 arguments.");
+        return makeString("");
+    }
+    if (!dos_dir) return makeString("");
+    struct dirent* ent;
+    while ((ent = readdir(dos_dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+            return makeString(ent->d_name);
+        }
+    }
+    closedir(dos_dir); dos_dir = NULL;
+    return makeString("");
+}
+
+Value vm_builtin_dos_getfattr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "dos_getfattr expects 1 string argument.");
+        return makeInt(0);
+    }
+    struct stat st;
+    if (stat(AS_STRING(args[0]), &st) != 0) {
+        return makeInt(0);
+    }
+    int attr = 0;
+    if (S_ISDIR(st.st_mode)) attr |= 16;
+    if (!(st.st_mode & S_IWUSR)) attr |= 1;
+    return makeInt(attr);
+}
+
+Value vm_builtin_dos_getdate(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) {
+        runtimeError(vm, "dos_getdate expects 4 var arguments.");
+        return makeVoid();
+    }
+    time_t t = time(NULL);
+    struct tm tm_info;
+    localtime_r(&t, &tm_info);
+    Value* year = (Value*)args[0].ptr_val;
+    Value* month = (Value*)args[1].ptr_val;
+    Value* day = (Value*)args[2].ptr_val;
+    Value* dow = (Value*)args[3].ptr_val;
+    if (year) year->i_val = tm_info.tm_year + 1900;
+    if (month) month->i_val = tm_info.tm_mon + 1;
+    if (day) day->i_val = tm_info.tm_mday;
+    if (dow) dow->i_val = tm_info.tm_wday;
+    return makeVoid();
+}
+
+Value vm_builtin_dos_gettime(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) {
+        runtimeError(vm, "dos_gettime expects 4 var arguments.");
+        return makeVoid();
+    }
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm tm_info;
+    localtime_r(&tv.tv_sec, &tm_info);
+    Value* hour = (Value*)args[0].ptr_val;
+    Value* min = (Value*)args[1].ptr_val;
+    Value* sec = (Value*)args[2].ptr_val;
+    Value* sec100 = (Value*)args[3].ptr_val;
+    if (hour) hour->i_val = tm_info.tm_hour;
+    if (min) min->i_val = tm_info.tm_min;
+    if (sec) sec->i_val = tm_info.tm_sec;
+    if (sec100) sec100->i_val = (int)(tv.tv_usec / 10000);
     return makeVoid();
 }
 
@@ -4039,7 +4192,9 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "keypressed", "mstreamcreate", "quitrequested", "loadsound",
         "real", "readkey", "getmaxx", "getmaxy", "getticks", "sqr",
         "realtostr", "createtexture", "createtargettexture",
-        "loadimagetotexture", "rendertexttotexture"
+        "loadimagetotexture", "rendertexttotexture",
+        "dos_exec", "dos_findfirst", "dos_findnext", "dos_getenv",
+        "dos_getfattr", "dos_mkdir", "dos_rmdir"
         
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
@@ -4064,8 +4219,8 @@ BuiltinRoutineType getBuiltinType(const char *name) {
          "setcolor", "setrendertarget", "setrgbcolor",
          "textbackground", "textbackgrounde", "textcolor",
          "textcolore", "updatescreen", "updatetexture", "waitkeyevent",
-         "write", "writeln",
-     };
+         "write", "writeln", "dos_getdate", "dos_gettime",
+    };
     
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);
     for (int i = 0; i < num_procedures; i++) {

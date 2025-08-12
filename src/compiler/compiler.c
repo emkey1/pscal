@@ -896,7 +896,9 @@ static void preloadSmallIndexStrings(BytecodeChunk* chunk) {
     const char* builtins[] = {
         "abs","length","copy","pos","ord","chr","upcase","low","high","trunc","inc","dec",
         "assign","reset","rewrite","close","new","dispose",
-        "mstreamloadfromfile","mstreamsavetofile","mstreamfree","read","readln","write","writeln"
+        "mstreamloadfromfile","mstreamsavetofile","mstreamfree","read","readln","write","writeln",
+        "dos_exec","dos_findfirst","dos_findnext","dos_getenv","dos_getfattr",
+        "dos_mkdir","dos_rmdir","dos_getdate","dos_gettime"
     };
     for (size_t i = 0; i < sizeof(builtins)/sizeof(builtins[0]); i++) {
         (void)addStringConstant(chunk, builtins[i]);
