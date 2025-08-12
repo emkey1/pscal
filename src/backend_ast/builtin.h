@@ -87,6 +87,17 @@ Value vm_builtin_trunc(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_randomize(struct VM_s* vm, int arg_count, Value* args);
 Value vm_builtin_random(struct VM_s* vm, int arg_count, Value* args);
 
+// --- VM-NATIVE DOS/OS FUNCTIONS ---
+Value vm_builtin_dos_getenv(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_exec(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_mkdir(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_rmdir(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_findfirst(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_findnext(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_getdate(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_gettime(struct VM_s* vm, int arg_count, Value* args);
+Value vm_builtin_dos_getfattr(struct VM_s* vm, int arg_count, Value* args);
+
 // --- AST-BASED BUILT-INS (for AST interpreter) ---
 
 // Prototypes from builtin.c
