@@ -1560,6 +1560,24 @@ comparison_error_label:
                     else if (target_lvalue_ptr->type == TYPE_INTEGER && value_to_set.type == TYPE_CHAR) {
                         target_lvalue_ptr->i_val = (long long)value_to_set.c_val;
                     }
+                    else if (target_lvalue_ptr->type == TYPE_CHAR) {
+                        if (value_to_set.type == TYPE_CHAR) {
+                            target_lvalue_ptr->c_val = value_to_set.c_val;
+                        } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                            size_t len = strlen(value_to_set.s_val);
+                            if (len == 1) {
+                                target_lvalue_ptr->c_val = value_to_set.s_val[0];
+                            } else if (len == 0) {
+                                target_lvalue_ptr->c_val = '\0';
+                            } else {
+                                runtimeError(vm, "Type mismatch: Cannot assign multi-character string to CHAR.");
+                            }
+                        } else if (value_to_set.type == TYPE_INTEGER) {
+                            target_lvalue_ptr->c_val = (char)value_to_set.i_val;
+                        } else {
+                            runtimeError(vm, "Type mismatch: Cannot assign %s to CHAR.", varTypeToString(value_to_set.type));
+                        }
+                    }
                     else {
                         freeValue(target_lvalue_ptr);
                         *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
