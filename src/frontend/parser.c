@@ -12,6 +12,7 @@
 #include "symbol/symbol.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 // Define the helper function *only* when DEBUG is enabled
 // No 'static inline' needed here as it's defined only once in this file.
@@ -2646,7 +2647,9 @@ AST *factor(Parser *parser) {
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_STRING_CONST) {
-        int isChar = (initialToken->value && initialToken->value[1] == '\0');
+        /* Treat zero-length strings as TYPE_STRING and single-character strings as TYPE_CHAR */
+        size_t len = (initialToken->value ? strlen(initialToken->value) : 0);
+        int isChar = (len == 1);
         Token* c = copyToken(initialToken);
         eat(parser, initialTokenType); // Eat the string token
         node = newASTNode(AST_STRING, c); freeToken(c);
