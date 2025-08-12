@@ -1166,13 +1166,14 @@ void debugASTFile(AST *node) {
 }
 
 char *findUnitFile(const char *unit_name) {
+    // Allow overriding the library search path via the PSCAL_LIB_DIR
+    // environment variable.  If it is not provided, fall back to the
+    // repository's local `lib` directory instead of the old hard-coded
+    // `/usr/local/Pscal/lib` path.  This makes the compiler work out of the
+    // box for developers running from the source tree.
     const char *base_path = getenv("PSCAL_LIB_DIR");
     if (base_path == NULL || *base_path == '\0') {
-#ifdef DEBUG
-        base_path = "/usr/local/Pscal/lib";
-#else
-        base_path = "/usr/local/Pscal/lib";
-#endif
+        base_path = "lib";   // Default relative library path
     }
 
     // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
