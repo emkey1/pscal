@@ -551,6 +551,37 @@ Value executeBuiltinWaitKeyEvent(AST *node) {
     return makeVoid(); // WaitKeyEvent is a procedure
 }
 
+// Pscal: function PollKey: char; // Non-blocking key poll from SDL
+Value executeBuiltinPollKey(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: PollKey expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+        return makeChar('\0');
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            break_requested = 1;
+            return makeChar('\0');
+        } else if (event.type == SDL_KEYDOWN) {
+            SDL_Keycode sym = event.key.keysym.sym;
+            if (sym == SDLK_q) {
+                break_requested = 1;
+            }
+            if (sym >= 0 && sym <= 255) {
+                return makeChar((char)sym);
+            } else {
+                return makeChar('\0');
+            }
+        }
+    }
+    return makeChar('\0');
+}
+
 // Pscal: procedure ClearDevice;
 Value executeBuiltinClearDevice(AST *node) {
     if (node->child_count != 0) {
@@ -2830,6 +2861,26 @@ Value vm_builtin_setrendertarget(VM* vm, int arg_count, Value* args) {
 
     SDL_SetRenderTarget(gSdlRenderer, targetTexture);
     return makeVoid();
+}
+
+Value vm_builtin_pollkey(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) { runtimeError(vm, "PollKey expects 0 arguments."); return makeChar('\0'); }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) { return makeChar('\0'); }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) { break_requested = 1; return makeChar('\0'); }
+        else if (event.type == SDL_KEYDOWN) {
+            SDL_Keycode sym = event.key.keysym.sym;
+            if (sym == SDLK_q) { break_requested = 1; }
+            if (sym >= 0 && sym <= 255) {
+                return makeChar((char)sym);
+            } else {
+                return makeChar('\0');
+            }
+        }
+    }
+    return makeChar('\0');
 }
 
 Value vm_builtin_waitkeyevent(VM* vm, int arg_count, Value* args) {

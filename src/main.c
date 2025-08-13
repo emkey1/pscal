@@ -138,6 +138,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("LoadSound", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitTextSystem", AST_PROCEDURE_DECL, NULL);
