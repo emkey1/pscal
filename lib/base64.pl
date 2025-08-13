@@ -2,16 +2,16 @@ unit Base64;
 
 interface
 
-function EncodeStringBase64(const s: string): string;
-function DecodeStringBase64(const s: string): string;
-
-implementation
-
 const
   Base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 var
   DecodeTable: array[0..127] of integer; { Simple ASCII range is enough }
+
+function EncodeStringBase64(const s: string): string;
+function DecodeStringBase64(const s: string): string;
+
+implementation
 
 procedure InitializeDecodeTable;
 var
@@ -126,13 +126,27 @@ begin
      if i <= len then c3 := DecodeTable[Ord(s[i])] else c3 := -1; inc(i); // Handle end padding
      if i <= len then c4 := DecodeTable[Ord(s[i])] else c4 := -1; inc(i); // Handle end padding
 
-     { Check for invalid characters (ignore padding chars here) }
-     if (c1=-1) or (c2=-1) or (c3=-1 and (i-1 <= len-padding)) or (c4=-1 and (i <= len-padding)) then
-     begin
-        writeln('Warning: Invalid character found in Base64 input.');
-        DecodeStringBase64 := '';
-        exit;
-     end;
+      { Check for invalid characters (ignore padding chars here) }
+      if (c1 = -1) or (c2 = -1) then
+      begin
+         writeln('Warning: Invalid character found in Base64 input.');
+         DecodeStringBase64 := '';
+         exit;
+      end;
+
+      if (c3 = -1) and ((i - 1) <= (len - padding)) then
+      begin
+         writeln('Warning: Invalid character found in Base64 input.');
+         DecodeStringBase64 := '';
+         exit;
+      end;
+
+      if (c4 = -1) and (i <= (len - padding)) then
+      begin
+         writeln('Warning: Invalid character found in Base64 input.');
+         DecodeStringBase64 := '';
+         exit;
+      end;
 
      { Combine 4x6 bits into 3x8 bits }
      b1 := (c1 shl 2) or (c2 shr 4);
