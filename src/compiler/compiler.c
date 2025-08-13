@@ -907,40 +907,6 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
     }
 }
 
-static void preloadSmallIndexStrings(BytecodeChunk* chunk) {
-    // 1) Builtins you may emit via OP_CALL_BUILTIN
-    const char* builtins[] = {
-        "abs","length","copy","pos","ord","chr","upcase","low","high","trunc","inc","dec",
-        "assign","reset","rewrite","close","new","dispose",
-        "mstreamloadfromfile","mstreamsavetofile","mstreamfree","read","readln","write","writeln",
-        "dos_exec","dos_findfirst","dos_findnext","dos_getenv","dos_getfattr",
-        "dos_mkdir","dos_rmdir","dos_getdate","dos_gettime"
-    };
-    for (size_t i = 0; i < sizeof(builtins)/sizeof(builtins[0]); i++) {
-        (void)addStringConstant(chunk, builtins[i]);
-    }
-
-    // 2) Type names you embed in OP_DEFINE_GLOBAL (non-arrays and array element types)
-    const char* type_names[] = {
-        "integer","real","string","char","boolean","byte","word","file","text"
-        // add any user types you stringify into bytecode (records/enums aliases etc.) if applicable
-    };
-    for (size_t i = 0; i < sizeof(type_names)/sizeof(type_names[0]); i++) {
-        (void)addStringConstant(chunk, type_names[i]);
-    }
-
-    // 3) (Nice-to-have) Preload procedure/function names so OP_CALL's 1-byte name index stays small.
-    // If you have access to the global procedure table here, intern their names:
-    if (procedure_table) {
-        for (int b = 0; b < HASHTABLE_SIZE; b++) {
-            for (Symbol* s = procedure_table->buckets[b]; s; s = s->next) {
-                if (s->name && s->name[0]) {
-                    (void)addStringConstant(chunk, s->name);  // use the same casing your OP_CALL writes
-                }
-            }
-        }
-    }
-}
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
@@ -950,7 +916,6 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     compiler_had_error = false;
     current_function_compiler = NULL;
     
-    preloadSmallIndexStrings(outputChunk);
     current_procedure_table = procedure_table;
 
     if (rootNode->type == AST_PROGRAM) {
@@ -1582,7 +1547,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // Call the built-in `readln` function. This part is correct.
             int nameIndex = addStringConstant(chunk, "readln");
             writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-            writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+            emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
         }
@@ -1914,7 +1879,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         toLowerString(normalized_name);
                         int nameIndex = addStringConstant(chunk, normalized_name);
                         writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                        emitShort(chunk, (uint16_t)nameIndex, line);
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
 
                         // If it was a function, its return value is on the stack. Pop it.
@@ -1931,7 +1896,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
                 int nameIndex = addStringConstant(chunk, calleeName);
                 writeBytecodeChunk(chunk, OP_CALL, line);
-                writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                emitShort(chunk, (uint16_t)nameIndex, line);
 
                 if (proc_symbol->is_defined) {
                     emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
@@ -2389,7 +2354,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     toLowerString(normalized_name);
                     int nameIndex = addStringConstant(chunk, normalized_name);
                     writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-                    writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                    emitShort(chunk, (uint16_t)nameIndex, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 } else {
                      fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context.\n", line, functionName);
@@ -2427,7 +2392,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     } else {
                         int nameIndex = addStringConstant(chunk, functionName);
                         writeBytecodeChunk(chunk, OP_CALL, line);
-                        writeBytecodeChunk(chunk, (uint8_t)nameIndex, line);
+                        emitShort(chunk, (uint16_t)nameIndex, line);
 
                         if (func_symbol->is_defined) {
                             emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
@@ -2485,21 +2450,23 @@ void finalizeBytecode(BytecodeChunk* chunk) {
 
         if (opcode == OP_CALL) {
             // Ensure we can read the full OP_CALL instruction
-            if (offset + 4 >= chunk->count) {
+            if (offset + 5 >= chunk->count) {
                 fprintf(stderr, "Compiler Error: Malformed OP_CALL instruction at offset %d.\n", offset);
                 compiler_had_error = true;
                 break;
             }
 
-            uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
+            uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
+                                          chunk->code[offset + 4]);
 
             // Check if this is a placeholder that needs patching.
             if (address == 0xFFFF) {
-                uint8_t name_index = chunk->code[offset + 1];
+                uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                                 chunk->code[offset + 2]);
                 if (name_index >= chunk->constants_count) {
                     fprintf(stderr, "Compiler Error: Invalid name index in OP_CALL at offset %d.\n", name_index);
                     compiler_had_error = true;
-                    offset += 5; // Skip this malformed instruction
+                    offset += 6; // Skip this malformed instruction
                     continue;
                 }
 
@@ -2507,7 +2474,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 if (name_val.type != TYPE_STRING) {
                     fprintf(stderr, "Compiler Error: Constant at index %d is not a string for OP_CALL.\n", name_index);
                     compiler_had_error = true;
-                    offset += 5; // Skip
+                    offset += 6; // Skip
                     continue;
                 }
 
@@ -2535,7 +2502,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                     compiler_had_error = true;
                 }
             }
-            offset += 5; // Advance past the 5-byte OP_CALL instruction
+            offset += 6; // Advance past the 6-byte OP_CALL instruction
         } else {
             // For any other instruction, use the new helper to get the correct length and advance the offset.
             offset += getInstructionLength(chunk, offset);
