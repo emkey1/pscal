@@ -171,11 +171,12 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 3; // 1 byte opcode + 2-byte operand
         case OP_JUMP:
         case OP_JUMP_IF_FALSE:
-        case OP_CALL_BUILTIN:
         case OP_FORMAT_VALUE:
             return 3; // 1-byte opcode + 2-byte operand
+        case OP_CALL_BUILTIN:
+            return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
         case OP_CALL:
-            return 5; // 1-byte opcode + 1-byte name_idx + 2-byte addr + 1-byte arity
+            return 6; // 1-byte opcode + 2-byte name_idx + 2-byte addr + 1-byte arity
         case OP_EXIT:
             return 1;
         case OP_DEFINE_GLOBAL: {
@@ -577,10 +578,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             return offset + 1;
 
         case OP_CALL_BUILTIN: {
-            uint8_t name_index = chunk->code[offset + 1];
-            uint8_t arg_count = chunk->code[offset + 2];
-            printf("%-16s %3d '%s' (%d args)\n", "OP_CALL_BUILTIN", name_index, AS_STRING(chunk->constants[name_index]), arg_count);
-            return offset + 3;
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            uint8_t arg_count = chunk->code[offset + 3];
+            const char* name = "<INVALID>";
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[name_index])) {
+                name = AS_STRING(chunk->constants[name_index]);
+            }
+            printf("%-16s %5d '%s' (%d args)\n",
+                   "OP_CALL_BUILTIN", name_index, name, arg_count);
+            return offset + 4;
         }
         
         // These are not currently used in your compiler but are in the enum
@@ -610,12 +619,20 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printf("OP_POP\n");
             return offset + 1;
         case OP_CALL: {
-            uint8_t name_index = chunk->code[offset + 1];
-            uint16_t address = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
-            uint8_t declared_arity = chunk->code[offset + 4];
-            const char* targetProcName = AS_STRING(chunk->constants[name_index]);
-            printf("%-16s %04X (%s) (%d args)\n", "OP_CALL", address, targetProcName, declared_arity);
-            return offset + 5;
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
+                                          chunk->code[offset + 4]);
+            uint8_t declared_arity = chunk->code[offset + 5];
+            const char* targetProcName = "<INVALID>";
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[name_index])) {
+                targetProcName = AS_STRING(chunk->constants[name_index]);
+            }
+            printf("%-16s %04X (%s) (%d args)\n",
+                   "OP_CALL", address, targetProcName, declared_arity);
+            return offset + 6;
         }
         case OP_HALT:
             printf("OP_HALT\n");

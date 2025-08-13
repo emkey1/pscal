@@ -2135,7 +2135,7 @@ comparison_error_label:
                 break;
             }
             case OP_CALL_BUILTIN: {
-                uint8_t name_const_idx = READ_BYTE();
+                uint16_t name_const_idx = READ_SHORT(vm);
                 uint8_t arg_count = READ_BYTE();
 
                 if (vm->stackTop - vm->stack < arg_count) {
@@ -2195,8 +2195,8 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Operands: name_idx (1 byte), target_address (2 bytes), declared_arity (1 byte)
-                uint8_t name_idx_ignored = READ_BYTE(); // Read and discard the name index
+                // Operands: name_idx (2 bytes), target_address (2 bytes), declared_arity (1 byte)
+                uint16_t name_idx_ignored = READ_SHORT(vm); // Read and discard the name index
                 (void)name_idx_ignored; // Suppress unused variable warning
                 uint16_t target_address = READ_SHORT(vm);
                 uint8_t declared_arity = READ_BYTE();

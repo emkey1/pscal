@@ -81,7 +81,7 @@ typedef enum {
 
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
-                      // Needs: index of builtin, argument count
+                      // Operands: 2-byte name index, 1-byte argument count
     
     OP_CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
     OP_CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
@@ -93,7 +93,7 @@ typedef enum {
 
     OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
     OP_CALL,          // For user-defined procedure/function calls.
-                      // Operands: 1-byte name_idx, 2-byte address, 1-byte arg count
+                      // Operands: 2-byte name_idx, 2-byte address, 1-byte arg count
     OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
     OP_EXIT,          // Early exit from the current function without halting the VM
     OP_FORMAT_VALUE   // Format the value on top of the stack. Operands: width (byte), precision (byte)
