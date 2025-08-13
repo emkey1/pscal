@@ -1176,33 +1176,71 @@ bool isUnitDocumented(const char *unit_name) {
     return false;
 }
 
-char *findUnitFile(const char *unit_name) {
-    // Allow overriding the library search path via the PSCAL_LIB_DIR
-    // environment variable.  If it is not provided, fall back to the
-    // repository's local `lib` directory instead of the old hard-coded
-    // `/usr/local/Pscal/lib` path.  This makes the compiler work out of the
-    // box for developers running from the source tree.
-    const char *base_path = getenv("PSCAL_LIB_DIR");
-    if (base_path == NULL || *base_path == '\0') {
-        base_path = "lib";   // Default relative library path
-    }
-
-    // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
-    size_t max_path_len = strlen(base_path) + 1 + strlen(unit_name) + 3 + 1;
+static char *try_dir_for_unit(const char *dir, const char *unit_name) {
+    size_t max_path_len = strlen(dir) + 1 + strlen(unit_name) + 3 + 1;
     char *file_name = malloc(max_path_len);
     if (!file_name) {
         fprintf(stderr, "Memory allocation error in findUnitFile\n");
         EXIT_FAILURE_HANDLER();
     }
-
-    // Format full path safely
-    snprintf(file_name, max_path_len, "%s/%s.pl", base_path, unit_name);
-
+    snprintf(file_name, max_path_len, "%s/%s.pl", dir, unit_name);
     if (access(file_name, F_OK) == 0) {
-        return file_name; // Caller takes ownership
+        return file_name;
+    }
+    free(file_name);
+    return NULL;
+}
+
+char *findUnitFile(const char *unit_name) {
+    // Support multiple search locations for unit libraries.
+    // 1) PSCAL_LIB_DIR env var for backward compatibility.
+    // 2) Each component of PSCAL_PATH with "lib" appended.
+    // 3) Default locations: ./lib and /usr/local/pscal/lib.
+
+    const char *base_path = getenv("PSCAL_LIB_DIR");
+    if (base_path && *base_path) {
+        char *candidate = try_dir_for_unit(base_path, unit_name);
+        if (candidate) {
+            return candidate;
+        }
     }
 
-    free(file_name);
+    const char *pscal_path = getenv("PSCAL_PATH");
+    if (pscal_path && *pscal_path) {
+        char *paths = strdup(pscal_path);
+        if (!paths) {
+            fprintf(stderr, "Memory allocation error in findUnitFile\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        char *saveptr = NULL;
+        for (char *token = strtok_r(paths, ":", &saveptr);
+             token != NULL;
+             token = strtok_r(NULL, ":", &saveptr)) {
+            size_t dir_len = strlen(token) + 4 + 1; // + "/lib" + null
+            char *lib_dir = malloc(dir_len);
+            if (!lib_dir) {
+                fprintf(stderr, "Memory allocation error in findUnitFile\n");
+                EXIT_FAILURE_HANDLER();
+            }
+            snprintf(lib_dir, dir_len, "%s/lib", token);
+            char *candidate = try_dir_for_unit(lib_dir, unit_name);
+            free(lib_dir);
+            if (candidate) {
+                free(paths);
+                return candidate;
+            }
+        }
+        free(paths);
+    }
+
+    const char *default_dirs[] = {"./lib", "/usr/local/pscal/lib"};
+    for (size_t i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+        char *candidate = try_dir_for_unit(default_dirs[i], unit_name);
+        if (candidate) {
+            return candidate;
+        }
+    }
+
     return NULL; // Not found
 }
 

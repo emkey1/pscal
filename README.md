@@ -60,7 +60,7 @@ sudo ln -s "${REPO_DIR}/etc" /usr/local/Pscal/etc
 sudo ln -s "${REPO_DIR}/lib" /usr/local/Pscal/lib
 ```
 
-Alternatively, set the `PSCAL_LIB_DIR` environment variable to point at a copy of the `lib` directory.
+By default unit libraries are searched in `./lib` and `/usr/local/pscal/lib`.  The `PSCAL_PATH` environment variable may be set to a colon-separated list of directories; the `lib` subdirectory of each entry is searched before the defaults.  The legacy `PSCAL_LIB_DIR` variable is still honored to override a single library directory.
 
 ## License
 
