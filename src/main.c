@@ -234,13 +234,33 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 
     AST *GlobalAST = NULL;
     bool overall_success_status = false;
-    bool used_cache = false;
 
-    if (!dump_ast_json_flag && !use_ast_interpreter_flag) {
-        used_cache = loadBytecodeFromCache(programName, &chunk);
-    }
+    if (loadBytecodeFromCache(source, &chunk, procedure_table)) {
+        if (dump_bytecode_flag) {
+            disassembleBytecodeChunk(&chunk, programName ? programName : "CachedChunk", procedure_table);
+            fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
+        }
+        VM vm;
+        initVM(&vm);
+        InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+        freeVM(&vm);
+        globalSymbols = NULL;
+        if (result_vm == INTERPRET_OK) {
+            if (dump_bytecode_flag) {
+                fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
+            }
+            overall_success_status = true;
+        } else {
+            fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
+                    result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
+            overall_success_status = false;
+            vm_dump_stack_info(&vm);
+        }
+    } else {
+        freeProcedureTable();
+        procedure_table = createHashTable();
+        current_procedure_table = procedure_table;
 
-    if (!used_cache) {
         Lexer lexer;
         initLexer(&lexer, source);
 
@@ -296,14 +316,12 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
                 if (compilation_ok_for_vm) {
                     finalizeBytecode(&chunk);
-                    saveBytecodeToCache(programName, &chunk);
                 }
                 if (compilation_ok_for_vm) {
                     fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    saveBytecodeToCache(source, &chunk, procedure_table);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                    }
-                    if (dump_bytecode_flag) {
                         fprintf(stderr, "\n--- Executing Program with VM ---\n");
                     }
                     VM vm;
@@ -334,17 +352,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             fprintf(stderr, "Failed to build Program AST for JSON dump.\n");
             overall_success_status = false;
         }
-    } else {
-        if (dump_bytecode_flag) {
-            disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-            fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
-        }
-        VM vm;
-        initVM(&vm);
-        InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
-        freeVM(&vm);
-        globalSymbols = NULL;
-        overall_success_status = (result_vm == INTERPRET_OK);
     }
 
     freeBytecodeChunk(&chunk);

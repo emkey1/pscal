@@ -1,5 +1,6 @@
 #include "core/cache.h"
 #include "core/utils.h" // for Value constructors
+#include "symbol/symbol.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdlib.h>
@@ -130,7 +131,96 @@ static bool read_value(FILE* f, Value* out) {
     return true;
 }
 
-bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
+/* --- Procedure table serialization helpers --- */
+
+static int count_procedures(HashTable* table) {
+    if (!table) return 0;
+    int count = 0;
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        for (Symbol* s = table->buckets[i]; s; s = s->next) {
+            if (s->is_alias) continue;
+            count++;
+            if (s->type_def && s->type_def->symbol_table) {
+                count += count_procedures((HashTable*)s->type_def->symbol_table);
+            }
+        }
+    }
+    return count;
+}
+
+static void write_procedure(FILE* f, const Symbol* s) {
+    int len = s->name ? (int)strlen(s->name) : 0;
+    fwrite(&len, sizeof(len), 1, f);
+    if (len > 0) fwrite(s->name, 1, len, f);
+    uint8_t flag = s->is_defined ? 1 : 0;
+    fwrite(&flag, sizeof(flag), 1, f);
+    fwrite(&s->bytecode_address, sizeof(s->bytecode_address), 1, f);
+    fwrite(&s->arity, sizeof(s->arity), 1, f);
+    fwrite(&s->locals_count, sizeof(s->locals_count), 1, f);
+    fwrite(&s->upvalue_count, sizeof(s->upvalue_count), 1, f);
+    for (int i = 0; i < s->upvalue_count; ++i) {
+        fwrite(&s->upvalues[i].index, sizeof(uint8_t), 1, f);
+        uint8_t is_local = s->upvalues[i].isLocal ? 1 : 0;
+        uint8_t is_ref = s->upvalues[i].is_ref ? 1 : 0;
+        fwrite(&is_local, sizeof(uint8_t), 1, f);
+        fwrite(&is_ref, sizeof(uint8_t), 1, f);
+    }
+}
+
+static void write_procedure_table(FILE* f, HashTable* table) {
+    if (!table) return;
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        for (Symbol* s = table->buckets[i]; s; s = s->next) {
+            if (s->is_alias) continue;
+            write_procedure(f, s);
+            if (s->type_def && s->type_def->symbol_table) {
+                write_procedure_table(f, (HashTable*)s->type_def->symbol_table);
+            }
+        }
+    }
+}
+
+static bool read_procedure(FILE* f, HashTable* table) {
+    int len = 0;
+    if (fread(&len, sizeof(len), 1, f) != 1) return false;
+    char* name = (len > 0) ? (char*)malloc(len + 1) : NULL;
+    if (len > 0 && (!name || fread(name, 1, len, f) != (size_t)len)) {
+        if (name) free(name);
+        return false;
+    }
+    if (name) name[len] = '\0';
+    uint8_t flag = 0;
+    if (fread(&flag, sizeof(flag), 1, f) != 1) { if (name) free(name); return false; }
+    int address = 0;
+    uint8_t arity = 0, locals = 0, upcount = 0;
+    if (fread(&address, sizeof(address), 1, f) != 1 ||
+        fread(&arity, sizeof(arity), 1, f) != 1 ||
+        fread(&locals, sizeof(locals), 1, f) != 1 ||
+        fread(&upcount, sizeof(upcount), 1, f) != 1) {
+        if (name) free(name);
+        return false;
+    }
+    Symbol* sym = (Symbol*)calloc(1, sizeof(Symbol));
+    if (!sym) { if (name) free(name); return false; }
+    sym->name = name;
+    sym->is_defined = flag ? true : false;
+    sym->bytecode_address = address;
+    sym->arity = arity;
+    sym->locals_count = locals;
+    sym->upvalue_count = upcount;
+    for (int i = 0; i < upcount; ++i) {
+        if (fread(&sym->upvalues[i].index, sizeof(uint8_t), 1, f) != 1) { free(sym->name); free(sym); return false; }
+        uint8_t is_local = 0, is_ref = 0;
+        if (fread(&is_local, sizeof(uint8_t), 1, f) != 1) { free(sym->name); free(sym); return false; }
+        if (fread(&is_ref, sizeof(uint8_t), 1, f) != 1) { free(sym->name); free(sym); return false; }
+        sym->upvalues[i].isLocal = is_local != 0;
+        sym->upvalues[i].is_ref = is_ref != 0;
+    }
+    hashTableInsert(table, sym);
+    return true;
+}
+
+bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTable* procedure_table) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return false;
     bool ok = false;
@@ -156,6 +246,16 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                             for (int i = 0; i < const_count; ++i) {
                                 if (!read_value(f, &chunk->constants[i])) { ok = false; break; }
                             }
+                            if (ok) {
+                                int proc_count = 0;
+                                if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
+                                    for (int i = 0; i < proc_count; ++i) {
+                                        if (!read_procedure(f, procedure_table)) { ok = false; break; }
+                                    }
+                                } else {
+                                    ok = false;
+                                }
+                            }
                         }
                     }
                 }
@@ -171,7 +271,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     return ok;
 }
 
-void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
+void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, HashTable* procedure_table) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return;
     FILE* f = fopen(cache_path, "wb");
@@ -186,6 +286,9 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     for (int i = 0; i < chunk->constants_count; ++i) {
         if (!write_value(f, &chunk->constants[i])) { break; }
     }
+    int proc_count = count_procedures(procedure_table);
+    fwrite(&proc_count, sizeof(proc_count), 1, f);
+    write_procedure_table(f, procedure_table);
     fclose(f);
     free(cache_path);
 }
