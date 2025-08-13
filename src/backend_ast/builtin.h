@@ -1,4 +1,3 @@
-// src/backend_ast/builtin.h
 #ifndef BUILTIN_H
 #define BUILTIN_H
 

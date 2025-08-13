@@ -1,4 +1,3 @@
-// src/backend_ast/builtin.c
 #include "backend_ast/builtin.h"
 #include "frontend/parser.h"
 #include "core/utils.h"

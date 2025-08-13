@@ -1,6 +1,3 @@
-// src/backend_ast/sdl.h
-
-// Include guards are essential for header files
 #ifndef PSCAL_SDL_H
 #define PSCAL_SDL_H
 
