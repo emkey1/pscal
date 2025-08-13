@@ -76,11 +76,7 @@ begin
   // (e.g., looping through window lines and using ClrEol) or
   // using DECSED which might not be universally supported.
   // We'll clear the whole screen and home the cursor to window top-left.
-  // Write(ESC, '[2J');
-  Write(ESC);
-  Write('[');
-  Write('2');
-  Write('J');
+  Write(ESC, '[2J');
   GotoXY(WinLeft, WinTop); // Home cursor to window top-left
 end;
 
