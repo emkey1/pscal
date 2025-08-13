@@ -18,7 +18,7 @@ Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
 bool gSoundSystemInitialized = false;
 
 // VM-native version of LoadSound.
-Value vm_builtin_loadsound(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinLoadsound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "LoadSound expects 1 argument (FileName: String).");
         return makeInt(-1);
@@ -384,13 +384,13 @@ Value executeBuiltinIsSoundPlaying(AST *node) {
     return makeBoolean(playing != 0);
 }
 
-Value vm_builtin_initsoundsystem(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinInitsoundsystem(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "InitSoundSystem expects 0 arguments.");
     else audioInitSystem();
     return makeVoid();
 }
 
-Value vm_builtin_playsound(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinPlaysound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
         runtimeError(vm, "PlaySound expects 1 integer argument.");
     } else {
@@ -399,13 +399,13 @@ Value vm_builtin_playsound(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_quitsoundsystem(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinQuitsoundsystem(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "QuitSoundSystem expects 0 arguments.");
     else audioQuitSystem();
     return makeVoid();
 }
 
-Value vm_builtin_issoundplaying(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinIssoundplaying(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "IsSoundPlaying expects 0 arguments.");
         return makeBoolean(false);

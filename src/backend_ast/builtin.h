@@ -22,81 +22,81 @@ typedef struct {
 VmBuiltinFn getVmBuiltinHandler(const char* name);
 
 // --- VM-NATIVE GENERAL BUILT-INS ---
-Value vm_builtin_inttostr(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_length(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_abs(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_round(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_halt(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_delay(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_new(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dispose(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_exit(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_ord(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_inc(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dec(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_low(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_high(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_screencols(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_screenrows(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_sqr(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_chr(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_succ(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_upcase(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_pos(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_copy(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_realtostr(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_paramcount(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_paramstr(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_wherex(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_wherey(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_gotoxy(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_keypressed(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_readkey(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_textcolor(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_textbackground(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_textcolore(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_textbackgrounde(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_quitrequested(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_real(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinInttostr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLength(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinAbs(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHalt(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDelay(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinNew(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDispose(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinExit(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinOrd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinInc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDec(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLow(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHigh(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinScreencols(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinScreenrows(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSqr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinChr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSucc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinUpcase(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPos(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCopy(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRealtostr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinParamcount(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinParamstr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWherex(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWherey(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGotoxy(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinKeypressed(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinReadkey(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTextcolor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTextbackground(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTextcolore(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTextbackgrounde(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
 // --- VM-NATIVE FILE I/O ---
-Value vm_builtin_assign(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_reset(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_rewrite(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_close(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_readln(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_eof(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_ioresult(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinReset(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRewrite(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinClose(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinReadln(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinEof(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinIoresult(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE MEMORY STREAM FUNCTIONS ---
-Value vm_builtin_mstreamcreate(struct VM_s* vm, int arg_count, Value* args); // ADDED
-Value vm_builtin_mstreamloadfromfile(struct VM_s* vm, int arg_count, Value* args); // ADDED
-Value vm_builtin_mstreamsavetofile(struct VM_s* vm, int arg_count, Value* args); // ADDED
-Value vm_builtin_mstreamfree(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinMstreamcreate(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinMstreamloadfromfile(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinMstreamsavetofile(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinMstreamfree(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
 // --- VM-NATIVE MATHY STUFF ---
-Value vm_builtin_sqrt(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_exp(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_ln(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_cos(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_sin(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_tan(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_trunc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSqrt(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinExp(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLn(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCos(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTan(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTrunc(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE RANDOM FUNCTIONS ---
-Value vm_builtin_randomize(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_random(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRandomize(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRandom(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE DOS/OS FUNCTIONS ---
-Value vm_builtin_dos_getenv(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_exec(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_mkdir(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_rmdir(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_findfirst(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_findnext(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_getdate(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_gettime(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_dos_getfattr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosGetenv(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosExec(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosMkdir(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosRmdir(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosFindfirst(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosFindnext(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosGetdate(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosGettime(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDosGetfattr(struct VM_s* vm, int arg_count, Value* args);
 
 // --- AST-BASED BUILT-INS (for AST interpreter) ---
 
@@ -196,8 +196,8 @@ Value executeBuiltinRenderCopyEx(AST *node);
 Value executeBuiltinLoadImageToTexture(AST *node);
 Value executeBuiltinRenderTextToTexture(AST *node);
 Value executeBuiltinSetAlphaBlend(AST *node);
-Value vm_builtin_loadimagetotexture(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_waitkeyevent(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLoadimagetotexture(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWaitkeyevent(struct VM_s* vm, int arg_count, Value* args);
 
 // Prototypes from audio.c (via audio.h)
 Value executeBuiltinInitSoundSystem(AST *node);
