@@ -1021,19 +1021,26 @@ Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
             }
         }
     } else if (arg_count == 1) {
-        if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
-            runtimeError(vm, "Eof: Argument must be a VAR file parameter.");
+        if (args[0].type == TYPE_POINTER && args[0].ptr_val) {
+            Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
+            if (fileVarLValue->type != TYPE_FILE) {
+                runtimeError(vm, "Argument to Eof must be a file variable.");
+                return makeBoolean(true);
+            }
+            if (!fileVarLValue->f_val) {
+                return makeBoolean(true); // Closed file is treated as EOF
+            }
+            stream = fileVarLValue->f_val;
+        } else if (args[0].type == TYPE_FILE) {
+            if (!args[0].f_val) {
+                return makeBoolean(true); // Closed file is treated as EOF
+            }
+            stream = args[0].f_val;
+            args[0].f_val = NULL; // Prevent freeValue from closing the stream
+        } else {
+            runtimeError(vm, "Eof: Argument must be a file or VAR file parameter.");
             return makeBoolean(true);
         }
-        Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
-        if (fileVarLValue->type != TYPE_FILE) {
-            runtimeError(vm, "Argument to Eof must be a file variable.");
-            return makeBoolean(true);
-        }
-        if (!fileVarLValue->f_val) {
-            return makeBoolean(true); // Closed file is treated as EOF
-        }
-        stream = fileVarLValue->f_val;
     } else {
         runtimeError(vm, "Eof expects 0 or 1 arguments.");
         return makeBoolean(true);

@@ -1737,6 +1737,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 int expected = proc_symbol->type_def->child_count;
                 bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
                 bool is_halt = (strcasecmp(calleeName, "halt") == 0);
+                bool is_eof  = (strcasecmp(calleeName, "eof") == 0);
                 if (is_inc_dec) {
                     if (!(node->child_count == 1 || node->child_count == 2)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
@@ -1745,6 +1746,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         param_mismatch = true;
                     }
                 } else if (is_halt) {
+                    if (!(node->child_count == 0 || node->child_count == 1)) {
+                        fprintf(stderr, "L%d: Compiler Error: '%s' expects 0 or 1 argument(s) but %d were provided.\n",
+                                line, calleeName, node->child_count);
+                        compiler_had_error = true;
+                        param_mismatch = true;
+                    }
+                } else if (is_eof) {
                     if (!(node->child_count == 0 || node->child_count == 1)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 0 or 1 argument(s) but %d were provided.\n",
                                 line, calleeName, node->child_count);
