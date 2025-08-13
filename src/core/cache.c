@@ -10,9 +10,25 @@
 #include <errno.h>
 #include <stdint.h>
 
+#ifndef PROGRAM_VERSION
+#define PROGRAM_VERSION "undefined.version_DEV"
+#endif
+
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION 1
+#define CACHE_VERSION 2
+
+static int compare_versions(const char* a, const char* b) {
+    size_t len_a = strcspn(a, "_");
+    size_t len_b = strcspn(b, "_");
+    size_t min = len_a < len_b ? len_a : len_b;
+    int cmp = strncmp(a, b, min);
+    if (cmp == 0) {
+        if (len_a == len_b) return 0;
+        return (len_a < len_b) ? -1 : 1;
+    }
+    return cmp;
+}
 
 static unsigned long hash_path(const char* path) {
     uint32_t hash = 2166136261u;
@@ -231,33 +247,63 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTa
             if (fread(&magic, sizeof(magic), 1, f) == 1 &&
                 fread(&ver, sizeof(ver), 1, f) == 1 &&
                 magic == CACHE_MAGIC && ver == CACHE_VERSION) {
-                int count = 0, const_count = 0;
-                if (fread(&count, sizeof(count), 1, f) == 1 &&
-                    fread(&const_count, sizeof(const_count), 1, f) == 1) {
-                    chunk->code = (uint8_t*)malloc(count);
-                    chunk->lines = (int*)malloc(sizeof(int) * count);
-                    chunk->constants = (Value*)calloc(const_count, sizeof(Value));
-                    if (chunk->code && chunk->lines && chunk->constants) {
-                        chunk->count = count; chunk->capacity = count;
-                        chunk->constants_count = const_count; chunk->constants_capacity = const_count;
-                        if (fread(chunk->code, 1, count, f) == (size_t)count &&
-                            fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
-                            ok = true;
-                            for (int i = 0; i < const_count; ++i) {
-                                if (!read_value(f, &chunk->constants[i])) { ok = false; break; }
-                            }
-                            if (ok) {
-                                int proc_count = 0;
-                                if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
-                                    for (int i = 0; i < proc_count; ++i) {
-                                        if (!read_procedure(f, procedure_table)) { ok = false; break; }
+                int ver_len = 0;
+                if (fread(&ver_len, sizeof(ver_len), 1, f) == 1 && ver_len > 0) {
+                    char* cached_ver = (char*)malloc(ver_len + 1);
+                    if (cached_ver && fread(cached_ver, 1, ver_len, f) == (size_t)ver_len) {
+                        cached_ver[ver_len] = '\0';
+                        int cmp = compare_versions(cached_ver, PROGRAM_VERSION);
+                        free(cached_ver);
+                        if (cmp < 0) {
+                            fclose(f);
+                            unlink(cache_path);
+                            free(cache_path);
+                            return false;
+                        } else if (cmp != 0) {
+                            fclose(f);
+                            free(cache_path);
+                            return false;
+                        }
+                        int count = 0, const_count = 0;
+                        if (fread(&count, sizeof(count), 1, f) == 1 &&
+                            fread(&const_count, sizeof(const_count), 1, f) == 1) {
+                            chunk->code = (uint8_t*)malloc(count);
+                            chunk->lines = (int*)malloc(sizeof(int) * count);
+                            chunk->constants = (Value*)calloc(const_count, sizeof(Value));
+                            if (chunk->code && chunk->lines && chunk->constants) {
+                                chunk->count = count; chunk->capacity = count;
+                                chunk->constants_count = const_count; chunk->constants_capacity = const_count;
+                                if (fread(chunk->code, 1, count, f) == (size_t)count &&
+                                    fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
+                                    ok = true;
+                                    for (int i = 0; i < const_count; ++i) {
+                                        if (!read_value(f, &chunk->constants[i])) { ok = false; break; }
                                     }
-                                } else {
-                                    ok = false;
+                                    if (ok) {
+                                        int proc_count = 0;
+                                        if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
+                                            for (int i = 0; i < proc_count; ++i) {
+                                                if (!read_procedure(f, procedure_table)) { ok = false; break; }
+                                            }
+                                        } else {
+                                            ok = false;
+                                        }
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        if (cached_ver) free(cached_ver);
+                        fclose(f);
+                        unlink(cache_path);
+                        free(cache_path);
+                        return false;
                     }
+                } else {
+                    fclose(f);
+                    unlink(cache_path);
+                    free(cache_path);
+                    return false;
                 }
             }
             fclose(f);
@@ -279,6 +325,9 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, Ha
     uint32_t magic = CACHE_MAGIC, ver = CACHE_VERSION;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
+    int ver_len = (int)strlen(PROGRAM_VERSION);
+    fwrite(&ver_len, sizeof(ver_len), 1, f);
+    fwrite(PROGRAM_VERSION, 1, ver_len, f);
     fwrite(&chunk->count, sizeof(chunk->count), 1, f);
     fwrite(&chunk->constants_count, sizeof(chunk->constants_count), 1, f);
     fwrite(chunk->code, 1, chunk->count, f);
