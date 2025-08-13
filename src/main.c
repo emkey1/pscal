@@ -105,7 +105,7 @@ void executeWithASTDump(AST *program_ast, const char *program_name) {
     executeWithScope(program_ast, true);
 }
 
-int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int use_ast_interpreter_flag, int dump_bytecode_flag) {
+int runProgram(const char *source_code, const char *source_path, const char *programName, int dump_ast_json_flag, int use_ast_interpreter_flag, int dump_bytecode_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -236,7 +236,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     AST *GlobalAST = NULL;
     bool overall_success_status = false;
 
-    if (loadBytecodeFromCache(source, &chunk, procedure_table)) {
+    if (loadBytecodeFromCache(source_path, &chunk, procedure_table)) {
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, programName ? programName : "CachedChunk", procedure_table);
             fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
@@ -263,7 +263,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         current_procedure_table = procedure_table;
 
         Lexer lexer;
-        initLexer(&lexer, source);
+        initLexer(&lexer, source_code);
 
 #ifdef DEBUG
         fprintf(stderr, "\n--- Build AST Before Execution START (stderr print)---\n");
@@ -320,7 +320,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 }
                 if (compilation_ok_for_vm) {
                     fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
-                    saveBytecodeToCache(source, &chunk, procedure_table);
+                    saveBytecodeToCache(source_path, &chunk, procedure_table);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                         fprintf(stderr, "\n--- Executing Program with VM ---\n");
@@ -476,7 +476,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, dump_ast_json_flag, use_ast_interpreter_flag, dump_bytecode_flag);
+    int result = runProgram(source_buffer, sourceFile, programName, dump_ast_json_flag, use_ast_interpreter_flag, dump_bytecode_flag);
     free(source_buffer); // Free the source code buffer
 
     return result;
