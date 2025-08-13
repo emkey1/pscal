@@ -36,11 +36,11 @@ Value executeBuiltinQuitSoundSystem(AST *node);
 Value executeBuiltinIsSoundPlaying(AST *node);
 
 // VM-native built-ins
-Value vm_builtin_initsoundsystem(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_loadsound(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_playsound(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_quitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
-Value vm_builtin_issoundplaying(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinInitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLoadsound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPlaysound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinQuitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinIssoundplaying(struct VM_s* vm, int arg_count, Value* args);
 
 #endif
 #endif // PSCAL_AUDIO_H

@@ -228,7 +228,7 @@ Value executeBuiltinAPIReceive(AST *node) {
     return result_string;
 }
 
-Value vm_builtin_api_send(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
         runtimeError(vm, "api_send expects 2 arguments (URL: String, RequestBody: String/MStream).");
         return makeVoid(); // Return void on error
@@ -317,7 +317,7 @@ Value vm_builtin_api_send(VM* vm, int arg_count, Value* args) {
     return makeMStream(response_stream);
 }
 
-Value vm_builtin_api_receive(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinApiReceive(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "api_receive expects 1 argument (MStream).");
         return makeString(""); // Return empty string on error
