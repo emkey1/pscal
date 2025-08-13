@@ -123,6 +123,7 @@ static const VmBuiltinMapping vm_builtin_dispatch_table[] = {
     {"paramstr", vm_builtin_paramstr},
 #ifdef SDL
     {"playsound", vm_builtin_playsound},
+    {"pollkey", vm_builtin_pollkey},
 #endif
     {"pos", vm_builtin_pos},
 #ifdef SDL
@@ -1608,6 +1609,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"paramstr",  executeBuiltinParamstr},
 #ifdef SDL
     {"playsound", executeBuiltinPlaySound},
+    {"pollkey", executeBuiltinPollKey},
 #endif
     {"pos",       executeBuiltinPos},
 #ifdef SDL
