@@ -165,6 +165,7 @@ Value executeBuiltinGraphLoop(AST *node);
 Value executeBuiltinUpdateScreen(AST *node);
 Value executeBuiltinClearDevice(AST *node);
 Value executeBuiltinWaitKeyEvent(AST *node);
+Value executeBuiltinPollKey(AST *node);
 Value executeBuiltinGetMaxX(AST *node);
 Value executeBuiltinGetMaxY(AST *node);
 Value executeBuiltinGetTicks(AST *node);
@@ -196,6 +197,7 @@ Value executeBuiltinLoadImageToTexture(AST *node);
 Value executeBuiltinRenderTextToTexture(AST *node);
 Value executeBuiltinSetAlphaBlend(AST *node);
 Value vmBuiltinLoadimagetotexture(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPollkey(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWaitkeyevent(struct VM_s* vm, int arg_count, Value* args);
 
 // Prototypes from audio.c (via audio.h)

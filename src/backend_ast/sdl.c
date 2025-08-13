@@ -551,6 +551,29 @@ Value executeBuiltinWaitKeyEvent(AST *node) {
     return makeVoid(); // WaitKeyEvent is a procedure
 }
 
+// Pscal: function PollKey: Integer; // Non-blocking key poll, returns 0 if none
+Value executeBuiltinPollKey(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: PollKey expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before PollKey.\n");
+        return makeInt(0);
+    }
+
+    SDL_Event event;
+    if (SDL_PollEvent(&event)) {
+        if (event.type == SDL_KEYDOWN) {
+            return makeInt(event.key.keysym.sym);
+        } else {
+            SDL_PushEvent(&event); // preserve non-key events
+        }
+    }
+    return makeInt(0);
+}
+
 // Pscal: procedure ClearDevice;
 Value executeBuiltinClearDevice(AST *node) {
     if (node->child_count != 0) {
@@ -2830,6 +2853,21 @@ Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
 
     SDL_SetRenderTarget(gSdlRenderer, targetTexture);
     return makeVoid();
+}
+
+Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) { runtimeError(vm, "PollKey expects 0 arguments."); return makeInt(0); }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before PollKey."); return makeInt(0); }
+
+    SDL_Event event;
+    if (SDL_PollEvent(&event)) {
+        if (event.type == SDL_KEYDOWN) {
+            return makeInt(event.key.keysym.sym);
+        } else {
+            SDL_PushEvent(&event);
+        }
+    }
+    return makeInt(0);
 }
 
 Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
