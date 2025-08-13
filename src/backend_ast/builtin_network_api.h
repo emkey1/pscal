@@ -17,7 +17,7 @@ Value executeBuiltinAPIReceive(AST *node);
 
 // Add VM-native prototypes later if you convert these to the new system
 struct VM_s;
-Value vm_builtin_api_send(struct VM_s* vm, int arg_count, Value* args); // ADDED
-Value vm_builtin_api_receive(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinApiSend(struct VM_s* vm, int arg_count, Value* args); // ADDED
+Value vmBuiltinApiReceive(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
 #endif // BUILTIN_NETWORK_API_H

@@ -9,6 +9,7 @@
 #include "backend_ast/builtin.h"
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
+#include "core/cache.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -229,122 +230,128 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     fflush(stderr);
 #endif
 
-    Lexer lexer;
-    initLexer(&lexer, source);
-
-#ifdef DEBUG
-    fprintf(stderr, "\n--- Build AST Before Execution START (stderr print)---\n");
-#endif
-
-    Parser parser;
-    parser.lexer = &lexer;
-    parser.current_token = getNextToken(&lexer);
-    
-    // --- MODIFICATION: Initialize the main bytecode chunk here ---
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
 
-    // --- MODIFICATION: Pass the chunk to the AST builder ---
-    AST *GlobalAST = buildProgramAST(&parser, &chunk);
+    AST *GlobalAST = NULL;
+    bool overall_success_status = false;
+    bool used_cache = false;
 
-    if (parser.current_token) {
-        freeToken(parser.current_token);
-        parser.current_token = NULL;
+    if (!dump_ast_json_flag && !use_ast_interpreter_flag) {
+        used_cache = loadBytecodeFromCache(programName, &chunk);
     }
 
-    bool overall_success_status = false;
-
-    if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
-        annotateTypes(GlobalAST, NULL, GlobalAST);
+    if (!used_cache) {
+        Lexer lexer;
+        initLexer(&lexer, source);
 
 #ifdef DEBUG
-        fprintf(stderr, "--- Verifying AST Links ---\n");
-        if (verifyASTLinks(GlobalAST, NULL)) {
-            fprintf(stderr, "--- AST Link Verification Passed ---\n");
-        } else {
-            fprintf(stderr, "--- AST Link Verification FAILED ---\n");
+        fprintf(stderr, "\n--- Build AST Before Execution START (stderr print)---\n");
+#endif
+
+        Parser parser;
+        parser.lexer = &lexer;
+        parser.current_token = getNextToken(&lexer);
+
+        GlobalAST = buildProgramAST(&parser, &chunk);
+
+        if (parser.current_token) {
+            freeToken(parser.current_token);
+            parser.current_token = NULL;
         }
-        fprintf(stderr, "\n--- Build AST Before Execution END (stderr print)---\n");
+
+        if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
+            annotateTypes(GlobalAST, NULL, GlobalAST);
+
+#ifdef DEBUG
+            fprintf(stderr, "--- Verifying AST Links ---\n");
+            if (verifyASTLinks(GlobalAST, NULL)) {
+                fprintf(stderr, "--- AST Link Verification Passed ---\n");
+            } else {
+                fprintf(stderr, "--- AST Link Verification FAILED ---\n");
+            }
+            fprintf(stderr, "\n--- Build AST Before Execution END (stderr print)---\n");
 #endif
 
-        if (dump_ast_json_flag) {
-            fprintf(stderr, "--- Dumping AST to JSON (stdout) ---\n");
-            dumpASTJSON(GlobalAST, stdout);
-            fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
-            overall_success_status = true;
-        } else if (use_ast_interpreter_flag) {
-            fprintf(stderr, "\n--- Executing Program with AST Interpreter (selected by flag) ---\n");
+            if (dump_ast_json_flag) {
+                fprintf(stderr, "--- Dumping AST to JSON (stdout) ---\n");
+                dumpASTJSON(GlobalAST, stdout);
+                fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
+                overall_success_status = true;
+            } else if (use_ast_interpreter_flag) {
+                fprintf(stderr, "\n--- Executing Program with AST Interpreter (selected by flag) ---\n");
 #ifdef DEBUG
-            if (dumpExec) { // Use your dumpExec flag for AST dump if running AST walker
-                fprintf(stderr, " ===== FINAL AST DUMP START (Textual to stderr if AST walker selected) =====\n");
-                dumpAST(GlobalAST, 0);
-                fprintf(stderr, " ===== FINAL AST DUMP END (Textual to stderr) =====\n");
-                dumpSymbolTable();
-            }
+                if (dumpExec) {
+                    fprintf(stderr, " ===== FINAL AST DUMP START (Textual to stderr if AST walker selected) =====\n");
+                    dumpAST(GlobalAST, 0);
+                    fprintf(stderr, " ===== FINAL AST DUMP END (Textual to stderr) =====\n");
+                    dumpSymbolTable();
+                }
 #endif
-            executeWithScope(GlobalAST, true);
-            overall_success_status = true;
-        } else {
-            // --- DEFAULT: COMPILE TO BYTECODE AND EXECUTE WITH VM ---
-            // The chunk is already initialized and populated with unit implementations.
-            // We just need to compile the main program block now.
-            if (dump_bytecode_flag) {
-                fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
-            }
-            bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
-            
-            if (compilation_ok_for_vm) {
-                finalizeBytecode(&chunk); // Perform the final back-patching pass
-            }
-            
-            if (compilation_ok_for_vm) {
-                fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
-                if (dump_bytecode_flag) {
-                    disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                }
-                if (dump_bytecode_flag) {
-                    fprintf(stderr, "\n--- Executing Program with VM ---\n");
-                }
-            VM vm;
-            initVM(&vm);
-            InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
-            freeVM(&vm);
-            globalSymbols = NULL; // Prevent subsequent freeHashTable(globalSymbols) in main's cleanup.
-            
-            if (result_vm == INTERPRET_OK) {
-                if (dump_bytecode_flag) {
-                    fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
-                }
+                executeWithScope(GlobalAST, true);
                 overall_success_status = true;
             } else {
-                fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
-                        result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
-                    overall_success_status = false;
-                vm_dump_stack_info(&vm);
+                if (dump_bytecode_flag) {
+                    fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
                 }
-            } else {
-                fprintf(stderr, "Compilation failed with errors.\n");
-                overall_success_status = false;
+                bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
+                if (compilation_ok_for_vm) {
+                    finalizeBytecode(&chunk);
+                    saveBytecodeToCache(programName, &chunk);
+                }
+                if (compilation_ok_for_vm) {
+                    fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    if (dump_bytecode_flag) {
+                        disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
+                    }
+                    if (dump_bytecode_flag) {
+                        fprintf(stderr, "\n--- Executing Program with VM ---\n");
+                    }
+                    VM vm;
+                    initVM(&vm);
+                    InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+                    freeVM(&vm);
+                    globalSymbols = NULL;
+                    if (result_vm == INTERPRET_OK) {
+                        if (dump_bytecode_flag) {
+                            fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
+                        }
+                        overall_success_status = true;
+                    } else {
+                        fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
+                                result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
+                        overall_success_status = false;
+                        vm_dump_stack_info(&vm);
+                    }
+                } else {
+                    fprintf(stderr, "Compilation failed with errors.\n");
+                    overall_success_status = false;
+                }
             }
-            
-            // This is already done below
-            // freeBytecodeChunk(&chunk);
+        } else if (!dump_ast_json_flag) {
+            fprintf(stderr, "Failed to build Program AST for execution.\n");
+            overall_success_status = false;
+        } else if (dump_ast_json_flag && (!GlobalAST || GlobalAST->type != AST_PROGRAM)) {
+            fprintf(stderr, "Failed to build Program AST for JSON dump.\n");
+            overall_success_status = false;
         }
-    } else if (!dump_ast_json_flag) {
-        fprintf(stderr, "Failed to build Program AST for execution.\n");
-        overall_success_status = false;
-    } else if (dump_ast_json_flag && (!GlobalAST || GlobalAST->type != AST_PROGRAM)) {
-        fprintf(stderr, "Failed to build Program AST for JSON dump.\n");
-        overall_success_status = false;
+    } else {
+        if (dump_bytecode_flag) {
+            disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
+            fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
+        }
+        VM vm;
+        initVM(&vm);
+        InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+        freeVM(&vm);
+        globalSymbols = NULL;
+        overall_success_status = (result_vm == INTERPRET_OK);
     }
 
-    // --- Cleanup ---
-    freeBytecodeChunk(&chunk); // Free chunk resources after use
+    freeBytecodeChunk(&chunk);
     freeProcedureTable();
     freeTypeTableASTNodes();
     freeTypeTable();
-
-    // --- FIX START: Move global symbol table cleanup here ---
     if (globalSymbols) {
         freeHashTable(globalSymbols);
         globalSymbols = NULL;
@@ -355,8 +362,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         inserted_global_names = NULL;
     }
 #endif
-    // --- FIX END ---
-
     if (GlobalAST) {
         freeAST(GlobalAST);
         GlobalAST = NULL;
@@ -364,8 +369,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 #ifdef SDL
     SdlCleanupAtExit();
 #endif
-    // The block that was here has been moved up.
-
     return overall_success_status ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

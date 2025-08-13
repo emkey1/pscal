@@ -551,37 +551,6 @@ Value executeBuiltinWaitKeyEvent(AST *node) {
     return makeVoid(); // WaitKeyEvent is a procedure
 }
 
-// Pscal: function PollKey: char; // Non-blocking key poll from SDL
-Value executeBuiltinPollKey(AST *node) {
-    if (node->child_count != 0) {
-        fprintf(stderr, "Runtime error: PollKey expects 0 arguments.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-
-    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
-        return makeChar('\0');
-    }
-
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT) {
-            break_requested = 1;
-            return makeChar('\0');
-        } else if (event.type == SDL_KEYDOWN) {
-            SDL_Keycode sym = event.key.keysym.sym;
-            if (sym == SDLK_q) {
-                break_requested = 1;
-            }
-            if (sym >= 0 && sym <= 255) {
-                return makeChar((char)sym);
-            } else {
-                return makeChar('\0');
-            }
-        }
-    }
-    return makeChar('\0');
-}
-
 // Pscal: procedure ClearDevice;
 Value executeBuiltinClearDevice(AST *node) {
     if (node->child_count != 0) {
@@ -2115,7 +2084,7 @@ Value executeBuiltinRenderTextToTexture(AST *node) {
     return makeInt(textureID); // Return the 0-based TextureID
 }
 
-Value vm_builtin_initgraph(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
         return makeVoid();
@@ -2170,14 +2139,14 @@ Value vm_builtin_initgraph(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_closegraph(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinClosegraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "CloseGraph expects 0 arguments.");
     if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
     if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
     return makeVoid();
 }
 
-Value vm_builtin_fillrect(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinFillrect(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "FillRect expects 4 integer arguments."); return makeVoid(); }
     // ... type checks for all 4 args being integer ...
     SDL_Rect rect;
@@ -2192,7 +2161,7 @@ Value vm_builtin_fillrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_updatetexture(struct VM_s* vm, int arg_count, Value* args) {
+Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
         runtimeError(vm, "UpdateTexture expects 2 arguments (TextureID: Integer; PixelData: ARRAY OF Byte).");
         return makeVoid();
@@ -2246,13 +2215,13 @@ Value vm_builtin_updatetexture(struct VM_s* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_updatescreen(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinUpdatescreen(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "UpdateScreen expects 0 arguments.");
     if (gSdlRenderer) SDL_RenderPresent(gSdlRenderer);
     return makeVoid();
 }
 
-Value vm_builtin_cleardevice(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinCleardevice(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "Runtime error: ClearDevice expects 0 arguments.");
         return makeVoid();
@@ -2266,17 +2235,17 @@ Value vm_builtin_cleardevice(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_getmaxx(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGetmaxx(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "GetMaxX expects 0 arguments.");
     return makeInt(gSdlWidth > 0 ? gSdlWidth - 1 : 0);
 }
 
-Value vm_builtin_getmaxy(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGetmaxy(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "GetMaxY expects 0 arguments.");
     return makeInt(gSdlHeight > 0 ? gSdlHeight - 1 : 0);
 }
 
-Value vm_builtin_getticks(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGetticks(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "GetTicks expects 0 arguments.");
         return makeInt(0);
@@ -2284,7 +2253,7 @@ Value vm_builtin_getticks(VM* vm, int arg_count, Value* args) {
     return makeInt((long long)SDL_GetTicks());
 }
 
-Value vm_builtin_setrgbcolor(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "SetRGBColor expects 3 arguments."); return makeVoid(); }
     gSdlCurrentColor.r = (Uint8)args[0].i_val;
     gSdlCurrentColor.g = (Uint8)args[1].i_val;
@@ -2296,14 +2265,14 @@ Value vm_builtin_setrgbcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_quittextsystem(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinQuittextsystem(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "QuitTextSystem expects 0 arguments.");
     if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
     if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
     return makeVoid();
 }
 
-Value vm_builtin_gettextsize(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGettextsize(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "GetTextSize expects 3 arguments."); return makeVoid(); }
     if (!gSdlFont) { runtimeError(vm, "Font not initialized for GetTextSize."); return makeVoid(); }
     
@@ -2320,7 +2289,7 @@ Value vm_builtin_gettextsize(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_getmousestate(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) {
         runtimeError(vm, "GetMouseState expects 3 arguments.");
         return makeVoid();
@@ -2363,7 +2332,7 @@ Value vm_builtin_getmousestate(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_destroytexture(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinDestroytexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "DestroyTexture expects 1 integer argument."); return makeVoid(); }
     int textureID = (int)args[0].i_val;
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID]) {
@@ -2373,7 +2342,7 @@ Value vm_builtin_destroytexture(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_rendercopyrect(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinRendercopyrect(VM* vm, int arg_count, Value* args) {
     if (arg_count != 5) {
         fprintf(stderr, "Runtime error: RenderCopyRect expects 5 arguments.\n");
         return makeVoid();
@@ -2397,14 +2366,14 @@ Value vm_builtin_rendercopyrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_setalphablend(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinSetalphablend(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_BOOLEAN) { runtimeError(vm, "SetAlphaBlend expects 1 boolean argument."); return makeVoid(); }
     SDL_BlendMode mode = AS_BOOLEAN(args[0]) ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE;
     if (gSdlRenderer) SDL_SetRenderDrawBlendMode(gSdlRenderer, mode);
     return makeVoid();
 }
 
-Value vm_builtin_rendertexttotexture(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "RenderTextToTexture expects 4 arguments."); return makeInt(-1); }
     if (!gSdlFont) { runtimeError(vm, "Font not initialized for RenderTextToTexture."); return makeInt(-1); }
 
@@ -2429,7 +2398,7 @@ Value vm_builtin_rendertexttotexture(VM* vm, int arg_count, Value* args) {
     return makeInt(free_slot);
 }
 
-Value vm_builtin_inittextsystem(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinInittextsystem(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
         runtimeError(vm, "InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).");
         return makeVoid();
@@ -2475,7 +2444,7 @@ Value vm_builtin_inittextsystem(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_createtargettexture(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinCreatetargettexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "CreateTargetTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before CreateTargetTexture."); return makeInt(-1); }
 
@@ -2500,7 +2469,7 @@ Value vm_builtin_createtargettexture(VM* vm, int arg_count, Value* args) {
     return makeInt(textureID);
 }
 
-Value vm_builtin_createtexture(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinCreatetexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "CreateTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before CreateTexture."); return makeInt(-1); }
 
@@ -2525,7 +2494,7 @@ Value vm_builtin_createtexture(VM* vm, int arg_count, Value* args) {
     return makeInt(textureID);
 }
 
-Value vm_builtin_drawcircle(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinDrawcircle(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawCircle."); return makeVoid(); }
 
@@ -2564,7 +2533,7 @@ Value vm_builtin_drawcircle(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_drawline(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinDrawline(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "DrawLine expects 4 integer arguments (x1, y1, x2, y2)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawLine."); return makeVoid(); }
 
@@ -2581,7 +2550,7 @@ Value vm_builtin_drawline(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_drawpolygon(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "DrawPolygon expects 2 arguments (PointsArray, NumPoints)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for DrawPolygon."); return makeVoid(); }
 
@@ -2620,7 +2589,7 @@ Value vm_builtin_drawpolygon(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_drawrect(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinDrawrect(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "DrawRect expects 4 integer arguments (X1, Y1, X2, Y2)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawRect."); return makeVoid(); }
 
@@ -2643,7 +2612,7 @@ Value vm_builtin_drawrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_getpixelcolor(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 6) { runtimeError(vm, "GetPixelColor expects 6 arguments (X, Y: Integer; var R, G, B, A: Byte)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for GetPixelColor."); return makeVoid(); }
 
@@ -2687,7 +2656,7 @@ Value vm_builtin_getpixelcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_loadimagetotexture(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinLoadimagetotexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "LoadImageToTexture expects 1 argument (FilePath: String)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before LoadImageToTexture."); return makeInt(-1); }
 
@@ -2710,7 +2679,7 @@ Value vm_builtin_loadimagetotexture(VM* vm, int arg_count, Value* args) {
     return makeInt(free_slot);
 }
 
-Value vm_builtin_outtextxy(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinOuttextxy(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "OutTextXY expects 3 arguments (X, Y: Integer; Text: String)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before OutTextXY."); return makeVoid(); }
     if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "Text system or font not initialized before OutTextXY."); return makeVoid(); }
@@ -2735,7 +2704,7 @@ Value vm_builtin_outtextxy(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_rendercopy(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinRendercopy(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
         fprintf(stderr, "Runtime error: RenderCopy expects 1 argument (TextureID: Integer).\n");
         return makeVoid();
@@ -2755,7 +2724,7 @@ Value vm_builtin_rendercopy(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_rendercopyex(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
     if (arg_count != 13) {
         fprintf(stderr, "Runtime error: RenderCopyEx expects 13 arguments.\n");
         return makeVoid();
@@ -2809,7 +2778,7 @@ Value vm_builtin_rendercopyex(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_setcolor(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "SetColor expects 1 argument (color index 0-255)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before SetColor."); return makeVoid(); }
 
@@ -2837,7 +2806,7 @@ Value vm_builtin_setcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_setrendertarget(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "SetRenderTarget expects 1 argument (TextureID: Integer)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before SetRenderTarget."); return makeVoid(); }
 
@@ -2863,27 +2832,7 @@ Value vm_builtin_setrendertarget(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_pollkey(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) { runtimeError(vm, "PollKey expects 0 arguments."); return makeChar('\0'); }
-    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) { return makeChar('\0'); }
-
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT) { break_requested = 1; return makeChar('\0'); }
-        else if (event.type == SDL_KEYDOWN) {
-            SDL_Keycode sym = event.key.keysym.sym;
-            if (sym == SDLK_q) { break_requested = 1; }
-            if (sym >= 0 && sym <= 255) {
-                return makeChar((char)sym);
-            } else {
-                return makeChar('\0');
-            }
-        }
-    }
-    return makeChar('\0');
-}
-
-Value vm_builtin_waitkeyevent(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
 
@@ -2901,7 +2850,7 @@ Value vm_builtin_waitkeyevent(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_fillcircle(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) {
         runtimeError(vm, "FillCircle expects 3 integer arguments (CenterX, CenterY, Radius).");
         return makeVoid();
@@ -2935,7 +2884,7 @@ Value vm_builtin_fillcircle(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_graphloop(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
         return makeVoid();
@@ -2966,7 +2915,7 @@ Value vm_builtin_graphloop(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vm_builtin_putpixel(VM* vm, int arg_count, Value* args) {
+Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
         runtimeError(vm, "PutPixel expects 2 arguments (X, Y).");
         return makeVoid();
