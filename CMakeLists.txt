@@ -130,6 +130,7 @@ set(PSCAL_SOURCES
     src/backend_ast/interpreter.c src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c
     src/compiler/bytecode.c src/compiler/compiler.c
+    src/core/cache.c
     src/vm/vm.c
 )
 
