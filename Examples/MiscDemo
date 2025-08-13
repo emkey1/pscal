@@ -1,0 +1,180 @@
+program PscalDemo;
+
+uses
+  CRT, Dos, StringUtil, MathLib, Base64;
+
+type
+  TPerson = record
+    Name: string;
+    Age: integer;
+  end;
+
+var
+  choice: integer;
+  input, encoded, decoded: string;
+  year, month, day, dow: word;
+  hour, minute, second, sec100: word;
+  people: array[1..3] of TPerson;
+  srName: string;
+  i: integer;
+
+procedure WaitKey;
+begin
+  TextColor(LightGray);
+  writeln;
+  writeln('Press any key to continue...');
+  repeat
+  until KeyPressed;
+  ReadKey;
+end;
+
+procedure ShowMenu;
+begin
+  ClrScr;
+  TextColor(LightGreen);
+  writeln('--- Pscal Demo ---');
+  TextColor(White);
+  writeln('1) Show date/time and HOME variable');
+  writeln('2) List current directory');
+  writeln('3) Base64 encode/decode');
+  writeln('4) String utilities');
+  writeln('5) Math library demo');
+  writeln('6) Array & record demo');
+  writeln('0) Exit');
+  write('Choice: ');
+end;
+
+procedure DemoDateTime;
+begin
+  GetDate(year, month, day, dow);
+  GetTime(hour, minute, second, sec100);
+  writeln('Today is ', year, '-', month, '-', day, ' (dow=', dow, ')');
+  writeln('Current time: ', hour, ':', minute, ':', second);
+  writeln('HOME env: ', GetEnv('HOME'));
+end;
+
+procedure DemoDirectory;
+begin
+  srName := FindFirst('./');
+  while srName <> '' do
+  begin
+    writeln(srName, '  Attr=', GetFAttr(srName));
+    srName := FindNext;
+  end;
+end;
+
+function ToUpper(s: string): string;
+var
+  res: string;
+  idx: integer;
+begin
+  res := '';
+  for idx := 1 to length(s) do
+  begin
+    if (s[idx] >= 'a') and (s[idx] <= 'z') then
+      res := res + chr(ord(s[idx]) - 32)
+    else
+      res := res + s[idx];
+  end;
+  ToUpper := res;
+end;
+
+function ToLower(s: string): string;
+var
+  res: string;
+  idx: integer;
+begin
+  res := '';
+  for idx := 1 to length(s) do
+  begin
+    if (s[idx] >= 'A') and (s[idx] <= 'Z') then
+      res := res + chr(ord(s[idx]) + 32)
+    else
+      res := res + s[idx];
+  end;
+  ToLower := res;
+end;
+
+function TrimSpaces(s: string): string;
+var
+  startIdx, endIdx, idx: integer;
+  res: string;
+begin
+  startIdx := 1;
+  while (startIdx <= length(s)) and (s[startIdx] <= ' ') do
+    startIdx := startIdx + 1;
+  endIdx := length(s);
+  while (endIdx >= startIdx) and (s[endIdx] <= ' ') do
+    endIdx := endIdx - 1;
+  res := '';
+  for idx := startIdx to endIdx do
+    res := res + s[idx];
+  TrimSpaces := res;
+end;
+
+procedure DemoStrings;
+begin
+  write('Enter text: ');
+  readln(input);
+  writeln('Trimmed: "', TrimSpaces(input), '"');
+  writeln('UpperCase: ', ToUpper(input));
+  writeln('LowerCase: ', ToLower(input));
+  writeln('Reversed: ', ReverseString(input));
+end;
+
+procedure DemoBase64;
+begin
+  write('Enter text to encode: ');
+  readln(input);
+  encoded := EncodeStringBase64(input);
+  writeln('Encoded: ', encoded);
+  decoded := DecodeStringBase64(encoded);
+  writeln('Decoded: ', decoded);
+end;
+
+procedure DemoMath;
+var
+  x: real;
+begin
+  x := 1.234;
+  writeln('sin(', x:0:3, ') = ', sin(x):0:6);
+  writeln('cos(', x:0:3, ') = ', cos(x):0:6);
+  writeln('ArcTan(1) = ', ArcTan(1.0):0:6);
+  writeln('Power(2,10) = ', Power(2.0,10.0):0:6);
+  writeln('Log10(1000) = ', Log10(1000.0):0:6);
+  writeln('Floor(', x:0:3, ') = ', Floor(x));
+  writeln('Ceil(', x:0:3, ') = ', Ceil(x));
+end;
+
+procedure DemoRecords;
+begin
+  for i := 1 to 3 do
+  begin
+    write('Name ', i, ': ');
+    readln(people[i].Name);
+    write('Age ', i, ': ');
+    readln(people[i].Age);
+  end;
+  writeln('You entered:');
+  for i := 1 to 3 do
+    writeln(people[i].Name, ' (', people[i].Age, ')');
+end;
+
+begin
+  repeat
+    ShowMenu;
+    readln(choice);
+    ClrScr;
+    case choice of
+      1: DemoDateTime;
+      2: DemoDirectory;
+      3: DemoBase64;
+      4: DemoStrings;
+      5: DemoMath;
+      6: DemoRecords;
+    end;
+    if choice <> 0 then WaitKey;
+  until choice = 0;
+  TextColor(White);
+end.
+
