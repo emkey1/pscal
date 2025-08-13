@@ -135,6 +135,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"random", vmBuiltinRandom},
     {"randomize", vmBuiltinRandomize},
+    {"read", vmBuiltinRead},
     {"readkey", vmBuiltinReadkey},
     {"readln", vmBuiltinReadln},
     {"real", vmBuiltinReal},
@@ -1053,6 +1054,87 @@ Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
     }
     ungetc(c, stream); // Push character back
     return makeBoolean(false);
+}
+
+Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
+    FILE* input_stream = stdin;
+    int var_start_index = 0;
+    bool first_arg_is_file_by_value = false;
+    last_io_error = 0;
+
+    if (arg_count > 0) {
+        const Value* a0 = &args[0];
+        if (a0->type == TYPE_POINTER && a0->ptr_val) a0 = (const Value*)a0->ptr_val;
+        if (a0->type == TYPE_FILE) {
+            if (!a0->f_val) { runtimeError(vm, "File not open for Read."); last_io_error = 1; return makeVoid(); }
+            input_stream = a0->f_val;
+            var_start_index = 1;
+            if (args[0].type == TYPE_FILE) first_arg_is_file_by_value = true;
+        }
+    }
+
+    for (int i = var_start_index; i < arg_count; i++) {
+        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
+            runtimeError(vm, "Read requires VAR parameters to read into.");
+            last_io_error = 1;
+            break;
+        }
+        Value* dst = (Value*)args[i].ptr_val;
+
+        if (dst->type == TYPE_NIL) {
+            dst->type = TYPE_STRING;
+            dst->s_val = NULL;
+        }
+
+        if (dst->type == TYPE_CHAR) {
+            int ch = fgetc(input_stream);
+            if (ch == EOF) { last_io_error = 1; dst->c_val = '\0'; break; }
+            dst->c_val = (char)ch;
+        } else {
+            char buffer[DEFAULT_STRING_CAPACITY];
+            if (fscanf(input_stream, "%254s", buffer) != 1) {
+                last_io_error = 1;
+                buffer[0] = '\0';
+            }
+
+            switch (dst->type) {
+                case TYPE_INTEGER:
+                case TYPE_WORD:
+                case TYPE_BYTE: {
+                    errno = 0;
+                    long long v = strtoll(buffer, NULL, 10);
+                    if (errno == ERANGE) last_io_error = 1;
+                    dst->i_val = v;
+                    break;
+                }
+                case TYPE_REAL: {
+                    errno = 0;
+                    double v = strtod(buffer, NULL);
+                    if (errno == ERANGE) last_io_error = 1;
+                    dst->r_val = v;
+                    break;
+                }
+                case TYPE_STRING: {
+                    char* tmp = strdup(buffer);
+                    if (!tmp) { runtimeError(vm, "Out of memory in Read."); last_io_error = 1; break; }
+                    if (dst->s_val) free(dst->s_val);
+                    dst->s_val = tmp;
+                    break;
+                }
+                default:
+                    runtimeError(vm, "Cannot Read into a variable of type %s.", varTypeToString(dst->type));
+                    last_io_error = 1;
+                    break;
+            }
+        }
+    }
+
+    if (!last_io_error && ferror(input_stream)) last_io_error = 1;
+    else if (last_io_error != 1) last_io_error = 0;
+
+    if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }
+
+    return makeVoid();
 }
 
 Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {

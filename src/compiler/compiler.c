@@ -1526,9 +1526,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             endLoop(); // <<< MODIFIED
             break;
         }
+        case AST_READ: {
+            int line = getLine(node);
+
+            int var_start_index = 0;
+            if (node->child_count > 0 && node->children[0]->var_type == TYPE_FILE) {
+                compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                var_start_index = 1;
+            }
+
+            for (int i = var_start_index; i < node->child_count; i++) {
+                AST* arg_node = node->children[i];
+                compileLValue(arg_node, chunk, getLine(arg_node));
+            }
+
+            int nameIndex = addStringConstant(chunk, "read");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            emitShort(chunk, (uint16_t)nameIndex, line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+            break;
+        }
         case AST_READLN: {
             int line = getLine(node);
-            
+
             int var_start_index = 0;
             // Check if the first argument is a file variable. We can guess based on its type,
             // which the annotation pass should have set on the AST node.

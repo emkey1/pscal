@@ -63,6 +63,7 @@ Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRewrite(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinClose(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRead(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReadln(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinEof(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinIoresult(struct VM_s* vm, int arg_count, Value* args);
