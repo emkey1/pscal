@@ -1737,6 +1737,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 int expected = proc_symbol->type_def->child_count;
                 bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
                 bool is_halt = (strcasecmp(calleeName, "halt") == 0);
+                bool is_eof  = (strcasecmp(calleeName, "eof") == 0);
                 if (is_inc_dec) {
                     if (!(node->child_count == 1 || node->child_count == 2)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
@@ -1745,6 +1746,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         param_mismatch = true;
                     }
                 } else if (is_halt) {
+                    if (!(node->child_count == 0 || node->child_count == 1)) {
+                        fprintf(stderr, "L%d: Compiler Error: '%s' expects 0 or 1 argument(s) but %d were provided.\n",
+                                line, calleeName, node->child_count);
+                        compiler_had_error = true;
+                        param_mismatch = true;
+                    }
+                } else if (is_eof) {
                     if (!(node->child_count == 0 || node->child_count == 1)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 0 or 1 argument(s) but %d were provided.\n",
                                 line, calleeName, node->child_count);
@@ -1832,7 +1840,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     is_var_param = true;
                 }
                 else if (calleeName && (
-                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0)) ||
+                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
                     (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR
