@@ -16,6 +16,7 @@
 #include "builtin.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
+#include <limits.h>    // For PATH_MAX
 
 
 const char *varTypeToString(VarType type) {
@@ -1195,7 +1196,8 @@ char *findUnitFile(const char *unit_name) {
     // Support multiple search locations for unit libraries.
     // 1) PSCAL_LIB_DIR env var for backward compatibility.
     // 2) Each component of PSCAL_PATH with "lib" appended.
-    // 3) Default locations: ./lib and /usr/local/pscal/lib.
+    // 3) Local "lib" directory and any parent directories containing "lib".
+    // 4) System-wide default: /usr/local/pscal/lib.
 
     const char *base_path = getenv("PSCAL_LIB_DIR");
     if (base_path && *base_path) {
@@ -1233,12 +1235,40 @@ char *findUnitFile(const char *unit_name) {
         free(paths);
     }
 
-    const char *default_dirs[] = {"./lib", "/usr/local/pscal/lib"};
-    for (size_t i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
-        char *candidate = try_dir_for_unit(default_dirs[i], unit_name);
-        if (candidate) {
-            return candidate;
+    // Check current working directory's lib first.
+    char *candidate = try_dir_for_unit("./lib", unit_name);
+    if (candidate) {
+        return candidate;
+    }
+
+    // Traverse parent directories looking for a "lib" folder.
+    char cwd[PATH_MAX];
+    if (getcwd(cwd, sizeof(cwd))) {
+        while (1) {
+            char *slash = strrchr(cwd, '/');
+            if (!slash || slash == cwd) {
+                break; // Reached filesystem root
+            }
+            *slash = '\0';
+            size_t dir_len = strlen(cwd) + 4 + 1; // + "/lib" + null
+            char *lib_dir = malloc(dir_len);
+            if (!lib_dir) {
+                fprintf(stderr, "Memory allocation error in findUnitFile\n");
+                EXIT_FAILURE_HANDLER();
+            }
+            snprintf(lib_dir, dir_len, "%s/lib", cwd);
+            candidate = try_dir_for_unit(lib_dir, unit_name);
+            free(lib_dir);
+            if (candidate) {
+                return candidate;
+            }
         }
+    }
+
+    // Finally, fall back to system-wide installation path.
+    candidate = try_dir_for_unit("/usr/local/pscal/lib", unit_name);
+    if (candidate) {
+        return candidate;
     }
 
     return NULL; // Not found
