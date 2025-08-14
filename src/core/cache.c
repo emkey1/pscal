@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
+#include <pwd.h>
+#include <limits.h>
 
 #ifndef PROGRAM_VERSION
 #define PROGRAM_VERSION "undefined.version_DEV"
@@ -41,14 +43,31 @@ static unsigned long hash_path(const char* path) {
 
 static char* build_cache_path(const char* source_path) {
     const char* home = getenv("HOME");
-    if (!home) return NULL;
+    if (!home || !*home) {
+        struct passwd* pw = getpwuid(getuid());
+        if (pw && pw->pw_dir) {
+            home = pw->pw_dir;
+        } else {
+            return NULL; // No home directory available
+        }
+    }
+
+    char canonical[PATH_MAX];
+    const char* path_for_hash = source_path;
+    if (realpath(source_path, canonical)) {
+        path_for_hash = canonical;
+    }
+
     size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
     char* dir = (char*)malloc(dir_len);
     if (!dir) return NULL;
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
-    mkdir(dir, 0777); // ensure directory exists
+    if (mkdir(dir, 0777) != 0 && errno != EEXIST) {
+        free(dir);
+        return NULL;
+    }
 
-    unsigned long h = hash_path(source_path);
+    unsigned long h = hash_path(path_for_hash);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
