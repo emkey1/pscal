@@ -7,5 +7,6 @@
 
 bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTable* procedure_table);
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, HashTable* procedure_table);
+char* ensureCacheDir(void);
 
 #endif // PSCAL_CACHE_H

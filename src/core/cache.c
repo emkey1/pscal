@@ -42,7 +42,7 @@ static unsigned long hash_path(const char* path) {
     return (unsigned long)hash;
 }
 
-static char* ensure_cache_dir(void) {
+char* ensureCacheDir(void) {
     const char* home = getenv("HOME");
     if (!home || !*home) {
         struct passwd* pw = getpwuid(getuid());
@@ -87,7 +87,7 @@ static char* ensure_cache_dir(void) {
 }
 
 static char* build_cache_path(const char* source_path) {
-    char* dir = ensure_cache_dir();
+    char* dir = ensureCacheDir();
 
     char canonical[PATH_MAX];
     const char* path_for_hash = source_path;

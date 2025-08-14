@@ -224,7 +224,7 @@ int runProgram(const char *source_code, const char *source_path, const char *pro
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
-    
+
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
     fflush(stderr);
@@ -235,6 +235,9 @@ int runProgram(const char *source_code, const char *source_path, const char *pro
 
     AST *GlobalAST = NULL;
     bool overall_success_status = false;
+
+    char* cache_dir_check = ensureCacheDir();
+    free(cache_dir_check);
 
     if (loadBytecodeFromCache(source_path, &chunk, procedure_table)) {
         if (dump_bytecode_flag) {
