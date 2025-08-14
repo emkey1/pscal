@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <pwd.h>
 #include <limits.h>
+#include <fcntl.h>
 
 #ifndef PROGRAM_VERSION
 #define PROGRAM_VERSION "undefined.version_DEV"
@@ -41,7 +42,7 @@ static unsigned long hash_path(const char* path) {
     return (unsigned long)hash;
 }
 
-static char* build_cache_path(const char* source_path) {
+static char* ensure_cache_dir(void) {
     const char* home = getenv("HOME");
     if (!home || !*home) {
         struct passwd* pw = getpwuid(getuid());
@@ -52,35 +53,45 @@ static char* build_cache_path(const char* source_path) {
         }
     }
 
+    size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
+    char* dir = (char*)malloc(dir_len);
+    if (!dir) return NULL;
+    snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
+
+    struct stat st;
+    if (stat(dir, &st) != 0) {
+        if (mkdir(dir, S_IRWXU) != 0) {
+            free(dir);
+            return NULL;
+        }
+    } else {
+        if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+            if (chmod(dir, S_IRWXU) != 0) {
+                free(dir);
+                return NULL;
+            }
+        }
+    }
+    return dir;
+}
+
+static char* build_cache_path(const char* source_path) {
+    char* dir = ensure_cache_dir();
+    if (!dir) return NULL;
+
     char canonical[PATH_MAX];
     const char* path_for_hash = source_path;
     if (realpath(source_path, canonical)) {
         path_for_hash = canonical;
     }
 
-    size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
-    char* dir = (char*)malloc(dir_len);
-    if (!dir) return NULL;
-    snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
-    if (mkdir(dir, 0777) != 0 && errno != EEXIST) {
-        free(dir);
-        return NULL;
-    }
-
     unsigned long h = hash_path(path_for_hash);
-    size_t path_len = dir_len + 32;
+    size_t path_len = strlen(dir) + 1 + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
     snprintf(full, path_len, "%s/%lu.bc", dir, h);
     free(dir);
     return full;
-}
-
-static bool is_cache_fresh(const char* cache_path, const char* source_path) {
-    struct stat src_stat, cache_stat;
-    if (stat(source_path, &src_stat) != 0) return false;
-    if (stat(cache_path, &cache_stat) != 0) return false;
-    return difftime(cache_stat.st_mtime, src_stat.st_mtime) >= 0;
 }
 
 static bool write_value(FILE* f, const Value* v) {
@@ -258,76 +269,79 @@ static bool read_procedure(FILE* f, HashTable* table) {
 bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTable* procedure_table) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return false;
+
+    struct stat src_stat, cache_stat;
+    if (stat(source_path, &src_stat) != 0 ||
+        stat(cache_path, &cache_stat) != 0 ||
+        difftime(cache_stat.st_mtime, src_stat.st_mtime) < 0) {
+        free(cache_path);
+        return false;
+    }
+
+    FILE* f = fopen(cache_path, "rb");
+    if (!f) { free(cache_path); return false; }
+
     bool ok = false;
-    if (is_cache_fresh(cache_path, source_path)) {
-        FILE* f = fopen(cache_path, "rb");
-        if (f) {
-            uint32_t magic = 0, ver = 0;
-            if (fread(&magic, sizeof(magic), 1, f) == 1 &&
-                fread(&ver, sizeof(ver), 1, f) == 1 &&
-                magic == CACHE_MAGIC && ver == CACHE_VERSION) {
-                int ver_len = 0;
-                if (fread(&ver_len, sizeof(ver_len), 1, f) == 1 && ver_len > 0) {
-                    char* cached_ver = (char*)malloc(ver_len + 1);
-                    if (cached_ver && fread(cached_ver, 1, ver_len, f) == (size_t)ver_len) {
-                        cached_ver[ver_len] = '\0';
-                        int cmp = compare_versions(cached_ver, PROGRAM_VERSION);
-                        free(cached_ver);
-                        if (cmp < 0) {
-                            fclose(f);
-                            unlink(cache_path);
-                            free(cache_path);
-                            return false;
-                        } else if (cmp != 0) {
-                            fclose(f);
-                            free(cache_path);
-                            return false;
-                        }
-                        int count = 0, const_count = 0;
-                        if (fread(&count, sizeof(count), 1, f) == 1 &&
-                            fread(&const_count, sizeof(const_count), 1, f) == 1) {
-                            chunk->code = (uint8_t*)malloc(count);
-                            chunk->lines = (int*)malloc(sizeof(int) * count);
-                            chunk->constants = (Value*)calloc(const_count, sizeof(Value));
-                            if (chunk->code && chunk->lines && chunk->constants) {
-                                chunk->count = count; chunk->capacity = count;
-                                chunk->constants_count = const_count; chunk->constants_capacity = const_count;
-                                if (fread(chunk->code, 1, count, f) == (size_t)count &&
-                                    fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
-                                    ok = true;
-                                    for (int i = 0; i < const_count; ++i) {
-                                        if (!read_value(f, &chunk->constants[i])) { ok = false; break; }
-                                    }
-                                    if (ok) {
-                                        int proc_count = 0;
-                                        if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
-                                            for (int i = 0; i < proc_count; ++i) {
-                                                if (!read_procedure(f, procedure_table)) { ok = false; break; }
-                                            }
-                                        } else {
-                                            ok = false;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        if (cached_ver) free(cached_ver);
-                        fclose(f);
-                        unlink(cache_path);
-                        free(cache_path);
-                        return false;
-                    }
-                } else {
+    uint32_t magic = 0, ver = 0;
+    if (fread(&magic, sizeof(magic), 1, f) == 1 &&
+        fread(&ver, sizeof(ver), 1, f) == 1 &&
+        magic == CACHE_MAGIC && ver == CACHE_VERSION) {
+        int ver_len = 0;
+        if (fread(&ver_len, sizeof(ver_len), 1, f) == 1 && ver_len > 0) {
+            char* cached_ver = (char*)malloc(ver_len + 1);
+            if (cached_ver && fread(cached_ver, 1, ver_len, f) == (size_t)ver_len) {
+                cached_ver[ver_len] = '\0';
+                int cmp = compare_versions(PROGRAM_VERSION, cached_ver);
+                free(cached_ver);
+                if (cmp > 0) {
                     fclose(f);
                     unlink(cache_path);
                     free(cache_path);
                     return false;
                 }
+                int count = 0, const_count = 0;
+                if (fread(&count, sizeof(count), 1, f) == 1 &&
+                    fread(&const_count, sizeof(const_count), 1, f) == 1) {
+                    chunk->code = (uint8_t*)malloc(count);
+                    chunk->lines = (int*)malloc(sizeof(int) * count);
+                    chunk->constants = (Value*)calloc(const_count, sizeof(Value));
+                    if (chunk->code && chunk->lines && chunk->constants) {
+                        chunk->count = count; chunk->capacity = count;
+                        chunk->constants_count = const_count; chunk->constants_capacity = const_count;
+                        if (fread(chunk->code, 1, count, f) == (size_t)count &&
+                            fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
+                            ok = true;
+                            for (int i = 0; i < const_count; ++i) {
+                                if (!read_value(f, &chunk->constants[i])) { ok = false; break; }
+                            }
+                            if (ok) {
+                                int proc_count = 0;
+                                if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
+                                    for (int i = 0; i < proc_count; ++i) {
+                                        if (!read_procedure(f, procedure_table)) { ok = false; break; }
+                                    }
+                                } else {
+                                    ok = false;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (cached_ver) free(cached_ver);
+                fclose(f);
+                unlink(cache_path);
+                free(cache_path);
+                return false;
             }
+        } else {
             fclose(f);
+            unlink(cache_path);
+            free(cache_path);
+            return false;
         }
     }
+    fclose(f);
     free(cache_path);
     if (!ok) {
         free(chunk->code); chunk->code = NULL; chunk->lines = NULL; chunk->constants = NULL;
@@ -339,8 +353,10 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTa
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, HashTable* procedure_table) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return;
-    FILE* f = fopen(cache_path, "wb");
-    if (!f) { free(cache_path); return; }
+    int fd = open(cache_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (fd < 0) { free(cache_path); return; }
+    FILE* f = fdopen(fd, "wb");
+    if (!f) { close(fd); free(cache_path); return; }
     uint32_t magic = CACHE_MAGIC, ver = CACHE_VERSION;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
