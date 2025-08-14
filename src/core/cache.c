@@ -42,33 +42,44 @@ static unsigned long hash_path(const char* path) {
     return (unsigned long)hash;
 }
 
-static char* ensure_cache_dir(void) {
+char* ensureCacheDir(void) {
     const char* home = getenv("HOME");
     if (!home || !*home) {
         struct passwd* pw = getpwuid(getuid());
         if (pw && pw->pw_dir) {
             home = pw->pw_dir;
         } else {
-            return NULL; // No home directory available
+            fprintf(stderr, "Error: Could not determine home directory for cache.\n");
+            exit(EXIT_FAILURE);
         }
     }
 
     size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
     char* dir = (char*)malloc(dir_len);
-    if (!dir) return NULL;
+    if (!dir) {
+        fprintf(stderr, "Error: Out of memory creating cache directory path.\n");
+        exit(EXIT_FAILURE);
+    }
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
 
     struct stat st;
     if (stat(dir, &st) != 0) {
-        if (mkdir(dir, S_IRWXU) != 0) {
+        if (errno != ENOENT) {
+            fprintf(stderr, "Error: Could not access cache directory '%s': %s\n", dir, strerror(errno));
             free(dir);
-            return NULL;
+            exit(EXIT_FAILURE);
+        }
+        if (mkdir(dir, S_IRWXU) != 0) {
+            fprintf(stderr, "Error: Could not create cache directory '%s': %s\n", dir, strerror(errno));
+            free(dir);
+            exit(EXIT_FAILURE);
         }
     } else {
         if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
             if (chmod(dir, S_IRWXU) != 0) {
+                fprintf(stderr, "Error: Could not set permissions on cache directory '%s': %s\n", dir, strerror(errno));
                 free(dir);
-                return NULL;
+                exit(EXIT_FAILURE);
             }
         }
     }
@@ -76,8 +87,7 @@ static char* ensure_cache_dir(void) {
 }
 
 static char* build_cache_path(const char* source_path) {
-    char* dir = ensure_cache_dir();
-    if (!dir) return NULL;
+    char* dir = ensureCacheDir();
 
     char canonical[PATH_MAX];
     const char* path_for_hash = source_path;
@@ -88,7 +98,11 @@ static char* build_cache_path(const char* source_path) {
     unsigned long h = hash_path(path_for_hash);
     size_t path_len = strlen(dir) + 1 + 32;
     char* full = (char*)malloc(path_len);
-    if (!full) { free(dir); return NULL; }
+    if (!full) {
+        free(dir);
+        fprintf(stderr, "Error: Out of memory constructing cache path.\n");
+        exit(EXIT_FAILURE);
+    }
     snprintf(full, path_len, "%s/%lu.bc", dir, h);
     free(dir);
     return full;
@@ -271,15 +285,31 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTa
     if (!cache_path) return false;
 
     struct stat src_stat, cache_stat;
-    if (stat(source_path, &src_stat) != 0 ||
-        stat(cache_path, &cache_stat) != 0 ||
-        difftime(cache_stat.st_mtime, src_stat.st_mtime) < 0) {
+    if (stat(source_path, &src_stat) != 0) {
+        fprintf(stderr, "Error: Could not stat source file '%s': %s\n", source_path, strerror(errno));
+        free(cache_path);
+        exit(EXIT_FAILURE);
+    }
+    if (stat(cache_path, &cache_stat) != 0) {
+        if (errno != ENOENT) {
+            fprintf(stderr, "Error: Could not access cache file '%s': %s\n", cache_path, strerror(errno));
+            free(cache_path);
+            exit(EXIT_FAILURE);
+        }
+        free(cache_path);
+        return false;
+    }
+    if (difftime(cache_stat.st_mtime, src_stat.st_mtime) < 0) {
         free(cache_path);
         return false;
     }
 
     FILE* f = fopen(cache_path, "rb");
-    if (!f) { free(cache_path); return false; }
+    if (!f) {
+        fprintf(stderr, "Error: Could not open cache file '%s': %s\n", cache_path, strerror(errno));
+        free(cache_path);
+        exit(EXIT_FAILURE);
+    }
 
     bool ok = false;
     uint32_t magic = 0, ver = 0;
@@ -352,11 +382,23 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk, HashTa
 
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, HashTable* procedure_table) {
     char* cache_path = build_cache_path(source_path);
-    if (!cache_path) return;
+    if (!cache_path) {
+        fprintf(stderr, "Error: Could not determine cache path for '%s'.\n", source_path);
+        exit(EXIT_FAILURE);
+    }
     int fd = open(cache_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    if (fd < 0) { free(cache_path); return; }
+    if (fd < 0) {
+        fprintf(stderr, "Error: Could not write cache file '%s': %s\n", cache_path, strerror(errno));
+        free(cache_path);
+        exit(EXIT_FAILURE);
+    }
     FILE* f = fdopen(fd, "wb");
-    if (!f) { close(fd); free(cache_path); return; }
+    if (!f) {
+        fprintf(stderr, "Error: Could not open cache file '%s': %s\n", cache_path, strerror(errno));
+        close(fd);
+        free(cache_path);
+        exit(EXIT_FAILURE);
+    }
     uint32_t magic = CACHE_MAGIC, ver = CACHE_VERSION;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
@@ -373,6 +415,10 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, Ha
     int proc_count = count_procedures(procedure_table);
     fwrite(&proc_count, sizeof(proc_count), 1, f);
     write_procedure_table(f, procedure_table);
-    fclose(f);
+    if (fclose(f) != 0) {
+        fprintf(stderr, "Error: Failed to close cache file '%s': %s\n", cache_path, strerror(errno));
+        free(cache_path);
+        exit(EXIT_FAILURE);
+    }
     free(cache_path);
 }
