@@ -62,6 +62,12 @@ char* ensureCacheDir(void) {
     }
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
 
+    static bool printed = false;
+    if (!printed) {
+        fprintf(stderr, "Using cache directory: %s\n", dir);
+        printed = true;
+    }
+
     struct stat st;
     if (stat(dir, &st) != 0) {
         if (errno != ENOENT) {
@@ -386,6 +392,7 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, Ha
         fprintf(stderr, "Error: Could not determine cache path for '%s'.\n", source_path);
         exit(EXIT_FAILURE);
     }
+    fprintf(stderr, "Saving bytecode cache to %s\n", cache_path);
     int fd = open(cache_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         fprintf(stderr, "Error: Could not write cache file '%s': %s\n", cache_path, strerror(errno));
