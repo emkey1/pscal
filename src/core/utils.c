@@ -1199,10 +1199,37 @@ char *findUnitFile(const char *unit_name) {
     // 3) Local "lib" directory and any parent directories containing "lib".
     // 4) System-wide default: /usr/local/pscal/lib.
 
+    // Keep track of all directories searched so we can report on failure.
+    typedef struct {
+        char **dirs;
+        size_t count;
+    } SearchList;
+    SearchList searched = { NULL, 0 };
+
+#define ADD_SEARCH_DIR(D) \
+    do { \
+        char **tmp = realloc(searched.dirs, sizeof(char*) * (searched.count + 1)); \
+        if (!tmp) { \
+            fprintf(stderr, "Memory allocation error in findUnitFile\n"); \
+            EXIT_FAILURE_HANDLER(); \
+        } \
+        searched.dirs = tmp; \
+        searched.dirs[searched.count] = strdup(D); \
+        if (!searched.dirs[searched.count]) { \
+            fprintf(stderr, "Memory allocation error in findUnitFile\n"); \
+            EXIT_FAILURE_HANDLER(); \
+        } \
+        searched.count++; \
+    } while (0)
+
     const char *base_path = getenv("PSCAL_LIB_DIR");
     if (base_path && *base_path) {
+        ADD_SEARCH_DIR(base_path);
         char *candidate = try_dir_for_unit(base_path, unit_name);
         if (candidate) {
+            // Clean up tracked directories before returning.
+            for (size_t i = 0; i < searched.count; i++) free(searched.dirs[i]);
+            free(searched.dirs);
             return candidate;
         }
     }
@@ -1225,10 +1252,13 @@ char *findUnitFile(const char *unit_name) {
                 EXIT_FAILURE_HANDLER();
             }
             snprintf(lib_dir, dir_len, "%s/lib", token);
+            ADD_SEARCH_DIR(lib_dir);
             char *candidate = try_dir_for_unit(lib_dir, unit_name);
             free(lib_dir);
             if (candidate) {
                 free(paths);
+                for (size_t i = 0; i < searched.count; i++) free(searched.dirs[i]);
+                free(searched.dirs);
                 return candidate;
             }
         }
@@ -1236,8 +1266,11 @@ char *findUnitFile(const char *unit_name) {
     }
 
     // Check current working directory's lib first.
+    ADD_SEARCH_DIR("./lib");
     char *candidate = try_dir_for_unit("./lib", unit_name);
     if (candidate) {
+        for (size_t i = 0; i < searched.count; i++) free(searched.dirs[i]);
+        free(searched.dirs);
         return candidate;
     }
 
@@ -1257,21 +1290,38 @@ char *findUnitFile(const char *unit_name) {
                 EXIT_FAILURE_HANDLER();
             }
             snprintf(lib_dir, dir_len, "%s/lib", cwd);
+            ADD_SEARCH_DIR(lib_dir);
             candidate = try_dir_for_unit(lib_dir, unit_name);
             free(lib_dir);
             if (candidate) {
+                for (size_t i = 0; i < searched.count; i++) free(searched.dirs[i]);
+                free(searched.dirs);
                 return candidate;
             }
         }
     }
 
     // Finally, fall back to system-wide installation path.
-    candidate = try_dir_for_unit("/usr/local/pscal/lib", unit_name);
+    const char *system_path = "/usr/local/pscal/lib";
+    ADD_SEARCH_DIR(system_path);
+    candidate = try_dir_for_unit(system_path, unit_name);
     if (candidate) {
+        for (size_t i = 0; i < searched.count; i++) free(searched.dirs[i]);
+        free(searched.dirs);
         return candidate;
     }
 
-    return NULL; // Not found
+    // If we reach here, the unit file was not found. Report all locations and exit.
+    fprintf(stderr, "Unit '%s' not found. Searched paths:\n", unit_name);
+    for (size_t i = 0; i < searched.count; i++) {
+        fprintf(stderr, "  %s/%s.pl\n", searched.dirs[i], unit_name);
+        free(searched.dirs[i]);
+    }
+    free(searched.dirs);
+    EXIT_FAILURE_HANDLER();
+    return NULL; // Unreachable, but silences compiler warnings.
+
+#undef ADD_SEARCH_DIR
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {
