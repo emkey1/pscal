@@ -2808,7 +2808,10 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) { runtimeError(vm, "SetColor expects 1 argument (color index 0-255)."); return makeVoid(); }
+    if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_BYTE)) {
+        runtimeError(vm, "SetColor expects 1 argument (color index 0-255).");
+        return makeVoid();
+    }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before SetColor."); return makeVoid(); }
 
     long long colorCode = args[0].i_val;
