@@ -402,22 +402,44 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
     return makeInt(1); // Default on error
 }
 
+// --- Terminal helper for VM input routines ---
+static struct termios vm_orig_termios;
+static int vm_raw_mode = 0;
+
+static void vm_restore_terminal(void) {
+    if (vm_raw_mode) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
+        vm_raw_mode = 0;
+    }
+}
+
+static void vm_enable_raw_mode(void) {
+    if (vm_raw_mode)
+        return;
+
+    if (tcgetattr(STDIN_FILENO, &vm_orig_termios) < 0)
+        return;
+
+    struct termios raw = vm_orig_termios;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN]  = 1;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
+        vm_raw_mode = 1;
+        atexit(vm_restore_terminal);
+    }
+}
+
 Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "KeyPressed expects 0 arguments.");
         return makeBoolean(false);
     }
-    // Logic from executeBuiltinKeyPressed
-    struct termios oldt, newt;
+    vm_enable_raw_mode();
+
     int bytes_available = 0;
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO);
-    newt.c_cc[VMIN] = 0;
-    newt.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     return makeBoolean(bytes_available > 0);
 }
 
@@ -426,27 +448,12 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ReadKey expects 0 arguments.");
         return makeChar('\0');
     }
-    // Logic from executeBuiltinReadKey
-    struct termios oldt, newt;
+    vm_enable_raw_mode();
+
     char c;
-
-    // Get current terminal settings
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-
-    // Disable canonical mode and echo so a single character is read
-    newt.c_lflag &= ~(ICANON | ECHO);
-    newt.c_cc[VMIN] = 1;
-    newt.c_cc[VTIME] = 0;
-
-    // Apply new settings before reading
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-
-    // Read one character
-    read(STDIN_FILENO, &c, 1);
-
-    // Restore original terminal settings
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    if (read(STDIN_FILENO, &c, 1) != 1) {
+        return makeChar('\0');
+    }
     return makeChar(c);
 }
 
