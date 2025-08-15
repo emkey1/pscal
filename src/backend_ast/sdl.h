@@ -45,6 +45,7 @@ Value executeBuiltinGraphLoop(AST *node);
 Value executeBuiltinUpdateScreen(AST *node);
 Value executeBuiltinClearDevice(AST *node);
 Value executeBuiltinWaitKeyEvent(AST *node);
+Value executeBuiltinPollKey(AST *node);
 Value executeBuiltinGetMaxX(AST *node);
 Value executeBuiltinGetMaxY(AST *node);
 Value executeBuiltinGetTicks(AST *node);
@@ -109,6 +110,8 @@ Value vmBuiltinRendercopy(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRendercopyex(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetrendertarget(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPollkey(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWaitkeyevent(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args);
 
 #ifdef __cplusplus
