@@ -23,6 +23,9 @@ const
   White        = 15;
   Blink        = 128;
 
+type
+  TOSType = (osUnknown, osLinux, osMac);
+
 // --- Standard CRT Procedures/Functions ---
 procedure ClrScr;
 procedure GotoXY(x, y: integer);
@@ -59,6 +62,7 @@ procedure BlinkText;
 var
   // Global variables to store the current window coordinates
   WinLeft, WinTop, WinRight, WinBottom: integer;
+  OSKind: TOSType;
   // Default text attributes can be stored here if needed
   // e.g., CurrentTextColor, CurrentTextBackground: byte;
 
@@ -71,13 +75,18 @@ const
 { Clears the screen (or current window) and positions the cursor at the top-left of the window }
 procedure ClrScr;
 begin
-  // Note: Standard ANSI ClrScr [2J clears entire screen.
-  // To clear only within the window requires more complex logic
-  // (e.g., looping through window lines and using ClrEol) or
-  // using DECSED which might not be universally supported.
-  // We'll clear the whole screen and home the cursor to window top-left.
-  Write(ESC, '[2J');
-  GotoXY(WinLeft, WinTop); // Home cursor to window top-left
+  case OSKind of
+    osLinux, osMac:
+      begin
+        Write(ESC, '[2J');
+        GotoXY(WinLeft, WinTop);
+      end;
+  else
+      begin
+        Write(#12);
+        GotoXY(1, 1);
+      end;
+  end;
 end;
 
 { Positions the cursor at column x, row y relative to the current window }
@@ -260,14 +269,13 @@ end;
 { Sets text attribute to high intensity (bold) }
 procedure HighVideo;
 begin
-  TextColor(DarkGray); // Common interpretation of LowVideo
-  // Alternatively, directly: Write(ESC, '[1m');
+  Write(ESC, '[1m');
 end;
 
 { Sets text attribute to low intensity (often dark gray foreground) }
 procedure LowVideo;
 begin
-  BoldText; // Reuse existing BoldText procedure
+  TextColor(DarkGray);
   // Alternatively, could use faint code if supported: Write(ESC, '[2m');
 end;
 
@@ -304,14 +312,49 @@ begin
   end;
 end;
 
+function GetEnvInt(const Name: string; Default: integer): integer;
+var
+  S: string;
+  Code, N: integer;
+begin
+  S := GetEnv(Name);
+  if S <> '' then
+  begin
+    Val(S, N, Code);
+    if Code = 0 then
+      GetEnvInt := N
+    else
+      GetEnvInt := Default;
+  end
+  else
+    GetEnvInt := Default;
+end;
+
+function DetectOS: TOSType;
+var
+  S: string;
+  I: integer;
+begin
+  S := GetEnv('OSTYPE');
+  for I := 1 to Length(S) do
+    S[I] := UpCase(S[I]);
+  if Pos('LINUX', S) > 0 then
+    DetectOS := osLinux
+  else if Pos('DARWIN', S) > 0 then
+    DetectOS := osMac
+  else
+    DetectOS := osUnknown;
+end;
+
 // --- Initialization block for the unit ---
 begin
-  // Set default window to full screen (assuming 80x24 typical size)
-  // Adjust these defaults if your terminal size is different
+  OSKind := DetectOS;
+
+  // Set default window to full screen using environment size when available
   WinLeft := 1;
   WinTop := 1;
-  WinRight := 80;
-  WinBottom := 24;
+  WinRight := GetEnvInt('COLUMNS', 80);
+  WinBottom := GetEnvInt('LINES', 24);
   // Optionally set default colors here too
   // NormalColors;
 end.
