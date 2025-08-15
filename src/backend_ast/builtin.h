@@ -85,9 +85,11 @@ Value vmBuiltinTrunc(struct VM_s* vm, int arg_count, Value* args);
 // --- VM-NATIVE RANDOM FUNCTIONS ---
 Value vmBuiltinRandomize(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRandom(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinVal(struct VM_s* vm, int arg_count, Value* args);
 
 // --- VM-NATIVE DOS/OS FUNCTIONS ---
 Value vmBuiltinDosGetenv(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGetenv(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDosExec(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDosMkdir(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDosRmdir(struct VM_s* vm, int arg_count, Value* args);
