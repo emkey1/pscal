@@ -19,6 +19,8 @@ var
   startPos, endPos, searchPos: integer; // searchPos reused for different searches
   currentZipCode : string;
   apiKeyFromFile : string; // Variable for API Key
+  tempC, tempF : real;      // Temperatures in Celsius and Fahrenheit
+  valCode : integer;        // Error code for Val
 
 // --- Function to read API key from file ---
 function ReadApiKeyFromFile(filename: string): string;
@@ -191,7 +193,17 @@ begin
   tempStr := '';
   searchPos := pos('"main":{', response);
   if searchPos > 0 then tempStr := ExtractNumericValueStr(response, 'temp', searchPos);
-  if tempStr <> '' then writeln('Temperature:    ', tempStr, ' C')
+  if tempStr <> '' then
+  begin
+    Val(tempStr, tempC, valCode);
+    if valCode = 0 then
+    begin
+      tempF := tempC * 9 / 5 + 32;
+      writeln('Temperature:    ', tempStr, ' C (', tempF:0:1, ' F)');
+    end
+    else
+      writeln('Temperature:    ', tempStr, ' C');
+  end
   else writeln('Temperature:    Not Found');
 
   humidityStr := '';
