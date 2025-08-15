@@ -724,13 +724,15 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "inttostr")  == 0 ||
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
-        strcasecmp(name, "readkey")   == 0 ||
         strcasecmp(name, "copy")      == 0) {
         return TYPE_STRING;
     }
 
-    /* UpCase returns a single character */
-    if (strcasecmp(name, "upcase") == 0) return TYPE_CHAR;
+    /* ReadKey and UpCase return a single character */
+    if (strcasecmp(name, "readkey") == 0 ||
+        strcasecmp(name, "upcase")  == 0) {
+        return TYPE_CHAR;
+    }
 
     return TYPE_VOID;
 }
