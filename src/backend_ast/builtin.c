@@ -429,10 +429,23 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     // Logic from executeBuiltinReadKey
     struct termios oldt, newt;
     char c;
+
+    // Get current terminal settings
     tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
+
+    // Disable canonical mode and echo so a single character is read
     newt.c_lflag &= ~(ICANON | ECHO);
+    newt.c_cc[VMIN] = 1;
+    newt.c_cc[VTIME] = 0;
+
+    // Apply new settings before reading
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+    // Read one character
     read(STDIN_FILENO, &c, 1);
+
+    // Restore original terminal settings
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     return makeChar(c);
 }
