@@ -800,23 +800,15 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
 
                 Value* name_val = &vm->chunk->constants[name_idx];
-                Symbol* sym = NULL;
-                if (name_val->type == TYPE_STRING) {
-                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                    if (!sym) {
-                        runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    if (!sym->value) {
-                        runtimeError(vm, "Runtime Error: Global '%s' has no Value slot.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    // Cache the symbol pointer in the constant table for faster future lookups
-                    name_val->type = TYPE_POINTER;
-                    name_val->ptr_val = (Value*)sym;
-                    name_val->base_type_node = NULL;
-                } else {
-                    sym = (Symbol*)name_val->ptr_val;
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "Runtime Error: Invalid global name for address lookup.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
 
                 push(vm, makePointer(sym->value, NULL));
@@ -830,22 +822,15 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
 
                 Value* name_val = &vm->chunk->constants[name_idx];
-                Symbol* sym = NULL;
-                if (name_val->type == TYPE_STRING) {
-                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                    if (!sym) {
-                        runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    if (!sym->value) {
-                        runtimeError(vm, "Runtime Error: Global '%s' has no Value slot.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    name_val->type = TYPE_POINTER;
-                    name_val->ptr_val = (Value*)sym;
-                    name_val->base_type_node = NULL;
-                } else {
-                    sym = (Symbol*)name_val->ptr_val;
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "Runtime Error: Invalid global name for address lookup.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
 
                 push(vm, makePointer(sym->value, NULL));
@@ -1722,20 +1707,23 @@ comparison_error_label:
             }
             case OP_GET_GLOBAL: {
                 uint8_t name_idx = READ_BYTE();
-                Value* name_val = &vm->chunk->constants[name_idx];
-                Symbol* sym = NULL;
-                if (name_val->type == TYPE_STRING) {
-                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                    if (!sym || !sym->value) {
-                        runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    name_val->type = TYPE_POINTER;
-                    name_val->ptr_val = (Value*)sym;
-                    name_val->base_type_node = NULL;
-                } else {
-                    sym = (Symbol*)name_val->ptr_val;
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
+
+                Value* name_val = &vm->chunk->constants[name_idx];
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "Runtime Error: Invalid global name.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
                 push(vm, makeCopyOfValue(sym->value));
                 break;
             }
@@ -1745,39 +1733,41 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL16.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+
                 Value* name_val = &vm->chunk->constants[name_idx];
-                Symbol* sym = NULL;
-                if (name_val->type == TYPE_STRING) {
-                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                    if (!sym || !sym->value) {
-                        runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    name_val->type = TYPE_POINTER;
-                    name_val->ptr_val = (Value*)sym;
-                    name_val->base_type_node = NULL;
-                } else {
-                    sym = (Symbol*)name_val->ptr_val;
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "Runtime Error: Invalid global name.");
+                    return INTERPRET_RUNTIME_ERROR;
                 }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
                 push(vm, makeCopyOfValue(sym->value));
                 break;
             }
             case OP_SET_GLOBAL: {
                 uint8_t name_idx = READ_BYTE();
-                Value* name_val = &vm->chunk->constants[name_idx];
-                Symbol* sym = NULL;
-                if (name_val->type == TYPE_STRING) {
-                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                    if (!sym) {
-                        runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    name_val->type = TYPE_POINTER;
-                    name_val->ptr_val = (Value*)sym;
-                    name_val->base_type_node = NULL;
-                } else {
-                    sym = (Symbol*)name_val->ptr_val;
+                if (name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL.", name_idx);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
+
+                Value* name_val = &vm->chunk->constants[name_idx];
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "Runtime Error: Invalid global variable name.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
                 if (!sym->value) {
                     sym->value = (Value*)malloc(sizeof(Value));
                     if (!sym->value) {
@@ -1818,20 +1808,19 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL16.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+
                 Value* name_val = &vm->chunk->constants[name_idx];
-                Symbol* sym = NULL;
-                if (name_val->type == TYPE_STRING) {
-                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                    if (!sym) {
-                        runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    name_val->type = TYPE_POINTER;
-                    name_val->ptr_val = (Value*)sym;
-                    name_val->base_type_node = NULL;
-                } else {
-                    sym = (Symbol*)name_val->ptr_val;
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "Runtime Error: Invalid global variable name.");
+                    return INTERPRET_RUNTIME_ERROR;
                 }
+
+                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                if (!sym) {
+                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
                 if (!sym->value) {
                     sym->value = (Value*)malloc(sizeof(Value));
                     if (!sym->value) {

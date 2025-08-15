@@ -168,6 +168,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"round", vmBuiltinRound},
     {"screencols", vmBuiltinScreencols},
     {"screenrows", vmBuiltinScreenrows},
+    {"setlength", vmBuiltinSetlength},
 #ifdef SDL
     {"setalphablend", vmBuiltinSetalphablend},
     {"setcolor", vmBuiltinSetcolor}, // Moved
@@ -342,6 +343,52 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
     Value result = makeString(new_str);
     free(new_str);
     return result;
+}
+
+Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_POINTER || args[1].type != TYPE_INTEGER) {
+        runtimeError(vm, "SetLength expects (var string, integer).");
+        return makeVoid();
+    }
+
+    Value* target = (Value*)args[0].ptr_val;
+    if (!target) {
+        runtimeError(vm, "SetLength received a nil pointer.");
+        return makeVoid();
+    }
+
+    long long new_len = AS_INTEGER(args[1]);
+    if (new_len < 0) new_len = 0;
+
+    if (target->type != TYPE_STRING) {
+        freeValue(target);
+        target->type = TYPE_STRING;
+        target->s_val = NULL;
+        target->max_length = -1;
+    }
+
+    char* new_buf = (char*)malloc((size_t)new_len + 1);
+    if (!new_buf) {
+        runtimeError(vm, "SetLength: memory allocation failed.");
+        return makeVoid();
+    }
+
+    size_t copy_len = 0;
+    if (target->s_val) {
+        copy_len = strlen(target->s_val);
+        if (copy_len > (size_t)new_len) copy_len = (size_t)new_len;
+        memcpy(new_buf, target->s_val, copy_len);
+        free(target->s_val);
+    }
+
+    if ((size_t)new_len > copy_len) {
+        memset(new_buf + copy_len, 0, (size_t)new_len - copy_len);
+    }
+    new_buf[new_len] = '\0';
+
+    target->s_val = new_buf;
+    target->max_length = -1;
+    return makeVoid();
 }
 
 Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
@@ -4380,6 +4427,15 @@ Value executeBuiltinKeyPressed(AST *node) {
 int isBuiltin(const char *name) {
     if (!name) return 0;
 
+    /* Check VM dispatch table first */
+    size_t vm_count = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
+    for (size_t i = 0; i < vm_count; i++) {
+        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+            return 1;
+        }
+    }
+
+    /* Fallback to legacy AST dispatch table */
     for (size_t i = 0; i < num_builtins; i++) {
         if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
             return 1;
@@ -4579,7 +4635,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "mstreamloadfromfile", "mstreamsavetofile", "new", "normvideo", "outtextxy",
         "playsound", "putpixel", "quitsoundsystem", "quittextsystem",
         "randomize", "read", "readln", "rendercopy", "rendercopyex", "rendercopyrect", "reset", "rewrite", "setalphablend",
-         "setcolor", "setrendertarget", "setrgbcolor",
+         "setcolor", "setlength", "setrendertarget", "setrgbcolor",
           "textbackground", "textbackgrounde", "textcolor",
           "textcolore", "underlinetext", "updatescreen", "updatetexture", "val", "waitkeyevent",
           "write", "writeln", "dos_getdate", "dos_gettime",
