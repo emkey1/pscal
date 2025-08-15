@@ -81,6 +81,11 @@ char* ensureCacheDir(void) {
             exit(EXIT_FAILURE);
         }
     } else {
+        if (!S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "Error: Cache path '%s' is not a directory.\n", dir);
+            free(dir);
+            exit(EXIT_FAILURE);
+        }
         if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
             if (chmod(dir, S_IRWXU) != 0) {
                 fprintf(stderr, "Error: Could not set permissions on cache directory '%s': %s\n", dir, strerror(errno));
@@ -396,6 +401,12 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk, Ha
     int fd = open(cache_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         fprintf(stderr, "Error: Could not write cache file '%s': %s\n", cache_path, strerror(errno));
+        free(cache_path);
+        exit(EXIT_FAILURE);
+    }
+    if (fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+        fprintf(stderr, "Error: Could not set permissions on cache file '%s': %s\n", cache_path, strerror(errno));
+        close(fd);
         free(cache_path);
         exit(EXIT_FAILURE);
     }

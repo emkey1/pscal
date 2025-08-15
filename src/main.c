@@ -239,7 +239,78 @@ int runProgram(const char *source_code, const char *source_path, const char *pro
     char* cache_dir_check = ensureCacheDir();
     free(cache_dir_check);
 
-    if (loadBytecodeFromCache(source_path, &chunk, procedure_table)) {
+    if (!dump_ast_json_flag && !use_ast_interpreter_flag) {
+        if (!loadBytecodeFromCache(source_path, &chunk, procedure_table)) {
+            freeProcedureTable();
+            procedure_table = createHashTable();
+            current_procedure_table = procedure_table;
+
+            Lexer lexer;
+            initLexer(&lexer, source_code);
+
+#ifdef DEBUG
+            fprintf(stderr, "\n--- Build AST Before Execution START (stderr print)---\n");
+#endif
+
+            Parser parser;
+            parser.lexer = &lexer;
+            parser.current_token = getNextToken(&lexer);
+
+            GlobalAST = buildProgramAST(&parser, &chunk);
+
+            if (parser.current_token) {
+                freeToken(parser.current_token);
+                parser.current_token = NULL;
+            }
+
+            if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
+                annotateTypes(GlobalAST, NULL, GlobalAST);
+
+#ifdef DEBUG
+                fprintf(stderr, "--- Verifying AST Links ---\n");
+                if (verifyASTLinks(GlobalAST, NULL)) {
+                    fprintf(stderr, "--- AST Link Verification Passed ---\n");
+                } else {
+                    fprintf(stderr, "--- AST Link Verification FAILED ---\n");
+                }
+                fprintf(stderr, "\n--- Build AST Before Execution END (stderr print)---\n");
+#endif
+
+                if (dump_bytecode_flag) {
+                    fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
+                }
+                bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
+                if (compilation_ok_for_vm) {
+                    finalizeBytecode(&chunk);
+                }
+                if (compilation_ok_for_vm) {
+                    fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    saveBytecodeToCache(source_path, &chunk, procedure_table);
+                } else {
+                    fprintf(stderr, "Compilation failed with errors.\n");
+                    freeAST(GlobalAST); GlobalAST = NULL;
+                    goto end_execution;
+                }
+            } else {
+                fprintf(stderr, "Failed to build Program AST for execution.\n");
+                overall_success_status = false;
+                goto end_execution;
+            }
+
+            freeAST(GlobalAST); GlobalAST = NULL;
+            freeBytecodeChunk(&chunk);
+            initBytecodeChunk(&chunk);
+            freeProcedureTable();
+            procedure_table = createHashTable();
+            current_procedure_table = procedure_table;
+
+            if (!loadBytecodeFromCache(source_path, &chunk, procedure_table)) {
+                fprintf(stderr, "Error: Failed to load bytecode from cache after compilation.\n");
+                overall_success_status = false;
+                goto end_execution;
+            }
+        }
+
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, programName ? programName : "CachedChunk", procedure_table);
             fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
@@ -261,10 +332,6 @@ int runProgram(const char *source_code, const char *source_path, const char *pro
             vm_dump_stack_info(&vm);
         }
     } else {
-        freeProcedureTable();
-        procedure_table = createHashTable();
-        current_procedure_table = procedure_table;
-
         Lexer lexer;
         initLexer(&lexer, source_code);
 
@@ -313,41 +380,6 @@ int runProgram(const char *source_code, const char *source_path, const char *pro
 #endif
                 executeWithScope(GlobalAST, true);
                 overall_success_status = true;
-            } else {
-                if (dump_bytecode_flag) {
-                    fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
-                }
-                bool compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
-                if (compilation_ok_for_vm) {
-                    finalizeBytecode(&chunk);
-                }
-                if (compilation_ok_for_vm) {
-                    fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
-                    saveBytecodeToCache(source_path, &chunk, procedure_table);
-                    if (dump_bytecode_flag) {
-                        disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                        fprintf(stderr, "\n--- Executing Program with VM ---\n");
-                    }
-                    VM vm;
-                    initVM(&vm);
-                    InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
-                    freeVM(&vm);
-                    globalSymbols = NULL;
-                    if (result_vm == INTERPRET_OK) {
-                        if (dump_bytecode_flag) {
-                            fprintf(stderr, "--- VM Execution Finished Successfully ---\n");
-                        }
-                        overall_success_status = true;
-                    } else {
-                        fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
-                                result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
-                        overall_success_status = false;
-                        vm_dump_stack_info(&vm);
-                    }
-                } else {
-                    fprintf(stderr, "Compilation failed with errors.\n");
-                    overall_success_status = false;
-                }
             }
         } else if (!dump_ast_json_flag) {
             fprintf(stderr, "Failed to build Program AST for execution.\n");
@@ -357,6 +389,8 @@ int runProgram(const char *source_code, const char *source_path, const char *pro
             overall_success_status = false;
         }
     }
+
+end_execution:
 
     freeBytecodeChunk(&chunk);
     freeProcedureTable();
