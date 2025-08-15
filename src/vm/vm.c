@@ -11,14 +11,12 @@
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "globals.h"
-#include "backend_ast/audio.h"
 #include "frontend/parser.h"
 #include "frontend/ast.h"
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
-#include "backend_ast/audio.h"
 
 #define MAX_WRITELN_ARGS_VM 32
 

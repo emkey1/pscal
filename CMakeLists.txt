@@ -127,20 +127,11 @@ set(PSCAL_SOURCES
     src/core/types.c src/core/utils.c src/core/list.c
     src/frontend/lexer.c src/frontend/parser.c src/frontend/ast.c
     src/symbol/symbol.c
-    src/backend_ast/interpreter.c src/backend_ast/builtin.c
-    src/backend_ast/builtin_network_api.c
+    src/backend_ast/builtin.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
     src/vm/vm.c
 )
-
-# --- Conditionally add SDL source files ---
-if(SDL)
-    list(APPEND PSCAL_SOURCES
-        src/backend_ast/sdl.c
-        src/backend_ast/audio.c
-    )
-endif()
 
 
 # ---- Executable Targets Function ----
