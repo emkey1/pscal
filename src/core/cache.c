@@ -13,7 +13,7 @@
 
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION 1
+#define CACHE_VERSION 3
 
 static unsigned long hash_path(const char* path) {
     uint32_t hash = 2166136261u;
@@ -62,7 +62,7 @@ static bool write_value(FILE* f, const Value* v) {
         case TYPE_CHAR:
             fwrite(&v->c_val, sizeof(v->c_val), 1, f); break;
         case TYPE_STRING: {
-            int len = v->s_val ? (int)strlen(v->s_val) : 0;
+            int len = v->s_val ? (int)strlen(v->s_val) : -1;
             fwrite(&len, sizeof(len), 1, f);
             if (len > 0) fwrite(v->s_val, 1, len, f);
             break;
@@ -108,14 +108,15 @@ static bool read_value(FILE* f, Value* out) {
         case TYPE_STRING: {
             int len = 0;
             if (fread(&len, sizeof(len), 1, f) != 1) return false;
-            if (len > 0) {
+            if (len >= 0) {
                 out->s_val = (char*)malloc(len + 1);
                 if (!out->s_val) return false;
-                if (fread(out->s_val, 1, len, f) != (size_t)len) return false;
+                if (len > 0 && fread(out->s_val, 1, len, f) != (size_t)len) return false;
                 out->s_val[len] = '\0';
             } else {
                 out->s_val = NULL;
             }
+            out->max_length = -1;
             break;
         }
         case TYPE_NIL:
@@ -205,6 +206,37 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                         }
                                         free(name);
                                     }
+
+                                    if (ok) {
+                                        int const_sym_count = 0;
+                                        if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
+                                            for (int i = 0; i < const_sym_count; ++i) {
+                                                int name_len = 0;
+                                                if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
+                                                char* name = (char*)malloc(name_len + 1);
+                                                if (!name) { ok = false; break; }
+                                                if (fread(name, 1, name_len, f) != (size_t)name_len) {
+                                                    free(name); ok = false; break; }
+                                                name[name_len] = '\0';
+                                                VarType type;
+                                                if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
+                                                Value val = {0};
+                                                if (!read_value(f, &val)) { free(name); ok = false; break; }
+                                                insertGlobalSymbol(name, type, NULL);
+                                                Symbol* sym = lookupGlobalSymbol(name);
+                                                if (sym && sym->value) {
+                                                    freeValue(sym->value);
+                                                    *(sym->value) = val;
+                                                    sym->is_const = true;
+                                                } else {
+                                                    freeValue(&val);
+                                                }
+                                                free(name);
+                                            }
+                                        } else {
+                                            ok = false;
+                                        }
+                                    }
                                 } else {
                                     ok = false;
                                 }
@@ -264,6 +296,34 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
                 fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f);
                 fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
                 fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
+            }
+        }
+    }
+
+    int const_sym_count = 0;
+    if (globalSymbols) {
+        for (int i = 0; i < HASHTABLE_SIZE; i++) {
+            for (Symbol* sym = globalSymbols->buckets[i]; sym; sym = sym->next) {
+                if (sym->is_alias || !sym->is_const) continue;
+                const_sym_count++;
+            }
+        }
+    }
+    fwrite(&const_sym_count, sizeof(const_sym_count), 1, f);
+    if (globalSymbols) {
+        for (int i = 0; i < HASHTABLE_SIZE; i++) {
+            for (Symbol* sym = globalSymbols->buckets[i]; sym; sym = sym->next) {
+                if (sym->is_alias || !sym->is_const) continue;
+                int name_len = (int)strlen(sym->name);
+                fwrite(&name_len, sizeof(name_len), 1, f);
+                fwrite(sym->name, 1, name_len, f);
+                fwrite(&sym->type, sizeof(sym->type), 1, f);
+                if (sym->value) {
+                    write_value(f, sym->value);
+                } else {
+                    Value tmp = makeVoid();
+                    write_value(f, &tmp);
+                }
             }
         }
     }
