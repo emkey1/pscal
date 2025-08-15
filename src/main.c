@@ -5,7 +5,6 @@
 #include "core/utils.h"
 #include "core/list.h"
 #include "globals.h"
-#include "backend_ast/interpreter.h"
 #include "backend_ast/builtin.h"
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
@@ -41,7 +40,6 @@ const char *PSCAL_USAGE =
     "     -v                          Display version.\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
-    "     --use-ast-interpreter       Use AST interpreter instead of VM.\n"
     "   or: pscal (with no arguments to display version and usage)";
 
 void initSymbolSystem(void) {
@@ -67,179 +65,15 @@ void initSymbolSystem(void) {
 #endif
 }
 
-void executeWithASTDump(AST *program_ast, const char *program_name) {
-    // Your existing executeWithASTDump function body is fine
-    // For brevity, I'm not repeating it here. Ensure it uses executeWithScope.
-    // Example (ensure this is your actual correct logic):
-    struct stat st = {0};
-    if (stat("/tmp/pscal", &st) == -1) {
-        if (mkdir("/tmp/pscal", 0777) != 0) {
-            perror("mkdir /tmp/pscal failed");
-            fprintf(stderr, "Warning: Could not create /tmp/pscal for AST dump. AST dump skipped.\n");
-            executeWithScope(program_ast, true);
-            return;
-        }
-    }
-    pid_t pid = getpid();
-    char filename[256];
-    const char *base = strrchr(program_name, '/');
-    if (base) base++; else base = program_name;
-    int chars_written = snprintf(filename, sizeof(filename), "/tmp/pscal/%s.%d.ast", base, (int)pid);
-    if (chars_written < 0 || (size_t)chars_written >= sizeof(filename)) {
-         fprintf(stderr, "Warning: AST dump filename is too long or invalid. AST dump skipped.\n");
-         executeWithScope(program_ast, true);
-         return;
-    }
-    FILE *f = fopen(filename, "wb");
-    if (!f) {
-        perror("fopen for AST dump failed");
-        fprintf(stderr, "Warning: Could not open AST dump file '%s'. AST dump skipped.\n", filename);
-        executeWithScope(program_ast, true);
-        return;
-    }
-    FILE *old_stdout = stdout;
-    stdout = f;
-    debugASTFile(program_ast);
-    stdout = old_stdout;
-    fclose(f);
-    executeWithScope(program_ast, true);
-}
-
-int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int use_ast_interpreter_flag, int dump_bytecode_flag) {
+int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int dump_bytecode_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
     }
     
-#ifdef SDL
-    // --- SDL GRAPHICS AND SOUND BUILT-INS ---
-    registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CreateTargetTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("CreateTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("DestroyTexture", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawCircle", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawLine", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawPolygon", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillCircle", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetMaxX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetMaxY", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetMouseState", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GraphLoop", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitGraph", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("IsSoundPlaying", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("LoadImageToTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("LoadSound", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitTextSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopy", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopyEx", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopyRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderTextToTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SetAlphaBlend", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRenderTarget", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRGBColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateScreen", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateTexture", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("WaitKeyEvent", AST_PROCEDURE_DECL, NULL);
-#endif
 
 
     /* Register built-in functions and procedures. */
-    registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Copy", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Cos", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Dec", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dos_exec", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_findfirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_findnext", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getenv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getfattr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_mkdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_rmdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getdate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dos_gettime", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Inc", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("IntToStr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("IOResult", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Ln", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("MStreamCreate", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("MStreamFree", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("New", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Ord", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ParamCount", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ParamStr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Pos", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("QuitRequested", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Random", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Randomize", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ReadKey", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ScreenRows", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Sin", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Sqr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Succ", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Tan", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GotoXY", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BoldText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIBoldText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BlinkText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIBlinkText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UnderlineText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIUnderlineText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("LowVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BILowVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("NormVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BINormVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ClrScr", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIClrScr", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextBackground", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextColorE", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
     
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
@@ -268,12 +102,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             dumpASTJSON(GlobalAST, stdout);
             fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
             overall_success_status = true;
-        } else if (use_ast_interpreter_flag) {
-            fprintf(stderr, "\n--- Executing Program with AST Interpreter (selected by flag) ---\n");
-            executeWithScope(GlobalAST, true);
-            overall_success_status = true;
         } else {
-            if (!dump_ast_json_flag && !use_ast_interpreter_flag) {
+            if (!dump_ast_json_flag) {
                 used_cache = loadBytecodeFromCache(programName, &chunk);
             }
             bool compilation_ok_for_vm = true;
@@ -350,7 +180,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 // Consistent main function structure for argument parsing
 int main(int argc, char *argv[]) {
     int dump_ast_json_flag = 0;
-    int use_ast_interpreter_flag = 0;
     int dump_bytecode_flag = 0;
     const char *sourceFile = NULL;
     const char *programName = argv[0]; // Default program name to executable name
@@ -372,8 +201,6 @@ int main(int argc, char *argv[]) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
-        } else if (strcmp(argv[i], "--use-ast-interpreter") == 0) {
-            use_ast_interpreter_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "%s\n", PSCAL_USAGE);
@@ -444,7 +271,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, dump_ast_json_flag, use_ast_interpreter_flag, dump_bytecode_flag);
+    int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag);
     free(source_buffer); // Free the source code buffer
 
     return result;
