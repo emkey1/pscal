@@ -1741,6 +1741,29 @@ Value makeCopyOfValue(const Value *src) {
             v.c_val = src->c_val;
             v.max_length = 1;
             break;
+        case TYPE_MEMORYSTREAM:
+            v.mstream = NULL;
+            if (src->mstream) {
+                v.mstream = malloc(sizeof(MStream));
+                if (!v.mstream) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                v.mstream->size = src->mstream->size;
+                v.mstream->capacity = src->mstream->capacity;
+                if (src->mstream->buffer && src->mstream->capacity > 0) {
+                    v.mstream->buffer = malloc(src->mstream->capacity);
+                    if (!v.mstream->buffer) {
+                        free(v.mstream);
+                        fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream buffer)\n");
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    memcpy(v.mstream->buffer, src->mstream->buffer, src->mstream->size);
+                } else {
+                    v.mstream->buffer = NULL;
+                }
+            }
+            break;
         case TYPE_SET:
             v.set_val.set_values = NULL;
             v.set_val.set_size = 0;
