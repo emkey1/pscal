@@ -59,6 +59,12 @@ procedure BoldText;      // Note: Same effect as HighVideo
 procedure UnderlineText;
 procedure BlinkText;
 
+// --- Environment Helpers ---
+function GetEnv(VarName: string): string;
+function GetEnvInt(const Name: string; Default: integer): integer;
+procedure Val(S: string; var N: integer; var Code: integer);
+procedure ValReal(S: string; var R: real; var Code: integer);
+
 var
   // Global variables to store the current window coordinates
   WinLeft, WinTop, WinRight, WinBottom: integer;
@@ -310,6 +316,179 @@ begin
     // Move cursor to top-left of the new window
     GotoXY(1, 1);
   end;
+end;
+
+function GetEnv(VarName: string): string;
+begin
+  GetEnv := dos_getenv(VarName);
+end;
+
+{ Convert a string to an integer. Mimics Turbo Pascal's Val behaviour. }
+procedure Val(S: string; var N: integer; var Code: integer);
+var
+  i, len, sign: integer;
+  digitFound: boolean;
+begin
+  N := 0;
+  Code := 0;
+  len := Length(S);
+  if len = 0 then
+  begin
+    Code := 1;
+    exit;
+  end;
+  i := 1;
+  while (i <= len) and (S[i] <= ' ') do
+    i := i + 1;
+  if i > len then
+  begin
+    Code := 1;
+    exit;
+  end;
+  sign := 1;
+  if (S[i] = '+') or (S[i] = '-') then
+  begin
+    if S[i] = '-' then
+      sign := -1;
+    i := i + 1;
+  end;
+  if i > len then
+  begin
+    Code := i;
+    exit;
+  end;
+  digitFound := False;
+  while (i <= len) and (S[i] >= '0') and (S[i] <= '9') do
+  begin
+    digitFound := True;
+    N := N * 10 + Ord(S[i]) - Ord('0');
+    i := i + 1;
+  end;
+  if not digitFound then
+  begin
+    Code := i;
+    N := 0;
+    exit;
+  end;
+  if i <= len then
+  begin
+    Code := i;
+    exit;
+  end;
+  N := N * sign;
+end;
+
+{ Convert a string to a real number. Supports optional decimal and exponent. }
+procedure ValReal(S: string; var R: real; var Code: integer);
+var
+  i, len, sign, expSign, expVal: integer;
+  intPart, fracPart, fracDiv: real;
+  digitFound: boolean;
+begin
+  R := 0.0;
+  Code := 0;
+  len := Length(S);
+  if len = 0 then
+  begin
+    Code := 1;
+    exit;
+  end;
+  i := 1;
+  while (i <= len) and (S[i] <= ' ') do
+    i := i + 1;
+  if i > len then
+  begin
+    Code := 1;
+    exit;
+  end;
+  sign := 1;
+  if (S[i] = '+') or (S[i] = '-') then
+  begin
+    if S[i] = '-' then
+      sign := -1;
+    i := i + 1;
+  end;
+  if i > len then
+  begin
+    Code := i;
+    exit;
+  end;
+  digitFound := False;
+  intPart := 0.0;
+  while (i <= len) and (S[i] >= '0') and (S[i] <= '9') do
+  begin
+    digitFound := True;
+    intPart := intPart * 10.0 + (Ord(S[i]) - Ord('0'));
+    i := i + 1;
+  end;
+  R := intPart;
+  if (i <= len) and (S[i] = '.') then
+  begin
+    i := i + 1;
+    fracPart := 0.0;
+    fracDiv := 1.0;
+    if (i > len) or not ((S[i] >= '0') and (S[i] <= '9')) then
+    begin
+      Code := i;
+      exit;
+    end;
+    while (i <= len) and (S[i] >= '0') and (S[i] <= '9') do
+    begin
+      digitFound := True;
+      fracPart := fracPart * 10.0 + (Ord(S[i]) - Ord('0'));
+      fracDiv := fracDiv * 10.0;
+      i := i + 1;
+    end;
+    R := R + fracPart / fracDiv;
+  end;
+  if (i <= len) and ((S[i] = 'E') or (S[i] = 'e')) then
+  begin
+    i := i + 1;
+    expSign := 1;
+    if (i <= len) and (S[i] = '+') then
+      i := i + 1
+    else if (i <= len) and (S[i] = '-') then
+    begin
+      expSign := -1;
+      i := i + 1;
+    end;
+    if (i > len) or not ((S[i] >= '0') and (S[i] <= '9')) then
+    begin
+      Code := i;
+      exit;
+    end;
+    expVal := 0;
+    while (i <= len) and (S[i] >= '0') and (S[i] <= '9') do
+    begin
+      expVal := expVal * 10 + Ord(S[i]) - Ord('0');
+      i := i + 1;
+    end;
+    if expSign = 1 then
+      while expVal > 0 do
+      begin
+        R := R * 10.0;
+        expVal := expVal - 1;
+      end
+    else
+      while expVal > 0 do
+      begin
+        R := R / 10.0;
+        expVal := expVal - 1;
+      end;
+  end;
+  if not digitFound then
+  begin
+    Code := i;
+    R := 0.0;
+    exit;
+  end;
+  if i <= len then
+  begin
+    Code := i;
+    R := 0.0;
+    exit;
+  end;
+  R := R * sign;
 end;
 
 function GetEnvInt(const Name: string; Default: integer): integer;
