@@ -478,6 +478,17 @@ static void vm_enable_raw_mode(void) {
     }
 }
 
+// Restore the terminal to a canonical, line-buffered state suitable for
+// Read()/ReadLn().  This undoes any prior ReadKey-induced raw mode,
+// discards leftover input, ensures echoing, and makes the cursor visible.
+static void vm_prepare_canonical_input(void) {
+    vm_restore_terminal();
+    tcflush(STDIN_FILENO, TCIFLUSH);
+    const char show_cursor[] = "\x1B[?25h";
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+    fflush(stdout);
+}
+
 Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "KeyPressed expects 0 arguments.");
@@ -1224,6 +1235,10 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
         }
     }
 
+    if (input_stream == stdin) {
+        vm_prepare_canonical_input();
+    }
+
     for (int i = var_start_index; i < arg_count; i++) {
         if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
             runtimeError(vm, "Read requires VAR parameters to read into.");
@@ -1318,6 +1333,10 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
             // Prevent that by neutering the stack value before we return.
             if (args[0].type == TYPE_FILE) first_arg_is_file_by_value = true;   // ***NEW***
         }
+    }
+
+    if (input_stream == stdin) {
+        vm_prepare_canonical_input();
     }
 
     // 2) Read full line
