@@ -122,6 +122,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"paramstr", vmBuiltinParamstr},
 #ifdef SDL
     {"playsound", vmBuiltinPlaysound},
+    {"pollkey", vmBuiltinPollkey},
 #endif
     {"pos", vmBuiltinPos},
 #ifdef SDL
@@ -1607,6 +1608,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"paramstr",  executeBuiltinParamstr},
 #ifdef SDL
     {"playsound", executeBuiltinPlaySound},
+    {"pollkey", executeBuiltinPollKey},
 #endif
     {"pos",       executeBuiltinPos},
 #ifdef SDL
@@ -3166,7 +3168,8 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
              strcasecmp(name, "wherex") == 0 ||
              strcasecmp(name, "wherey") == 0 ||
              strcasecmp(name, "createtexture") == 0 ||
-             strcasecmp(name, "loadsound") == 0 ) {
+             strcasecmp(name, "loadsound") == 0 ||
+             strcasecmp(name, "pollkey") == 0 ) {
 
         if (strcasecmp(name, "ord") == 0 || strcasecmp(name, "round") == 0 || strcasecmp(name, "trunc") == 0 || strcasecmp(name, "length") == 0 || strcasecmp(name, "loadsound") == 0) {
             dummy->child_capacity = 1;

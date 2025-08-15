@@ -551,6 +551,35 @@ Value executeBuiltinWaitKeyEvent(AST *node) {
     return makeVoid(); // WaitKeyEvent is a procedure
 }
 
+// Pscal: function PollKey: Integer; // Non-blocking key poll
+Value executeBuiltinPollKey(AST *node) {
+    if (node->child_count != 0) {
+        fprintf(stderr, "Runtime error: PollKey expects 0 arguments.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (!gSdlInitialized || !gSdlRenderer) {
+        fprintf(stderr, "Runtime error: Graphics mode not initialized before PollKey.\n");
+        return makeInt(0);
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            break_requested = 1;
+            return makeInt(0);
+        }
+        if (event.type == SDL_KEYDOWN) {
+            if (event.key.keysym.sym == SDLK_q) {
+                break_requested = 1;
+            }
+            return makeInt((int)event.key.keysym.sym);
+        }
+    }
+
+    return makeInt(0); // No key event
+}
+
 // Pscal: procedure ClearDevice;
 Value executeBuiltinClearDevice(AST *node) {
     if (node->child_count != 0) {
@@ -2830,6 +2859,31 @@ Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
 
     SDL_SetRenderTarget(gSdlRenderer, targetTexture);
     return makeVoid();
+}
+
+Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "PollKey expects 0 arguments.");
+        return makeInt(0);
+    }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+        runtimeError(vm, "Graphics mode not initialized before PollKey.");
+        return makeInt(0);
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            break_requested = 1;
+            return makeInt(0);
+        } else if (event.type == SDL_KEYDOWN) {
+            if (event.key.keysym.sym == SDLK_q) {
+                break_requested = 1;
+            }
+            return makeInt((int)event.key.keysym.sym);
+        }
+    }
+    return makeInt(0);
 }
 
 Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
