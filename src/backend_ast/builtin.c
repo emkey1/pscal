@@ -3329,6 +3329,8 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
              strcasecmp(name, "length") == 0 ||
              strcasecmp(name, "wherex") == 0 ||
              strcasecmp(name, "wherey") == 0 ||
+             strcasecmp(name, "biwherex") == 0 ||
+             strcasecmp(name, "biwherey") == 0 ||
              strcasecmp(name, "createtexture") == 0 ||
              strcasecmp(name, "loadsound") == 0 ||
              strcasecmp(name, "pollkey") == 0 ) {
