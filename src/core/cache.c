@@ -15,6 +15,7 @@
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
 #define CACHE_VERSION 3
 
+
 static unsigned long hash_path(const char* path) {
     uint32_t hash = 2166136261u;
     for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
@@ -220,7 +221,9 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                                 name[name_len] = '\0';
                                                 VarType type;
                                                 if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
+
                                                 Value val = {0};
+
                                                 if (!read_value(f, &val)) { free(name); ok = false; break; }
                                                 insertGlobalSymbol(name, type, NULL);
                                                 Symbol* sym = lookupGlobalSymbol(name);
