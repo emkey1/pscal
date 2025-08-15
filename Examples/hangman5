@@ -412,18 +412,10 @@ begin
     padding := (effectiveWidth - length(promptMsg)) div 2; if padding < 0 then padding := 0;
     GotoXY(borderLeft + 1 + padding, vMsgRow + 3);
 
-    write(promptMsg, ' ');
-    GotoXY(borderLeft + 1 + padding + length(promptMsg), vMsgRow + 3);
+    write(promptMsg);
+    repeat replay := ReadKey; if replay = #0 then Delay(10); until (replay <> #0);
+    write(replay);
 
-    repeat
-      replay := ReadKey;
-      if replay = #0 then Delay(10);
-    until (replay <> #0);
-
-    GotoXY(borderLeft + 1 + padding + length(promptMsg), vMsgRow + 3);
-
-    if not (replay in [#10, #13]) then
-      write(replay);
 
   until not ( (UpCase(replay) = 'Y') or (replay = #10) or (replay = #13) );
 
