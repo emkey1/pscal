@@ -1,0 +1,47 @@
+# Pscal Project Overview
+
+Pscal is a Pascal‑like language implemented in C.  The code base contains
+three major components:
+
+* **Front end** – hand written lexer and parser.
+* **Bytecode compiler** – generates a compact instruction stream.
+* **Virtual machine** – executes the bytecode and provides built‑in routines.
+
+Optional SDL2 and libcurl integrations add graphics, audio and basic
+networking capabilities.
+
+## Building
+
+Pscal uses CMake.  A typical non‑SDL build looks like:
+
+```sh
+mkdir build && cd build
+cmake -DSDL=OFF ..
+make
+```
+
+Enable SDL support by passing `-DSDL=ON` and ensuring the SDL2 development
+libraries are installed.
+
+## Testing
+
+After compiling, run the regression suite:
+
+```sh
+ctest --output-on-failure
+```
+
+This executes `Tests/run_tests.sh` and exercises positive and expected
+failure cases.
+
+## Directory Layout
+
+* `src/` – compiler and virtual machine sources
+* `lib/` – standard library units written in Pscal
+* `Examples/` – small sample programs
+* `Docs/` – project and language documentation
+
+## License
+
+Pscal is released under [The Unlicense](../LICENSE).
+
