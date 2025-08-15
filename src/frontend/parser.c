@@ -8,7 +8,6 @@
 #include "core/types.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
-#include "backend_ast/interpreter.h"
 #include "symbol/symbol.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -2707,7 +2706,7 @@ AST *factor(Parser *parser) {
         else if (node->type == AST_VARIABLE) {
                 // <<<< MODIFICATION START >>>>
                 // Check for built-in functions FIRST, as they are a special case.
-                if (node->token && isBuiltin(node->token->value) && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
+                if (node->token && isBuiltin(node->token->value)) {
                     
                     #ifdef DEBUG
                     fprintf(stderr, "[DEBUG factor] IDENTIFIER '%s' is a built-in FUNCTION. Converting to AST_PROCEDURE_CALL.\n", node->token->value);

@@ -5,7 +5,6 @@
 #include <assert.h>
 #include <ctype.h>
 #include "parser.h"  // so that Procedure and TypeEntry are defined
-#include "backend_ast/interpreter.h"  // so that Procedure and TypeEntry are defined
 #include "documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
@@ -1382,7 +1381,7 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
         switch(decl->type) {
             case AST_CONST_DECL: {
                 if (!decl->token) break;
-                Value v = eval(decl->left); // evaluated constant expression
+                Value v = evaluateCompileTimeValue(decl->left); // evaluated constant expression
                 sym = malloc(sizeof(Symbol)); /* null check */
                 if (!sym) { fprintf(stderr, "Malloc failed (Symbol) in buildUnitSymbolTable\n"); freeValue(&v); EXIT_FAILURE_HANDLER(); }
 
@@ -1825,117 +1824,7 @@ int computeFlatOffset(Value *array, int *indices) {
     }
     return offset;
 }
-Value* resolveLValueToPtr(AST* lvalueNode) {
-    if (!lvalueNode) {
-        fprintf(stderr, "Runtime error: Cannot resolve NULL lvalue node.\n");
-        EXIT_FAILURE_HANDLER();
-    }
 
-    switch (lvalueNode->type) {
-        case AST_VARIABLE: {
-            Symbol* sym = lookupSymbol(lvalueNode->token->value); // Handles not found error
-            if (sym->is_const) {
-                 fprintf(stderr, "Runtime error: Cannot modify constant symbol '%s'.\n", sym->name);
-                 EXIT_FAILURE_HANDLER();
-            }
-            if (!sym->value) {
-                 fprintf(stderr, "Runtime error: Symbol '%s' has NULL value pointer.\n", sym->name);
-                 EXIT_FAILURE_HANDLER();
-            }
-            return sym->value; // Return pointer to the symbol's value storage
-        }
-
-        case AST_ARRAY_ACCESS: {
-            Value* baseValuePtr = resolveLValueToPtr(lvalueNode->left);
-            if (!baseValuePtr) { /* Error handled in recursive call */ EXIT_FAILURE_HANDLER(); }
-
-            if (baseValuePtr->type == TYPE_ARRAY) {
-                if (!baseValuePtr->array_val) { /* Error: Array not initialized */ }
-                if (lvalueNode->child_count != baseValuePtr->dimensions) { /* Error: Index count mismatch */ }
-
-                int* indices = malloc(sizeof(int) * baseValuePtr->dimensions);
-                if (!indices) { /* Mem Error */ }
-                for (int i = 0; i < lvalueNode->child_count; i++) {
-                    assert(i < baseValuePtr->dimensions);
-                    Value idxVal = eval(lvalueNode->children[i]);
-                    if (idxVal.type != TYPE_INTEGER) { /* Index Type Error */ free(indices); freeValue(&idxVal); EXIT_FAILURE_HANDLER(); }
-                    indices[i] = (int)idxVal.i_val;
-                    freeValue(&idxVal);
-                }
-
-                int offset = computeFlatOffset(baseValuePtr, indices);
-                int total_size = 1;
-                for (int i = 0; i < baseValuePtr->dimensions; i++) { total_size *= (baseValuePtr->upper_bounds[i] - baseValuePtr->lower_bounds[i] + 1); }
-                 if (offset < 0 || offset >= total_size) { /* Bounds Error */ free(indices); EXIT_FAILURE_HANDLER(); }
-
-                free(indices);
-
-                return &(baseValuePtr->array_val[offset]);
-
-            } else if (baseValuePtr->type == TYPE_STRING) {
-                return baseValuePtr;
-            } else {
-                fprintf(stderr, "Runtime error: Attempted array/string access on non-array/string type (%s).\n", varTypeToString(baseValuePtr->type));
-                EXIT_FAILURE_HANDLER();
-            }
-            break;
-        }
-
-        case AST_FIELD_ACCESS: {
-            Value* baseValuePtr = resolveLValueToPtr(lvalueNode->left);
-             if (!baseValuePtr) { /* Error handled in recursive call */ EXIT_FAILURE_HANDLER(); }
-
-            if (baseValuePtr->type != TYPE_RECORD) {
-                 fprintf(stderr, "Runtime error: Field access on non-record type (%s).\n", varTypeToString(baseValuePtr->type));
-                 EXIT_FAILURE_HANDLER();
-            }
-             if (!baseValuePtr->record_val) {
-                  fprintf(stderr, "Runtime error: Record accessed before initialization or after being freed.\n");
-                  EXIT_FAILURE_HANDLER();
-             }
-
-            const char* targetFieldName = lvalueNode->token ? lvalueNode->token->value : NULL;
-            if (!targetFieldName) { /* Invalid AST node error */ }
-
-            FieldValue* currentField = baseValuePtr->record_val;
-            while (currentField) {
-                if (currentField->name && strcmp(currentField->name, targetFieldName) == 0) {
-                    return &(currentField->value);
-                }
-                currentField = currentField->next;
-            }
-
-            fprintf(stderr, "Runtime error: Field '%s' not found in record.\n", targetFieldName);
-            EXIT_FAILURE_HANDLER();
-            break;
-        }
-        case AST_DEREFERENCE: {
-            Value pointerValue = eval(lvalueNode->left);
-
-            if (pointerValue.type != TYPE_POINTER) {
-                fprintf(stderr, "Runtime error: Attempting to dereference a non-pointer type (%s) in LValue.\n", varTypeToString(pointerValue.type));
-                freeValue(&pointerValue);
-                EXIT_FAILURE_HANDLER();
-            }
-
-            if (pointerValue.ptr_val == NULL) {
-                fprintf(stderr, "Runtime error: Attempting assignment via a nil pointer.\n");
-                EXIT_FAILURE_HANDLER();
-            }
-
-            Value* targetValuePtr = pointerValue.ptr_val;
-
-            return targetValuePtr;
-        }
-
-        default:
-            fprintf(stderr, "Runtime error: Invalid lvalue node type (%s) for assignment target resolution.\n", astTypeToString(lvalueNode->type));
-            EXIT_FAILURE_HANDLER();
-    }
-    return NULL; // Should not be reached
-}
-
-// --- Set utility helpers (internal) ---
 static bool setContainsOrdinalUtil(const Value* setVal, long long ordinal) {
     if (!setVal || setVal->type != TYPE_SET || !setVal->set_val.set_values) {
         return false;
@@ -1968,6 +1857,12 @@ static void addOrdinalToResultSetUtil(Value* resultVal, long long ordinal) {
 
     resultVal->set_val.set_values[resultVal->set_val.set_size] = ordinal;
     resultVal->set_val.set_size++;
+}
+
+int getCursorPosition(int *row, int *col) {
+    if (row) *row = 1;
+    if (col) *col = 1;
+    return 0;
 }
 
 // --- Set operations exported via utils.h ---
