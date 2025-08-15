@@ -218,11 +218,17 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("Tan", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GotoXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("BoldText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("BIBoldText", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("BlinkText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("BIBlinkText", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("UnderlineText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("BIUnderlineText", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("LowVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("BILowVideo", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("NormVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("BINormVideo", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ClrScr", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("BIClrScr", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackground", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextColor", AST_PROCEDURE_DECL, NULL);
@@ -231,7 +237,9 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
     
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
