@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <termios.h>
+#include <unistd.h>
 
 // Helper function to get the ordinal value from a Value struct
 // Returns true on success, false if the type is not ordinal. Stores value in out_ord.
@@ -37,6 +39,21 @@ static bool getOrdinalValue(Value val, long long *out_ord) {
         default:
             return false; // Not a recognized ordinal type or valid single-char string
     }
+}
+
+// Ensure the terminal is in canonical (line-buffered) mode with echo and a
+// visible cursor before using Read/ReadLn. This safeguards against prior
+// calls to ReadKey or similar routines leaving the terminal in raw mode.
+static void interpreter_prepare_canonical_input(void) {
+    struct termios t;
+    if (tcgetattr(STDIN_FILENO, &t) == 0) {
+        t.c_lflag |= (ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    }
+    tcflush(STDIN_FILENO, TCIFLUSH);
+    const char show_cursor[] = "\x1B[?25h";
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+    fflush(stdout);
 }
 
 // Helper to check if an ordinal value exists in a set's values array
@@ -2369,6 +2386,10 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                  // Complex to handle correctly without knowing type beforehand. Assume simple or file for now.
             }
 
+            if (input == stdin) {
+                interpreter_prepare_canonical_input();
+            }
+
             // Loop to read into variable arguments
             for (int i = startIndex; i < node->child_count; i++) {
                 AST *target_lvalue_node = node->children[i];
@@ -2438,6 +2459,10 @@ void executeWithScope(AST *node, bool is_global_scope)  {
                     input = firstArg.f_val;
                     startIndex = 1;
                 }
+            }
+
+            if (input == stdin) {
+                interpreter_prepare_canonical_input();
             }
             for (int i = startIndex; i < node->child_count; i++) {
                 AST *target = node->children[i];
