@@ -1750,19 +1750,21 @@ Value makeCopyOfValue(const Value *src) {
                     EXIT_FAILURE_HANDLER();
                 }
                 v.mstream->size = src->mstream->size;
-                v.mstream->capacity = src->mstream->capacity;
-                if (src->mstream->buffer && src->mstream->capacity > 0) {
-                    v.mstream->buffer = malloc(src->mstream->capacity);
+                if (src->mstream->buffer && src->mstream->size >= 0) {
+                    size_t copy_size = (size_t)src->mstream->size + 1;
+                    v.mstream->capacity = copy_size;
+                    v.mstream->buffer = malloc(copy_size);
                     if (!v.mstream->buffer) {
                         free(v.mstream);
                         fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream buffer)\n");
                         EXIT_FAILURE_HANDLER();
                     }
-                    memcpy(v.mstream->buffer, src->mstream->buffer, src->mstream->size);
+                    memcpy(v.mstream->buffer, src->mstream->buffer, copy_size);
                 } else {
                     v.mstream->buffer = NULL;
+                    v.mstream->capacity = 0;
                 }
-            }
+                }
             break;
         case TYPE_SET:
             v.set_val.set_values = NULL;
