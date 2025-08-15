@@ -1157,9 +1157,6 @@ void dumpSymbol(Symbol *sym) {
     printf("\n");
 }
 
-/* Dump the global and local symbol tables. */
-void dumpSymbolTable(void);
-
 /*
  * debug_ast - A simple wrapper that begins dumping at the root with zero indent.
  */
