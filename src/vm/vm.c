@@ -1594,7 +1594,14 @@ comparison_error_label:
                     }
                     else {
                         freeValue(target_lvalue_ptr);
-                        *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
+                        if (value_to_set.type == TYPE_MEMORYSTREAM) {
+                            /* Transfer ownership of the MStream pointer without freeing it
+                             * when the temporary value is cleaned up below. */
+                            *target_lvalue_ptr = value_to_set;
+                            value_to_set.mstream = NULL;
+                        } else {
+                            *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
+                        }
                     }
                 }
 
