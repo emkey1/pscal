@@ -115,8 +115,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"ioresult", vmBuiltinIoresult},
 #ifdef SDL
     {"issoundplaying", vmBuiltinIssoundplaying}, // Moved
-    {"keypressed", vmBuiltinKeypressed},
 #endif
+    {"keypressed", vmBuiltinKeypressed},
     {"length", vmBuiltinLength},
     {"ln", vmBuiltinLn},
 #ifdef SDL
@@ -2664,13 +2664,17 @@ Value executeBuiltinReadKey(AST *node) {
     // --- Diagnostic: Check if stdin is a terminal ---
     if (!isatty(STDIN_FILENO)) {
         fprintf(stderr, "ReadKey Error: Standard input is not a terminal.\n");
-        return makeString(""); // Return empty string on error
+        // Returning an empty string previously caused callers expecting a
+        // character to receive a value of type STRING, which later became
+        // NIL when assigned to a char variable.  Return a NUL character
+        // instead so the type system remains consistent even on error.
+        return makeChar('\0');
     }
 
     // --- Get current terminal settings ---
     if (tcgetattr(STDIN_FILENO, &oldt) < 0) {
          perror("ReadKey Error: tcgetattr failed");
-         return makeString("");
+         return makeChar('\0');
     }
     newt = oldt;
 
@@ -2685,7 +2689,7 @@ Value executeBuiltinReadKey(AST *node) {
         perror("ReadKey Error: tcsetattr (set raw) failed");
         // Attempt to restore original settings *before* returning
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
-        return makeString("");
+        return makeChar('\0');
     }
 
     // --- Flush the input and output buffer (TCIOFLUSH attempt) ---
@@ -2709,19 +2713,15 @@ Value executeBuiltinReadKey(AST *node) {
     // --- Handle read result ---
     if (bytes_read < 0) {
         perror("ReadKey Error: read failed");
-        return makeString("");
+        return makeChar('\0');
     }
     else if (bytes_read == 0) {
         // Should not happen with VMIN=1, VTIME=0 unless EOF was reached *before* read
         fprintf(stderr, "Warning: ReadKey read 0 bytes (EOF?).\n");
-        return makeString("");
+        return makeChar('\0');
     } else {
         // Success: bytes_read should be 1
-        char buf[2];
-        buf[0] = ch_read;
-        buf[1] = '\0';
-        // Return as single-char string (or makeChar if preferred)
-        return makeString(buf);
+        return makeChar(ch_read);
     }
 }
 
@@ -3477,9 +3477,17 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
     }
     else if (strcasecmp(name, "readkey") == 0) {
+        // ReadKey returns a single character.  The previous implementation
+        // mistakenly declared the return type as STRING which resulted in
+        // the VM pushing a NIL value when assigning the function result to a
+        // char variable.  Subsequent equality checks against character
+        // constants (e.g. `if ch = 'S'`) therefore compared NIL with CHAR and
+        // triggered runtime errors.  Declaring the correct CHAR return type
+        // allows the compiler to generate proper char operations and avoids
+        // the comparison mismatch.
         dummy->child_count = 0;
-        Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
-        setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
+        Token* retTok = newToken(TOKEN_IDENTIFIER, "char", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
+        setTypeAST(retNode, TYPE_CHAR); setRight(dummy, retNode); dummy->var_type = TYPE_CHAR;
     }
     else if (strcasecmp(name, "copy") == 0) {
         dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
