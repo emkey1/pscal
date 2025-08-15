@@ -1012,8 +1012,20 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 Value result_val;
                 bool comparison_succeeded = false;
 
+                // Handle NIL comparisons explicitly. Only '=' and '<>' are allowed.
+                if (a_val.type == TYPE_NIL || b_val.type == TYPE_NIL) {
+                    if (instruction_val == OP_EQUAL) {
+                        result_val = makeBoolean(a_val.type == TYPE_NIL && b_val.type == TYPE_NIL);
+                        comparison_succeeded = true;
+                    } else if (instruction_val == OP_NOT_EQUAL) {
+                        result_val = makeBoolean(a_val.type != TYPE_NIL || b_val.type != TYPE_NIL);
+                        comparison_succeeded = true;
+                    } else {
+                        goto comparison_error_label;
+                    }
+                }
                 // Numeric comparison (Integers and Reals)
-                if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
+                else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
                     if (a_val.type == TYPE_REAL || b_val.type == TYPE_REAL) {
                         double fa = as_f64(a_val);
                         double fb = as_f64(b_val);
