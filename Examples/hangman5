@@ -413,6 +413,7 @@ begin
     GotoXY(borderLeft + 1 + padding, vMsgRow + 3);
     write(promptMsg);
     repeat replay := ReadKey; if replay = #0 then Delay(10); until (replay <> #0);
+    write(replay);
 
   until not ( (UpCase(replay) = 'Y') or (replay = #10) or (replay = #13) );
 

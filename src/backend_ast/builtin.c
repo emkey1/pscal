@@ -2769,6 +2769,11 @@ Value executeBuiltinReadKey(AST *node) {
     errno = 0; // Clear errno before read
     bytes_read = read(STDIN_FILENO, &ch_read, 1); // Read 1 byte
 
+    // --- Discard any extra input (e.g., a stray newline) ---
+    if (tcflush(STDIN_FILENO, TCIFLUSH) < 0) {
+        perror("ReadKey Warning: tcflush(TCIFLUSH) failed");
+    }
+
     // --- Restore original terminal settings ---
     // It's crucial to restore settings *regardless* of read success/failure
     if (tcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
