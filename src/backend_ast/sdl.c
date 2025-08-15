@@ -16,12 +16,9 @@
 #include "vm/vm.h"
 
 #include "sdl.h" // This header includes SDL/SDL_ttf headers
-#include "globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
+#include "globals.h"
 #include "types.h"
-#include "ast.h"
-#include "interpreter.h"
 #include "utils.h"
-#include "builtin.h"
 
 // SDL Global Variable Definitions
 SDL_Window* gSdlWindow = NULL;

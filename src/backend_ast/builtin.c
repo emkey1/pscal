@@ -10,8 +10,6 @@
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 
-// Forward declaration for eval from interpreter
-Value eval(AST *node);
 
 // Standard library includes remain the same
 #include <math.h>
@@ -1839,6 +1837,7 @@ Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     }
 }
 
+#if 0
 static const BuiltinMapping builtin_dispatch_table[] = {
     {"abs",       executeBuiltinAbs},
     {"api_receive", executeBuiltinAPIReceive},
@@ -1998,11 +1997,12 @@ static const BuiltinMapping builtin_dispatch_table[] = {
 #endif
     {"wherex",    executeBuiltinWhereX},
     {"wherey",    executeBuiltinWhereY}
-};
+#endif
 
 // Calculate the number of entries in the table
-static const size_t num_builtins = sizeof(builtin_dispatch_table) / sizeof(builtin_dispatch_table[0]);
+static const size_t num_builtins = 0;
 
+#if 0
 void assignValueToLValue(AST *lvalueNode, Value newValue) {
     if (!lvalueNode) {
         fprintf(stderr, "Runtime error: Cannot assign to NULL lvalue node.\n");
@@ -3450,6 +3450,7 @@ Value executeBuiltinProcedure(AST *node) {
     EXIT_FAILURE_HANDLER();
     return makeInt(0);
 }
+#endif
 
 static void configureBuiltinDummyAST(AST *dummy, const char *name) {
     // Ensure dummy is not NULL before proceeding
@@ -4333,7 +4334,7 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType, const char*
     addProcedure(dummy, unit_context_name_param_for_addproc, procedure_table);
     freeAST(dummy); // This will free the dummy node and its tree (params, return type node)
 }
-
+#if 0
 Value executeBuiltinParamcount(AST *node) {
     // No arguments expected.
     return makeInt(gParamCount);
@@ -4447,6 +4448,7 @@ Value executeBuiltinKeyPressed(AST *node) {
     // --- Return result ---
     return makeBoolean(key_is_pressed);
 }
+#endif
 
 int isBuiltin(const char *name) {
     if (!name) return 0;
@@ -4459,15 +4461,6 @@ int isBuiltin(const char *name) {
         }
     }
 
-    /* Fallback to legacy AST dispatch table */
-    for (size_t i = 0; i < num_builtins; i++) {
-        if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
-            return 1;
-        }
-    }
-
-    // Additionally check for Write/Writeln/Read/Readln if they are handled
-    // directly in the interpreter and not in the dispatch table.
     if (strcasecmp(name, "write") == 0 || strcasecmp(name, "writeln") == 0 ||
         strcasecmp(name, "read") == 0 || strcasecmp(name, "readln") == 0) {
         return 1;
@@ -4475,6 +4468,8 @@ int isBuiltin(const char *name) {
 
     return 0;
 }
+
+#if 0
 
 // --- Low(X) ---
 // Argument X: An expression evaluating to an ordinal type, OR more simply,
@@ -5060,6 +5055,8 @@ Value executeBuiltinExit(AST *node) {
     // is responsible for unwinding appropriately.
     return makeVoid();
 }
+
+#endif
 
 // VM Versions
 

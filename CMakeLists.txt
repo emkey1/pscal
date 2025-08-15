@@ -127,7 +127,7 @@ set(PSCAL_SOURCES
     src/core/types.c src/core/utils.c src/core/list.c
     src/frontend/lexer.c src/frontend/parser.c src/frontend/ast.c
     src/symbol/symbol.c
-    src/backend_ast/interpreter.c src/backend_ast/builtin.c
+    src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c

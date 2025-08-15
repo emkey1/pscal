@@ -4,7 +4,6 @@
 #include <string.h>
 #include <curl/curl.h>
 #include "backend_ast/builtin.h"
-#include "backend_ast/interpreter.h"
 #include "globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
@@ -60,6 +59,7 @@ static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *use
     return real_size;
 }
 
+#if 0
 /* Built–in function: api_send(URL, requestBody)
    - URL is a string.
    - requestBody can be a string or a memory stream.
@@ -227,6 +227,7 @@ Value executeBuiltinAPIReceive(AST *node) {
 
     return result_string;
 }
+#endif
 
 Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {

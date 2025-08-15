@@ -5,7 +5,6 @@
 #include "core/utils.h"
 #include "core/list.h"
 #include "globals.h"
-#include "backend_ast/interpreter.h"
 #include "backend_ast/builtin.h"
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
@@ -41,7 +40,6 @@ const char *PSCAL_USAGE =
     "     -v                          Display version.\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
-    "     --use-ast-interpreter       Use AST interpreter instead of VM.\n"
     "   or: pscal (with no arguments to display version and usage)";
 
 void initSymbolSystem(void) {
@@ -67,45 +65,7 @@ void initSymbolSystem(void) {
 #endif
 }
 
-void executeWithASTDump(AST *program_ast, const char *program_name) {
-    // Your existing executeWithASTDump function body is fine
-    // For brevity, I'm not repeating it here. Ensure it uses executeWithScope.
-    // Example (ensure this is your actual correct logic):
-    struct stat st = {0};
-    if (stat("/tmp/pscal", &st) == -1) {
-        if (mkdir("/tmp/pscal", 0777) != 0) {
-            perror("mkdir /tmp/pscal failed");
-            fprintf(stderr, "Warning: Could not create /tmp/pscal for AST dump. AST dump skipped.\n");
-            executeWithScope(program_ast, true);
-            return;
-        }
-    }
-    pid_t pid = getpid();
-    char filename[256];
-    const char *base = strrchr(program_name, '/');
-    if (base) base++; else base = program_name;
-    int chars_written = snprintf(filename, sizeof(filename), "/tmp/pscal/%s.%d.ast", base, (int)pid);
-    if (chars_written < 0 || (size_t)chars_written >= sizeof(filename)) {
-         fprintf(stderr, "Warning: AST dump filename is too long or invalid. AST dump skipped.\n");
-         executeWithScope(program_ast, true);
-         return;
-    }
-    FILE *f = fopen(filename, "wb");
-    if (!f) {
-        perror("fopen for AST dump failed");
-        fprintf(stderr, "Warning: Could not open AST dump file '%s'. AST dump skipped.\n", filename);
-        executeWithScope(program_ast, true);
-        return;
-    }
-    FILE *old_stdout = stdout;
-    stdout = f;
-    debugASTFile(program_ast);
-    stdout = old_stdout;
-    fclose(f);
-    executeWithScope(program_ast, true);
-}
-
-int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int use_ast_interpreter_flag, int dump_bytecode_flag) {
+int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int dump_bytecode_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -268,12 +228,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             dumpASTJSON(GlobalAST, stdout);
             fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
             overall_success_status = true;
-        } else if (use_ast_interpreter_flag) {
-            fprintf(stderr, "\n--- Executing Program with AST Interpreter (selected by flag) ---\n");
-            executeWithScope(GlobalAST, true);
-            overall_success_status = true;
         } else {
-            if (!dump_ast_json_flag && !use_ast_interpreter_flag) {
+            if (!dump_ast_json_flag) {
                 used_cache = loadBytecodeFromCache(programName, &chunk);
             }
             bool compilation_ok_for_vm = true;
@@ -350,7 +306,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 // Consistent main function structure for argument parsing
 int main(int argc, char *argv[]) {
     int dump_ast_json_flag = 0;
-    int use_ast_interpreter_flag = 0;
     int dump_bytecode_flag = 0;
     const char *sourceFile = NULL;
     const char *programName = argv[0]; // Default program name to executable name
@@ -372,8 +327,6 @@ int main(int argc, char *argv[]) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
-        } else if (strcmp(argv[i], "--use-ast-interpreter") == 0) {
-            use_ast_interpreter_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "%s\n", PSCAL_USAGE);
@@ -444,7 +397,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, dump_ast_json_flag, use_ast_interpreter_flag, dump_bytecode_flag);
+    int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag);
     free(source_buffer); // Free the source code buffer
 
     return result;

@@ -11,7 +11,6 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include "types.h"
-#include "ast.h"
 
 // Forward declare the VM struct
 struct VM_s;
@@ -27,13 +26,6 @@ int audioLoadSound(const char* filename);
 void audioPlaySound(int soundID);
 void audioFreeSound(int soundID);
 void audioQuitSystem(void);
-
-// AST-based built-ins
-Value executeBuiltinInitSoundSystem(AST *node);
-Value executeBuiltinLoadSound(AST *node);
-Value executeBuiltinPlaySound(AST *node);
-Value executeBuiltinQuitSoundSystem(AST *node);
-Value executeBuiltinIsSoundPlaying(AST *node);
 
 // VM-native built-ins
 Value vmBuiltinInitsoundsystem(struct VM_s* vm, int arg_count, Value* args);

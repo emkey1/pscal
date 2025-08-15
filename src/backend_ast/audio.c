@@ -2,7 +2,6 @@
 
 #include "audio.h"
 #include "globals.h" // For EXIT_FAILURE_HANDLER
-#include "interpreter.h" // For EXIT_FAILURE_HANDLER
 #include "utils.h" // For EXIT_FAILURE_HANDLER
 #include <stdio.h>
 #include <string.h> // For strdup
@@ -251,8 +250,8 @@ void audioQuitSystem(void) {
     DEBUG_PRINT("[DEBUG AUDIO] Pscal sound system shutdown procedures complete (Mix_Quit deferred to global exit).\n");
 }
 
-// The builtins (assuming these are correctly placed after Audio_... function definitions)
-
+#if 0
+// AST interpreter sound builtins
 Value executeBuiltinInitSoundSystem(AST *node) {
     // Check that no arguments were provided
     if (node->child_count != 0) {
@@ -383,6 +382,7 @@ Value executeBuiltinIsSoundPlaying(AST *node) {
     // Return a Pascal Boolean Value (True if playing, False otherwise)
     return makeBoolean(playing != 0);
 }
+#endif
 
 Value vmBuiltinInitsoundsystem(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "InitSoundSystem expects 0 arguments.");
