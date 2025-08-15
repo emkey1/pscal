@@ -1,5 +1,7 @@
 #include "core/cache.h"
 #include "core/utils.h" // for Value constructors
+#include "globals.h"
+#include "symbol/symbol.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdlib.h>
@@ -74,6 +76,14 @@ static bool write_value(FILE* f, const Value* v) {
             fwrite(&v->enum_val.ordinal, sizeof(v->enum_val.ordinal), 1, f);
             break;
         }
+        case TYPE_SET: {
+            int sz = v->set_val.set_size;
+            fwrite(&sz, sizeof(sz), 1, f);
+            if (sz > 0 && v->set_val.set_values) {
+                fwrite(v->set_val.set_values, sizeof(long long), sz, f);
+            }
+            break;
+        }
         default:
             return false;
     }
@@ -124,6 +134,19 @@ static bool read_value(FILE* f, Value* out) {
             if (fread(&out->enum_val.ordinal, sizeof(out->enum_val.ordinal), 1, f) != 1) return false;
             break;
         }
+        case TYPE_SET: {
+            int sz = 0;
+            if (fread(&sz, sizeof(sz), 1, f) != 1) return false;
+            out->set_val.set_size = sz;
+            if (sz > 0) {
+                out->set_val.set_values = (long long*)malloc(sizeof(long long) * sz);
+                if (!out->set_val.set_values) return false;
+                if (fread(out->set_val.set_values, sizeof(long long), sz, f) != (size_t)sz) return false;
+            } else {
+                out->set_val.set_values = NULL;
+            }
+            break;
+        }
         default:
             return false;
     }
@@ -134,6 +157,8 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return false;
     bool ok = false;
+    int const_count = 0;
+    int read_consts = 0;
     if (is_cache_fresh(cache_path, source_path)) {
         FILE* f = fopen(cache_path, "rb");
         if (f) {
@@ -141,7 +166,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
             if (fread(&magic, sizeof(magic), 1, f) == 1 &&
                 fread(&ver, sizeof(ver), 1, f) == 1 &&
                 magic == CACHE_MAGIC && ver == CACHE_VERSION) {
-                int count = 0, const_count = 0;
+                int count = 0;
                 if (fread(&count, sizeof(count), 1, f) == 1 &&
                     fread(&const_count, sizeof(const_count), 1, f) == 1) {
                     chunk->code = (uint8_t*)malloc(count);
@@ -153,8 +178,36 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                         if (fread(chunk->code, 1, count, f) == (size_t)count &&
                             fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
                             ok = true;
-                            for (int i = 0; i < const_count; ++i) {
-                                if (!read_value(f, &chunk->constants[i])) { ok = false; break; }
+                            for (read_consts = 0; read_consts < const_count; ++read_consts) {
+                                if (!read_value(f, &chunk->constants[read_consts])) { ok = false; break; }
+                            }
+                            if (ok) {
+                                int proc_count = 0;
+                                if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
+                                    for (int i = 0; i < proc_count; ++i) {
+                                        int name_len = 0;
+                                        if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
+                                        char* name = (char*)malloc(name_len + 1);
+                                        if (!name) { ok = false; break; }
+                                        if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
+                                        name[name_len] = '\0';
+                                        int addr = 0; uint8_t locals = 0, upvals = 0;
+                                        if (fread(&addr, sizeof(addr), 1, f) != 1 ||
+                                            fread(&locals, sizeof(locals), 1, f) != 1 ||
+                                            fread(&upvals, sizeof(upvals), 1, f) != 1) {
+                                            free(name); ok = false; break; }
+                                        Symbol* sym = lookupProcedure(name);
+                                        if (sym) {
+                                            sym->bytecode_address = addr;
+                                            sym->locals_count = locals;
+                                            sym->upvalue_count = upvals;
+                                            sym->is_defined = true;
+                                        }
+                                        free(name);
+                                    }
+                                } else {
+                                    ok = false;
+                                }
                             }
                         }
                     }
@@ -165,8 +218,13 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     }
     free(cache_path);
     if (!ok) {
-        free(chunk->code); chunk->code = NULL; chunk->lines = NULL; chunk->constants = NULL;
-        chunk->count = chunk->capacity = 0; chunk->constants_count = chunk->constants_capacity = 0;
+        for (int i = 0; i < read_consts; ++i) {
+            freeValue(&chunk->constants[i]);
+        }
+        free(chunk->code);
+        free(chunk->lines);
+        free(chunk->constants);
+        initBytecodeChunk(chunk);
     }
     return ok;
 }
@@ -185,6 +243,29 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     fwrite(chunk->lines, sizeof(int), chunk->count, f);
     for (int i = 0; i < chunk->constants_count; ++i) {
         if (!write_value(f, &chunk->constants[i])) { break; }
+    }
+    int proc_count = 0;
+    if (procedure_table) {
+        for (int i = 0; i < HASHTABLE_SIZE; i++) {
+            for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
+                if (sym->is_alias) continue;
+                proc_count++;
+            }
+        }
+    }
+    fwrite(&proc_count, sizeof(proc_count), 1, f);
+    if (procedure_table) {
+        for (int i = 0; i < HASHTABLE_SIZE; i++) {
+            for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
+                if (sym->is_alias) continue;
+                int name_len = (int)strlen(sym->name);
+                fwrite(&name_len, sizeof(name_len), 1, f);
+                fwrite(sym->name, 1, name_len, f);
+                fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f);
+                fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
+                fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
+            }
+        }
     }
     fclose(f);
     free(cache_path);
