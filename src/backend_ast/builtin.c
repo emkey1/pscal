@@ -28,6 +28,7 @@ Value eval(AST *node);
 #include <stdlib.h>  // For system(), getenv, malloc
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
+#include <stdio.h>   // For printf, fprintf
 
 static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 
@@ -38,10 +39,13 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"api_receive", vmBuiltinApiReceive},
     {"api_send", vmBuiltinApiSend},
     {"assign", vmBuiltinAssign},
+    {"blinktext", vmBuiltinBlinktext},
+    {"boldtext", vmBuiltinBoldtext},
     {"chr", vmBuiltinChr},
 #ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
 #endif
+    {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
 #ifdef SDL
     {"closegraph", vmBuiltinClosegraph},
@@ -112,11 +116,13 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"loadsound", vmBuiltinLoadsound},
 #endif
     {"low", vmBuiltinLow},
+    {"lowvideo", vmBuiltinLowvideo},
     {"mstreamcreate", vmBuiltinMstreamcreate},
     {"mstreamfree", vmBuiltinMstreamfree},
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"new", vmBuiltinNew},
+    {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
 #ifdef SDL
     {"outtextxy", vmBuiltinOuttextxy}, // Moved
@@ -169,6 +175,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"textcolor", vmBuiltinTextcolor},
     {"textcolore", vmBuiltinTextcolore},
     {"trunc", vmBuiltinTrunc},
+    {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
 #ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
@@ -483,6 +490,75 @@ Value vmBuiltinTextbackgrounde(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)AS_INTEGER(args[0]);
     gCurrentBgIsExt = true;
+    return makeVoid();
+}
+
+Value vmBuiltinBoldtext(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "BoldText expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextBold = true;
+    return makeVoid();
+}
+
+Value vmBuiltinUnderlinetext(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "UnderlineText expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextUnderline = true;
+    return makeVoid();
+}
+
+Value vmBuiltinBlinktext(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "BlinkText expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextBlink = true;
+    return makeVoid();
+}
+
+Value vmBuiltinLowvideo(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "LowVideo expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextBold = false;
+    return makeVoid();
+}
+
+Value vmBuiltinNormvideo(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "NormVideo expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextColor = 7;
+    gCurrentTextBackground = 0;
+    gCurrentTextBold = false;
+    gCurrentColorIsExt = false;
+    gCurrentBgIsExt = false;
+    gCurrentTextUnderline = false;
+    gCurrentTextBlink = false;
+    printf("\x1B[0m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "ClrScr expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[2J");
+    fflush(stdout);
     return makeVoid();
 }
 
@@ -1582,10 +1658,13 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"api_receive", executeBuiltinAPIReceive},
     {"api_send",  executeBuiltinAPISend},
     {"assign",    executeBuiltinAssign},
+    {"blinktext", executeBuiltinBlinkText},
+    {"boldtext",  executeBuiltinBoldText},
     {"chr",       executeBuiltinChr},
 #ifdef SDL
     {"cleardevice", executeBuiltinClearDevice},
 #endif
+    {"clrscr",    executeBuiltinClrScr},
     {"close",     executeBuiltinClose},
 #ifdef SDL
     {"closegraph", executeBuiltinCloseGraph},
@@ -1656,11 +1735,13 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"loadsound", executeBuiltinLoadSound},
 #endif
     {"low",       executeBuiltinLow},
+    {"lowvideo",  executeBuiltinLowVideo},
     {"mstreamcreate", executeBuiltinMstreamCreate},
     {"mstreamfree", executeBuiltinMstreamFree},
     {"mstreamloadfromfile", executeBuiltinMstreamLoadFromFile},
     {"mstreamsavetofile", executeBuiltinMstreamSaveToFile},
     {"new",       executeBuiltinNew},
+    {"normvideo", executeBuiltinNormVideo},
     {"ord",       executeBuiltinOrd},
 #ifdef SDL
     {"outtextxy", executeBuiltinOutTextXY},
@@ -1711,6 +1792,7 @@ static const BuiltinMapping builtin_dispatch_table[] = {
     {"textcolor", executeBuiltinTextColor},
     {"textcolore", executeBuiltinTextColorE},
     {"trunc",     executeBuiltinTrunc},
+    {"underlinetext", executeBuiltinUnderlineText},
     {"upcase",    executeBuiltinUpcase},
 #ifdef SDL
     {"updatescreen", executeBuiltinUpdateScreen},
@@ -4351,17 +4433,17 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     // List known PROCEDURES (no return value) - case-insensitive compare
     const char *procedures[] = {
          // Existing procedures
-        "assign", "cleardevice", "close", "closegraph", "dec", "delay",
+        "assign", "blinktext", "boldtext", "cleardevice", "clrscr", "close", "closegraph", "dec", "delay",
         "destroytexture", "dispose", "drawcircle", "drawline",
         "drawpolygon", "drawrect", "exit", "fillcircle", "fillrect",
         "getmousestate", "gettextsize", "gotoxy", "graphloop", "halt", "inc",
-        "initgraph", "initsoundsystem", "inittextsystem", "mstreamfree",
-        "mstreamloadfromfile", "mstreamsavetofile", "new", "outtextxy",
+        "initgraph", "initsoundsystem", "inittextsystem", "lowvideo", "mstreamfree",
+        "mstreamloadfromfile", "mstreamsavetofile", "new", "normvideo", "outtextxy",
         "playsound", "putpixel", "quitsoundsystem", "quittextsystem",
         "randomize", "read", "readln", "rendercopy", "rendercopyex", "rendercopyrect", "reset", "rewrite", "setalphablend",
          "setcolor", "setrendertarget", "setrgbcolor",
           "textbackground", "textbackgrounde", "textcolor",
-          "textcolore", "updatescreen", "updatetexture", "val", "waitkeyevent",
+          "textcolore", "underlinetext", "updatescreen", "updatetexture", "val", "waitkeyevent",
           "write", "writeln", "dos_getdate", "dos_gettime",
     };
     
@@ -4457,6 +4539,59 @@ Value executeBuiltinTextBackground(AST *node) {
     gCurrentBgIsExt = false; // Mark as standard 16-color mode (only 8 for BG used)
 
     // DO NOT PRINT ANYTHING HERE
+    return makeVoid();
+}
+
+Value executeBuiltinBoldText(AST *node) {
+    (void)node;
+    gCurrentTextBold = true;
+    printf("\x1B[1m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value executeBuiltinUnderlineText(AST *node) {
+    (void)node;
+    gCurrentTextUnderline = true;
+    printf("\x1B[4m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value executeBuiltinBlinkText(AST *node) {
+    (void)node;
+    gCurrentTextBlink = true;
+    printf("\x1B[5m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value executeBuiltinLowVideo(AST *node) {
+    (void)node;
+    gCurrentTextBold = false;
+    printf("\x1B[22m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value executeBuiltinNormVideo(AST *node) {
+    (void)node;
+    gCurrentTextColor = 7;
+    gCurrentTextBackground = 0;
+    gCurrentTextBold = false;
+    gCurrentColorIsExt = false;
+    gCurrentBgIsExt = false;
+    gCurrentTextUnderline = false;
+    gCurrentTextBlink = false;
+    printf("\x1B[0m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value executeBuiltinClrScr(AST *node) {
+    (void)node;
+    printf("\x1B[2J");
+    fflush(stdout);
     return makeVoid();
 }
 

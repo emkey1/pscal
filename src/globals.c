@@ -38,6 +38,8 @@ int gCurrentTextBackground = 0;       // Default background color (Black in 16-c
 bool gCurrentTextBold      = false;   // Default text boldness state.
 bool gCurrentColorIsExt    = false;   // Flag for extended 256-color foreground mode.
 bool gCurrentBgIsExt       = false;   // Flag for extended 256-color background mode.
+bool gCurrentTextUnderline = false;   // Default underline state.
+bool gCurrentTextBlink     = false;   // Default blink state.
 // --- End CRT State Variables ---
 
 // Flag used by builtins like GraphLoop to signal a quit request from the user.

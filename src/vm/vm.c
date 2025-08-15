@@ -2070,21 +2070,34 @@ comparison_error_label:
                 if (output_stream == stdout) {
                     // Check if the current color settings are the default ones.
                     bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
-                                             !gCurrentTextBold && !gCurrentColorIsExt && !gCurrentBgIsExt);
+                                             !gCurrentTextBold && !gCurrentTextUnderline && !gCurrentTextBlink &&
+                                             !gCurrentColorIsExt && !gCurrentBgIsExt);
 
                     if (!is_default_state) {
                         color_was_applied = true; // Mark that we're applying custom colors.
                         char escape_sequence[64] = "\x1B[";
                         char code_str[64];
                         bool first_attr = true;
+                        if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                        if (gCurrentTextUnderline) {
+                            if (!first_attr) strcat(escape_sequence, ";");
+                            strcat(escape_sequence, "4");
+                            first_attr = false;
+                        }
+                        if (gCurrentTextBlink) {
+                            if (!first_attr) strcat(escape_sequence, ";");
+                            strcat(escape_sequence, "5");
+                            first_attr = false;
+                        }
                         if (gCurrentColorIsExt) {
+                            if (!first_attr) strcat(escape_sequence, ";");
                             snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
                         } else {
-                            if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                            if (!first_attr) strcat(escape_sequence, ";");
                             snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
                         }
-                        if (!first_attr) strcat(escape_sequence, ";");
                         strcat(escape_sequence, code_str);
+                        first_attr = false;
                         strcat(escape_sequence, ";");
                         if (gCurrentBgIsExt) {
                             snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);

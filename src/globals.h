@@ -50,6 +50,8 @@ extern int gCurrentTextBackground;
 extern bool gCurrentTextBold;
 extern bool gCurrentColorIsExt;
 extern bool gCurrentBgIsExt;
+extern bool gCurrentTextUnderline;
+extern bool gCurrentTextBlink;
 
 // --- Other Globals ---
 #define MAX_RECURSION_DEPTH 10

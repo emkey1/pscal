@@ -55,6 +55,12 @@ Value vmBuiltinTextcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextbackground(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextcolore(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextbackgrounde(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinBoldtext(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinUnderlinetext(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinBlinktext(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinNormvideo(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLowvideo(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinClrscr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
@@ -154,6 +160,12 @@ Value executeBuiltinTextColorE(AST *node);
 Value executeBuiltinTextBackgroundE(AST *node);
 Value executeBuiltinTextColor(AST *node);
 Value executeBuiltinTextBackground(AST *node);
+Value executeBuiltinBoldText(AST *node);
+Value executeBuiltinUnderlineText(AST *node);
+Value executeBuiltinBlinkText(AST *node);
+Value executeBuiltinNormVideo(AST *node);
+Value executeBuiltinLowVideo(AST *node);
+Value executeBuiltinClrScr(AST *node);
 Value executeBuiltinNew(AST *node);
 Value executeBuiltinDispose(AST *node);
 Value executeBuiltinRealToStr(AST *node);
