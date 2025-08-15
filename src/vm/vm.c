@@ -567,6 +567,16 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         \
         /* String/char concatenation for OP_ADD */ \
         if (current_instruction_code == OP_ADD) { \
+            while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
+                Value tmp = makeCopyOfValue(a_val_popped.ptr_val); \
+                freeValue(&a_val_popped); \
+                a_val_popped = tmp; \
+            } \
+            while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
+                Value tmp = makeCopyOfValue(b_val_popped.ptr_val); \
+                freeValue(&b_val_popped); \
+                b_val_popped = tmp; \
+            } \
             if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
                 (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
                 char a_buffer[2] = {0}; \
