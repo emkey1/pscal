@@ -2273,32 +2273,37 @@ void executeWithScope(AST *node, bool is_global_scope)  {
             // --- Apply ANSI color codes ONLY if writing to stdout ---
             if (!isFileOp) { // <<< Only apply colors if output is stdout
 #ifdef DEBUG
-                fprintf(stderr, "<< Write Handler Start (stdout): Reading FG=%d, Ext=%d, BG=%d, BGExt=%d, Bold=%d\n",
+                fprintf(stderr, "<< Write Handler Start (stdout): Reading FG=%d, Ext=%d, BG=%d, BGExt=%d, Bold=%d, Under=%d, Blink=%d\n",
                         gCurrentTextColor, gCurrentColorIsExt,
                         gCurrentTextBackground, gCurrentBgIsExt,
-                        gCurrentTextBold);
+                        gCurrentTextBold, gCurrentTextUnderline, gCurrentTextBlink);
                 fflush(stderr);
 #endif
                 char escape_sequence[64] = "\x1B[";
                 char code_str[64];  // Probably larger than it needs to be, but better safe than sorry
                 bool first_attr = true;
 
-                // 1. Handle Bold/Intensity
-                if (!gCurrentColorIsExt && gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-                // 2. Handle Foreground Color
+                if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+                if (gCurrentTextUnderline) {
+                    if (!first_attr) strcat(escape_sequence, ";");
+                    strcat(escape_sequence, "4");
+                    first_attr = false;
+                }
+                if (gCurrentTextBlink) {
+                    if (!first_attr) strcat(escape_sequence, ";");
+                    strcat(escape_sequence, "5");
+                    first_attr = false;
+                }
                 if (!first_attr) strcat(escape_sequence, ";");
                 if (gCurrentColorIsExt) { snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor); }
                 else { snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold)); }
                 strcat(escape_sequence, code_str);
                 first_attr = false;
-                // 3. Handle Background Color
                 strcat(escape_sequence, ";");
                 if (gCurrentBgIsExt) { snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground); }
                 else { snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground)); }
                 strcat(escape_sequence, code_str);
-                // 4. Terminate sequence
                 strcat(escape_sequence, "m");
-                // 5. Print sequence to stdout
                 printf("%s", escape_sequence);
                 fflush(stdout); // Flush color code immediately might help
                 colorWasSet = true; // <<< SET Flag: Colors were applied

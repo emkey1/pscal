@@ -84,7 +84,7 @@ begin
   case OSKind of
     osLinux, osMac:
       begin
-        Write(ESC, '[2J');
+        BIClrScr;
         GotoXY(WinLeft, WinTop);
       end;
   else
@@ -235,17 +235,17 @@ end;
 
 procedure BoldText;
 begin
-  Write(ESC, '[1m');
+  BIBoldText;
 end;
 
 procedure UnderlineText;
 begin
-  Write(ESC, '[4m');
+  BIUnderlineText;
 end;
 
 procedure BlinkText;
 begin
-  Write(ESC, '[5m');
+  BIBlinkText;
 end;
 
 function WhereX: integer;
@@ -275,21 +275,19 @@ end;
 { Sets text attribute to high intensity (bold) }
 procedure HighVideo;
 begin
-  Write(ESC, '[1m');
+  BIBoldText;
 end;
 
 { Sets text attribute to low intensity (often dark gray foreground) }
 procedure LowVideo;
 begin
-  TextColor(DarkGray);
-  // Alternatively, could use faint code if supported: Write(ESC, '[2m');
+  BILowVideo;
 end;
 
 { Sets text attribute to the default/normal intensity and colors }
 procedure NormVideo;
 begin
-  NormalColors; // Reuse existing NormalColors procedure
-  // Alternatively, directly: Write(ESC, '[0m');
+  BINormVideo;
 end;
 
 { Defines a text window on the screen }
