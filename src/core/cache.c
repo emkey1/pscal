@@ -13,7 +13,8 @@
 
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION 2
+#define CACHE_VERSION 3
+
 
 static unsigned long hash_path(const char* path) {
     uint32_t hash = 2166136261u;
@@ -62,7 +63,7 @@ static bool write_value(FILE* f, const Value* v) {
         case TYPE_CHAR:
             fwrite(&v->c_val, sizeof(v->c_val), 1, f); break;
         case TYPE_STRING: {
-            int len = v->s_val ? (int)strlen(v->s_val) : 0;
+            int len = v->s_val ? (int)strlen(v->s_val) : -1;
             fwrite(&len, sizeof(len), 1, f);
             if (len > 0) fwrite(v->s_val, 1, len, f);
             break;
@@ -108,14 +109,15 @@ static bool read_value(FILE* f, Value* out) {
         case TYPE_STRING: {
             int len = 0;
             if (fread(&len, sizeof(len), 1, f) != 1) return false;
-            if (len > 0) {
+            if (len >= 0) {
                 out->s_val = (char*)malloc(len + 1);
                 if (!out->s_val) return false;
-                if (fread(out->s_val, 1, len, f) != (size_t)len) return false;
+                if (len > 0 && fread(out->s_val, 1, len, f) != (size_t)len) return false;
                 out->s_val[len] = '\0';
             } else {
                 out->s_val = NULL;
             }
+            out->max_length = -1;
             break;
         }
         case TYPE_NIL:
@@ -219,7 +221,9 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                                 name[name_len] = '\0';
                                                 VarType type;
                                                 if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
-                                                Value val;
+
+                                                Value val = {0};
+
                                                 if (!read_value(f, &val)) { free(name); ok = false; break; }
                                                 insertGlobalSymbol(name, type, NULL);
                                                 Symbol* sym = lookupGlobalSymbol(name);
