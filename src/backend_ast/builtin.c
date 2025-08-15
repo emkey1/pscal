@@ -79,6 +79,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"fillcircle", vmBuiltinFillcircle},
     {"fillrect", vmBuiltinFillrect},
+#endif
+    {"getenv", vmBuiltinGetenv},
+#ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
     {"getmousestate", vmBuiltinGetmousestate},
@@ -170,6 +173,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
     {"updatetexture", vmBuiltinUpdatetexture},
+#endif
+    {"val", vmBuiltinVal},
+#ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
     {"wherex", vmBuiltinWherex},
@@ -1197,6 +1203,58 @@ Value vmBuiltinDosGetenv(VM* vm, int arg_count, Value* args) {
     return makeString(val);
 }
 
+// Expose getenv without the DOS_ prefix for portability
+Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "getenv expects 1 string argument.");
+        return makeString("");
+    }
+    const char* val = getenv(AS_STRING(args[0]));
+    if (!val) val = "";
+    return makeString(val);
+}
+
+// Parse string to numeric value similar to Turbo Pascal's Val procedure
+Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) {
+        runtimeError(vm, "Val expects 3 arguments.");
+        return makeVoid();
+    }
+
+    Value src = args[0];
+    Value dstPtr = args[1];
+    Value codePtr = args[2];
+    if (src.type != TYPE_STRING || dstPtr.type != TYPE_POINTER || codePtr.type != TYPE_POINTER) {
+        runtimeError(vm, "Val expects (string, var numeric, var integer).");
+        return makeVoid();
+    }
+
+    Value* dst = (Value*)dstPtr.ptr_val;
+    Value* code = (Value*)codePtr.ptr_val;
+    const char* s = src.s_val ? src.s_val : "";
+
+    char* endptr = NULL;
+    errno = 0;
+    if (dst->type == TYPE_REAL) {
+        double r = strtod(s, &endptr);
+        if (errno != 0 || (endptr && *endptr != '\0')) {
+            *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
+        } else {
+            dst->r_val = r;
+            *code = makeInt(0);
+        }
+    } else {
+        long long n = strtoll(s, &endptr, 10);
+        if (errno != 0 || (endptr && *endptr != '\0')) {
+            *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
+        } else {
+            dst->i_val = n;
+            *code = makeInt(0);
+        }
+    }
+    return makeVoid();
+}
+
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
         runtimeError(vm, "dos_exec expects 2 string arguments.");
@@ -1565,6 +1623,9 @@ static const BuiltinMapping builtin_dispatch_table[] = {
 #ifdef SDL
     {"fillcircle", executeBuiltinFillCircle},
     {"fillrect",  executeBuiltinFillRect},
+#endif
+    {"getenv", NULL},
+#ifdef SDL
     {"getmaxx",   executeBuiltinGetMaxX},
     {"getmaxy",   executeBuiltinGetMaxY},
     {"getmousestate", executeBuiltinGetMouseState},
@@ -1654,6 +1715,9 @@ static const BuiltinMapping builtin_dispatch_table[] = {
 #ifdef SDL
     {"updatescreen", executeBuiltinUpdateScreen},
     {"updatetexture", executeBuiltinUpdateTexture},
+#endif
+    {"val", NULL},
+#ifdef SDL
     {"waitkeyevent", executeBuiltinWaitKeyEvent},
 #endif
     {"wherex",    executeBuiltinWhereX},
@@ -3272,7 +3336,7 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         Token* retTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0); AST* retNode = newASTNode(AST_VARIABLE, retTok); freeToken(retTok);
         setTypeAST(retNode, TYPE_STRING); setRight(dummy, retNode); dummy->var_type = TYPE_STRING;
     }
-    else if (strcasecmp(name, "dos_getenv") == 0) {
+    else if (strcasecmp(name, "dos_getenv") == 0 || strcasecmp(name, "getenv") == 0) {
         dummy->child_capacity = 1; dummy->children = malloc(sizeof(AST*)); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
         AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
         Token* pn1 = newToken(TOKEN_IDENTIFIER, "_varname", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1; dummy->child_count = 1;
@@ -3916,6 +3980,16 @@ static void configureBuiltinDummyAST(AST *dummy, const char *name) {
         dummy->var_type = TYPE_INTEGER;
     }
 #endif
+    else if (strcasecmp(name, "val") == 0) {
+        dummy->child_capacity = 3; dummy->children = malloc(sizeof(AST*) * 3); if (!dummy->children) { EXIT_FAILURE_HANDLER(); }
+        AST* p1 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p1, TYPE_STRING);
+        Token* pn1 = newToken(TOKEN_IDENTIFIER, "_s", 0, 0); AST* v1 = newASTNode(AST_VARIABLE, pn1); freeToken(pn1); addChild(p1, v1); dummy->children[0] = p1;
+        AST* p2 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p2, TYPE_INTEGER); p2->by_ref = 1;
+        Token* pn2 = newToken(TOKEN_IDENTIFIER, "_n", 0, 0); AST* v2 = newASTNode(AST_VARIABLE, pn2); freeToken(pn2); addChild(p2, v2); dummy->children[1] = p2;
+        AST* p3 = newASTNode(AST_VAR_DECL, NULL); setTypeAST(p3, TYPE_INTEGER); p3->by_ref = 1;
+        Token* pn3 = newToken(TOKEN_IDENTIFIER, "_code", 0, 0); AST* v3 = newASTNode(AST_VARIABLE, pn3); freeToken(pn3); addChild(p3, v3); dummy->children[2] = p3;
+        dummy->child_count = 3; dummy->var_type = TYPE_VOID;
+    }
     // --- Default / Unhandled ---
     else {
         if (dummy->type == AST_FUNCTION_DECL) {
@@ -4259,11 +4333,11 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "upcase", "low", "high", "succ", "pred", "round",
         "inttostr", "api_send", "api_receive", "screencols", "screenrows",
         "keypressed", "mstreamcreate", "quitrequested", "loadsound",
-        "real", "readkey", "getmaxx", "getmaxy", "getticks", "sqr",
+         "real", "readkey", "getenv", "getmaxx", "getmaxy", "getticks", "sqr",
         "realtostr", "createtexture", "createtargettexture",
         "loadimagetotexture", "rendertexttotexture",
-        "dos_exec", "dos_findfirst", "dos_findnext", "dos_getenv",
-        "dos_getfattr", "dos_mkdir", "dos_rmdir"
+         "dos_exec", "dos_findfirst", "dos_findnext", "dos_getenv",
+         "dos_getfattr", "dos_mkdir", "dos_rmdir"
         
          // Add others like TryStrToInt, TryStrToFloat if implemented
     };
@@ -4286,9 +4360,9 @@ BuiltinRoutineType getBuiltinType(const char *name) {
         "playsound", "putpixel", "quitsoundsystem", "quittextsystem",
         "randomize", "read", "readln", "rendercopy", "rendercopyex", "rendercopyrect", "reset", "rewrite", "setalphablend",
          "setcolor", "setrendertarget", "setrgbcolor",
-         "textbackground", "textbackgrounde", "textcolor",
-         "textcolore", "updatescreen", "updatetexture", "waitkeyevent",
-         "write", "writeln", "dos_getdate", "dos_gettime",
+          "textbackground", "textbackgrounde", "textcolor",
+          "textcolore", "updatescreen", "updatetexture", "val", "waitkeyevent",
+          "write", "writeln", "dos_getdate", "dos_gettime",
     };
     
     int num_procedures = sizeof(procedures) / sizeof(procedures[0]);

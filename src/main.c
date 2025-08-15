@@ -181,6 +181,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Inc", AST_PROCEDURE_DECL, NULL);
@@ -222,6 +223,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("TextColorE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
     
