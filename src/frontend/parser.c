@@ -1380,9 +1380,11 @@ AST *parseEnumDefinition(Parser *parser, Token* enumTypeNameToken) {
         // --- Symbol Table Handling (using copied token's value) ---
         insertGlobalSymbol(copiedValueToken->value, TYPE_ENUM, node);
         Symbol *symCheck = lookupGlobalSymbol(copiedValueToken->value);
-         if (symCheck && symCheck->value) {
-             symCheck->value->enum_val.ordinal = valueNode->i_val;
-         }
+        if (symCheck && symCheck->value) {
+            symCheck->value->enum_val.ordinal = valueNode->i_val;
+            /* Enum members are constants so mark them accordingly */
+            symCheck->is_const = true;
+        }
         // --- End Symbol Table Handling ---
 
         // --- Free the COPIED enum value token ---
@@ -2335,10 +2337,12 @@ AST *enumDeclaration(Parser *parser) {
         // Pass the parent TYPE node ('node') as the type definition hint.
         insertGlobalSymbol(valueToken->value, TYPE_ENUM, node);
         Symbol *symCheck = lookupGlobalSymbol(valueToken->value);
-         if (symCheck && symCheck->value) {
-             symCheck->value->enum_val.ordinal = valueNode->i_val; // Ensure ordinal is correct
-             // enum_name should be set correctly by insertGlobalSymbol now
-         }
+        if (symCheck && symCheck->value) {
+            symCheck->value->enum_val.ordinal = valueNode->i_val; // Ensure ordinal is correct
+            /* Enum members are constants for global lookup and caching */
+            symCheck->is_const = true;
+            // enum_name should be set correctly by insertGlobalSymbol now
+        }
         // --- End Symbol Table Handling ---
 
         if (parser->current_token->type == TOKEN_COMMA) {

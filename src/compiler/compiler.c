@@ -230,6 +230,12 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                 (param_actual->var_type == TYPE_CHAR   && arg_vt == TYPE_STRING)) {
                 return true;
             }
+            // Allow implicit narrowing from wider ordinal types to BYTE.
+            if (param_actual->var_type == TYPE_BYTE &&
+                (arg_vt == TYPE_INTEGER || arg_vt == TYPE_WORD ||
+                 arg_vt == TYPE_ENUM    || arg_vt == TYPE_CHAR)) {
+                return true;
+            }
             return false;
         }
     } else if (!arg_actual) {
@@ -263,12 +269,15 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                 return arg_vt == TYPE_STRING || arg_vt == TYPE_CHAR;
             case TYPE_BOOLEAN:
             case TYPE_BYTE:
-            case TYPE_WORD:
             case TYPE_ENUM:
             case TYPE_FILE:
             case TYPE_MEMORYSTREAM:
             case TYPE_NIL:
                 return param_actual->var_type == arg_vt;
+            case TYPE_WORD:
+                return arg_vt == TYPE_WORD || arg_vt == TYPE_INTEGER ||
+                       arg_vt == TYPE_BYTE  || arg_vt == TYPE_ENUM   ||
+                       arg_vt == TYPE_CHAR;
             default:
                 return false; // Need structural info for arrays/records/etc.
         }
@@ -2374,6 +2383,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (param_node && param_node->by_ref) {
                             is_var_param = true;
                         }
+                    } else if (functionName && i == 0 && strcasecmp(functionName, "eof") == 0) {
+                        // Built-in EOF takes its file parameter by reference
+                        is_var_param = true;
                     }
 
                     if (is_var_param) {
