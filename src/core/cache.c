@@ -15,7 +15,7 @@
 
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION 3
+#define CACHE_VERSION 4
 
 
 static unsigned long hash_path(const char* path) {
@@ -283,10 +283,11 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                         if (!name) { ok = false; break; }
                                         if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
                                         name[name_len] = '\0';
-                                        int addr = 0; uint8_t locals = 0, upvals = 0;
+                                        int addr = 0; uint8_t locals = 0, upvals = 0; VarType type;
                                         if (fread(&addr, sizeof(addr), 1, f) != 1 ||
                                             fread(&locals, sizeof(locals), 1, f) != 1 ||
-                                            fread(&upvals, sizeof(upvals), 1, f) != 1) {
+                                            fread(&upvals, sizeof(upvals), 1, f) != 1 ||
+                                            fread(&type, sizeof(type), 1, f) != 1) {
                                             free(name); ok = false; break; }
                                         // Standalone VM runs start without a populated procedure table.
                                         // Recreate entries from the bytecode when they're absent.
@@ -295,6 +296,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                             sym->bytecode_address = addr;
                                             sym->locals_count = locals;
                                             sym->upvalue_count = upvals;
+                                            sym->type = type;
                                             sym->is_defined = true;
                                         } else {
                                             sym = (Symbol*)calloc(1, sizeof(Symbol));
@@ -314,6 +316,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                             sym->bytecode_address = addr;
                                             sym->locals_count = locals;
                                             sym->upvalue_count = upvals;
+                                            sym->type = type;
                                             sym->is_defined = true;
                                             sym->is_alias = false;
                                             sym->is_local_var = false;
@@ -418,10 +421,11 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                     if (!name) { ok = false; break; }
                                     if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
                                     name[name_len] = '\0';
-                                    int addr = 0; uint8_t locals = 0, upvals = 0;
+                                    int addr = 0; uint8_t locals = 0, upvals = 0; VarType type;
                                     if (fread(&addr, sizeof(addr), 1, f) != 1 ||
                                         fread(&locals, sizeof(locals), 1, f) != 1 ||
-                                        fread(&upvals, sizeof(upvals), 1, f) != 1) {
+                                        fread(&upvals, sizeof(upvals), 1, f) != 1 ||
+                                        fread(&type, sizeof(type), 1, f) != 1) {
                                         free(name); ok = false; break; }
                                     // When loading raw bytecode the procedure table may be empty,
                                     // so recreate any missing entries from the serialized metadata.
@@ -430,6 +434,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                         sym->bytecode_address = addr;
                                         sym->locals_count = locals;
                                         sym->upvalue_count = upvals;
+                                        sym->type = type;
                                         sym->is_defined = true;
                                     } else {
                                         sym = (Symbol*)malloc(sizeof(Symbol));
@@ -450,6 +455,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                         sym->bytecode_address = addr;
                                         sym->locals_count = locals;
                                         sym->upvalue_count = upvals;
+                                        sym->type = type;
                                         sym->is_defined = true;
                                         sym->is_alias = false;
                                         sym->is_local_var = false;
@@ -569,6 +575,7 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
                 fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f);
                 fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
                 fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
+                fwrite(&sym->type, sizeof(sym->type), 1, f);
             }
         }
     }
