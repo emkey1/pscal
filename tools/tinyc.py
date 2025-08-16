@@ -81,6 +81,11 @@ class Token:
 
 
 def tokenize(source: str) -> List[Token]:
+    # Remove comments enclosed in curly braces. Comments do not nest and may
+    # span multiple lines, so we simply strip everything between a ``{`` and
+    # the next ``}``.
+    source = re.sub(r"\{[^}]*\}", " ", source)
+
     tokens: List[Token] = []
     for match in TOKEN_REGEX.finditer(source):
         if match.group("id"):
