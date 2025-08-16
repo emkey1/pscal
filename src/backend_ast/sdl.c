@@ -51,6 +51,102 @@ int findFreeTextureID(void) {
     return -1; // No free slots
 }
 
+void SdlCleanupAtExit(void) {
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SDL] Running SdlCleanupAtExit (Final Program Exit Cleanup)...\n");
+    #endif
+
+    // --- Clean up SDL_ttf resources ---
+    if (gSdlFont) {
+        TTF_CloseFont(gSdlFont);
+        gSdlFont = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_CloseFont successful.\n");
+        #endif
+    }
+    if (gSdlTtfInitialized) {
+        TTF_Quit();
+        gSdlTtfInitialized = false;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_Quit successful.\n");
+        #endif
+    }
+
+    // --- Clean up SDL_image resources --- // <<< NEW SECTION
+    if (gSdlImageInitialized) {
+        IMG_Quit();
+        gSdlImageInitialized = false;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: IMG_Quit successful.\n");
+        #endif
+    }
+    // --- END NEW SECTION ---
+
+
+    // --- Clean up SDL_mixer audio resources ---
+    for (int i = 0; i < MAX_SOUNDS; ++i) {
+        if (gLoadedSounds[i] != NULL) {
+            Mix_FreeChunk(gLoadedSounds[i]);
+            gLoadedSounds[i] = NULL;
+            DEBUG_PRINT("[DEBUG AUDIO] SdlCleanupAtExit: Auto-freed sound chunk at index %d.\n", i);
+        }
+    }
+    int open_freq, open_channels;
+    Uint16 open_format;
+    if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) {
+        Mix_CloseAudio();
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio successful.\n");
+        #endif
+    } else {
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
+        #endif
+    }
+    Mix_Quit();
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_Quit successful.\n");
+    #endif
+    gSoundSystemInitialized = false;
+
+
+    // --- Clean up core SDL video and timer resources ---
+    // Destroy textures first
+/*    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
+        if (gSdlTextures[i] != NULL) {
+            SDL_DestroyTexture(gSdlTextures[i]);
+            gSdlTextures[i] = NULL;
+        }
+    }
+ */
+    if (gSdlRenderer) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
+        #endif
+    }
+    if (gSdlWindow) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyWindow successful.\n");
+        #endif
+    }
+    if (gSdlInitialized) {
+        SDL_Quit();
+        gSdlInitialized = false;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_Quit successful.\n");
+        #endif
+    }
+
+    #ifdef DEBUG
+    fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit finished.\n");
+    #endif
+}
+
+
 Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
