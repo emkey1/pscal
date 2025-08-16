@@ -1,0 +1,492 @@
+#!/usr/bin/env python3
+"""Tiny language compiler targeting the Pscal VM.
+
+This script parses a very small language described by the grammar in the
+repository's README and emits Pscal bytecode so the resulting program can be
+executed by ``pscalvm``.  Only integer variables and arithmetic are supported,
+which is sufficient for basic demonstrations and educational purposes.
+
+Usage::
+
+    python tools/tinyc.py source.tiny output.pbc
+
+The output file can be executed with ``pscalvm``::
+
+    ./build/bin/pscalvm output.pbc
+
+"""
+from __future__ import annotations
+
+import re
+import struct
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Tuple, Dict, Any, Set
+
+# ---------------------------------------------------------------------------
+# Opcode loading
+# ---------------------------------------------------------------------------
+
+def load_opcodes(root: Path) -> Dict[str, int]:
+    """Parse ``bytecode.h`` to recover opcode values."""
+    header = root / "src" / "compiler" / "bytecode.h"
+    pattern = re.compile(r"^\s*(OP_[A-Z0-9_]+)\s*,")
+    opcodes: Dict[str, int] = {}
+    enum_started = False
+    index = 0
+    with open(header, "r", encoding="utf-8") as f:
+        for line in f:
+            if not enum_started:
+                if line.strip().startswith("typedef enum"):
+                    enum_started = True
+                continue
+            if line.strip().startswith("}"):
+                break
+            m = pattern.search(line)
+            if m:
+                name = m.group(1)
+                opcodes[name] = index
+                index += 1
+    return opcodes
+
+# VarType enum (partial)
+TYPE_INTEGER = 2
+TYPE_STRING = 4
+
+# ---------------------------------------------------------------------------
+# Lexer
+# ---------------------------------------------------------------------------
+
+TOKEN_REGEX = re.compile(
+    r"\s*(?:"  # Skip leading whitespace
+    r"(?P<id>[A-Za-z_][A-Za-z_0-9]*)"
+    r"|(?P<num>\d+)"
+    r"|(?P<assign>:=)"
+    r"|(?P<op>[+\-*/<>=;()])"
+    r"|(?P<unknown>.)"
+    r")"
+)
+
+KEYWORDS = {
+    "if", "then", "else", "end",
+    "repeat", "until",
+    "read", "write",
+}
+
+@dataclass
+class Token:
+    type: str
+    value: str
+
+
+def tokenize(source: str) -> List[Token]:
+    tokens: List[Token] = []
+    for match in TOKEN_REGEX.finditer(source):
+        if match.group("id"):
+            val = match.group("id")
+            typ = val.lower() if val.lower() in KEYWORDS else "IDENT"
+            tokens.append(Token(typ, val))
+        elif match.group("num"):
+            tokens.append(Token("NUMBER", match.group("num")))
+        elif match.group("assign"):
+            tokens.append(Token(":=", ":="))
+        elif match.group("op"):
+            tokens.append(Token(match.group("op"), match.group("op")))
+        elif match.group("unknown"):
+            raise SyntaxError(f"Unknown token: {match.group('unknown')}")
+    tokens.append(Token("EOF", ""))
+    return tokens
+
+# ---------------------------------------------------------------------------
+# Parser AST definitions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Node:
+    pass
+
+@dataclass
+class Program(Node):
+    statements: List[Node]
+
+@dataclass
+class Assign(Node):
+    name: str
+    expr: Node
+
+@dataclass
+class Read(Node):
+    name: str
+
+@dataclass
+class Write(Node):
+    expr: Node
+
+@dataclass
+class If(Node):
+    cond: Node
+    then_branch: List[Node]
+    else_branch: Optional[List[Node]]
+
+@dataclass
+class Repeat(Node):
+    body: List[Node]
+    cond: Node
+
+@dataclass
+class BinOp(Node):
+    left: Node
+    op: str
+    right: Node
+
+@dataclass
+class Num(Node):
+    value: int
+
+@dataclass
+class Var(Node):
+    name: str
+
+# ---------------------------------------------------------------------------
+# Recursive descent parser
+# ---------------------------------------------------------------------------
+
+class Parser:
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.pos = 0
+
+    def current(self) -> Token:
+        return self.tokens[self.pos]
+
+    def consume(self, typ: str) -> Token:
+        tok = self.current()
+        if tok.type != typ:
+            raise SyntaxError(f"Expected {typ}, got {tok.type}")
+        self.pos += 1
+        return tok
+
+    def parse(self) -> Program:
+        stmts = self.statement_sequence()
+        self.consume("EOF")
+        return Program(stmts)
+
+    def statement_sequence(self) -> List[Node]:
+        stmts = [self.statement()]
+        while self.current().type == ";":
+            self.consume(";")
+            stmts.append(self.statement())
+        return stmts
+
+    def statement(self) -> Node:
+        tok = self.current()
+        if tok.type == "if":
+            return self.if_statement()
+        if tok.type == "repeat":
+            return self.repeat_statement()
+        if tok.type == "read":
+            self.consume("read")
+            name = self.consume("IDENT").value
+            return Read(name)
+        if tok.type == "write":
+            self.consume("write")
+            expr = self.expression()
+            return Write(expr)
+        if tok.type == "IDENT":
+            name = self.consume("IDENT").value
+            self.consume(":=")
+            expr = self.expression()
+            return Assign(name, expr)
+        raise SyntaxError(f"Unexpected token {tok.type}")
+
+    def if_statement(self) -> If:
+        self.consume("if")
+        cond = self.expression()
+        self.consume("then")
+        then_branch = self.statement_sequence()
+        else_branch = None
+        if self.current().type == "else":
+            self.consume("else")
+            else_branch = self.statement_sequence()
+        self.consume("end")
+        return If(cond, then_branch, else_branch)
+
+    def repeat_statement(self) -> Repeat:
+        self.consume("repeat")
+        body = self.statement_sequence()
+        self.consume("until")
+        cond = self.expression()
+        return Repeat(body, cond)
+
+    def expression(self) -> Node:
+        node = self.simple_expression()
+        tok = self.current()
+        if tok.type in ("<", "="):
+            self.consume(tok.type)
+            right = self.simple_expression()
+            node = BinOp(node, tok.type, right)
+        return node
+
+    def simple_expression(self) -> Node:
+        node = self.term()
+        while self.current().type in ("+", "-"):
+            op = self.current().type
+            self.consume(op)
+            right = self.term()
+            node = BinOp(node, op, right)
+        return node
+
+    def term(self) -> Node:
+        node = self.factor()
+        while self.current().type in ("*", "/"):
+            op = self.current().type
+            self.consume(op)
+            right = self.factor()
+            node = BinOp(node, op, right)
+        return node
+
+    def factor(self) -> Node:
+        tok = self.current()
+        if tok.type == "(" :
+            self.consume("(")
+            node = self.expression()
+            self.consume(")")
+            return node
+        if tok.type == "NUMBER":
+            self.consume("NUMBER")
+            return Num(int(tok.value))
+        if tok.type == "IDENT":
+            self.consume("IDENT")
+            return Var(tok.value)
+        raise SyntaxError(f"Unexpected token {tok.type}")
+
+# ---------------------------------------------------------------------------
+# Bytecode builder and emitter helpers
+# ---------------------------------------------------------------------------
+
+class BytecodeBuilder:
+    def __init__(self, opcodes: Dict[str, int]):
+        self.opcodes = opcodes
+        self.code: List[int] = []
+        self.lines: List[int] = []
+        self.constants: List[Tuple[int, Any]] = []
+        self.const_map: Dict[Tuple[int, Any], int] = {}
+
+    def emit(self, byte: int) -> None:
+        self.code.append(byte & 0xFF)
+        self.lines.append(0)
+
+    def emit_short(self, value: int) -> None:
+        self.emit((value >> 8) & 0xFF)
+        self.emit(value & 0xFF)
+
+    def add_constant(self, ctype: int, value: Any) -> int:
+        key = (ctype, value)
+        if key in self.const_map:
+            return self.const_map[key]
+        idx = len(self.constants)
+        self.constants.append((ctype, value))
+        self.const_map[key] = idx
+        return idx
+
+    def emit_constant(self, value: int) -> None:
+        idx = self.add_constant(TYPE_INTEGER, value)
+        if idx <= 0xFF:
+            self.emit(self.opcodes["OP_CONSTANT"])
+            self.emit(idx)
+        else:
+            self.emit(self.opcodes["OP_CONSTANT16"])
+            self.emit_short(idx)
+
+# ---------------------------------------------------------------------------
+# Compiler
+# ---------------------------------------------------------------------------
+
+class TinyCompiler:
+    def __init__(self, root: Path):
+        self.root = root
+        self.opcodes = load_opcodes(root)
+        self.builder = BytecodeBuilder(self.opcodes)
+        self.vars: Set[str] = set()
+        self.var_name_idx: Dict[str, int] = {}
+        self.read_idx = self.builder.add_constant(TYPE_STRING, "read")
+        self.type_integer_idx = self.builder.add_constant(TYPE_STRING, "integer")
+
+    # --- AST Traversal to collect variables ---
+    def collect_vars(self, node: Node) -> None:
+        if isinstance(node, Var):
+            self.vars.add(node.name)
+        for child in getattr(node, "__dict__", {}).values():
+            if isinstance(child, list):
+                for c in child:
+                    if isinstance(c, Node):
+                        self.collect_vars(c)
+            elif isinstance(child, Node):
+                self.collect_vars(child)
+
+    # --- Top-level compile ---
+    def compile(self, program: Program) -> BytecodeBuilder:
+        self.collect_vars(program)
+        # Emit definitions for all variables
+        for name in sorted(self.vars):
+            name_idx = self.builder.add_constant(TYPE_STRING, name)
+            self.var_name_idx[name] = name_idx
+            if name_idx <= 0xFF:
+                self.builder.emit(self.opcodes["OP_DEFINE_GLOBAL"])
+                self.builder.emit(name_idx)
+            else:
+                self.builder.emit(self.opcodes["OP_DEFINE_GLOBAL16"])
+                self.builder.emit_short(name_idx)
+            self.builder.emit(TYPE_INTEGER)
+            self.builder.emit_short(self.type_integer_idx)
+        # Compile statements
+        for stmt in program.statements:
+            self.compile_statement(stmt)
+        self.builder.emit(self.opcodes["OP_HALT"])
+        return self.builder
+
+    # --- Statement compilation ---
+    def compile_statement(self, stmt: Node) -> None:
+        if isinstance(stmt, Assign):
+            self.compile_expression(stmt.expr)
+            name_idx = self.var_name_idx[stmt.name]
+            self.emit_global_addr(name_idx)
+            self.builder.emit(self.opcodes["OP_SWAP"])
+            self.builder.emit(self.opcodes["OP_SET_INDIRECT"])
+        elif isinstance(stmt, Read):
+            name_idx = self.var_name_idx[stmt.name]
+            self.emit_global_addr(name_idx)
+            self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+            self.builder.emit_short(self.read_idx)
+            self.builder.emit(1)  # argument count
+        elif isinstance(stmt, Write):
+            self.compile_expression(stmt.expr)
+            self.builder.emit(self.opcodes["OP_WRITE"])
+            self.builder.emit(1)
+        elif isinstance(stmt, If):
+            self.compile_expression(stmt.cond)
+            self.builder.emit(self.opcodes["OP_JUMP_IF_FALSE"])
+            jump_to_else = len(self.builder.code)
+            self.builder.emit_short(0)
+            for s in stmt.then_branch:
+                self.compile_statement(s)
+            if stmt.else_branch:
+                self.builder.emit(self.opcodes["OP_JUMP"])
+                jump_over_else = len(self.builder.code)
+                self.builder.emit_short(0)
+                offset = len(self.builder.code) - (jump_to_else + 2)
+                self.patch_short(jump_to_else, offset)
+                for s in stmt.else_branch:
+                    self.compile_statement(s)
+                offset = len(self.builder.code) - (jump_over_else + 2)
+                self.patch_short(jump_over_else, offset)
+            else:
+                offset = len(self.builder.code) - (jump_to_else + 2)
+                self.patch_short(jump_to_else, offset)
+        elif isinstance(stmt, Repeat):
+            loop_start = len(self.builder.code)
+            for s in stmt.body:
+                self.compile_statement(s)
+            self.compile_expression(stmt.cond)
+            self.builder.emit(self.opcodes["OP_JUMP_IF_FALSE"])
+            backward = loop_start - (len(self.builder.code) + 2)
+            self.builder.emit_short(backward)
+        else:
+            raise NotImplementedError(f"Unhandled statement {stmt}")
+
+    def patch_short(self, pos: int, value: int) -> None:
+        self.builder.code[pos] = (value >> 8) & 0xFF
+        self.builder.code[pos + 1] = value & 0xFF
+
+    def emit_global_addr(self, name_idx: int) -> None:
+        if name_idx <= 0xFF:
+            self.builder.emit(self.opcodes["OP_GET_GLOBAL_ADDRESS"])
+            self.builder.emit(name_idx)
+        else:
+            self.builder.emit(self.opcodes["OP_GET_GLOBAL_ADDRESS16"])
+            self.builder.emit_short(name_idx)
+
+    # --- Expression compilation ---
+    def compile_expression(self, expr: Node) -> None:
+        if isinstance(expr, Num):
+            self.builder.emit_constant(expr.value)
+        elif isinstance(expr, Var):
+            name_idx = self.var_name_idx[expr.name]
+            if name_idx <= 0xFF:
+                self.builder.emit(self.opcodes["OP_GET_GLOBAL"])
+                self.builder.emit(name_idx)
+            else:
+                self.builder.emit(self.opcodes["OP_GET_GLOBAL16"])
+                self.builder.emit_short(name_idx)
+        elif isinstance(expr, BinOp):
+            self.compile_expression(expr.left)
+            self.compile_expression(expr.right)
+            opmap = {
+                "+": "OP_ADD",
+                "-": "OP_SUBTRACT",
+                "*": "OP_MULTIPLY",
+                "/": "OP_DIVIDE",
+                "<": "OP_LESS",
+                "=": "OP_EQUAL",
+            }
+            self.builder.emit(self.opcodes[opmap[expr.op]])
+        else:
+            raise NotImplementedError(f"Unhandled expression {expr}")
+
+# ---------------------------------------------------------------------------
+# Serialization
+# ---------------------------------------------------------------------------
+
+CACHE_MAGIC = 0x50534243  # 'PSBC'
+CACHE_VERSION = 4
+
+
+def write_bytecode(builder: BytecodeBuilder, path: Path) -> None:
+    code = bytes(builder.code)
+    lines = [0] * len(code)
+    consts = builder.constants
+    with open(path, "wb") as f:
+        f.write(struct.pack("<II", CACHE_MAGIC, CACHE_VERSION))
+        f.write(struct.pack("<ii", len(code), len(consts)))
+        f.write(code)
+        f.write(struct.pack("<" + "i" * len(lines), *lines))
+        for ctype, val in consts:
+            f.write(struct.pack("<i", ctype))
+            if ctype == TYPE_INTEGER:
+                f.write(struct.pack("<q", int(val)))
+            elif ctype == TYPE_STRING:
+                if val is None:
+                    f.write(struct.pack("<i", -1))
+                else:
+                    data = val.encode("utf-8")
+                    f.write(struct.pack("<i", len(data)))
+                    if data:
+                        f.write(data)
+            else:
+                raise NotImplementedError("Unsupported constant type")
+        # Procedure table, const symbol table, and type table counts (all zero)
+        f.write(struct.pack("<i", 0))
+        f.write(struct.pack("<i", 0))
+        f.write(struct.pack("<i", 0))
+
+# ---------------------------------------------------------------------------
+# Main entry
+# ---------------------------------------------------------------------------
+
+def main(argv: List[str]) -> int:
+    if len(argv) != 3:
+        print("Usage: tinyc.py source.tiny output.pbc", file=sys.stderr)
+        return 1
+    src_path = Path(argv[1])
+    out_path = Path(argv[2])
+    source = src_path.read_text(encoding="utf-8")
+    tokens = tokenize(source)
+    program = Parser(tokens).parse()
+    compiler = TinyCompiler(Path(__file__).resolve().parent.parent)
+    builder = compiler.compile(program)
+    write_bytecode(builder, out_path)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
