@@ -183,6 +183,9 @@ END;
 
 BEGIN // Main Program
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  { Pump the event loop once so the window becomes visible on all platforms }
+  UpdateScreen;
+  GraphLoop(0);
   Randomize;
   MaxX := GetMaxX; MaxY := GetMaxY;
 
