@@ -198,12 +198,38 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                                             fread(&locals, sizeof(locals), 1, f) != 1 ||
                                             fread(&upvals, sizeof(upvals), 1, f) != 1) {
                                             free(name); ok = false; break; }
+                                        // Standalone VM runs start without a populated procedure table.
+                                        // Recreate entries from the bytecode when they're absent.
                                         Symbol* sym = lookupProcedure(name);
                                         if (sym) {
                                             sym->bytecode_address = addr;
                                             sym->locals_count = locals;
                                             sym->upvalue_count = upvals;
                                             sym->is_defined = true;
+                                        } else {
+                                            sym = (Symbol*)calloc(1, sizeof(Symbol));
+                                            if (!sym) {
+                                                free(name);
+                                                ok = false;
+                                                break;
+                                            }
+                                            sym->name = strdup(name);
+                                            if (!sym->name) {
+                                                free(sym);
+                                                free(name);
+                                                ok = false;
+                                                break;
+                                            }
+                                            toLowerString(sym->name);
+                                            sym->bytecode_address = addr;
+                                            sym->locals_count = locals;
+                                            sym->upvalue_count = upvals;
+                                            sym->is_defined = true;
+                                            sym->is_alias = false;
+                                            sym->is_local_var = false;
+                                            sym->is_const = false;
+                                            sym->real_symbol = NULL;
+                                            hashTableInsert(procedure_table, sym);
                                         }
                                         free(name);
                                     }
@@ -307,12 +333,39 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                         fread(&locals, sizeof(locals), 1, f) != 1 ||
                                         fread(&upvals, sizeof(upvals), 1, f) != 1) {
                                         free(name); ok = false; break; }
+                                    // When loading raw bytecode the procedure table may be empty,
+                                    // so recreate any missing entries from the serialized metadata.
                                     Symbol* sym = lookupProcedure(name);
                                     if (sym) {
                                         sym->bytecode_address = addr;
                                         sym->locals_count = locals;
                                         sym->upvalue_count = upvals;
                                         sym->is_defined = true;
+                                    } else {
+                                        sym = (Symbol*)malloc(sizeof(Symbol));
+                                        if (!sym) {
+                                            free(name);
+                                            ok = false;
+                                            break;
+                                        }
+                                        memset(sym, 0, sizeof(Symbol));
+                                        sym->name = strdup(name);
+                                        if (!sym->name) {
+                                            free(sym);
+                                            free(name);
+                                            ok = false;
+                                            break;
+                                        }
+                                        toLowerString(sym->name);
+                                        sym->bytecode_address = addr;
+                                        sym->locals_count = locals;
+                                        sym->upvalue_count = upvals;
+                                        sym->is_defined = true;
+                                        sym->is_alias = false;
+                                        sym->is_local_var = false;
+                                        sym->is_const = false;
+                                        sym->real_symbol = NULL;
+                                        hashTableInsert(procedure_table, sym);
                                     }
                                     free(name);
                                 }
