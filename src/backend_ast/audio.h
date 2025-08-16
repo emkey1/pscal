@@ -29,11 +29,6 @@ void audioFreeSound(int soundID);
 void audioQuitSystem(void);
 
 // AST-based built-ins
-Value executeBuiltinInitSoundSystem(AST *node);
-Value executeBuiltinLoadSound(AST *node);
-Value executeBuiltinPlaySound(AST *node);
-Value executeBuiltinQuitSoundSystem(AST *node);
-Value executeBuiltinIsSoundPlaying(AST *node);
 
 // VM-native built-ins
 Value vmBuiltinInitsoundsystem(struct VM_s* vm, int arg_count, Value* args);

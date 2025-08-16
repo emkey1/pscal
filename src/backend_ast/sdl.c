@@ -19,7 +19,6 @@
 #include "globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 #include "types.h"
 #include "ast.h"
-#include "interpreter.h"
 #include "utils.h"
 #include "builtin.h"
 
@@ -47,6 +46,7 @@ void InitializeTextureSystem(void) {
 }
 
 Value executeBuiltinInitGraph(AST *node) {
+#if 0
     // --- Initialize SDL if not already done ---
     if (!gSdlInitialized) {
         #ifdef DEBUG
@@ -2113,6 +2113,7 @@ Value executeBuiltinRenderTextToTexture(AST *node) {
     return makeInt(textureID); // Return the 0-based TextureID
 }
 
+#endif /* AST interpreter removed */
 Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");

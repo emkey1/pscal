@@ -1,5 +1,4 @@
 #include "backend_ast/builtin.h"
-#include "frontend/parser.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #ifdef SDL
@@ -9,9 +8,6 @@
 #include "globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
-
-// Forward declaration for eval from interpreter
-Value eval(AST *node);
 
 // Standard library includes remain the same
 #include <math.h>
@@ -23,6 +19,7 @@ Value eval(AST *node);
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
 #include <string.h>  // For strlen, strdup
+#include <strings.h> // For strcasecmp
 #include <dirent.h>  // For directory traversal
 #include <sys/stat.h> // For file attributes
 #include <stdlib.h>  // For system(), getenv, malloc
@@ -487,6 +484,12 @@ static void vm_prepare_canonical_input(void) {
     const char show_cursor[] = "\x1B[?25h";
     write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
     fflush(stdout);
+}
+
+int getCursorPosition(int *row, int *col) {
+    if (row) *row = 1;
+    if (col) *col = 1;
+    return 0;
 }
 
 Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
@@ -1839,6 +1842,7 @@ Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     }
 }
 
+#if 0
 static const BuiltinMapping builtin_dispatch_table[] = {
     {"abs",       executeBuiltinAbs},
     {"api_receive", executeBuiltinAPIReceive},
@@ -5063,6 +5067,8 @@ Value executeBuiltinExit(AST *node) {
 
 // VM Versions
 
+#endif /* AST interpreter removed */
+
 Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "IntToStr requires 1 argument."); return makeString(""); }
     Value arg = args[0];
@@ -5088,6 +5094,7 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "Length requires 1 string argument."); return makeInt(0); }
     return makeInt(args[0].s_val ? strlen(args[0].s_val) : 0);
 }
+
 
 Value vmBuiltinAbs(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
@@ -5126,14 +5133,44 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-// Looks up a built-in by name and returns its C function handler.
-BuiltinHandler getBuiltinHandler(const char *name) {
-    if (!name) return NULL;
-
-    for (size_t i = 0; i < num_builtins; i++) {
-        if (strcasecmp(name, builtin_dispatch_table[i].name) == 0) {
-            return builtin_dispatch_table[i].handler;
+int getBuiltinIDForCompiler(const char *name) {
+    if (!name) return -1;
+    size_t count = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
+    for (size_t i = 0; i < count; ++i) {
+        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+            return (int)i;
         }
     }
-    return NULL;
+    return -1;
 }
+
+typedef struct {
+    char *name;
+    BuiltinRoutineType type;
+} RegisteredBuiltin;
+
+static RegisteredBuiltin builtin_registry[256];
+static int builtin_registry_count = 0;
+
+void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
+    (void)unit_context_name_param_for_addproc;
+    if (builtin_registry_count >= 256) return;
+    builtin_registry[builtin_registry_count].name = strdup(name);
+    builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?
+        BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
+    builtin_registry_count++;
+}
+
+int isBuiltin(const char *name) {
+    return getBuiltinIDForCompiler(name) != -1;
+}
+
+BuiltinRoutineType getBuiltinType(const char *name) {
+    for (int i = 0; i < builtin_registry_count; ++i) {
+        if (strcasecmp(name, builtin_registry[i].name) == 0) {
+            return builtin_registry[i].type;
+        }
+    }
+    return BUILTIN_TYPE_NONE;
+}
+

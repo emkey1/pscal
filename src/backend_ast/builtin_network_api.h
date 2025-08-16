@@ -12,8 +12,6 @@
 #include "frontend/ast.h"
 
 // Prototypes for AST-based handlers
-Value executeBuiltinAPISend(AST *node);
-Value executeBuiltinAPIReceive(AST *node);
 
 // Add VM-native prototypes later if you convert these to the new system
 struct VM_s;

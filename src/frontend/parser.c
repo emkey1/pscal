@@ -8,7 +8,6 @@
 #include "core/types.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
-#include "backend_ast/interpreter.h"
 #include "symbol/symbol.h"
 #include <stdbool.h>
 #include <stdio.h>

@@ -39,43 +39,6 @@ void InitializeTextureSystem(void);
 void SdlCleanupAtExit(void);
 
 // AST-based built-in handlers
-Value executeBuiltinInitGraph(AST *node);
-Value executeBuiltinCloseGraph(AST *node);
-Value executeBuiltinGraphLoop(AST *node);
-Value executeBuiltinUpdateScreen(AST *node);
-Value executeBuiltinClearDevice(AST *node);
-Value executeBuiltinWaitKeyEvent(AST *node);
-Value executeBuiltinPollKey(AST *node);
-Value executeBuiltinGetMaxX(AST *node);
-Value executeBuiltinGetMaxY(AST *node);
-Value executeBuiltinGetTicks(AST *node);
-Value executeBuiltinGetMouseState(AST *node);
-Value executeBuiltinQuitRequested(AST *node);
-Value executeBuiltinSetColor(AST *node);
-Value executeBuiltinSetRGBColor(AST *node);
-Value executeBuiltinPutPixel(AST *node);
-Value executeBuiltinDrawLine(AST *node);
-Value executeBuiltinDrawRect(AST *node);
-Value executeBuiltinFillRect(AST *node);
-Value executeBuiltinDrawCircle(AST *node);
-Value executeBuiltinFillCircle(AST *node);
-Value executeBuiltinDrawPolygon(AST *node);
-Value executeBuiltinGetPixelColor(AST *node);
-Value executeBuiltinInitTextSystem(AST *node);
-Value executeBuiltinQuitTextSystem(AST *node);
-Value executeBuiltinOutTextXY(AST *node);
-Value executeBuiltinGetTextSize(AST *node);
-Value executeBuiltinCreateTexture(AST *node);
-Value executeBuiltinCreateTargetTexture(AST *node);
-Value executeBuiltinDestroyTexture(AST *node);
-Value executeBuiltinUpdateTexture(AST *node);
-Value executeBuiltinSetRenderTarget(AST *node);
-Value executeBuiltinRenderCopy(AST *node);
-Value executeBuiltinRenderCopyRect(AST *node);
-Value executeBuiltinRenderCopyEx(AST *node);
-Value executeBuiltinLoadImageToTexture(AST *node);
-Value executeBuiltinRenderTextToTexture(AST *node);
-Value executeBuiltinSetAlphaBlend(AST *node);
 
 // VM-native built-in handlers
 Value vmBuiltinInitgraph(struct VM_s* vm, int arg_count, Value* args);
