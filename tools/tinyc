@@ -126,7 +126,7 @@ class Read(Node):
 
 @dataclass
 class Write(Node):
-    expr: Node
+    expr: Optional[Node] = None
 
 @dataclass
 class If(Node):
@@ -196,6 +196,8 @@ class Parser:
             return Read(name)
         if tok.type == "write":
             self.consume("write")
+            if self.current().type in {";", "until", "end", "else", "EOF"}:
+                return Write(None)
             expr = self.expression()
             return Write(expr)
         if tok.type == "IDENT":
@@ -370,9 +372,13 @@ class TinyCompiler:
             self.builder.emit_short(self.read_idx)
             self.builder.emit(1)  # argument count
         elif isinstance(stmt, Write):
-            self.compile_expression(stmt.expr)
-            self.builder.emit(self.opcodes["OP_WRITE"])
-            self.builder.emit(1)
+            if stmt.expr is None:
+                self.builder.emit(self.opcodes["OP_WRITE_LN"])
+                self.builder.emit(0)
+            else:
+                self.compile_expression(stmt.expr)
+                self.builder.emit(self.opcodes["OP_WRITE"])
+                self.builder.emit(1)
         elif isinstance(stmt, If):
             self.compile_expression(stmt.cond)
             self.builder.emit(self.opcodes["OP_JUMP_IF_FALSE"])
