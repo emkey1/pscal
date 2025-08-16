@@ -2377,6 +2377,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (param_node && param_node->by_ref) {
                             is_var_param = true;
                         }
+                    } else if (functionName && i == 0 && strcasecmp(functionName, "eof") == 0) {
+                        // Built-in EOF takes its file parameter by reference
+                        is_var_param = true;
                     }
 
                     if (is_var_param) {
