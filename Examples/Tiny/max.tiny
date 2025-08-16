@@ -1,0 +1,9 @@
+{ Print the maximum of two numbers }
+read x;
+read y;
+if x < y then
+    max := y
+else
+    max := x
+end;
+write max
