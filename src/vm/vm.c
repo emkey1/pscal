@@ -291,15 +291,16 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
 void freeVM(VM* vm) {
     if (!vm) return;
+    // The VM holds references to global symbol tables that are owned and
+    // managed by the caller (e.g. vm_main.c). Freeing them here would lead to
+    // double-free errors when the caller performs its own cleanup. Simply
+    // clear the pointer to signal that the VM no longer uses it.
     if (vm->vmGlobalSymbols) {
-        // Assuming freeHashTable also frees the Symbols and their Values correctly.
-        // If not, you might need to iterate and free Values if they contain heap data
-        // not managed by freeValue calls during Symbol freeing.
-        freeHashTable(vm->vmGlobalSymbols); //
         vm->vmGlobalSymbols = NULL;
     }
-    // No explicit freeing of vm->host_functions array itself as it's part of VM struct.
-    // If HostFn structs themselves allocated memory, that would need handling.
+    // No explicit freeing of vm->host_functions array itself as it's part of
+    // the VM struct. If HostFn entries allocated memory, that would require
+    // additional handling.
 }
 
 // Unwind the current call frame. If there are no more frames, the VM should halt.
