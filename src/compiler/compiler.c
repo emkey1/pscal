@@ -596,15 +596,16 @@ Value evaluateCompileTimeValue(AST* node) {
         case AST_PROCEDURE_CALL: {
             if (node->token && isBuiltin(node->token->value)) {
                 const char* funcName = node->token->value;
+
                 if ((strcasecmp(funcName, "low") == 0 || strcasecmp(funcName, "high") == 0) &&
                     node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
-                    
+
                     const char* typeName = node->children[0]->token->value;
                     AST* typeDef = lookupType(typeName);
 
                     if (typeDef) {
                         if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
-                        
+
                         if (typeDef->type == AST_ENUM_TYPE) {
                             if (strcasecmp(funcName, "low") == 0) {
                                 return makeEnum(typeName, 0);
@@ -613,6 +614,26 @@ Value evaluateCompileTimeValue(AST* node) {
                             }
                         }
                     }
+                } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
+                    Value arg = evaluateCompileTimeValue(node->children[0]);
+                    if (arg.type == TYPE_INTEGER) {
+                        Value result = makeChar((char)arg.i_val);
+                        freeValue(&arg);
+                        return result;
+                    }
+                    freeValue(&arg);
+                } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
+                    Value arg = evaluateCompileTimeValue(node->children[0]);
+                    Value result = makeVoid();
+                    if (arg.type == TYPE_CHAR) {
+                        result = makeInt((unsigned char)arg.c_val);
+                    } else if (arg.type == TYPE_BOOLEAN) {
+                        result = makeInt(arg.i_val ? 1 : 0);
+                    } else if (arg.type == TYPE_ENUM) {
+                        result = makeInt(arg.enum_val.ordinal);
+                    }
+                    freeValue(&arg);
+                    if (result.type != TYPE_VOID) return result;
                 }
             }
             break; // Fall through to makeVoid if not a recognized compile-time function
