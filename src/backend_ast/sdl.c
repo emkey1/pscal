@@ -41,6 +41,16 @@ void InitializeTextureSystem(void) {
     }
 }
 
+// Helper to find a free texture slot or return an error ID
+int findFreeTextureID(void) {
+    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
+        if (gSdlTextures[i] == NULL) {
+            return i;
+        }
+    }
+    return -1; // No free slots
+}
+
 Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
