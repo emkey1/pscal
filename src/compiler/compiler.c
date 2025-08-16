@@ -263,12 +263,15 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                 return arg_vt == TYPE_STRING || arg_vt == TYPE_CHAR;
             case TYPE_BOOLEAN:
             case TYPE_BYTE:
-            case TYPE_WORD:
             case TYPE_ENUM:
             case TYPE_FILE:
             case TYPE_MEMORYSTREAM:
             case TYPE_NIL:
                 return param_actual->var_type == arg_vt;
+            case TYPE_WORD:
+                return arg_vt == TYPE_WORD || arg_vt == TYPE_INTEGER ||
+                       arg_vt == TYPE_BYTE  || arg_vt == TYPE_ENUM   ||
+                       arg_vt == TYPE_CHAR;
             default:
                 return false; // Need structural info for arrays/records/etc.
         }
