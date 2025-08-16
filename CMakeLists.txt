@@ -237,12 +237,21 @@ add_pscal_executable(pscal)
 add_pscal_executable(dscal)
 # add_pscal_executable(hscal) // Lets not build this normally
 
+# Standalone VM binary
+set(PSCAL_VM_SOURCES ${PSCAL_SOURCES})
+list(REMOVE_ITEM PSCAL_VM_SOURCES src/main.c)
+list(APPEND PSCAL_VM_SOURCES src/vm/vm_main.c)
+set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
+set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
+add_pscal_executable(pscalvm)
+set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+
 # ---- Examples ----
 add_subdirectory(Examples)
 
 # ---- optional install ----
 include(GNUInstallDirs)
-install(TARGETS pscal dscal
+install(TARGETS pscal dscal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 add_test(NAME pscal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_tests.sh)
