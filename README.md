@@ -64,7 +64,8 @@ python tools/tinyc.py program.tiny out.pbc
 ```
 
 Only integer variables and arithmetic are supported, but this is sufficient for
-basic experiments or teaching purposes.
+basic experiments or teaching purposes. Example programs demonstrating the
+language can be found in `Examples/Tiny`.
 
 ## Runtime library
 

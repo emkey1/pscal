@@ -1,0 +1,6 @@
+{ Countdown from N to 1 }
+read x;
+repeat
+    write x;
+    x := x - 1
+until x = 0
