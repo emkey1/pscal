@@ -28,7 +28,7 @@ static void resetStack(VM* vm) {
 }
 
 // Internal function shared by stack dump helpers
-static void vm_dump_stack_internal(VM* vm, bool detailed) {
+static void vmDumpStackInternal(VM* vm, bool detailed) {
     if (!vm) return;
 
     if (detailed) {
@@ -47,18 +47,18 @@ static void vm_dump_stack_internal(VM* vm, bool detailed) {
     }
 }
 
-void vm_dump_stack_info_detailed(VM* vm, const char* context_message) {
+void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
     fprintf(stderr, "Stack Size: %ld, Frame Count: %d\n", vm->stackTop - vm->stack, vm->frameCount);
     fprintf(stderr, "Stack Contents (bottom to top):\n");
-    vm_dump_stack_internal(vm, true);
+    vmDumpStackInternal(vm, true);
     fprintf(stderr, "--------------------------\n");
 }
 
 // --- Helper function to dump stack and frame info ---
-void vm_dump_stack_info(VM* vm) {
+void vmDumpStackInfo(VM* vm) {
     long current_offset = vm->ip - vm->chunk->code;
     int line = (current_offset > 0 && current_offset <= vm->chunk->count) ? vm->chunk->lines[current_offset - 1] : 0;
 
@@ -74,7 +74,7 @@ void vm_dump_stack_info(VM* vm) {
 
     // Print stack contents for more detailed debugging:
     fprintf(stderr, "[VM_DEBUG] Stack Contents: ");
-    vm_dump_stack_internal(vm, false);
+    vmDumpStackInternal(vm, false);
 }
 
 static bool vmSetContains(const Value* setVal, const Value* itemVal) {
@@ -121,7 +121,7 @@ static bool vmSetContains(const Value* setVal, const Value* itemVal) {
 
 // Scans all global symbols and the entire VM value stack to find and nullify
 // any pointers that are aliases of a memory address that is being disposed.
-void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
+void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
     // 1. Scan global symbols using the existing hash table helper
     if (vm->vmGlobalSymbols) {
         nullifyPointerAliasesByAddrValue(vm->vmGlobalSymbols, disposedAddrValue);
@@ -191,7 +191,7 @@ void runtimeError(VM* vm, const char* format, ...) {
     }
 
     // Dump full stack contents
-    vm_dump_stack_info_detailed(vm, "Full Stack at Crash");
+    vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
 
     // --- END NEW DUMP ---
 
@@ -250,7 +250,7 @@ static Value peek(VM* vm, int distance) { // Using your original name 'peek'
  */
 
 // --- Host Function C Implementations ---
-static Value vm_host_quit_requested(VM* vm) {
+static Value vmHostQuitRequested(VM* vm) {
     // break_requested is extern int from globals.h, defined in globals.c
     // makeBoolean is from core/utils.h
     return makeBoolean(break_requested);
@@ -283,7 +283,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
     }
-    if (!register_host_function(vm, HOST_FN_QUIT_REQUESTED, vm_host_quit_requested)) { // from all.txt
+    if (!register_host_function(vm, HOST_FN_QUIT_REQUESTED, vmHostQuitRequested)) { // from all.txt
         fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
         exit(EXIT_FAILURE);
     }
@@ -722,7 +722,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
         }
         #endif */
-        //vm_dump_stack_info(vm); // Call new helper at the start of each instruction
+        //vmDumpStackInfo(vm); // Call new helper at the start of each instruction
 
         instruction_val = READ_BYTE();
         switch (instruction_val) {

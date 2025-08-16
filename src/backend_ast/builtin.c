@@ -466,14 +466,14 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
 static struct termios vm_orig_termios;
 static int vm_raw_mode = 0;
 
-static void vm_restore_terminal(void) {
+static void vmRestoreTerminal(void) {
     if (vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
         vm_raw_mode = 0;
     }
 }
 
-static void vm_enable_raw_mode(void) {
+static void vmEnableRawMode(void) {
     if (vm_raw_mode)
         return;
 
@@ -487,15 +487,15 @@ static void vm_enable_raw_mode(void) {
 
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
-        atexit(vm_restore_terminal);
+        atexit(vmRestoreTerminal);
     }
 }
 
 // Restore the terminal to a canonical, line-buffered state suitable for
 // Read()/ReadLn().  This undoes any prior ReadKey-induced raw mode,
 // discards leftover input, ensures echoing, and makes the cursor visible.
-static void vm_prepare_canonical_input(void) {
-    vm_restore_terminal();
+static void vmPrepareCanonicalInput(void) {
+    vmRestoreTerminal();
     tcflush(STDIN_FILENO, TCIFLUSH);
     const char show_cursor[] = "\x1B[?25h";
     write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
@@ -623,7 +623,7 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "KeyPressed expects 0 arguments.");
         return makeBoolean(false);
     }
-    vm_enable_raw_mode();
+    vmEnableRawMode();
 
     int bytes_available = 0;
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
@@ -635,7 +635,7 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ReadKey expects 0 arguments.");
         return makeChar('\0');
     }
-    vm_enable_raw_mode();
+    vmEnableRawMode();
 
     char c;
     if (read(STDIN_FILENO, &c, 1) != 1) {
@@ -1222,7 +1222,7 @@ Value vmBuiltinDispose(VM* vm, int arg_count, Value* args) {
     pointerVarValuePtr->ptr_val = NULL;
     
     // Call the new helper to find and nullify any dangling aliases
-    vm_nullifyAliases(vm, disposedAddrValue);
+    vmNullifyAliases(vm, disposedAddrValue);
     
     return makeVoid();
 }
@@ -1365,7 +1365,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
     }
 
     if (input_stream == stdin) {
-        vm_prepare_canonical_input();
+        vmPrepareCanonicalInput();
     }
 
     for (int i = var_start_index; i < arg_count; i++) {
@@ -1465,7 +1465,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     }
 
     if (input_stream == stdin) {
-        vm_prepare_canonical_input();
+        vmPrepareCanonicalInput();
     }
 
     // 2) Read full line
