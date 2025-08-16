@@ -52,14 +52,14 @@ This executes `Tests/run_tests.sh` and exercises both positive and expected fail
 ## Tiny language compiler
 
 A minimal compiler for a small educational language, often called *Tiny*, is
-provided in `tools/tinyc.py`.  It reads source code that follows the grammar
+provided in `tools/tinyc`.  It reads source code that follows the grammar
 described in the project documentation and emits bytecode that can be executed
 by the Pscal virtual machine.
 
 Example usage:
 
 ```sh
-python tools/tinyc.py program.tiny out.pbc
+python tools/tinyc program.tiny out.pbc
 ./build/bin/pscalvm out.pbc
 ```
 
