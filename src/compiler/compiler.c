@@ -230,6 +230,12 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                 (param_actual->var_type == TYPE_CHAR   && arg_vt == TYPE_STRING)) {
                 return true;
             }
+            // Allow implicit narrowing from wider ordinal types to BYTE.
+            if (param_actual->var_type == TYPE_BYTE &&
+                (arg_vt == TYPE_INTEGER || arg_vt == TYPE_WORD ||
+                 arg_vt == TYPE_ENUM    || arg_vt == TYPE_CHAR)) {
+                return true;
+            }
             return false;
         }
     } else if (!arg_actual) {
