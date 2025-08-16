@@ -68,10 +68,19 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         EXIT_FAILURE_HANDLER();
     }
     
-#ifdef SDL
-    // --- SDL GRAPHICS AND SOUND BUILT-INS ---
+    // --- Graphics stubs (usable even without SDL) ---
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("FillCircle", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("GetMaxX", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetMaxY", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GraphLoop", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("InitGraph", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("SetRGBColor", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("UpdateScreen", AST_PROCEDURE_DECL, NULL);
+
+#ifdef SDL
+    // --- Additional SDL graphics and sound built-ins ---
     registerBuiltinFunction("CreateTargetTexture", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("CreateTexture", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("DestroyTexture", AST_PROCEDURE_DECL, NULL);
@@ -79,16 +88,11 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("DrawLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("DrawPolygon", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("DrawRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillCircle", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("FillRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetMaxX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetMaxY", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetMouseState", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GraphLoop", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitGraph", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IsSoundPlaying", AST_FUNCTION_DECL, NULL);
@@ -107,8 +111,6 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     registerBuiltinFunction("SetAlphaBlend", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("SetColor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("SetRenderTarget", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRGBColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("UpdateTexture", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WaitKeyEvent", AST_PROCEDURE_DECL, NULL);
 #endif
