@@ -90,6 +90,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderPresent(gSdlRenderer);
+    SDL_PumpEvents(); // Process any pending events so the window becomes visible
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
     
