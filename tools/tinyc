@@ -348,6 +348,10 @@ class TinyCompiler:
         # Compile statements
         for stmt in program.statements:
             self.compile_statement(stmt)
+
+        # Ensure every program terminates with a newline for clean output
+        self.builder.emit(self.opcodes["OP_WRITE_LN"])
+        self.builder.emit(0)
         self.builder.emit(self.opcodes["OP_HALT"])
         return self.builder
 
