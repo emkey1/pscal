@@ -56,6 +56,15 @@ Pscal provides several simple and structured types:
 - **records** – aggregates of fields: `record x, y: integer; end`.
 - **pointers** – references to dynamically allocated data: `^TNode`.
 
+### Numeric limits
+
+Integers are represented as signed 64‑bit values. Arithmetic that
+produces a result outside the range `-2^63`..`2^63-1` causes the virtual
+machine to raise a runtime "Integer overflow" error. As a consequence,
+computations that grow rapidly—such as factorials beyond 20!—will halt
+once the limit is exceeded. `real` values follow the precision and range
+of IEEE‑754 double precision.
+
 ## Variables and Constants
 
 - Constants are introduced with the `const` keyword and are immutable:
