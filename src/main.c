@@ -261,7 +261,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                     fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
                             result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
                     overall_success_status = false;
-                    vm_dump_stack_info(&vm);
+                    vmDumpStackInfo(&vm);
                 }
             } else {
                 fprintf(stderr, "Compilation failed with errors.\n");

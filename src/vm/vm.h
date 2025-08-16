@@ -79,10 +79,10 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures);
-void vm_nullifyAliases(VM* vm, uintptr_t disposedAddrValue);
+void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 
 void runtimeError(VM* vm, const char* format, ...);
-void vm_dump_stack_info(VM* vm);
-void vm_dump_stack_info_detailed(VM* vm, const char* context_message);
+void vmDumpStackInfo(VM* vm);
+void vmDumpStackInfoDetailed(VM* vm, const char* context_message);
 
 #endif // PSCAL_VM_H
