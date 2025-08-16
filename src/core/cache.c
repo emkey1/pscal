@@ -264,6 +264,113 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     return ok;
 }
 
+bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
+    bool ok = false;
+    int const_count = 0;
+    int read_consts = 0;
+
+    FILE* f = fopen(file_path, "rb");
+    if (f) {
+        uint32_t magic = 0, ver = 0;
+        if (fread(&magic, sizeof(magic), 1, f) == 1 &&
+            fread(&ver, sizeof(ver), 1, f) == 1 &&
+            magic == CACHE_MAGIC && ver == CACHE_VERSION) {
+            int count = 0;
+            if (fread(&count, sizeof(count), 1, f) == 1 &&
+                fread(&const_count, sizeof(const_count), 1, f) == 1) {
+                chunk->code = (uint8_t*)malloc(count);
+                chunk->lines = (int*)malloc(sizeof(int) * count);
+                chunk->constants = (Value*)calloc(const_count, sizeof(Value));
+                if (chunk->code && chunk->lines && chunk->constants) {
+                    chunk->count = count;
+                    chunk->capacity = count;
+                    chunk->constants_count = const_count;
+                    chunk->constants_capacity = const_count;
+                    if (fread(chunk->code, 1, count, f) == (size_t)count &&
+                        fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
+                        ok = true;
+                        for (read_consts = 0; read_consts < const_count; ++read_consts) {
+                            if (!read_value(f, &chunk->constants[read_consts])) { ok = false; break; }
+                        }
+                        if (ok) {
+                            int proc_count = 0;
+                            if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
+                                for (int i = 0; i < proc_count; ++i) {
+                                    int name_len = 0;
+                                    if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
+                                    char* name = (char*)malloc(name_len + 1);
+                                    if (!name) { ok = false; break; }
+                                    if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
+                                    name[name_len] = '\0';
+                                    int addr = 0; uint8_t locals = 0, upvals = 0;
+                                    if (fread(&addr, sizeof(addr), 1, f) != 1 ||
+                                        fread(&locals, sizeof(locals), 1, f) != 1 ||
+                                        fread(&upvals, sizeof(upvals), 1, f) != 1) {
+                                        free(name); ok = false; break; }
+                                    Symbol* sym = lookupProcedure(name);
+                                    if (sym) {
+                                        sym->bytecode_address = addr;
+                                        sym->locals_count = locals;
+                                        sym->upvalue_count = upvals;
+                                        sym->is_defined = true;
+                                    }
+                                    free(name);
+                                }
+
+                                if (ok) {
+                                    int const_sym_count = 0;
+                                    if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
+                                        for (int i = 0; i < const_sym_count; ++i) {
+                                            int name_len = 0;
+                                            if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
+                                            char* name = (char*)malloc(name_len + 1);
+                                            if (!name) { ok = false; break; }
+                                            if (fread(name, 1, name_len, f) != (size_t)name_len) {
+                                                free(name); ok = false; break; }
+                                            name[name_len] = '\0';
+                                            VarType type;
+                                            if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
+
+                                            Value val = {0};
+                                            if (!read_value(f, &val)) { free(name); ok = false; break; }
+                                            insertGlobalSymbol(name, type, NULL);
+                                            Symbol* sym = lookupGlobalSymbol(name);
+                                            if (sym && sym->value) {
+                                                freeValue(sym->value);
+                                                *(sym->value) = val;
+                                                sym->is_const = true;
+                                            } else {
+                                                freeValue(&val);
+                                            }
+                                            free(name);
+                                        }
+                                    } else {
+                                        ok = false;
+                                    }
+                                }
+                            } else {
+                                ok = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        fclose(f);
+    }
+
+    if (!ok) {
+        for (int i = 0; i < read_consts; ++i) {
+            freeValue(&chunk->constants[i]);
+        }
+        free(chunk->code);
+        free(chunk->lines);
+        free(chunk->constants);
+        initBytecodeChunk(chunk);
+    }
+    return ok;
+}
+
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return;
