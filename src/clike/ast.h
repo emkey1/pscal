@@ -2,6 +2,7 @@
 #define CLIKE_AST_H
 
 #include "clike/lexer.h"
+#include "core/types.h"
 #include <stdio.h>
 
 typedef enum {
@@ -26,6 +27,7 @@ typedef enum {
 typedef struct ASTNodeClike {
     ASTNodeTypeClike type;
     ClikeToken token; // For identifier or operator token
+    VarType var_type; // Inferred or declared type
     struct ASTNodeClike *left;
     struct ASTNodeClike *right;
     struct ASTNodeClike *third; // else branch or additional pointer

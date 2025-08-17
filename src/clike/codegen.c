@@ -51,12 +51,7 @@ static void collectLocals(ASTNodeClike* node, FuncContext* ctx) {
     if (!node) return;
     if (node->type == TCAST_VAR_DECL) {
         char* name = tokenToCString(node->token);
-        VarType type = TYPE_INTEGER;
-        if (node->right) {
-            if (node->right->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
-            else if (node->right->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
-        }
-        addLocal(ctx, name, type);
+        addLocal(ctx, name, node->var_type);
         free(name);
         return;
     }
@@ -286,12 +281,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
         for (int i = 0; i < func->left->child_count; i++) {
             ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            VarType type = TYPE_INTEGER;
-            if (p->left) {
-                if (p->left->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
-                else if (p->left->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
-            }
-            addLocal(&ctx, name, type);
+            addLocal(&ctx, name, p->var_type);
             free(name);
             ctx.paramCount++;
         }
@@ -308,7 +298,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     sym->bytecode_address = address;
     sym->arity = (uint8_t)ctx.paramCount;
     sym->locals_count = (uint8_t)(ctx.localCount - ctx.paramCount);
-    sym->type = TYPE_INTEGER;
+    sym->type = func->var_type;
     sym->is_defined = true;
     hashTableInsert(procedure_table, sym);
 

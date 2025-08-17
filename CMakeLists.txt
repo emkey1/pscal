@@ -254,6 +254,7 @@ set(CLIKE_SOURCES
     src/clike/parser.c
     src/clike/ast.c
     src/clike/builtins.c
+    src/clike/semantics.c
     src/clike/codegen.c
     src/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
