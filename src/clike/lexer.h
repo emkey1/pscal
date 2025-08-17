@@ -53,6 +53,7 @@ typedef struct {
     const char *lexeme;
     int length;
     int line;
+    int column;
     int int_val;
     double float_val;
 } ClikeToken;
@@ -61,6 +62,7 @@ typedef struct {
     const char *src;
     int pos;
     int line;
+    int column;
 } ClikeLexer;
 
 void clike_initLexer(ClikeLexer *lexer, const char *source);

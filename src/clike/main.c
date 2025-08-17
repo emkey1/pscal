@@ -5,6 +5,7 @@
 #include "clike/codegen.h"
 #include "clike/builtins.h"
 #include "clike/semantics.h"
+#include "clike/errors.h"
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -13,6 +14,9 @@
 
 int gParamCount = 0;
 char **gParamValues = NULL;
+
+int clike_error_count = 0;
+int clike_warning_count = 0;
 
 static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
@@ -82,6 +86,18 @@ int main(int argc, char **argv) {
     initSymbolSystemClike();
     clike_register_builtins();
     analyzeSemanticsClike(prog);
+
+    if (clike_warning_count > 0) {
+        fprintf(stderr, "Compilation finished with %d warning(s).\n", clike_warning_count);
+    }
+    if (clike_error_count > 0) {
+        fprintf(stderr, "Compilation halted with %d error(s).\n", clike_error_count);
+        freeASTClike(prog);
+        free(src);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return clike_error_count > 255 ? 255 : clike_error_count;
+    }
 
     BytecodeChunk chunk; clike_compile(prog, &chunk);
     if (dump_bytecode_flag) {
