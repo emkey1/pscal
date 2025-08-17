@@ -59,6 +59,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start) {
     if (length == 5 && strncmp(start, "break", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_BREAK, start, length);
     if (length == 8 && strncmp(start, "continue", 8) == 0) return makeToken(lexer, CLIKE_TOKEN_CONTINUE, start, length);
     if (length == 6 && strncmp(start, "return", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_RETURN, start, length);
+    if (length == 6 && strncmp(start, "import", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_IMPORT, start, length);
     return makeToken(lexer, CLIKE_TOKEN_IDENTIFIER, start, length);
 }
 
@@ -190,6 +191,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_BREAK: return "TOKEN_BREAK";
         case CLIKE_TOKEN_CONTINUE: return "TOKEN_CONTINUE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
+        case CLIKE_TOKEN_IMPORT: return "TOKEN_IMPORT";
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
         case CLIKE_TOKEN_FLOAT_LITERAL: return "TOKEN_FLOAT_LITERAL";

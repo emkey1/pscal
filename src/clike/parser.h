@@ -8,9 +8,15 @@ typedef struct {
     ClikeLexer lexer;
     ClikeToken current;
     ClikeToken next;
+    char **imports;
+    int import_count;
+    int import_capacity;
 } ParserClike;
 
 void initParserClike(ParserClike *parser, const char *source);
 ASTNodeClike* parseProgramClike(ParserClike *parser);
+
+extern char **clike_imports;
+extern int clike_import_count;
 
 #endif
