@@ -1,4 +1,4 @@
 int main() {
-    writeln(123);
+    printf(43770);
     return 0;
 }
