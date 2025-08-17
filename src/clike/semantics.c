@@ -14,6 +14,11 @@ typedef struct {
     int count;
 } VarTable;
 
+typedef struct {
+    VarTable scopes[256];
+    int depth;
+} ScopeStack;
+
 static void vt_add(VarTable *t, const char *name, VarType type) {
     t->entries[t->count].name = strdup(name);
     t->entries[t->count].type = type;
@@ -31,6 +36,30 @@ static VarType vt_get(VarTable *t, const char *name) {
 
 static void vt_free(VarTable *t) {
     for (int i = 0; i < t->count; ++i) free(t->entries[i].name);
+    t->count = 0;
+}
+
+static void ss_push(ScopeStack *s) {
+    s->scopes[s->depth].count = 0;
+    s->depth++;
+}
+
+static void ss_pop(ScopeStack *s) {
+    if (s->depth <= 0) return;
+    vt_free(&s->scopes[s->depth - 1]);
+    s->depth--;
+}
+
+static void ss_add(ScopeStack *s, const char *name, VarType type) {
+    vt_add(&s->scopes[s->depth - 1], name, type);
+}
+
+static VarType ss_get(ScopeStack *s, const char *name) {
+    for (int i = s->depth - 1; i >= 0; --i) {
+        VarType t = vt_get(&s->scopes[i], name);
+        if (t != TYPE_UNKNOWN) return t;
+    }
+    return TYPE_UNKNOWN;
 }
 
 typedef struct {
@@ -55,9 +84,9 @@ static char *tokenToCString(ClikeToken t) {
     return s;
 }
 
-static VarType analyzeExpr(ASTNodeClike *node, VarTable *vt);
+static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes);
 
-static VarType analyzeExpr(ASTNodeClike *node, VarTable *vt) {
+static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
     if (!node) return TYPE_UNKNOWN;
     switch (node->type) {
         case TCAST_NUMBER:
@@ -65,25 +94,25 @@ static VarType analyzeExpr(ASTNodeClike *node, VarTable *vt) {
             return node->var_type;
         case TCAST_IDENTIFIER: {
             char *name = tokenToCString(node->token);
-            VarType t = vt_get(vt, name);
+            VarType t = ss_get(scopes, name);
             node->var_type = t;
             free(name);
             return t;
         }
         case TCAST_BINOP: {
-            VarType lt = analyzeExpr(node->left, vt);
-            VarType rt = analyzeExpr(node->right, vt);
+            VarType lt = analyzeExpr(node->left, scopes);
+            VarType rt = analyzeExpr(node->right, scopes);
             if (lt == TYPE_REAL || rt == TYPE_REAL) node->var_type = TYPE_REAL;
             else if (lt == TYPE_STRING || rt == TYPE_STRING) node->var_type = TYPE_STRING;
             else node->var_type = lt != TYPE_UNKNOWN ? lt : rt;
             return node->var_type;
         }
         case TCAST_UNOP:
-            node->var_type = analyzeExpr(node->left, vt);
+            node->var_type = analyzeExpr(node->left, scopes);
             return node->var_type;
         case TCAST_ASSIGN: {
-            VarType lt = analyzeExpr(node->left, vt);
-            VarType rt = analyzeExpr(node->right, vt);
+            VarType lt = analyzeExpr(node->left, scopes);
+            VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN && lt != rt) {
                 fprintf(stderr, "Type error: cannot assign %s to %s at line %d\n",
                         varTypeToString(rt), varTypeToString(lt), node->token.line);
@@ -103,39 +132,47 @@ static VarType analyzeExpr(ASTNodeClike *node, VarTable *vt) {
     }
 }
 
-static void analyzeStmt(ASTNodeClike *node, VarTable *vt, VarType retType) {
+static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType) {
     if (!node) return;
     switch (node->type) {
+        case TCAST_VAR_DECL: {
+            char *name = tokenToCString(node->token);
+            ss_add(scopes, name, node->var_type);
+            free(name);
+            break;
+        }
         case TCAST_COMPOUND:
+            ss_push(scopes);
             for (int i = 0; i < node->child_count; ++i) {
-                analyzeStmt(node->children[i], vt, retType);
+                analyzeStmt(node->children[i], scopes, retType);
             }
+            ss_pop(scopes);
             break;
         case TCAST_IF:
-            analyzeExpr(node->left, vt);
-            analyzeStmt(node->right, vt, retType);
-            analyzeStmt(node->third, vt, retType);
+            analyzeExpr(node->left, scopes);
+            analyzeStmt(node->right, scopes, retType);
+            analyzeStmt(node->third, scopes, retType);
             break;
         case TCAST_WHILE:
-            analyzeExpr(node->left, vt);
-            analyzeStmt(node->right, vt, retType);
+            analyzeExpr(node->left, scopes);
+            analyzeStmt(node->right, scopes, retType);
             break;
         case TCAST_FOR:
-            if (node->left) analyzeExpr(node->left, vt);
-            if (node->right) analyzeExpr(node->right, vt);
-            if (node->third) analyzeExpr(node->third, vt);
-            if (node->child_count > 0) analyzeStmt(node->children[0], vt, retType);
+            if (node->left) analyzeExpr(node->left, scopes);
+            if (node->right) analyzeExpr(node->right, scopes);
+            if (node->third) analyzeExpr(node->third, scopes);
+            if (node->child_count > 0) analyzeStmt(node->children[0], scopes, retType);
             break;
         case TCAST_DO_WHILE:
-            analyzeStmt(node->right, vt, retType);
-            analyzeExpr(node->left, vt);
+            analyzeStmt(node->right, scopes, retType);
+            analyzeExpr(node->left, scopes);
             break;
         case TCAST_BREAK:
         case TCAST_CONTINUE:
             break;
         case TCAST_RETURN: {
             VarType t = TYPE_VOID;
-            if (node->left) t = analyzeExpr(node->left, vt);
+            if (node->left) t = analyzeExpr(node->left, scopes);
             if (retType == TYPE_VOID) {
                 if (t != TYPE_VOID && t != TYPE_UNKNOWN) {
                     fprintf(stderr, "Type error: returning value from void function at line %d\n", node->token.line);
@@ -147,46 +184,29 @@ static void analyzeStmt(ASTNodeClike *node, VarTable *vt, VarType retType) {
             break;
         }
         case TCAST_EXPR_STMT:
-            if (node->left) analyzeExpr(node->left, vt);
+            if (node->left) analyzeExpr(node->left, scopes);
             break;
         default:
             if (node->type == TCAST_ASSIGN) {
-                analyzeExpr(node, vt);
+                analyzeExpr(node, scopes);
             }
             break;
     }
 }
 
-static void gatherDecls(ASTNodeClike *node, VarTable *vt) {
-    if (!node) return;
-    if (node->type == TCAST_VAR_DECL) {
-        char *name = tokenToCString(node->token);
-        vt_add(vt, name, node->var_type);
-        free(name);
-        return;
-    }
-    if (node->left) gatherDecls(node->left, vt);
-    if (node->right) gatherDecls(node->right, vt);
-    if (node->third) gatherDecls(node->third, vt);
-    for (int i = 0; i < node->child_count; ++i) {
-        gatherDecls(node->children[i], vt);
-    }
-}
-
 static void analyzeFunction(ASTNodeClike *func) {
-    VarTable vt = {0};
-    // parameters
+    ScopeStack scopes = {0};
+    ss_push(&scopes); // function scope for parameters
     if (func->left) {
         for (int i = 0; i < func->left->child_count; ++i) {
             ASTNodeClike *p = func->left->children[i];
             char *name = tokenToCString(p->token);
-            vt_add(&vt, name, p->var_type);
+            ss_add(&scopes, name, p->var_type);
             free(name);
         }
     }
-    gatherDecls(func->right, &vt);
-    analyzeStmt(func->right, &vt, func->var_type);
-    vt_free(&vt);
+    analyzeStmt(func->right, &scopes, func->var_type);
+    while (scopes.depth > 0) ss_pop(&scopes);
 }
 
 void analyzeSemanticsClike(ASTNodeClike *program) {
