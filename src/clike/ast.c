@@ -1,0 +1,142 @@
+#include "clike/ast.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
+    ASTNodeClike *node = (ASTNodeClike*)calloc(1, sizeof(ASTNodeClike));
+    if (!node) return NULL;
+    node->type = type;
+    node->token = token;
+    node->left = node->right = node->third = NULL;
+    node->children = NULL;
+    node->child_count = 0;
+    return node;
+}
+
+void addChildClike(ASTNodeClike *parent, ASTNodeClike *child) {
+    if (!parent || !child) return;
+    parent->children = (ASTNodeClike**)realloc(parent->children, sizeof(ASTNodeClike*) * (parent->child_count + 1));
+    parent->children[parent->child_count++] = child;
+}
+
+void freeASTClike(ASTNodeClike *node) {
+    if (!node) return;
+    for (int i = 0; i < node->child_count; ++i) freeASTClike(node->children[i]);
+    if (node->left) freeASTClike(node->left);
+    if (node->right) freeASTClike(node->right);
+    if (node->third) freeASTClike(node->third);
+    free(node->children);
+    free(node);
+}
+
+static void indent(FILE *out, int level) {
+    for (int i = 0; i < level; ++i) {
+        fputc(' ', out);
+    }
+}
+
+static void escapeString(FILE *out, const char *str, int len) {
+    for (int i = 0; i < len; ++i) {
+        char c = str[i];
+        switch (c) {
+            case '\\': fputs("\\\\", out); break;
+            case '"': fputs("\\\"", out); break;
+            case '\n': fputs("\\n", out); break;
+            case '\r': fputs("\\r", out); break;
+            case '\t': fputs("\\t", out); break;
+            default: fputc(c, out); break;
+        }
+    }
+}
+
+static const char* nodeTypeToString(ASTNodeTypeClike type) {
+    switch (type) {
+        case TCAST_PROGRAM: return "PROGRAM";
+        case TCAST_VAR_DECL: return "VAR_DECL";
+        case TCAST_FUN_DECL: return "FUN_DECL";
+        case TCAST_PARAM: return "PARAM";
+        case TCAST_COMPOUND: return "COMPOUND";
+        case TCAST_IF: return "IF";
+        case TCAST_WHILE: return "WHILE";
+        case TCAST_RETURN: return "RETURN";
+        case TCAST_EXPR_STMT: return "EXPR_STMT";
+        case TCAST_ASSIGN: return "ASSIGN";
+        case TCAST_BINOP: return "BINOP";
+        case TCAST_UNOP: return "UNOP";
+        case TCAST_NUMBER: return "NUMBER";
+        case TCAST_STRING: return "STRING";
+        case TCAST_IDENTIFIER: return "IDENTIFIER";
+        case TCAST_CALL: return "CALL";
+        default: return "UNKNOWN";
+    }
+}
+
+static void dumpASTClikeJSONRecursive(ASTNodeClike *node, FILE *out, int level) {
+    if (!node) {
+        indent(out, level);
+        fputs("null", out);
+        return;
+    }
+
+    indent(out, level);
+    fputs("{\n", out);
+
+    indent(out, level + 2);
+    fprintf(out, "\"type\": \"%s\"", nodeTypeToString(node->type));
+
+    if (node->token.type != CLIKE_TOKEN_UNKNOWN) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fprintf(out, "\"tokenType\": \"%s\"", clikeTokenTypeToString(node->token.type));
+    }
+    if (node->token.lexeme && node->token.length > 0) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fputs("\"token\": \"", out);
+        escapeString(out, node->token.lexeme, node->token.length);
+        fputc('"', out);
+    }
+
+    if (node->left) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fputs("\"left\": \n", out);
+        dumpASTClikeJSONRecursive(node->left, out, level + 4);
+    }
+    if (node->right) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fputs("\"right\": \n", out);
+        dumpASTClikeJSONRecursive(node->right, out, level + 4);
+    }
+    if (node->third) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fputs("\"third\": \n", out);
+        dumpASTClikeJSONRecursive(node->third, out, level + 4);
+    }
+    if (node->child_count > 0) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fputs("\"children\": [\n", out);
+        for (int i = 0; i < node->child_count; ++i) {
+            dumpASTClikeJSONRecursive(node->children[i], out, level + 4);
+            if (i < node->child_count - 1) {
+                fputs(",\n", out);
+            } else {
+                fputc('\n', out);
+            }
+        }
+        indent(out, level + 2);
+        fputs("]", out);
+    }
+
+    fputc('\n', out);
+    indent(out, level);
+    fputc('}', out);
+}
+
+void dumpASTClikeJSON(ASTNodeClike *node, FILE *out) {
+    dumpASTClikeJSONRecursive(node, out, 0);
+}

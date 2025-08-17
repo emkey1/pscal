@@ -1,5 +1,5 @@
-#include "tinyc/codegen.h"
-#include "tinyc/builtins.h"
+#include "clike/codegen.h"
+#include "clike/builtins.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
@@ -10,6 +10,7 @@
 typedef struct {
     char *name;
     int index;
+    VarType type;
 } LocalVar;
 
 typedef struct {
@@ -25,16 +26,17 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
-static char* tokenToCString(TinyCToken t) {
+static char* tokenToCString(ClikeToken t) {
     char* s = (char*)malloc(t.length + 1);
     memcpy(s, t.lexeme, t.length);
     s[t.length] = '\0';
     return s;
 }
 
-static int addLocal(FuncContext* ctx, const char* name) {
+static int addLocal(FuncContext* ctx, const char* name, VarType type) {
     ctx->locals[ctx->localCount].name = strdup(name);
     ctx->locals[ctx->localCount].index = ctx->localCount;
+    ctx->locals[ctx->localCount].type = type;
     return ctx->localCount++;
 }
 
@@ -45,11 +47,16 @@ static int resolveLocal(FuncContext* ctx, const char* name) {
     return -1;
 }
 
-static void collectLocals(ASTNodeTinyC* node, FuncContext* ctx) {
+static void collectLocals(ASTNodeClike* node, FuncContext* ctx) {
     if (!node) return;
     if (node->type == TCAST_VAR_DECL) {
         char* name = tokenToCString(node->token);
-        addLocal(ctx, name);
+        VarType type = TYPE_INTEGER;
+        if (node->right) {
+            if (node->right->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
+            else if (node->right->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
+        }
+        addLocal(ctx, name, type);
         free(name);
         return;
     }
@@ -61,12 +68,12 @@ static void collectLocals(ASTNodeTinyC* node, FuncContext* ctx) {
     }
 }
 
-static void compileStatement(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx);
-static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx);
+static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
+static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 
 // Helper to compile an l-value (currently only local identifiers) and push its
 // address onto the stack.
-static void compileLValue(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx) {
+static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx) {
     if (!node) return;
     if (node->type == TCAST_IDENTIFIER) {
         char* name = tokenToCString(node->token);
@@ -77,7 +84,7 @@ static void compileLValue(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext*
     }
 }
 
-static void compileStatement(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx) {
+static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx) {
     if (!node) return;
     switch (node->type) {
         case TCAST_RETURN:
@@ -128,7 +135,7 @@ static void compileStatement(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncConte
         case TCAST_COMPOUND: {
             // Var declarations already collected; skip them
             for (int i = 0; i < node->child_count; i++) {
-                ASTNodeTinyC* child = node->children[i];
+                ASTNodeClike* child = node->children[i];
                 if (child->type == TCAST_VAR_DECL) continue;
                 compileStatement(child, chunk, ctx);
             }
@@ -139,12 +146,27 @@ static void compileStatement(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncConte
     }
 }
 
-static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx) {
+static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx) {
     if (!node) return;
     switch (node->type) {
         case TCAST_NUMBER: {
-            Value v = makeInt(node->token.int_val);
+            Value v;
+            if (node->token.type == CLIKE_TOKEN_FLOAT_LITERAL) {
+                v = makeReal(node->token.float_val);
+            } else {
+                v = makeInt(node->token.int_val);
+            }
             int idx = addConstantToChunk(chunk, &v);
+            writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            break;
+        }
+        case TCAST_STRING: {
+            char* s = tokenToCString(node->token);
+            Value v = makeString(s);
+            free(s);
+            int idx = addConstantToChunk(chunk, &v);
+            freeValue(&v);
             writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
@@ -153,18 +175,18 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
             compileExpression(node->left, chunk, ctx);
             compileExpression(node->right, chunk, ctx);
             switch (node->token.type) {
-                case TINYCTOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
-                case TINYCTOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
-                case TINYCTOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
-                case TINYCTOKEN_SLASH: writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line); break;
-                case TINYCTOKEN_GREATER: writeBytecodeChunk(chunk, OP_GREATER, node->token.line); break;
-                case TINYCTOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, node->token.line); break;
-                case TINYCTOKEN_LESS: writeBytecodeChunk(chunk, OP_LESS, node->token.line); break;
-                case TINYCTOKEN_LESS_EQUAL: writeBytecodeChunk(chunk, OP_LESS_EQUAL, node->token.line); break;
-                case TINYCTOKEN_EQUAL_EQUAL: writeBytecodeChunk(chunk, OP_EQUAL, node->token.line); break;
-                case TINYCTOKEN_BANG_EQUAL: writeBytecodeChunk(chunk, OP_NOT_EQUAL, node->token.line); break;
-                case TINYCTOKEN_AND_AND: writeBytecodeChunk(chunk, OP_AND, node->token.line); break;
-                case TINYCTOKEN_OR_OR: writeBytecodeChunk(chunk, OP_OR, node->token.line); break;
+                case CLIKE_TOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
+                case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
+                case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
+                case CLIKE_TOKEN_SLASH: writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line); break;
+                case CLIKE_TOKEN_GREATER: writeBytecodeChunk(chunk, OP_GREATER, node->token.line); break;
+                case CLIKE_TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, node->token.line); break;
+                case CLIKE_TOKEN_LESS: writeBytecodeChunk(chunk, OP_LESS, node->token.line); break;
+                case CLIKE_TOKEN_LESS_EQUAL: writeBytecodeChunk(chunk, OP_LESS_EQUAL, node->token.line); break;
+                case CLIKE_TOKEN_EQUAL_EQUAL: writeBytecodeChunk(chunk, OP_EQUAL, node->token.line); break;
+                case CLIKE_TOKEN_BANG_EQUAL: writeBytecodeChunk(chunk, OP_NOT_EQUAL, node->token.line); break;
+                case CLIKE_TOKEN_AND_AND: writeBytecodeChunk(chunk, OP_AND, node->token.line); break;
+                case CLIKE_TOKEN_OR_OR: writeBytecodeChunk(chunk, OP_OR, node->token.line); break;
                 default: break;
             }
             break;
@@ -194,7 +216,7 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
                 }
-                // Directly map printf to the WriteLn opcode. printf in tinyc is
+                // Directly map printf to the WriteLn opcode. printf in clike is
                 // treated as a procedure that always succeeds and returns 0.
                 writeBytecodeChunk(chunk, OP_WRITE_LN, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
@@ -208,7 +230,7 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else if (strcmp(name, "scanf") == 0) {
                 // Compile arguments as l-values (addresses) and call VM builtin
-                // readln. scanf in tinyc returns 0 for simplicity.
+                // readln. scanf in clike returns 0 for simplicity.
                 for (int i = 0; i < node->child_count; ++i) {
                     compileLValue(node->children[i], chunk, ctx);
                 }
@@ -247,16 +269,21 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
     }
 }
 
-static void compileFunction(ASTNodeTinyC *func, BytecodeChunk *chunk) {
+static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     if (!func || !func->right) return;
 
     FuncContext ctx = {0};
     // Parameters
     if (func->left) {
         for (int i = 0; i < func->left->child_count; i++) {
-            ASTNodeTinyC* p = func->left->children[i];
+            ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            addLocal(&ctx, name);
+            VarType type = TYPE_INTEGER;
+            if (p->left) {
+                if (p->left->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
+                else if (p->left->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
+            }
+            addLocal(&ctx, name, type);
             free(name);
             ctx.paramCount++;
         }
@@ -277,15 +304,27 @@ static void compileFunction(ASTNodeTinyC *func, BytecodeChunk *chunk) {
     sym->is_defined = true;
     hashTableInsert(procedure_table, sym);
 
-    // Initialize local variables (excluding parameters) to 0 so that builtins
-    // like `readln` treat them as integers instead of defaulting to strings.
+    // Initialize local variables (excluding parameters) so that builtins like
+    // `readln` know their intended types. Integers default to 0, floats to
+    // 0.0 and strings to nil.
     if (ctx.localCount > ctx.paramCount) {
-        Value zero = makeInt(0);
-        int zeroIdx = addConstantToChunk(chunk, &zero);
-        freeValue(&zero);
         for (int i = ctx.paramCount; i < ctx.localCount; i++) {
+            Value init;
+            switch (ctx.locals[i].type) {
+                case TYPE_REAL:
+                    init = makeReal(0.0);
+                    break;
+                case TYPE_STRING:
+                    init = makeNil();
+                    break;
+                default:
+                    init = makeInt(0);
+                    break;
+            }
+            int idx = addConstantToChunk(chunk, &init);
+            freeValue(&init);
             writeBytecodeChunk(chunk, OP_CONSTANT, func->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)zeroIdx, func->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, func->token.line);
             writeBytecodeChunk(chunk, OP_SET_LOCAL, func->token.line);
             writeBytecodeChunk(chunk, (uint8_t)i, func->token.line);
         }
@@ -300,7 +339,7 @@ static void compileFunction(ASTNodeTinyC *func, BytecodeChunk *chunk) {
     free(fname);
 }
 
-void tinyc_compile(ASTNodeTinyC *program, BytecodeChunk *chunk) {
+void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
     initBytecodeChunk(chunk);
     if (!program) return;
 
@@ -325,7 +364,7 @@ void tinyc_compile(ASTNodeTinyC *program, BytecodeChunk *chunk) {
     int mainAddress = -1;
     uint8_t mainArity = 0;
     for (int i = 0; i < program->child_count; ++i) {
-        ASTNodeTinyC *decl = program->children[i];
+        ASTNodeClike *decl = program->children[i];
         if (decl->type != TCAST_FUN_DECL) continue;
         char *name = tokenToCString(decl->token);
         compileFunction(decl, chunk);

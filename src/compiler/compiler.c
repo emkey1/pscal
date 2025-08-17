@@ -51,6 +51,7 @@ typedef struct FunctionCompilerState {
     int scope_depth;
     const char* name;
     struct FunctionCompilerState* enclosing;
+    Symbol* function_symbol;
     CompilerUpvalue upvalues[MAX_UPVALUES];
     int upvalue_count;
 } FunctionCompilerState;
@@ -358,6 +359,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
+static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -378,6 +380,7 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->scope_depth = 0;
     fc->name = NULL;
     fc->enclosing = NULL;
+    fc->function_symbol = NULL;
     fc->upvalue_count = 0;
 }
 
@@ -1297,6 +1300,8 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
 
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
+    fc.function_symbol = proc_symbol;
+    proc_symbol->enclosing = fc.enclosing ? fc.enclosing->function_symbol : NULL;
 
     if (current_procedure_table != procedure_table) {
         if (!hashTableLookup(procedure_table, proc_symbol->name)) {
@@ -1386,6 +1391,92 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         free(fc.locals[i].name);
     }
     current_function_compiler = fc.enclosing;
+}
+
+static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result) {
+    if (!proc_symbol || !proc_symbol->type_def) {
+        // Fallback to normal call semantics handled by caller
+        return;
+    }
+
+    AST* decl = proc_symbol->type_def;
+
+    // If we're in the top-level program (no active FunctionCompilerState),
+    // create a temporary one so the inliner can allocate locals and emit
+    // OP_GET_LOCAL/OP_SET_LOCAL instructions as usual. This mirrors how
+    // other compilers conceptually treat the main program body as a routine.
+    FunctionCompilerState temp_fc;
+    FunctionCompilerState* saved_fc = current_function_compiler;
+    if (!current_function_compiler) {
+        initFunctionCompiler(&temp_fc);
+        current_function_compiler = &temp_fc;
+        temp_fc.name = proc_symbol->name ? proc_symbol->name :
+                       (decl->token ? decl->token->value : NULL);
+        temp_fc.function_symbol = proc_symbol;
+    }
+    AST* blockNode = (decl->type == AST_PROCEDURE_DECL) ? decl->right : decl->extra;
+    if (!blockNode) return;
+
+    int starting_local_count = current_function_compiler->local_count;
+
+    // Map arguments to parameters
+    int arg_index = 0;
+    for (int i = 0; i < decl->child_count && arg_index < call_node->child_count; i++) {
+        AST* param_group = decl->children[i];
+        bool by_ref = param_group->by_ref;
+        for (int j = 0; j < param_group->child_count && arg_index < call_node->child_count; j++, arg_index++) {
+            AST* param_name_node = param_group->children[j];
+            const char* pname = param_name_node->token ? param_name_node->token->value : NULL;
+            if (!pname) continue;
+            addLocal(current_function_compiler, pname, line, by_ref);
+            int slot = current_function_compiler->local_count - 1;
+            AST* arg_node = call_node->children[arg_index];
+            if (by_ref) {
+                compileLValue(arg_node, chunk, getLine(arg_node));
+            } else {
+                compileRValue(arg_node, chunk, getLine(arg_node));
+            }
+            writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        }
+    }
+
+    int result_slot = -1;
+    if (decl->type == AST_FUNCTION_DECL) {
+        // Allocate a slot for the function's result. Assignments to the
+        // function name will target this slot.
+        addLocal(current_function_compiler, decl->token->value, line, false);
+        result_slot = current_function_compiler->local_count - 1;
+    }
+
+    HashTable* saved_table = current_procedure_table;
+    if (decl->symbol_table) {
+        current_procedure_table = (HashTable*)decl->symbol_table;
+    }
+    compileNode(blockNode, chunk, getLine(blockNode));
+    current_procedure_table = saved_table;
+
+    if (push_result && decl->type == AST_FUNCTION_DECL) {
+        if (result_slot != -1) {
+            writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)result_slot, line);
+        } else {
+            emitConstant(chunk, addNilConstant(chunk), line);
+        }
+    }
+
+    // Clean up locals added during inlining
+    for (int i = current_function_compiler->local_count - 1; i >= starting_local_count; i--) {
+        free(current_function_compiler->locals[i].name);
+    }
+    current_function_compiler->local_count = starting_local_count;
+
+    // Restore previous compiler state if we created a temporary one
+    if (!saved_fc) {
+        current_function_compiler = NULL;
+    } else {
+        current_function_compiler = saved_fc;
+    }
 }
 
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
@@ -1619,9 +1710,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             compileRValue(rvalue, chunk, getLine(rvalue));
 
-            if (current_function_compiler && lvalue->type == AST_VARIABLE &&
-                           (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                            strcasecmp(lvalue->token->value, "result") == 0) ) {
+            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                lvalue->token && lvalue->token->value &&
+                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                 strcasecmp(lvalue->token->value, "result") == 0)) {
                 
                 int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 if (return_slot != -1) {
@@ -1874,6 +1966,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             if (param_mismatch) {
+                break;
+            }
+
+            // Inline routine bodies directly when possible.
+            if (proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_inline) {
+                compileInlineRoutine(proc_symbol, node, chunk, line, false);
                 break;
             }
 
@@ -2362,7 +2460,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (func_symbol && func_symbol->is_alias) {
                 func_symbol = func_symbol->real_symbol;
             }
-            
+
+            // Inline function calls directly when marked inline.
+            if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
+                compileInlineRoutine(func_symbol, node, chunk, line, true);
+                break;
+            }
+
             if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
