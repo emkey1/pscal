@@ -1,6 +1,7 @@
 #include "clike/semantics.h"
 #include "core/utils.h"
 #include "clike/errors.h"
+#include "clike/builtins.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,11 +132,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_ASSIGN: {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
-            if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN && lt != rt) {
-                fprintf(stderr, "Type error: cannot assign %s to %s at line %d, column %d\n",
-                        varTypeToString(rt), varTypeToString(lt),
-                        node->token.line, node->token.column);
-                clike_error_count++;
+            if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
+                if (!(lt == TYPE_REAL && rt == TYPE_INTEGER) && lt != rt) {
+                    fprintf(stderr,
+                            "Type error: cannot assign %s to %s at line %d, column %d\n",
+                            varTypeToString(rt), varTypeToString(lt),
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
             }
             node->var_type = lt;
             return lt;
@@ -144,12 +148,16 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             char *name = tokenToCString(node->token);
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
-                fprintf(stderr,
-                        "Type error: call to undefined function '%s' at line %d, column %d\n",
-                        name,
-                        node->token.line,
-                        node->token.column);
-                clike_error_count++;
+                if (clike_get_builtin_id(name) != -1) {
+                    t = TYPE_INTEGER;
+                } else {
+                    fprintf(stderr,
+                            "Type error: call to undefined function '%s' at line %d, column %d\n",
+                            name,
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                }
             }
             free(name);
             node->var_type = t;
