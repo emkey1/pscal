@@ -277,6 +277,20 @@ static void compileFunction(ASTNodeTinyC *func, BytecodeChunk *chunk) {
     sym->is_defined = true;
     hashTableInsert(procedure_table, sym);
 
+    // Initialize local variables (excluding parameters) to 0 so that builtins
+    // like `readln` treat them as integers instead of defaulting to strings.
+    if (ctx.localCount > ctx.paramCount) {
+        Value zero = makeInt(0);
+        int zeroIdx = addConstantToChunk(chunk, &zero);
+        freeValue(&zero);
+        for (int i = ctx.paramCount; i < ctx.localCount; i++) {
+            writeBytecodeChunk(chunk, OP_CONSTANT, func->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)zeroIdx, func->token.line);
+            writeBytecodeChunk(chunk, OP_SET_LOCAL, func->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)i, func->token.line);
+        }
+    }
+
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
 
@@ -290,26 +304,42 @@ void tinyc_compile(ASTNodeTinyC *program, BytecodeChunk *chunk) {
     initBytecodeChunk(chunk);
     if (!program) return;
 
-    // Placeholder jump to main
-    writeBytecodeChunk(chunk, OP_JUMP, 0);
-    int mainJump = chunk->count;
+    // Emit a call to main at the start of the program. This ensures a call
+    // frame is created so that local variables in main have storage on the
+    // stack.  Previously a simple jump was used, which executed `main`
+    // without a frame, leading to crashes when builtins expected VAR
+    // parameters (e.g. `scanf`).
+    writeBytecodeChunk(chunk, OP_CALL, 0);
+    int mainNameIdx = addStringConstant(chunk, "main");
+    emitShort(chunk, (uint16_t)mainNameIdx, 0);
+    // Placeholder for the target address of main; patch later once functions
+    // are compiled and we know its bytecode location.
+    int mainAddrPatch = chunk->count;
     emitShort(chunk, 0, 0);
+    // Placeholder for main's arity (argument count).
+    int mainArityPatch = chunk->count;
+    writeBytecodeChunk(chunk, 0, 0);
+    // After main returns halt the VM.
+    writeBytecodeChunk(chunk, OP_HALT, 0);
 
     int mainAddress = -1;
+    uint8_t mainArity = 0;
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeTinyC *decl = program->children[i];
         if (decl->type != TCAST_FUN_DECL) continue;
         char *name = tokenToCString(decl->token);
         compileFunction(decl, chunk);
         if (strcmp(name, "main") == 0) {
-            mainAddress = ((Symbol*)hashTableLookup(procedure_table, name))->bytecode_address;
+            Symbol* sym = (Symbol*)hashTableLookup(procedure_table, name);
+            mainAddress = sym->bytecode_address;
+            mainArity = sym->arity;
         }
         free(name);
     }
 
     if (mainAddress >= 0) {
-        uint16_t offset = (uint16_t)(mainAddress - (mainJump + 2));
-        patchShort(chunk, mainJump, offset);
+        patchShort(chunk, mainAddrPatch, (uint16_t)mainAddress);
+        chunk->code[mainArityPatch] = mainArity;
     }
 }
 
