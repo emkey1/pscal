@@ -47,6 +47,7 @@ static TinyCToken identifierOrKeyword(TinyCLexer *lexer, const char *start) {
     while (isAlpha(peek(lexer)) || isDigit(peek(lexer))) advance(lexer);
     int length = &lexer->src[lexer->pos] - start;
     if (length == 3 && strncmp(start, "int", 3) == 0) return makeToken(lexer, TINYCTOKEN_INT, start, length);
+    if (length == 3 && strncmp(start, "str", 3) == 0) return makeToken(lexer, TINYCTOKEN_STR, start, length);
     if (length == 4 && strncmp(start, "void", 4) == 0) return makeToken(lexer, TINYCTOKEN_VOID, start, length);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, TINYCTOKEN_IF, start, length);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, TINYCTOKEN_ELSE, start, length);
@@ -63,6 +64,14 @@ static TinyCToken numberToken(TinyCLexer *lexer, const char *start) {
     return t;
 }
 
+static TinyCToken stringToken(TinyCLexer *lexer) {
+    const char *start = &lexer->src[++lexer->pos];
+    while (peek(lexer) != '"' && peek(lexer) != '\0') advance(lexer);
+    int length = &lexer->src[lexer->pos] - start;
+    if (peek(lexer) == '"') advance(lexer);
+    return makeToken(lexer, TINYCTOKEN_STRING, start, length);
+}
+
 TinyCToken tinyc_nextToken(TinyCLexer *lexer) {
     while (1) {
         char c = peek(lexer);
@@ -71,6 +80,7 @@ TinyCToken tinyc_nextToken(TinyCLexer *lexer) {
         const char *start = &lexer->src[lexer->pos];
         if (isAlpha(c)) return identifierOrKeyword(lexer, start);
         if (isDigit(c)) return numberToken(lexer, start);
+        if (c == '"') return stringToken(lexer);
         advance(lexer);
         switch (c) {
             case '+': return makeToken(lexer, TINYCTOKEN_PLUS, start, 1);
@@ -116,8 +126,10 @@ const char* tinycTokenTypeToString(TinyCTokenType type) {
         case TINYCTOKEN_ELSE: return "TOKEN_ELSE";
         case TINYCTOKEN_WHILE: return "TOKEN_WHILE";
         case TINYCTOKEN_RETURN: return "TOKEN_RETURN";
+        case TINYCTOKEN_STR: return "TOKEN_STR";
         case TINYCTOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case TINYCTOKEN_NUMBER: return "TOKEN_NUMBER";
+        case TINYCTOKEN_STRING: return "TOKEN_STRING";
         case TINYCTOKEN_PLUS: return "+";
         case TINYCTOKEN_MINUS: return "-";
         case TINYCTOKEN_STAR: return "*";

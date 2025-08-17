@@ -149,6 +149,14 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
+        case TCAST_STRING: {
+            char* s = tokenToCString(node->token);
+            int idx = addStringConstant(chunk, s);
+            free(s);
+            writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            break;
+        }
         case TCAST_BINOP:
             compileExpression(node->left, chunk, ctx);
             compileExpression(node->right, chunk, ctx);

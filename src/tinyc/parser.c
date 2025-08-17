@@ -56,7 +56,7 @@ ASTNodeTinyC* parseProgramTinyC(ParserTinyC *parser) {
 }
 
 static ASTNodeTinyC* declaration(ParserTinyC *p) {
-    if (p->current.type == TINYCTOKEN_INT || p->current.type == TINYCTOKEN_VOID) {
+    if (p->current.type == TINYCTOKEN_INT || p->current.type == TINYCTOKEN_VOID || p->current.type == TINYCTOKEN_STR) {
         TinyCToken type_tok = p->current; advanceParser(p);
         TinyCToken ident = p->current; expectToken(p, TINYCTOKEN_IDENTIFIER, "identifier");
         if (p->current.type == TINYCTOKEN_LPAREN) {
@@ -115,7 +115,7 @@ static ASTNodeTinyC* param(ParserTinyC *p) {
 static ASTNodeTinyC* compoundStmt(ParserTinyC *p) {
     expectToken(p, TINYCTOKEN_LBRACE, "{");
     ASTNodeTinyC *node = newASTNodeTinyC(TCAST_COMPOUND, p->current);
-    while (p->current.type == TINYCTOKEN_INT || p->current.type == TINYCTOKEN_VOID) {
+    while (p->current.type == TINYCTOKEN_INT || p->current.type == TINYCTOKEN_VOID || p->current.type == TINYCTOKEN_STR) {
         TinyCToken type_tok = p->current; advanceParser(p);
         TinyCToken ident = p->current; expectToken(p, TINYCTOKEN_IDENTIFIER, "identifier");
         ASTNodeTinyC *decl = varDeclaration(p, type_tok, ident);
@@ -283,6 +283,10 @@ static ASTNodeTinyC* factor(ParserTinyC *p) {
     if (p->current.type == TINYCTOKEN_NUMBER) {
         TinyCToken num = p->current; advanceParser(p);
         return newASTNodeTinyC(TCAST_NUMBER, num);
+    }
+    if (p->current.type == TINYCTOKEN_STRING) {
+        TinyCToken str = p->current; advanceParser(p);
+        return newASTNodeTinyC(TCAST_STRING, str);
     }
     if (p->current.type == TINYCTOKEN_IDENTIFIER) {
         TinyCToken ident = p->current; advanceParser(p);
