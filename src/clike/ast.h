@@ -2,6 +2,7 @@
 #define CLIKE_AST_H
 
 #include "clike/lexer.h"
+#include <stdio.h>
 
 typedef enum {
     TCAST_PROGRAM,
@@ -35,5 +36,6 @@ typedef struct ASTNodeClike {
 ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token);
 void addChildClike(ASTNodeClike *parent, ASTNodeClike *child);
 void freeASTClike(ASTNodeClike *node);
+void dumpASTClikeJSON(ASTNodeClike *node, FILE *out);
 
 #endif
