@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Wrapper around tinycc compiler with debugging output
+
+set -euo pipefail
+
+VERBOSE=0
+# check if -v flag present
+if [[ ${1:-} == "-v" ]]; then
+  VERBOSE=1
+  shift
+fi
+# env var TINYCC_VERBOSE enables verbose
+if [[ -n ${TINYCC_VERBOSE:-} ]]; then
+  VERBOSE=1
+fi
+
+if [[ $# -lt 2 ]]; then
+  echo "Usage: $0 [-v] <input.c> <output>" >&2
+  exit 1
+fi
+
+INPUT="$1"
+OUTPUT="$2"
+
+TCC_BIN=${TINYCC_BINARY:-tinycc}
+
+if ! command -v "$TCC_BIN" >/dev/null 2>&1; then
+  echo "Error: $TCC_BIN not found" >&2
+  exit 1
+fi
+
+# Invoke compiler
+"$TCC_BIN" "$INPUT" -o "$OUTPUT"
+
+if [[ ! -f "$OUTPUT" ]]; then
+  echo "Error: compilation failed, output $OUTPUT not created" >&2
+  exit 1
+fi
+
+SIZE=$(stat -c%s "$OUTPUT")
+echo "Generated $OUTPUT (${SIZE} bytes)"
+
+if (( SIZE < 8 )); then
+  echo "Warning: output size looks too small" >&2
+fi
+
+if (( VERBOSE )); then
+  echo "Dumping header (first 64 bytes):"
+  hexdump -C "$OUTPUT" | head -n 4
+fi
