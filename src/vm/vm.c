@@ -2055,19 +2055,32 @@ comparison_error_label:
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
-                bool jump_condition_met = false;
+                bool condition_truth = false;
+                bool value_valid = true;
 
                 if (IS_BOOLEAN(condition_value)) {
-                    jump_condition_met = !AS_BOOLEAN(condition_value);
+                    condition_truth = AS_BOOLEAN(condition_value);
+                } else if (IS_INTLIKE(condition_value)) {
+                    condition_truth = AS_INTEGER(condition_value) != 0;
+                } else if (IS_REAL(condition_value)) {
+                    condition_truth = AS_REAL(condition_value) != 0.0;
+                } else if (IS_CHAR(condition_value)) {
+                    condition_truth = AS_CHAR(condition_value) != '\0';
+                } else if (condition_value.type == TYPE_NIL) {
+                    condition_truth = false;
                 } else {
-                    runtimeError(vm, "VM Error: IF condition must be a Boolean.");
+                    value_valid = false;
+                }
+
+                if (!value_valid) {
+                    runtimeError(vm, "VM Error: IF condition must be a Boolean or numeric value.");
                     freeValue(&condition_value);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
                 freeValue(&condition_value);
 
-                if (jump_condition_met) {
+                if (!condition_truth) {
                     vm->ip += (int16_t)offset_val;
                 }
                 break;
