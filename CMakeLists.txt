@@ -270,6 +270,13 @@ else()
     target_link_libraries(tinyc PRIVATE ${CURL_LIBRARIES} m)
 endif()
 
+# When SDL support is enabled, tinyc needs the same SDL include paths and
+# libraries as the main executables to successfully compile headers that
+# reference SDL types.
+if(SDL)
+    target_link_libraries(tinyc PRIVATE SDL2::SDL2 SDL2_image SDL2_mixer SDL2_ttf)
+endif()
+
 # ---- Examples ----
 add_subdirectory(Examples)
 
