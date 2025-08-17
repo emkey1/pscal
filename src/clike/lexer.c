@@ -40,6 +40,7 @@ static ClikeToken makeToken(ClikeLexer *lexer, ClikeTokenType type, const char *
     t.length = length;
     t.line = lexer->line;
     t.int_val = 0;
+    t.float_val = 0.0;
     return t;
 }
 
@@ -48,6 +49,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start) {
     int length = &lexer->src[lexer->pos] - start;
     if (length == 3 && strncmp(start, "int", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_INT, start, length);
     if (length == 4 && strncmp(start, "void", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_VOID, start, length);
+    if (length == 5 && strncmp(start, "float", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_FLOAT, start, length);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length);
     if (length == 5 && strncmp(start, "while", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_WHILE, start, length);
@@ -56,11 +58,28 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start) {
 }
 
 static ClikeToken numberToken(ClikeLexer *lexer, const char *start) {
+    bool isFloat = false;
     while (isDigit(peek(lexer))) advance(lexer);
+    if (peek(lexer) == '.' && isDigit(lexer->src[lexer->pos + 1])) {
+        isFloat = true;
+        advance(lexer); // consume '.'
+        while (isDigit(peek(lexer))) advance(lexer);
+    }
     int length = &lexer->src[lexer->pos] - start;
-    ClikeToken t = makeToken(lexer, CLIKE_TOKEN_NUMBER, start, length);
-    t.int_val = atoi(start);
+    ClikeToken t = makeToken(lexer, isFloat ? CLIKE_TOKEN_FLOAT_LITERAL : CLIKE_TOKEN_NUMBER, start, length);
+    if (isFloat) t.float_val = atof(start); else t.int_val = atoi(start);
     return t;
+}
+
+static ClikeToken stringToken(ClikeLexer *lexer, const char *start) {
+    advance(lexer); // consume opening quote
+    while (peek(lexer) != '"' && peek(lexer) != '\0') {
+        if (peek(lexer) == '\n') lexer->line++;
+        advance(lexer);
+    }
+    int length = &lexer->src[lexer->pos] - start - 1;
+    if (peek(lexer) == '"') advance(lexer); // consume closing quote
+    return makeToken(lexer, CLIKE_TOKEN_STRING, start + 1, length);
 }
 
 ClikeToken clike_nextToken(ClikeLexer *lexer) {
@@ -71,6 +90,7 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
         const char *start = &lexer->src[lexer->pos];
         if (isAlpha(c)) return identifierOrKeyword(lexer, start);
         if (isDigit(c)) return numberToken(lexer, start);
+        if (c == '"') return stringToken(lexer, start);
         advance(lexer);
         switch (c) {
             case '+': return makeToken(lexer, CLIKE_TOKEN_PLUS, start, 1);
@@ -112,12 +132,15 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
     switch(type) {
         case CLIKE_TOKEN_INT: return "TOKEN_INT";
         case CLIKE_TOKEN_VOID: return "TOKEN_VOID";
+        case CLIKE_TOKEN_FLOAT: return "TOKEN_FLOAT";
         case CLIKE_TOKEN_IF: return "TOKEN_IF";
         case CLIKE_TOKEN_ELSE: return "TOKEN_ELSE";
         case CLIKE_TOKEN_WHILE: return "TOKEN_WHILE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
+        case CLIKE_TOKEN_FLOAT_LITERAL: return "TOKEN_FLOAT_LITERAL";
+        case CLIKE_TOKEN_STRING: return "TOKEN_STRING";
         case CLIKE_TOKEN_PLUS: return "+";
         case CLIKE_TOKEN_MINUS: return "-";
         case CLIKE_TOKEN_STAR: return "*";
