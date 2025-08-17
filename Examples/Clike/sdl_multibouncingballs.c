@@ -66,7 +66,8 @@ int main() {
         b[i] = random(206) + 50;
         mass[i] = radius[i] * radius[i];
         active[i] = 1;
-        i = i + 1;
+        // Ensure loop index remains an integer for subsequent array indexing.
+        i = trunc(i + 1);
     }
 
     quit = 0;
@@ -99,7 +100,7 @@ int main() {
                     y[i] = MaxY - radius[i];
                     dy[i] = -dy[i];
                 }
-                j = i + 1;
+                j = trunc(i + 1);
                 while (j < NumBalls) {
                     if (active[j]) {
                         float distSq;
@@ -168,10 +169,12 @@ int main() {
                             }
                         }
                     }
-                    j = j + 1;
+                    // Maintain integer type for j when incrementing.
+                    j = trunc(j + 1);
                 }
             }
-            i = i + 1;
+            // Maintain integer type for i when incrementing.
+            i = trunc(i + 1);
         }
         cleardevice();
         i = 0;
@@ -180,7 +183,7 @@ int main() {
                 setrgbcolor(r[i], g[i], b[i]);
                 fillcircle(trunc(x[i]), trunc(y[i]), radius[i]);
             }
-            i = i + 1;
+            i = trunc(i + 1);
         }
         updatescreen();
         graphloop(FrameDelay);
