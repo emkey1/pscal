@@ -1,11 +1,14 @@
 #include "clike/codegen.h"
 #include "clike/builtins.h"
+#include "clike/parser.h"
+#include "clike/semantics.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "globals.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 typedef struct {
     char *name;
@@ -515,6 +518,36 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
     int mainAddress = -1;
     uint8_t mainArity = 0;
+
+    // Compile imported modules before the main program
+    for (int i = 0; i < clike_import_count; ++i) {
+        const char *path = clike_imports[i];
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            fprintf(stderr, "Could not open import '%s'\n", path);
+            continue;
+        }
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        rewind(f);
+        char *src = (char*)malloc(len + 1);
+        fread(src, 1, len, f);
+        src[len] = '\0';
+        fclose(f);
+
+        ParserClike p; initParserClike(&p, src);
+        ASTNodeClike *modProg = parseProgramClike(&p);
+        analyzeSemanticsClike(modProg);
+        for (int j = 0; j < modProg->child_count; ++j) {
+            ASTNodeClike *decl = modProg->children[j];
+            if (decl->type == TCAST_FUN_DECL) {
+                compileFunction(decl, chunk);
+            }
+        }
+        freeASTClike(modProg);
+        free(src);
+    }
+
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type != TCAST_FUN_DECL) continue;
@@ -532,5 +565,12 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         patchShort(chunk, mainAddrPatch, (uint16_t)mainAddress);
         chunk->code[mainArityPatch] = mainArity;
     }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        free(clike_imports[i]);
+    }
+    free(clike_imports);
+    clike_imports = NULL;
+    clike_import_count = 0;
 }
 

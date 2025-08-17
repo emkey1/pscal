@@ -1,6 +1,7 @@
 #include "clike/parser.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static VarType tokenTypeToVarType(ClikeTokenType t) {
     switch (t) {
@@ -63,15 +64,54 @@ static ASTNodeClike* breakStatement(ParserClike *p);
 static ASTNodeClike* continueStatement(ParserClike *p);
 static ASTNodeClike* returnStatement(ParserClike *p);
 
+char **clike_imports = NULL;
+int clike_import_count = 0;
+static int clike_import_capacity = 0;
+
+static void queueImportPath(ParserClike *p, ClikeToken tok) {
+    char *path = (char*)malloc(tok.length + 1);
+    memcpy(path, tok.lexeme, tok.length);
+    path[tok.length] = '\0';
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (strcmp(clike_imports[i], path) == 0) {
+            free(path);
+            return;
+        }
+    }
+    if (clike_import_count >= clike_import_capacity) {
+        clike_import_capacity = clike_import_capacity ? clike_import_capacity * 2 : 4;
+        clike_imports = (char**)realloc(clike_imports, sizeof(char*) * clike_import_capacity);
+    }
+    clike_imports[clike_import_count++] = path;
+    if (p) {
+        if (p->import_count >= p->import_capacity) {
+            p->import_capacity = p->import_capacity ? p->import_capacity * 2 : 4;
+            p->imports = (char**)realloc(p->imports, sizeof(char*) * p->import_capacity);
+        }
+        p->imports[p->import_count++] = path;
+    }
+}
+
 void initParserClike(ParserClike *parser, const char *source) {
     clike_initLexer(&parser->lexer, source);
     parser->current = clike_nextToken(&parser->lexer);
     parser->next = clike_nextToken(&parser->lexer);
+    parser->imports = NULL;
+    parser->import_count = 0;
+    parser->import_capacity = 0;
 }
 
 ASTNodeClike* parseProgramClike(ParserClike *parser) {
     ASTNodeClike *prog = newASTNodeClike(TCAST_PROGRAM, parser->current);
     while (parser->current.type != CLIKE_TOKEN_EOF) {
+        if (parser->current.type == CLIKE_TOKEN_IMPORT) {
+            advanceParser(parser);
+            ClikeToken pathTok = parser->current;
+            expectToken(parser, CLIKE_TOKEN_STRING, "module path");
+            queueImportPath(parser, pathTok);
+            expectToken(parser, CLIKE_TOKEN_SEMICOLON, ";");
+            continue;
+        }
         ASTNodeClike *decl = declaration(parser);
         if (decl) addChildClike(prog, decl);
     }
