@@ -91,7 +91,9 @@ static ASTNodeTinyC* funDeclaration(ParserTinyC *p, TinyCToken type_token, TinyC
 }
 
 static ASTNodeTinyC* params(ParserTinyC *p) {
+    /* allow both "void" and empty parameter lists */
     if (p->current.type == TINYCTOKEN_VOID) { advanceParser(p); return NULL; }
+    if (p->current.type == TINYCTOKEN_RPAREN) { return NULL; }
     ASTNodeTinyC *paramList = newASTNodeTinyC(TCAST_PARAM, p->current);
     ASTNodeTinyC *first = param(p);
     addChildTinyC(paramList, first);

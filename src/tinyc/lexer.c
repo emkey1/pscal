@@ -85,10 +85,22 @@ TinyCToken tinyc_nextToken(TinyCLexer *lexer) {
             case '}': return makeToken(lexer, TINYCTOKEN_RBRACE, start, 1);
             case '[': return makeToken(lexer, TINYCTOKEN_LBRACKET, start, 1);
             case ']': return makeToken(lexer, TINYCTOKEN_RBRACKET, start, 1);
-            case '!': return makeToken(lexer, match(lexer,'=')?TINYCTOKEN_BANG_EQUAL:TINYCTOKEN_BANG, start, match(lexer,'=')?2:1);
-            case '=': return makeToken(lexer, match(lexer,'=')?TINYCTOKEN_EQUAL_EQUAL:TINYCTOKEN_EQUAL, start, match(lexer,'=')?2:1);
-            case '<': return makeToken(lexer, match(lexer,'=')?TINYCTOKEN_LESS_EQUAL:TINYCTOKEN_LESS, start, match(lexer,'=')?2:1);
-            case '>': return makeToken(lexer, match(lexer,'=')?TINYCTOKEN_GREATER_EQUAL:TINYCTOKEN_GREATER, start, match(lexer,'=')?2:1);
+            case '!': {
+                bool hasEq = match(lexer, '=');
+                return makeToken(lexer, hasEq ? TINYCTOKEN_BANG_EQUAL : TINYCTOKEN_BANG, start, hasEq ? 2 : 1);
+            }
+            case '=': {
+                bool hasEq = match(lexer, '=');
+                return makeToken(lexer, hasEq ? TINYCTOKEN_EQUAL_EQUAL : TINYCTOKEN_EQUAL, start, hasEq ? 2 : 1);
+            }
+            case '<': {
+                bool hasEq = match(lexer, '=');
+                return makeToken(lexer, hasEq ? TINYCTOKEN_LESS_EQUAL : TINYCTOKEN_LESS, start, hasEq ? 2 : 1);
+            }
+            case '>': {
+                bool hasEq = match(lexer, '=');
+                return makeToken(lexer, hasEq ? TINYCTOKEN_GREATER_EQUAL : TINYCTOKEN_GREATER, start, hasEq ? 2 : 1);
+            }
             case '&': if (match(lexer,'&')) return makeToken(lexer, TINYCTOKEN_AND_AND, start, 2); break;
             case '|': if (match(lexer,'|')) return makeToken(lexer, TINYCTOKEN_OR_OR, start, 2); break;
         }
