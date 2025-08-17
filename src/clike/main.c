@@ -4,6 +4,7 @@
 #include "clike/parser.h"
 #include "clike/codegen.h"
 #include "clike/builtins.h"
+#include "clike/semantics.h"
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -80,6 +81,7 @@ int main(int argc, char **argv) {
 
     initSymbolSystemClike();
     clike_register_builtins();
+    analyzeSemanticsClike(prog);
 
     BytecodeChunk chunk; clike_compile(prog, &chunk);
     if (dump_bytecode_flag) {

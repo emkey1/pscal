@@ -8,6 +8,7 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     if (!node) return NULL;
     node->type = type;
     node->token = token;
+    node->var_type = TYPE_UNKNOWN;
     node->left = node->right = node->third = NULL;
     node->children = NULL;
     node->child_count = 0;
