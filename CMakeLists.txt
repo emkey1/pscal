@@ -270,11 +270,41 @@ else()
     target_link_libraries(tinyc PRIVATE ${CURL_LIBRARIES} m)
 endif()
 
-# When SDL support is enabled, tinyc needs the same SDL include paths and
-# libraries as the main executables to successfully compile headers that
-# reference SDL types.
+# When SDL support is enabled, tinyc needs the same SDL include paths,
+# library directories, and libraries as the other executables to compile
+# headers that reference SDL types.
 if(SDL)
-    target_link_libraries(tinyc PRIVATE SDL2::SDL2 SDL2_image SDL2_mixer SDL2_ttf)
+    target_include_directories(tinyc PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+    )
+
+    target_link_directories(tinyc PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
+
+    set(TINYC_SDL_LIBS "")
+    if(TARGET SDL2::SDL2)
+        list(APPEND TINYC_SDL_LIBS SDL2::SDL2)
+    else()
+        list(APPEND TINYC_SDL_LIBS ${SDL2_LIBRARIES})
+    endif()
+    list(APPEND TINYC_SDL_LIBS
+        ${PC_SDL2_IMAGE_LIBRARIES}
+        ${PC_SDL2_MIXER_LIBRARIES}
+        ${PC_SDL2_TTF_LIBRARIES}
+        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+    )
+    list(REMOVE_DUPLICATES TINYC_SDL_LIBS)
+    target_link_libraries(tinyc PRIVATE ${TINYC_SDL_LIBS})
+    target_compile_definitions(tinyc PRIVATE SDL)
+
 endif()
 
 # ---- Examples ----
