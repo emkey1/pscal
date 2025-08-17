@@ -1,4 +1,5 @@
 #include "clike/parser.h"
+#include "clike/errors.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +34,16 @@ static int matchToken(ParserClike *p, ClikeTokenType type) {
 
 static void expectToken(ParserClike *p, ClikeTokenType type, const char *msg) {
     if (!matchToken(p, type)) {
-        fprintf(stderr, "Parse error at line %d: expected %s (%s)\n", p->current.line, msg, clikeTokenTypeToString(type));
+        fprintf(stderr,
+                "Parse error at line %d, column %d: expected %s (%s), got '%.*s' (%s)\n",
+                p->current.line,
+                p->current.column,
+                msg,
+                clikeTokenTypeToString(type),
+                p->current.length,
+                p->current.lexeme,
+                clikeTokenTypeToString(p->current.type));
+        clike_error_count++;
     }
 }
 

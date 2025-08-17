@@ -1,5 +1,6 @@
 #include "clike/semantics.h"
 #include "core/utils.h"
+#include "clike/errors.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,6 +97,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             char *name = tokenToCString(node->token);
             VarType t = ss_get(scopes, name);
             node->var_type = t;
+            if (t == TYPE_UNKNOWN) {
+                fprintf(stderr,
+                        "Type error: undefined variable '%s' at line %d, column %d\n",
+                        name,
+                        node->token.line,
+                        node->token.column);
+                clike_error_count++;
+            }
             free(name);
             return t;
         }
@@ -114,8 +123,10 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN && lt != rt) {
-                fprintf(stderr, "Type error: cannot assign %s to %s at line %d\n",
-                        varTypeToString(rt), varTypeToString(lt), node->token.line);
+                fprintf(stderr, "Type error: cannot assign %s to %s at line %d, column %d\n",
+                        varTypeToString(rt), varTypeToString(lt),
+                        node->token.line, node->token.column);
+                clike_error_count++;
             }
             node->var_type = lt;
             return lt;
@@ -123,6 +134,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
             VarType t = getFunctionType(name);
+            if (t == TYPE_UNKNOWN) {
+                fprintf(stderr,
+                        "Type error: call to undefined function '%s' at line %d, column %d\n",
+                        name,
+                        node->token.line,
+                        node->token.column);
+                clike_error_count++;
+            }
             free(name);
             node->var_type = t;
             return t;
@@ -175,11 +194,17 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             if (node->left) t = analyzeExpr(node->left, scopes);
             if (retType == TYPE_VOID) {
                 if (t != TYPE_VOID && t != TYPE_UNKNOWN) {
-                    fprintf(stderr, "Type error: returning value from void function at line %d\n", node->token.line);
+                    fprintf(stderr,
+                            "Type error: returning value from void function at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
                 }
             } else if (t != TYPE_UNKNOWN && t != retType) {
-                fprintf(stderr, "Type error: return type %s does not match %s at line %d\n",
-                        varTypeToString(t), varTypeToString(retType), node->token.line);
+                fprintf(stderr,
+                        "Type error: return type %s does not match %s at line %d, column %d\n",
+                        varTypeToString(t), varTypeToString(retType),
+                        node->token.line, node->token.column);
+                clike_error_count++;
             }
             break;
         }
