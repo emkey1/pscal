@@ -50,6 +50,7 @@ include_directories(
     src
     src/core
     src/frontend
+    src/tinyc
     src/symbol
     src/backend_ast
     src/compiler
@@ -245,6 +246,29 @@ set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
 set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
 add_pscal_executable(pscalvm)
 set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+
+# Tiny C front-end executable
+set(TINYC_SOURCES
+    src/tinyc/main.c
+    src/tinyc/lexer.c
+    src/tinyc/parser.c
+    src/tinyc/ast.c
+    src/tinyc/builtins.c
+    src/tinyc/codegen.c
+    src/globals.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
+    src/compiler/bytecode.c
+    src/vm/vm.c
+    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/symbol/symbol.c
+    src/tinyc/stubs.c
+)
+add_executable(tinyc ${TINYC_SOURCES})
+if(TARGET CURL::libcurl)
+    target_link_libraries(tinyc PRIVATE CURL::libcurl m)
+else()
+    target_link_libraries(tinyc PRIVATE ${CURL_LIBRARIES} m)
+endif()
 
 # ---- Examples ----
 add_subdirectory(Examples)
