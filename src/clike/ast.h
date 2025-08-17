@@ -25,6 +25,7 @@ typedef enum {
     TCAST_NUMBER,
     TCAST_STRING,
     TCAST_IDENTIFIER,
+    TCAST_ARRAY_ACCESS,
     TCAST_CALL
 } ASTNodeTypeClike;
 
@@ -32,6 +33,9 @@ typedef struct ASTNodeClike {
     ASTNodeTypeClike type;
     ClikeToken token; // For identifier or operator token
     VarType var_type; // Inferred or declared type
+    int is_array;           // Non-zero if this declaration is an array
+    int array_size;         // Size of array for single-dimensional arrays
+    VarType element_type;   // Element type if this node represents an array
     struct ASTNodeClike *left;
     struct ASTNodeClike *right;
     struct ASTNodeClike *third; // else branch or additional pointer

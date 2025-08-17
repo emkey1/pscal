@@ -105,6 +105,10 @@ static ASTNodeClike* varDeclaration(ParserClike *p, ClikeToken type_token, Clike
         ClikeToken num = p->current; expectToken(p, CLIKE_TOKEN_NUMBER, "array size");
         node->left = newASTNodeClike(TCAST_NUMBER, num);
         node->left->var_type = TYPE_INTEGER;
+        node->is_array = 1;
+        node->array_size = (int)num.int_val;
+        node->element_type = node->var_type;
+        node->var_type = TYPE_ARRAY;
         expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
     }
     expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
@@ -395,6 +399,16 @@ static ASTNodeClike* factor(ParserClike *p) {
         ClikeToken ident = p->current; advanceParser(p);
         if (p->current.type == CLIKE_TOKEN_LPAREN) {
             return call(p, ident);
+        }
+        if (p->current.type == CLIKE_TOKEN_LBRACKET) {
+            advanceParser(p);
+            ASTNodeClike *index = expression(p);
+            expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
+            ASTNodeClike *idNode = newASTNodeClike(TCAST_IDENTIFIER, ident);
+            ASTNodeClike *access = newASTNodeClike(TCAST_ARRAY_ACCESS, ident);
+            access->left = idNode;
+            access->right = index;
+            return access;
         }
         return newASTNodeClike(TCAST_IDENTIFIER, ident);
     }
