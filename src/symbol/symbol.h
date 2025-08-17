@@ -24,6 +24,7 @@ struct Symbol_s {
     bool is_alias;
     bool is_local_var;
     bool is_const;
+    bool is_inline;
     struct AST *type_def;      // Use forward-declared struct AST
     struct Symbol_s *next;     // Self-referential pointer using the tag
     // --- New fields for compiled procedures/functions ---
