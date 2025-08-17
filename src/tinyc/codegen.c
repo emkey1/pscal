@@ -180,17 +180,32 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
                 compileExpression(node->children[i], chunk, ctx);
             }
             char *name = tokenToCString(node->token);
-            Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
-            int nameIndex = addStringConstant(chunk, name);
-            if (sym) {
-                writeBytecodeChunk(chunk, OP_CALL, node->token.line);
-                emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
+            if (strcmp(name, "printf") == 0) {
+                // Directly map printf to the WriteLn opcode. printf in tinyc is
+                // treated as a procedure that always succeeds and returns 0.
+                writeBytecodeChunk(chunk, OP_WRITE_LN, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+
+                // Push a dummy return value (0) so expression statements remain
+                // balanced on the stack.
+                Value zero = makeInt(0);
+                int idx = addConstantToChunk(chunk, &zero);
+                freeValue(&zero);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else {
-                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                int nameIndex = addStringConstant(chunk, name);
+                if (sym) {
+                    writeBytecodeChunk(chunk, OP_CALL, node->token.line);
+                    emitShort(chunk, (uint16_t)nameIndex, node->token.line);
+                    emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                } else {
+                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                    emitShort(chunk, (uint16_t)nameIndex, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                }
             }
             free(name);
             break;
