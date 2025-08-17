@@ -4,10 +4,8 @@ These programs demonstrate the clike language that `tools/clike` compiles to
 Pscal bytecode. Each source file can be compiled with:
 
 ```
-python tools/clike Examples/Clike/<program>.tiny /tmp/<program>.pbc
+tools/clike Examples/Clike/<program>.tiny /tmp/<program>.pbc
 ```
-
-Run the resulting bytecode with `pscalvm` from a built tree.
 
 ## Programs
 

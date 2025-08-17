@@ -17,7 +17,7 @@ reuse its runtime without touching the C sources.
 
 ## Step-by-step: the clike compiler (Python)
 
-`tools/clike` is a compact Python compiler for an educational language. It
+`tools/tiny` is a compact Python compiler for an educational language. It
 illustrates the entire pipeline for targeting the VM.
 
 ### Loading opcodes
@@ -103,8 +103,8 @@ python tools/clike source.tiny out.pbc
 
 ## Step-by-step: the clike compiler (C)
 
-`src/clike` is a compact C compiler for an educational language. It
-illustrates the same pipeline using C code.
+`src/clike` is a compact C like language compiler. It illustrates the same pipeline 
+using C code.
 
 ### Loading opcodes
 
