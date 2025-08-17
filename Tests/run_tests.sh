@@ -24,6 +24,7 @@ NEGATIVE_TESTS=(
   "ArgumentOrderMismatch.p"
   "ArrayArgumentMismatch.p"
   "OpenArrayBaseTypeMismatch.p"
+  "ArgumentTypeMismatch.p"
 )
 
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
