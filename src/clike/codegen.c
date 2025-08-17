@@ -11,6 +11,7 @@ typedef struct {
     char *name;
     int index;
     VarType type;
+    int depth;
 } LocalVar;
 
 typedef struct {
@@ -23,7 +24,9 @@ typedef struct {
 typedef struct {
     LocalVar locals[256];
     int localCount;
+    int maxLocalCount;
     int paramCount;
+    int scopeDepth;
     LoopInfo loops[256];
     int loopDepth;
 } FuncContext;
@@ -42,34 +45,32 @@ static char* tokenToCString(ClikeToken t) {
     return s;
 }
 
+static void beginScope(FuncContext* ctx) { ctx->scopeDepth++; }
+
+static void endScope(FuncContext* ctx) {
+    while (ctx->localCount > ctx->paramCount &&
+           ctx->locals[ctx->localCount - 1].depth >= ctx->scopeDepth) {
+        free(ctx->locals[ctx->localCount - 1].name);
+        ctx->localCount--;
+    }
+    ctx->scopeDepth--;
+}
+
 static int addLocal(FuncContext* ctx, const char* name, VarType type) {
     ctx->locals[ctx->localCount].name = strdup(name);
     ctx->locals[ctx->localCount].index = ctx->localCount;
     ctx->locals[ctx->localCount].type = type;
-    return ctx->localCount++;
+    ctx->locals[ctx->localCount].depth = ctx->scopeDepth;
+    ctx->localCount++;
+    if (ctx->localCount > ctx->maxLocalCount) ctx->maxLocalCount = ctx->localCount;
+    return ctx->localCount - 1;
 }
 
 static int resolveLocal(FuncContext* ctx, const char* name) {
-    for (int i = 0; i < ctx->localCount; i++) {
+    for (int i = ctx->localCount - 1; i >= 0; i--) {
         if (strcmp(ctx->locals[i].name, name) == 0) return ctx->locals[i].index;
     }
     return -1;
-}
-
-static void collectLocals(ASTNodeClike* node, FuncContext* ctx) {
-    if (!node) return;
-    if (node->type == TCAST_VAR_DECL) {
-        char* name = tokenToCString(node->token);
-        addLocal(ctx, name, node->var_type);
-        free(name);
-        return;
-    }
-    if (node->left) collectLocals(node->left, ctx);
-    if (node->right) collectLocals(node->right, ctx);
-    if (node->third) collectLocals(node->third, ctx);
-    for (int i = 0; i < node->child_count; i++) {
-        collectLocals(node->children[i], ctx);
-    }
 }
 
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
@@ -230,15 +231,31 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             }
             break;
         }
-        case TCAST_COMPOUND: {
-            // Var declarations already collected; skip them
-            for (int i = 0; i < node->child_count; i++) {
-                ASTNodeClike* child = node->children[i];
-                if (child->type == TCAST_VAR_DECL) continue;
-                compileStatement(child, chunk, ctx);
+        case TCAST_VAR_DECL: {
+            char* name = tokenToCString(node->token);
+            int idx = addLocal(ctx, name, node->var_type);
+            free(name);
+            Value init;
+            switch (node->var_type) {
+                case TYPE_REAL: init = makeReal(0.0); break;
+                case TYPE_STRING: init = makeNil(); break;
+                default: init = makeInt(0); break;
             }
+            int cidx = addConstantToChunk(chunk, &init);
+            freeValue(&init);
+            writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+            writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
+        case TCAST_COMPOUND:
+            beginScope(ctx);
+            for (int i = 0; i < node->child_count; i++) {
+                compileStatement(node->children[i], chunk, ctx);
+            }
+            endScope(ctx);
+            break;
         default:
             break;
     }
@@ -389,9 +406,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
             ctx.paramCount++;
         }
     }
-
-    // Collect local variable declarations recursively
-    collectLocals(func->right, &ctx);
+    ctx.maxLocalCount = ctx.localCount;
 
     int address = chunk->count;
     char* fname = tokenToCString(func->token);
@@ -400,41 +415,16 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     sym->name = strdup(fname);
     sym->bytecode_address = address;
     sym->arity = (uint8_t)ctx.paramCount;
-    sym->locals_count = (uint8_t)(ctx.localCount - ctx.paramCount);
     sym->type = func->var_type;
     sym->is_defined = true;
     hashTableInsert(procedure_table, sym);
 
-    // Initialize local variables (excluding parameters) so that builtins like
-    // `readln` know their intended types. Integers default to 0, floats to
-    // 0.0 and strings to nil.
-    if (ctx.localCount > ctx.paramCount) {
-        for (int i = ctx.paramCount; i < ctx.localCount; i++) {
-            Value init;
-            switch (ctx.locals[i].type) {
-                case TYPE_REAL:
-                    init = makeReal(0.0);
-                    break;
-                case TYPE_STRING:
-                    init = makeNil();
-                    break;
-                default:
-                    init = makeInt(0);
-                    break;
-            }
-            int idx = addConstantToChunk(chunk, &init);
-            freeValue(&init);
-            writeBytecodeChunk(chunk, OP_CONSTANT, func->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, func->token.line);
-            writeBytecodeChunk(chunk, OP_SET_LOCAL, func->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)i, func->token.line);
-        }
-    }
-
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
 
-    for (int i = 0; i < ctx.localCount; i++) {
+    sym->locals_count = (uint8_t)(ctx.maxLocalCount - ctx.paramCount);
+
+    for (int i = 0; i < ctx.paramCount; i++) {
         free(ctx.locals[i].name);
     }
     free(fname);
