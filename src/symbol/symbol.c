@@ -275,6 +275,7 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     new_symbol->is_const = false;
     new_symbol->is_local_var = false; // Globals aren't local vars
     new_symbol->next = NULL; // Will be linked by hashTableInsert
+    new_symbol->enclosing = NULL;
     new_symbol->type_def = type_def ? copyAST(type_def) : NULL; // Store a DEEP COPY of the type definition
     new_symbol->is_defined = false; // Flag to indicate if the body has been compiled (useful for forward declarations)
     new_symbol->bytecode_address = 0; // Starting address (offset) in the bytecode chunk
@@ -402,6 +403,7 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
     sym->is_local_var = is_variable_declaration; // Mark as local variable for correct cleanup
     sym->is_const = false; // Local variables are not constants initially
     sym->next = NULL; // Will be linked by hashTableInsert
+    sym->enclosing = NULL;
     sym->upvalue_count = 0;
 
 

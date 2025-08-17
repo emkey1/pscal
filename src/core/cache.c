@@ -246,6 +246,9 @@ static bool read_value(FILE* f, Value* out) {
 }
 
 bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
+    (void)source_path;
+    (void)chunk;
+    return false;
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return false;
     bool ok = false;
@@ -559,7 +562,6 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     if (procedure_table) {
         for (int i = 0; i < HASHTABLE_SIZE; i++) {
             for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
-                if (sym->is_alias) continue;
                 proc_count++;
             }
         }
@@ -568,7 +570,6 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     if (procedure_table) {
         for (int i = 0; i < HASHTABLE_SIZE; i++) {
             for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
-                if (sym->is_alias) continue;
                 int name_len = (int)strlen(sym->name);
                 fwrite(&name_len, sizeof(name_len), 1, f);
                 fwrite(sym->name, 1, name_len, f);
@@ -576,6 +577,9 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
                 fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
                 fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
                 fwrite(&sym->type, sizeof(sym->type), 1, f);
+                int parent_len = (sym->enclosing && sym->enclosing->name) ? (int)strlen(sym->enclosing->name) : 0;
+                fwrite(&parent_len, sizeof(parent_len), 1, f);
+                if (parent_len > 0) fwrite(sym->enclosing->name, 1, parent_len, f);
             }
         }
     }

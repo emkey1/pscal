@@ -1393,6 +1393,7 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                 sym->is_alias = false;
                 sym->is_local_var = false;
                 sym->next = NULL;
+                sym->enclosing = NULL;
                 freeValue(&v); // Free the temporary value from eval
                 break;
             }
@@ -1416,6 +1417,7 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                      varSym->is_alias = false;
                      varSym->is_local_var = false; // Not local to the unit's execution scope yet
                      varSym->next = NULL;
+                     varSym->enclosing = NULL;
 
                      // Append to list
                      *tail = varSym;
@@ -1445,6 +1447,7 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                 sym->is_alias = false;
                 sym->is_local_var = false;
                 sym->next = NULL;
+                sym->enclosing = NULL;
                 break;
             }
             default:
