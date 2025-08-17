@@ -10,7 +10,7 @@
 typedef struct {
     char *name;
     int index;
-    bool isFloat;
+    VarType type;
 } LocalVar;
 
 typedef struct {
@@ -33,10 +33,10 @@ static char* tokenToCString(ClikeToken t) {
     return s;
 }
 
-static int addLocal(FuncContext* ctx, const char* name, bool isFloat) {
+static int addLocal(FuncContext* ctx, const char* name, VarType type) {
     ctx->locals[ctx->localCount].name = strdup(name);
     ctx->locals[ctx->localCount].index = ctx->localCount;
-    ctx->locals[ctx->localCount].isFloat = isFloat;
+    ctx->locals[ctx->localCount].type = type;
     return ctx->localCount++;
 }
 
@@ -51,8 +51,12 @@ static void collectLocals(ASTNodeClike* node, FuncContext* ctx) {
     if (!node) return;
     if (node->type == TCAST_VAR_DECL) {
         char* name = tokenToCString(node->token);
-        bool isFloat = node->right && node->right->token.type == CLIKE_TOKEN_FLOAT;
-        addLocal(ctx, name, isFloat);
+        VarType type = TYPE_INTEGER;
+        if (node->right) {
+            if (node->right->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
+            else if (node->right->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
+        }
+        addLocal(ctx, name, type);
         free(name);
         return;
     }
@@ -274,8 +278,12 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
         for (int i = 0; i < func->left->child_count; i++) {
             ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            bool isFloat = p->left && p->left->token.type == CLIKE_TOKEN_FLOAT;
-            addLocal(&ctx, name, isFloat);
+            VarType type = TYPE_INTEGER;
+            if (p->left) {
+                if (p->left->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
+                else if (p->left->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
+            }
+            addLocal(&ctx, name, type);
             free(name);
             ctx.paramCount++;
         }
@@ -296,11 +304,23 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     sym->is_defined = true;
     hashTableInsert(procedure_table, sym);
 
-    // Initialize local variables (excluding parameters) to 0 so that builtins
-    // like `readln` treat them as integers instead of defaulting to strings.
+    // Initialize local variables (excluding parameters) so that builtins like
+    // `readln` know their intended types. Integers default to 0, floats to
+    // 0.0 and strings to nil.
     if (ctx.localCount > ctx.paramCount) {
         for (int i = ctx.paramCount; i < ctx.localCount; i++) {
-            Value init = ctx.locals[i].isFloat ? makeReal(0.0) : makeInt(0);
+            Value init;
+            switch (ctx.locals[i].type) {
+                case TYPE_REAL:
+                    init = makeReal(0.0);
+                    break;
+                case TYPE_STRING:
+                    init = makeNil();
+                    break;
+                default:
+                    init = makeInt(0);
+                    break;
+            }
             int idx = addConstantToChunk(chunk, &init);
             freeValue(&init);
             writeBytecodeChunk(chunk, OP_CONSTANT, func->token.line);
