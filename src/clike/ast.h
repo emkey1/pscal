@@ -17,6 +17,7 @@ typedef enum {
     TCAST_BINOP,
     TCAST_UNOP,
     TCAST_NUMBER,
+    TCAST_STRING,
     TCAST_IDENTIFIER,
     TCAST_CALL
 } ASTNodeTypeClike;

@@ -56,7 +56,7 @@ ASTNodeClike* parseProgramClike(ParserClike *parser) {
 }
 
 static ASTNodeClike* declaration(ParserClike *p) {
-    if (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID) {
+    if (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID || p->current.type == CLIKE_TOKEN_FLOAT) {
         ClikeToken type_tok = p->current; advanceParser(p);
         ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
         if (p->current.type == CLIKE_TOKEN_LPAREN) {
@@ -70,6 +70,7 @@ static ASTNodeClike* declaration(ParserClike *p) {
 
 static ASTNodeClike* varDeclaration(ParserClike *p, ClikeToken type_token, ClikeToken ident) {
     ASTNodeClike *node = newASTNodeClike(TCAST_VAR_DECL, ident);
+    node->right = newASTNodeClike(TCAST_IDENTIFIER, type_token);
     if (matchToken(p, CLIKE_TOKEN_LBRACKET)) {
         ClikeToken num = p->current; expectToken(p, CLIKE_TOKEN_NUMBER, "array size");
         node->left = newASTNodeClike(TCAST_NUMBER, num);
@@ -115,7 +116,7 @@ static ASTNodeClike* param(ParserClike *p) {
 static ASTNodeClike* compoundStmt(ParserClike *p) {
     expectToken(p, CLIKE_TOKEN_LBRACE, "{");
     ASTNodeClike *node = newASTNodeClike(TCAST_COMPOUND, p->current);
-    while (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID) {
+    while (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID || p->current.type == CLIKE_TOKEN_FLOAT) {
         ClikeToken type_tok = p->current; advanceParser(p);
         ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
         ASTNodeClike *decl = varDeclaration(p, type_tok, ident);
@@ -280,9 +281,13 @@ static ASTNodeClike* factor(ParserClike *p) {
         expectToken(p, CLIKE_TOKEN_RPAREN, ")");
         return expr;
     }
-    if (p->current.type == CLIKE_TOKEN_NUMBER) {
+    if (p->current.type == CLIKE_TOKEN_NUMBER || p->current.type == CLIKE_TOKEN_FLOAT_LITERAL) {
         ClikeToken num = p->current; advanceParser(p);
         return newASTNodeClike(TCAST_NUMBER, num);
+    }
+    if (p->current.type == CLIKE_TOKEN_STRING) {
+        ClikeToken str = p->current; advanceParser(p);
+        return newASTNodeClike(TCAST_STRING, str);
     }
     if (p->current.type == CLIKE_TOKEN_IDENTIFIER) {
         ClikeToken ident = p->current; advanceParser(p);
