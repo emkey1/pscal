@@ -263,6 +263,17 @@ set(TINYC_SOURCES
     src/symbol/symbol.c
     src/tinyc/stubs.c
 )
+
+# When SDL support is enabled, tinyc needs the same SDL backend sources
+# as the main executables to provide implementations for graphics and
+# audio builtins referenced from builtin.c.
+if(SDL)
+    list(APPEND TINYC_SOURCES
+        src/backend_ast/sdl.c
+        src/backend_ast/audio.c
+    )
+endif()
+
 add_executable(tinyc ${TINYC_SOURCES})
 if(TARGET CURL::libcurl)
     target_link_libraries(tinyc PRIVATE CURL::libcurl m)
