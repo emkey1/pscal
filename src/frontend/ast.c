@@ -54,6 +54,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->child_capacity = 0;
     node->type = type;
     node->is_global_scope = false;
+    node->is_inline = false;
     node->i_val = 0; // Initialize i_val
     node->symbol_table = NULL; // Initialize symbol_table
     node->unit_list = NULL; // Initialize unit_list
@@ -758,6 +759,7 @@ AST *copyAST(AST *node) {
     newNode->var_type = node->var_type;
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
+    newNode->is_inline = node->is_inline;
     newNode->i_val = node->i_val;
     // Preserve pointers for unit_list and symbol_table (shallow copy).
     // These structures are managed elsewhere and do not require deep copies
@@ -993,6 +995,11 @@ static void dumpASTJSONRecursive(AST *node, FILE *outFile, int indentLevel, bool
         PRINT_JSON_FIELD_SEPARATOR();
         printJSONIndent(outFile, nextIndent);
         fprintf(outFile, "\"type_definition_link\": \"%s (details not expanded)\"", astTypeToString(node->type_def->type));
+    }
+    if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
+        PRINT_JSON_FIELD_SEPARATOR();
+        printJSONIndent(outFile, nextIndent);
+        fprintf(outFile, "\"is_inline\": %s", node->is_inline ? "true" : "false");
     }
     // --- End Common Node Attributes ---
 

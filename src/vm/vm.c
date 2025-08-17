@@ -390,6 +390,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
                            // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
+    sym->is_inline = false;
     sym->next = NULL;
     sym->enclosing = NULL;
     sym->upvalue_count = 0;
@@ -477,6 +478,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             sym->is_alias = false;
             sym->is_const = false;
             sym->is_local_var = false;
+            sym->is_inline = false;
             sym->next = NULL;
             sym->enclosing = NULL;
             sym->upvalue_count = 0;

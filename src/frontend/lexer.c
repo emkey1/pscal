@@ -16,6 +16,7 @@ static Keyword keywords[] = {
     {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
     {"function", TOKEN_FUNCTION}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
     {"in", TOKEN_IN}, // Added IN
+    {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},
     {"interface", TOKEN_INTERFACE}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
     {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},

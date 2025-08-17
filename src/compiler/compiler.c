@@ -359,6 +359,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
+static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -1392,6 +1393,71 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     current_function_compiler = fc.enclosing;
 }
 
+static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result) {
+    if (!proc_symbol || !proc_symbol->type_def || !current_function_compiler) {
+        // Fallback to normal call semantics handled by caller
+        return;
+    }
+
+    AST* decl = proc_symbol->type_def;
+    AST* blockNode = (decl->type == AST_PROCEDURE_DECL) ? decl->right : decl->extra;
+    if (!blockNode) return;
+
+    int starting_local_count = current_function_compiler->local_count;
+
+    // Map arguments to parameters
+    int arg_index = 0;
+    for (int i = 0; i < decl->child_count && arg_index < call_node->child_count; i++) {
+        AST* param_group = decl->children[i];
+        bool by_ref = param_group->by_ref;
+        for (int j = 0; j < param_group->child_count && arg_index < call_node->child_count; j++, arg_index++) {
+            AST* param_name_node = param_group->children[j];
+            const char* pname = param_name_node->token ? param_name_node->token->value : NULL;
+            if (!pname) continue;
+            addLocal(current_function_compiler, pname, line, by_ref);
+            int slot = current_function_compiler->local_count - 1;
+            AST* arg_node = call_node->children[arg_index];
+            if (by_ref) {
+                compileLValue(arg_node, chunk, getLine(arg_node));
+            } else {
+                compileRValue(arg_node, chunk, getLine(arg_node));
+            }
+            writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        }
+    }
+
+    int result_slot = -1;
+    if (decl->type == AST_FUNCTION_DECL) {
+        // Allocate slots for function name and result like normal compilation
+        addLocal(current_function_compiler, decl->token->value, line, false);
+        addLocal(current_function_compiler, "result", line, false);
+        result_slot = current_function_compiler->local_count - 1;
+    }
+
+    HashTable* saved_table = current_procedure_table;
+    if (decl->symbol_table) {
+        current_procedure_table = (HashTable*)decl->symbol_table;
+    }
+    compileNode(blockNode, chunk, getLine(blockNode));
+    current_procedure_table = saved_table;
+
+    if (push_result && decl->type == AST_FUNCTION_DECL) {
+        if (result_slot != -1) {
+            writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)result_slot, line);
+        } else {
+            emitConstant(chunk, addNilConstant(chunk), line);
+        }
+    }
+
+    // Clean up locals added during inlining
+    for (int i = current_function_compiler->local_count - 1; i >= starting_local_count; i--) {
+        free(current_function_compiler->locals[i].name);
+    }
+    current_function_compiler->local_count = starting_local_count;
+}
+
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1881,6 +1947,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
+            if (proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_inline) {
+                compileInlineRoutine(proc_symbol, node, chunk, line, false);
+                break;
+            }
+
             // (Argument compilation logic remains the same...)
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
@@ -2366,7 +2437,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (func_symbol && func_symbol->is_alias) {
                 func_symbol = func_symbol->real_symbol;
             }
-            
+
+            if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
+                compileInlineRoutine(func_symbol, node, chunk, line, true);
+                break;
+            }
+
             if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
