@@ -332,11 +332,23 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
          return sym->type_def;
      }
 
-     if (currentScopeNode && currentScopeNode != globalProgramNode) {
-         foundDecl = findDeclarationInScope(varName, currentScopeNode);
-     }
+    if (currentScopeNode && currentScopeNode != globalProgramNode) {
+        foundDecl = findDeclarationInScope(varName, currentScopeNode);
+    }
 
-     if (!foundDecl && globalProgramNode && globalProgramNode->type == AST_PROGRAM) {
+    // If not found in the immediate scope, walk up parent scopes to
+    // support nested routines accessing variables from enclosing
+    // procedures/functions (upvalues).
+    AST* parentScope = currentScopeNode ? currentScopeNode->parent : NULL;
+    while (!foundDecl && parentScope) {
+        if (parentScope->type == AST_PROCEDURE_DECL || parentScope->type == AST_FUNCTION_DECL) {
+            foundDecl = findDeclarationInScope(varName, parentScope);
+            if (foundDecl) break;
+        }
+        parentScope = parentScope->parent;
+    }
+
+    if (!foundDecl && globalProgramNode && globalProgramNode->type == AST_PROGRAM) {
           if (globalProgramNode->right && globalProgramNode->right->type == AST_BLOCK && globalProgramNode->right->child_count > 0) {
               AST* globalDeclarationsNode = globalProgramNode->right->children[0];
               if (globalDeclarationsNode && globalDeclarationsNode->type == AST_COMPOUND) {
@@ -747,9 +759,14 @@ AST *copyAST(AST *node) {
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
     newNode->i_val = node->i_val;
-    // Do NOT copy unit_list or symbol_table unless you intend to deep copy them
-    newNode->unit_list = NULL;
-    newNode->symbol_table = NULL;
+    // Preserve pointers for unit_list and symbol_table (shallow copy).
+    // These structures are managed elsewhere and do not require deep copies
+    // when duplicating the AST node.  Retaining the symbol_table pointer is
+    // especially important for procedure declarations that contain nested
+    // routines; the VM relies on this table at runtime to resolve calls to
+    // inner procedures by their bytecode address.
+    newNode->unit_list = node->unit_list;
+    newNode->symbol_table = node->symbol_table;
     newNode->type_def = NULL;
     
     // Handle children first
