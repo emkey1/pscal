@@ -12,6 +12,9 @@ typedef struct {
     int index;
     VarType type;
     int depth;
+    int isArray;
+    int arraySize;
+    VarType elemType;
 } LocalVar;
 
 typedef struct {
@@ -56,11 +59,14 @@ static void endScope(FuncContext* ctx) {
     ctx->scopeDepth--;
 }
 
-static int addLocal(FuncContext* ctx, const char* name, VarType type) {
+static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArray, int arraySize, VarType elemType) {
     ctx->locals[ctx->localCount].name = strdup(name);
     ctx->locals[ctx->localCount].index = ctx->localCount;
     ctx->locals[ctx->localCount].type = type;
     ctx->locals[ctx->localCount].depth = ctx->scopeDepth;
+    ctx->locals[ctx->localCount].isArray = isArray;
+    ctx->locals[ctx->localCount].arraySize = arraySize;
+    ctx->locals[ctx->localCount].elemType = elemType;
     ctx->localCount++;
     if (ctx->localCount > ctx->maxLocalCount) ctx->maxLocalCount = ctx->localCount;
     return ctx->localCount - 1;
@@ -75,6 +81,7 @@ static int resolveLocal(FuncContext* ctx, const char* name) {
 
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
+static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
 
 // Helper to compile an l-value (currently only local identifiers) and push its
 // address onto the stack.
@@ -86,6 +93,32 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
         free(name);
         writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+    } else if (node->type == TCAST_ARRAY_ACCESS) {
+        // Evaluate index first, then push base array
+        compileExpression(node->right, chunk, ctx);
+        if (node->left && node->left->type == TCAST_IDENTIFIER) {
+            char* name = tokenToCString(node->left->token);
+            int idx = resolveLocal(ctx, name);
+            free(name);
+            writeBytecodeChunk(chunk, OP_GET_LOCAL, node->left->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
+        } else {
+            compileExpression(node->left, chunk, ctx);
+        }
+        writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
+        writeBytecodeChunk(chunk, 1, node->token.line);
+    }
+}
+
+static void collectLocals(ASTNodeClike *node, FuncContext* ctx) {
+    if (!node) return;
+    for (int i = 0; i < node->child_count; i++) {
+        ASTNodeClike* child = node->children[i];
+        if (child->type == TCAST_VAR_DECL) {
+            char* name = tokenToCString(child->token);
+            addLocal(ctx, name, child->var_type, child->is_array, child->array_size, child->element_type);
+            free(name);
+        }
     }
 }
 
@@ -233,24 +266,42 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
         }
         case TCAST_VAR_DECL: {
             char* name = tokenToCString(node->token);
-            int idx = addLocal(ctx, name, node->var_type);
+            int idx = resolveLocal(ctx, name);
             free(name);
-            Value init;
-            switch (node->var_type) {
-                case TYPE_REAL: init = makeReal(0.0); break;
-                case TYPE_STRING: init = makeNil(); break;
-                default: init = makeInt(0); break;
+            if (node->is_array) {
+                Value lower = makeInt(0);
+                Value upper = makeInt(node->array_size - 1);
+                int lidx = addConstantToChunk(chunk, &lower);
+                int uidx = addConstantToChunk(chunk, &upper);
+                freeValue(&lower);
+                freeValue(&upper);
+                int elemNameIdx = addStringConstant(chunk, "");
+                writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                writeBytecodeChunk(chunk, 1, node->token.line); // dimension count
+                emitShort(chunk, (uint16_t)lidx, node->token.line);
+                emitShort(chunk, (uint16_t)uidx, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+            } else {
+                Value init;
+                switch (node->var_type) {
+                    case TYPE_REAL: init = makeReal(0.0); break;
+                    case TYPE_STRING: init = makeNil(); break;
+                    default: init = makeInt(0); break;
+                }
+                int cidx = addConstantToChunk(chunk, &init);
+                freeValue(&init);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             }
-            int cidx = addConstantToChunk(chunk, &init);
-            freeValue(&init);
-            writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
-            writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
         case TCAST_COMPOUND:
             beginScope(ctx);
+            collectLocals(node, ctx);
             for (int i = 0; i < node->child_count; i++) {
                 compileStatement(node->children[i], chunk, ctx);
             }
@@ -314,14 +365,20 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             }
             break;
         case TCAST_ASSIGN: {
-            if (node->left && node->left->type == TCAST_IDENTIFIER) {
-                char* name = tokenToCString(node->left->token);
-                int idx = resolveLocal(ctx, name);
-                free(name);
-                compileExpression(node->right, chunk, ctx);
-                writeBytecodeChunk(chunk, OP_DUP, node->token.line);
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            if (node->left) {
+                if (node->left->type == TCAST_IDENTIFIER) {
+                    char* name = tokenToCString(node->left->token);
+                    int idx = resolveLocal(ctx, name);
+                    free(name);
+                    compileExpression(node->right, chunk, ctx);
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line);
+                    writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                } else if (node->left->type == TCAST_ARRAY_ACCESS) {
+                    compileLValue(node->left, chunk, ctx);
+                    compileExpression(node->right, chunk, ctx);
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line);
+                }
             }
             break;
         }
@@ -333,6 +390,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
+        case TCAST_ARRAY_ACCESS:
+            compileLValue(node, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
+            break;
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
             if (strcmp(name, "printf") == 0) {
@@ -401,7 +462,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
         for (int i = 0; i < func->left->child_count; i++) {
             ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            addLocal(&ctx, name, p->var_type);
+            addLocal(&ctx, name, p->var_type, 0, 0, TYPE_UNKNOWN);
             free(name);
             ctx.paramCount++;
         }
