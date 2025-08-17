@@ -81,6 +81,9 @@ python tools/tinycc.py program.c out.pbc
 ./build/bin/pscalvm out.pbc
 ```
 
+Sample programs demonstrating the Tiny C subset are available in
+`tools/tinycc/examples`.
+
 ## Runtime library
 
 The interpreter expects access to the `etc` and `lib` directories.  When running from the repository you can create temporary symlinks:
