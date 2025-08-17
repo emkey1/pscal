@@ -7,9 +7,11 @@ int fib(int n) {
 
 int main() {
     int i;
+    int j;
     i = 0;
-    while (i < 10) {
-        writeln(fib(i));
+    scanf(j);
+    while (i < j) {
+        printf(fib(i));
         i = i + 1;
     }
     return 0;
