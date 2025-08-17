@@ -14,9 +14,18 @@ typedef struct {
 } LocalVar;
 
 typedef struct {
+    int breakAddrs[256];
+    int breakCount;
+    int continueAddrs[256];
+    int continueCount;
+} LoopInfo;
+
+typedef struct {
     LocalVar locals[256];
     int localCount;
     int paramCount;
+    LoopInfo loops[256];
+    int loopDepth;
 } FuncContext;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
@@ -114,17 +123,111 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             break;
         }
         case TCAST_WHILE: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
             int loopStart = chunk->count;
             compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
             int exitJump = chunk->count;
             emitShort(chunk, 0xFFFF, node->token.line);
             compileStatement(node->right, chunk, ctx);
+            for (int i = 0; i < loop->continueCount; i++) {
+                patchShort(chunk, loop->continueAddrs[i], (uint16_t)(loopStart - (loop->continueAddrs[i] + 2)));
+            }
             writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
             int backOffset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backOffset, node->token.line);
-            uint16_t exitOffset = (uint16_t)(chunk->count - (exitJump + 2));
+            int loopEnd = chunk->count;
+            uint16_t exitOffset = (uint16_t)(loopEnd - (exitJump + 2));
             patchShort(chunk, exitJump, exitOffset);
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
+            break;
+        }
+        case TCAST_FOR: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
+            if (node->left) {
+                compileExpression(node->left, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+            }
+            int loopStart = chunk->count;
+            int exitJump = -1;
+            if (node->right) {
+                compileExpression(node->right, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+                exitJump = chunk->count;
+                emitShort(chunk, 0xFFFF, node->token.line);
+            }
+            ASTNodeClike* body = node->child_count > 0 ? node->children[0] : NULL;
+            compileStatement(body, chunk, ctx);
+            int postStart = chunk->count;
+            for (int i = 0; i < loop->continueCount; i++) {
+                patchShort(chunk, loop->continueAddrs[i], (uint16_t)(postStart - (loop->continueAddrs[i] + 2)));
+            }
+            if (node->third) {
+                compileExpression(node->third, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+            }
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int backOffset = loopStart - (chunk->count + 2);
+            emitShort(chunk, (uint16_t)backOffset, node->token.line);
+            int loopEnd = chunk->count;
+            if (exitJump != -1) {
+                uint16_t exitOffset = (uint16_t)(loopEnd - (exitJump + 2));
+                patchShort(chunk, exitJump, exitOffset);
+            }
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
+            break;
+        }
+        case TCAST_DO_WHILE: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
+            int loopStart = chunk->count;
+            compileStatement(node->right, chunk, ctx);
+            int continueTarget = chunk->count;
+            for (int i = 0; i < loop->continueCount; i++) {
+                patchShort(chunk, loop->continueAddrs[i], (uint16_t)(continueTarget - (loop->continueAddrs[i] + 2)));
+            }
+            compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+            int exitJump = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int backOffset = loopStart - (chunk->count + 2);
+            emitShort(chunk, (uint16_t)backOffset, node->token.line);
+            int loopEnd = chunk->count;
+            uint16_t exitOffset = (uint16_t)(loopEnd - (exitJump + 2));
+            patchShort(chunk, exitJump, exitOffset);
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
+            break;
+        }
+        case TCAST_BREAK: {
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int patch = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            if (ctx->loopDepth > 0) {
+                LoopInfo* loop = &ctx->loops[ctx->loopDepth - 1];
+                loop->breakAddrs[loop->breakCount++] = patch;
+            }
+            break;
+        }
+        case TCAST_CONTINUE: {
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int patch = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            if (ctx->loopDepth > 0) {
+                LoopInfo* loop = &ctx->loops[ctx->loopDepth - 1];
+                loop->continueAddrs[loop->continueCount++] = patch;
+            }
             break;
         }
         case TCAST_COMPOUND: {

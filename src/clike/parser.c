@@ -57,6 +57,10 @@ static ASTNodeClike* call(ParserClike *p, ClikeToken ident);
 static ASTNodeClike* expressionStatement(ParserClike *p);
 static ASTNodeClike* ifStatement(ParserClike *p);
 static ASTNodeClike* whileStatement(ParserClike *p);
+static ASTNodeClike* forStatement(ParserClike *p);
+static ASTNodeClike* doWhileStatement(ParserClike *p);
+static ASTNodeClike* breakStatement(ParserClike *p);
+static ASTNodeClike* continueStatement(ParserClike *p);
 static ASTNodeClike* returnStatement(ParserClike *p);
 
 void initParserClike(ParserClike *parser, const char *source) {
@@ -161,6 +165,10 @@ static ASTNodeClike* statement(ParserClike *p) {
     switch (p->current.type) {
         case CLIKE_TOKEN_IF: return ifStatement(p);
         case CLIKE_TOKEN_WHILE: return whileStatement(p);
+        case CLIKE_TOKEN_FOR: return forStatement(p);
+        case CLIKE_TOKEN_DO: return doWhileStatement(p);
+        case CLIKE_TOKEN_BREAK: return breakStatement(p);
+        case CLIKE_TOKEN_CONTINUE: return continueStatement(p);
         case CLIKE_TOKEN_RETURN: return returnStatement(p);
         case CLIKE_TOKEN_LBRACE: return compoundStmt(p);
         default: return expressionStatement(p);
@@ -194,6 +202,55 @@ static ASTNodeClike* whileStatement(ParserClike *p) {
     node->left = cond;
     node->right = body;
     return node;
+}
+
+static ASTNodeClike* forStatement(ParserClike *p) {
+    expectToken(p, CLIKE_TOKEN_FOR, "for");
+    expectToken(p, CLIKE_TOKEN_LPAREN, "(");
+    ASTNodeClike *init = NULL;
+    if (p->current.type != CLIKE_TOKEN_SEMICOLON) init = expression(p);
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    ASTNodeClike *cond = NULL;
+    if (p->current.type != CLIKE_TOKEN_SEMICOLON) cond = expression(p);
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    ASTNodeClike *post = NULL;
+    if (p->current.type != CLIKE_TOKEN_RPAREN) post = expression(p);
+    expectToken(p, CLIKE_TOKEN_RPAREN, ")");
+    ASTNodeClike *body = statement(p);
+    ASTNodeClike *node = newASTNodeClike(TCAST_FOR, p->current);
+    node->left = init;
+    node->right = cond;
+    node->third = post;
+    if (body) addChildClike(node, body);
+    return node;
+}
+
+static ASTNodeClike* doWhileStatement(ParserClike *p) {
+    expectToken(p, CLIKE_TOKEN_DO, "do");
+    ASTNodeClike *body = statement(p);
+    expectToken(p, CLIKE_TOKEN_WHILE, "while");
+    expectToken(p, CLIKE_TOKEN_LPAREN, "(");
+    ASTNodeClike *cond = expression(p);
+    expectToken(p, CLIKE_TOKEN_RPAREN, ")");
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    ASTNodeClike *node = newASTNodeClike(TCAST_DO_WHILE, p->current);
+    node->left = cond;
+    node->right = body;
+    return node;
+}
+
+static ASTNodeClike* breakStatement(ParserClike *p) {
+    ClikeToken tok = p->current;
+    expectToken(p, CLIKE_TOKEN_BREAK, "break");
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    return newASTNodeClike(TCAST_BREAK, tok);
+}
+
+static ASTNodeClike* continueStatement(ParserClike *p) {
+    ClikeToken tok = p->current;
+    expectToken(p, CLIKE_TOKEN_CONTINUE, "continue");
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    return newASTNodeClike(TCAST_CONTINUE, tok);
 }
 
 static ASTNodeClike* returnStatement(ParserClike *p) {

@@ -54,6 +54,10 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start) {
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length);
     if (length == 5 && strncmp(start, "while", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_WHILE, start, length);
+    if (length == 3 && strncmp(start, "for", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_FOR, start, length);
+    if (length == 2 && strncmp(start, "do", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_DO, start, length);
+    if (length == 5 && strncmp(start, "break", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_BREAK, start, length);
+    if (length == 8 && strncmp(start, "continue", 8) == 0) return makeToken(lexer, CLIKE_TOKEN_CONTINUE, start, length);
     if (length == 6 && strncmp(start, "return", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_RETURN, start, length);
     return makeToken(lexer, CLIKE_TOKEN_IDENTIFIER, start, length);
 }
@@ -181,6 +185,10 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_IF: return "TOKEN_IF";
         case CLIKE_TOKEN_ELSE: return "TOKEN_ELSE";
         case CLIKE_TOKEN_WHILE: return "TOKEN_WHILE";
+        case CLIKE_TOKEN_FOR: return "TOKEN_FOR";
+        case CLIKE_TOKEN_DO: return "TOKEN_DO";
+        case CLIKE_TOKEN_BREAK: return "TOKEN_BREAK";
+        case CLIKE_TOKEN_CONTINUE: return "TOKEN_CONTINUE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
