@@ -6,6 +6,7 @@
 #include "clike/builtins.h"
 #include "clike/semantics.h"
 #include "clike/errors.h"
+#include "clike/opt.h"
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -98,6 +99,7 @@ int main(int argc, char **argv) {
         if (procedure_table) freeHashTable(procedure_table);
         return clike_error_count > 255 ? 255 : clike_error_count;
     }
+    prog = optimizeClikeAST(prog);
 
     BytecodeChunk chunk; clike_compile(prog, &chunk);
     if (dump_bytecode_flag) {
