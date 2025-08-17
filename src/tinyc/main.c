@@ -33,10 +33,10 @@ int main(int argc, char **argv) {
     ParserTinyC parser; initParserTinyC(&parser, src);
     ASTNodeTinyC *prog = parseProgramTinyC(&parser);
 
-    BytecodeChunk chunk; tinyc_compile(prog, &chunk);
-
     initSymbolSystemTinyC();
     tinyc_register_builtins();
+
+    BytecodeChunk chunk; tinyc_compile(prog, &chunk);
     VM vm; initVM(&vm);
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
     freeVM(&vm);
