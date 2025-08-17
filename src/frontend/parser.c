@@ -782,6 +782,7 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     sym->is_alias = false;
     sym->is_local_var = false;
     sym->next = NULL;
+    sym->enclosing = NULL;
     sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
     sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
     sym->arity = proc_decl_ast_original->child_count; // Store parameter count for builtins and declarations

@@ -391,6 +391,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
                            // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
     sym->next = NULL;
+    sym->enclosing = NULL;
     sym->upvalue_count = 0;
     return sym;
 }
@@ -477,6 +478,8 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             sym->is_const = false;
             sym->is_local_var = false;
             sym->next = NULL;
+            sym->enclosing = NULL;
+            sym->upvalue_count = 0;
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
             runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
@@ -2278,16 +2281,28 @@ comparison_error_label:
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
-                    CallFrame* caller = (vm->frameCount >= 2) ? &vm->frames[vm->frameCount - 2] : NULL;
-                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
-                        if (!caller) {
-                            runtimeError(vm, "VM Error: No enclosing frame for upvalue.");
-                            return INTERPRET_RUNTIME_ERROR;
+                    CallFrame* parent_frame = NULL;
+                    if (proc_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
                         }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
                         if (proc_symbol->upvalues[i].isLocal) {
-                            frame->upvalues[i] = caller->slots + proc_symbol->upvalues[i].index;
+                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
                         } else {
-                            frame->upvalues[i] = caller->upvalues[proc_symbol->upvalues[i].index];
+                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
                         }
                     }
                 }

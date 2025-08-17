@@ -51,6 +51,7 @@ typedef struct FunctionCompilerState {
     int scope_depth;
     const char* name;
     struct FunctionCompilerState* enclosing;
+    Symbol* function_symbol;
     CompilerUpvalue upvalues[MAX_UPVALUES];
     int upvalue_count;
 } FunctionCompilerState;
@@ -378,6 +379,7 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->scope_depth = 0;
     fc->name = NULL;
     fc->enclosing = NULL;
+    fc->function_symbol = NULL;
     fc->upvalue_count = 0;
 }
 
@@ -1297,6 +1299,8 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
 
     proc_symbol->bytecode_address = func_bytecode_start_address;
     proc_symbol->is_defined = true;
+    fc.function_symbol = proc_symbol;
+    proc_symbol->enclosing = fc.enclosing ? fc.enclosing->function_symbol : NULL;
 
     if (current_procedure_table != procedure_table) {
         if (!hashTableLookup(procedure_table, proc_symbol->name)) {
