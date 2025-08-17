@@ -8,6 +8,10 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     if (!node) return NULL;
     node->type = type;
     node->token = token;
+    node->var_type = TYPE_UNKNOWN;
+    node->is_array = 0;
+    node->array_size = 0;
+    node->element_type = TYPE_UNKNOWN;
     node->left = node->right = node->third = NULL;
     node->children = NULL;
     node->child_count = 0;
@@ -59,6 +63,10 @@ static const char* nodeTypeToString(ASTNodeTypeClike type) {
         case TCAST_COMPOUND: return "COMPOUND";
         case TCAST_IF: return "IF";
         case TCAST_WHILE: return "WHILE";
+        case TCAST_FOR: return "FOR";
+        case TCAST_DO_WHILE: return "DO_WHILE";
+        case TCAST_BREAK: return "BREAK";
+        case TCAST_CONTINUE: return "CONTINUE";
         case TCAST_RETURN: return "RETURN";
         case TCAST_EXPR_STMT: return "EXPR_STMT";
         case TCAST_ASSIGN: return "ASSIGN";
@@ -67,6 +75,7 @@ static const char* nodeTypeToString(ASTNodeTypeClike type) {
         case TCAST_NUMBER: return "NUMBER";
         case TCAST_STRING: return "STRING";
         case TCAST_IDENTIFIER: return "IDENTIFIER";
+        case TCAST_ARRAY_ACCESS: return "ARRAY_ACCESS";
         case TCAST_CALL: return "CALL";
         default: return "UNKNOWN";
     }

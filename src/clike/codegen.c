@@ -1,22 +1,40 @@
 #include "clike/codegen.h"
 #include "clike/builtins.h"
+#include "clike/parser.h"
+#include "clike/semantics.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "globals.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 typedef struct {
     char *name;
     int index;
     VarType type;
+    int depth;
+    int isArray;
+    int arraySize;
+    VarType elemType;
 } LocalVar;
+
+typedef struct {
+    int breakAddrs[256];
+    int breakCount;
+    int continueAddrs[256];
+    int continueCount;
+} LoopInfo;
 
 typedef struct {
     LocalVar locals[256];
     int localCount;
+    int maxLocalCount;
     int paramCount;
+    int scopeDepth;
+    LoopInfo loops[256];
+    int loopDepth;
 } FuncContext;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
@@ -33,43 +51,40 @@ static char* tokenToCString(ClikeToken t) {
     return s;
 }
 
-static int addLocal(FuncContext* ctx, const char* name, VarType type) {
+static void beginScope(FuncContext* ctx) { ctx->scopeDepth++; }
+
+static void endScope(FuncContext* ctx) {
+    while (ctx->localCount > ctx->paramCount &&
+           ctx->locals[ctx->localCount - 1].depth >= ctx->scopeDepth) {
+        free(ctx->locals[ctx->localCount - 1].name);
+        ctx->localCount--;
+    }
+    ctx->scopeDepth--;
+}
+
+static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArray, int arraySize, VarType elemType) {
     ctx->locals[ctx->localCount].name = strdup(name);
     ctx->locals[ctx->localCount].index = ctx->localCount;
     ctx->locals[ctx->localCount].type = type;
-    return ctx->localCount++;
+    ctx->locals[ctx->localCount].depth = ctx->scopeDepth;
+    ctx->locals[ctx->localCount].isArray = isArray;
+    ctx->locals[ctx->localCount].arraySize = arraySize;
+    ctx->locals[ctx->localCount].elemType = elemType;
+    ctx->localCount++;
+    if (ctx->localCount > ctx->maxLocalCount) ctx->maxLocalCount = ctx->localCount;
+    return ctx->localCount - 1;
 }
 
 static int resolveLocal(FuncContext* ctx, const char* name) {
-    for (int i = 0; i < ctx->localCount; i++) {
+    for (int i = ctx->localCount - 1; i >= 0; i--) {
         if (strcmp(ctx->locals[i].name, name) == 0) return ctx->locals[i].index;
     }
     return -1;
 }
 
-static void collectLocals(ASTNodeClike* node, FuncContext* ctx) {
-    if (!node) return;
-    if (node->type == TCAST_VAR_DECL) {
-        char* name = tokenToCString(node->token);
-        VarType type = TYPE_INTEGER;
-        if (node->right) {
-            if (node->right->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
-            else if (node->right->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
-        }
-        addLocal(ctx, name, type);
-        free(name);
-        return;
-    }
-    if (node->left) collectLocals(node->left, ctx);
-    if (node->right) collectLocals(node->right, ctx);
-    if (node->third) collectLocals(node->third, ctx);
-    for (int i = 0; i < node->child_count; i++) {
-        collectLocals(node->children[i], ctx);
-    }
-}
-
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
+static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
 
 // Helper to compile an l-value (currently only local identifiers) and push its
 // address onto the stack.
@@ -81,6 +96,32 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
         free(name);
         writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+    } else if (node->type == TCAST_ARRAY_ACCESS) {
+        // Evaluate index first, then push base array
+        compileExpression(node->right, chunk, ctx);
+        if (node->left && node->left->type == TCAST_IDENTIFIER) {
+            char* name = tokenToCString(node->left->token);
+            int idx = resolveLocal(ctx, name);
+            free(name);
+            writeBytecodeChunk(chunk, OP_GET_LOCAL, node->left->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
+        } else {
+            compileExpression(node->left, chunk, ctx);
+        }
+        writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
+        writeBytecodeChunk(chunk, 1, node->token.line);
+    }
+}
+
+static void collectLocals(ASTNodeClike *node, FuncContext* ctx) {
+    if (!node) return;
+    for (int i = 0; i < node->child_count; i++) {
+        ASTNodeClike* child = node->children[i];
+        if (child->type == TCAST_VAR_DECL) {
+            char* name = tokenToCString(child->token);
+            addLocal(ctx, name, child->var_type, child->is_array, child->array_size, child->element_type);
+            free(name);
+        }
     }
 }
 
@@ -119,28 +160,156 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             break;
         }
         case TCAST_WHILE: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
             int loopStart = chunk->count;
             compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
             int exitJump = chunk->count;
             emitShort(chunk, 0xFFFF, node->token.line);
             compileStatement(node->right, chunk, ctx);
+            for (int i = 0; i < loop->continueCount; i++) {
+                patchShort(chunk, loop->continueAddrs[i], (uint16_t)(loopStart - (loop->continueAddrs[i] + 2)));
+            }
             writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
             int backOffset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backOffset, node->token.line);
-            uint16_t exitOffset = (uint16_t)(chunk->count - (exitJump + 2));
+            int loopEnd = chunk->count;
+            uint16_t exitOffset = (uint16_t)(loopEnd - (exitJump + 2));
             patchShort(chunk, exitJump, exitOffset);
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
             break;
         }
-        case TCAST_COMPOUND: {
-            // Var declarations already collected; skip them
-            for (int i = 0; i < node->child_count; i++) {
-                ASTNodeClike* child = node->children[i];
-                if (child->type == TCAST_VAR_DECL) continue;
-                compileStatement(child, chunk, ctx);
+        case TCAST_FOR: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
+            if (node->left) {
+                compileExpression(node->left, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+            }
+            int loopStart = chunk->count;
+            int exitJump = -1;
+            if (node->right) {
+                compileExpression(node->right, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+                exitJump = chunk->count;
+                emitShort(chunk, 0xFFFF, node->token.line);
+            }
+            ASTNodeClike* body = node->child_count > 0 ? node->children[0] : NULL;
+            compileStatement(body, chunk, ctx);
+            int postStart = chunk->count;
+            for (int i = 0; i < loop->continueCount; i++) {
+                patchShort(chunk, loop->continueAddrs[i], (uint16_t)(postStart - (loop->continueAddrs[i] + 2)));
+            }
+            if (node->third) {
+                compileExpression(node->third, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+            }
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int backOffset = loopStart - (chunk->count + 2);
+            emitShort(chunk, (uint16_t)backOffset, node->token.line);
+            int loopEnd = chunk->count;
+            if (exitJump != -1) {
+                uint16_t exitOffset = (uint16_t)(loopEnd - (exitJump + 2));
+                patchShort(chunk, exitJump, exitOffset);
+            }
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
+            break;
+        }
+        case TCAST_DO_WHILE: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
+            int loopStart = chunk->count;
+            compileStatement(node->right, chunk, ctx);
+            int continueTarget = chunk->count;
+            for (int i = 0; i < loop->continueCount; i++) {
+                patchShort(chunk, loop->continueAddrs[i], (uint16_t)(continueTarget - (loop->continueAddrs[i] + 2)));
+            }
+            compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+            int exitJump = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int backOffset = loopStart - (chunk->count + 2);
+            emitShort(chunk, (uint16_t)backOffset, node->token.line);
+            int loopEnd = chunk->count;
+            uint16_t exitOffset = (uint16_t)(loopEnd - (exitJump + 2));
+            patchShort(chunk, exitJump, exitOffset);
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
+            break;
+        }
+        case TCAST_BREAK: {
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int patch = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            if (ctx->loopDepth > 0) {
+                LoopInfo* loop = &ctx->loops[ctx->loopDepth - 1];
+                loop->breakAddrs[loop->breakCount++] = patch;
             }
             break;
         }
+        case TCAST_CONTINUE: {
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int patch = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            if (ctx->loopDepth > 0) {
+                LoopInfo* loop = &ctx->loops[ctx->loopDepth - 1];
+                loop->continueAddrs[loop->continueCount++] = patch;
+            }
+            break;
+        }
+        case TCAST_VAR_DECL: {
+            char* name = tokenToCString(node->token);
+            int idx = resolveLocal(ctx, name);
+            free(name);
+            if (node->is_array) {
+                Value lower = makeInt(0);
+                Value upper = makeInt(node->array_size - 1);
+                int lidx = addConstantToChunk(chunk, &lower);
+                int uidx = addConstantToChunk(chunk, &upper);
+                freeValue(&lower);
+                freeValue(&upper);
+                int elemNameIdx = addStringConstant(chunk, "");
+                writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                writeBytecodeChunk(chunk, 1, node->token.line); // dimension count
+                emitShort(chunk, (uint16_t)lidx, node->token.line);
+                emitShort(chunk, (uint16_t)uidx, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+            } else {
+                Value init;
+                switch (node->var_type) {
+                    case TYPE_REAL: init = makeReal(0.0); break;
+                    case TYPE_STRING: init = makeNil(); break;
+                    default: init = makeInt(0); break;
+                }
+                int cidx = addConstantToChunk(chunk, &init);
+                freeValue(&init);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            }
+            break;
+        }
+        case TCAST_COMPOUND:
+            beginScope(ctx);
+            collectLocals(node, ctx);
+            for (int i = 0; i < node->child_count; i++) {
+                compileStatement(node->children[i], chunk, ctx);
+            }
+            endScope(ctx);
+            break;
         default:
             break;
     }
@@ -190,15 +359,29 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 default: break;
             }
             break;
+        case TCAST_UNOP:
+            compileExpression(node->left, chunk, ctx);
+            switch (node->token.type) {
+                case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, node->token.line); break;
+                case CLIKE_TOKEN_BANG: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
+                default: break;
+            }
+            break;
         case TCAST_ASSIGN: {
-            if (node->left && node->left->type == TCAST_IDENTIFIER) {
-                char* name = tokenToCString(node->left->token);
-                int idx = resolveLocal(ctx, name);
-                free(name);
-                compileExpression(node->right, chunk, ctx);
-                writeBytecodeChunk(chunk, OP_DUP, node->token.line);
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            if (node->left) {
+                if (node->left->type == TCAST_IDENTIFIER) {
+                    char* name = tokenToCString(node->left->token);
+                    int idx = resolveLocal(ctx, name);
+                    free(name);
+                    compileExpression(node->right, chunk, ctx);
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line);
+                    writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                } else if (node->left->type == TCAST_ARRAY_ACCESS) {
+                    compileLValue(node->left, chunk, ctx);
+                    compileExpression(node->right, chunk, ctx);
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line);
+                }
             }
             break;
         }
@@ -210,6 +393,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
+        case TCAST_ARRAY_ACCESS:
+            compileLValue(node, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
+            break;
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
             if (strcmp(name, "printf") == 0) {
@@ -244,6 +431,24 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 freeValue(&zero);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else if (strcmp(name, "random") == 0) {
+                // Direct wrapper around the VM's random builtin.
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileExpression(node->children[i], chunk, ctx);
+                }
+                int rIndex = addStringConstant(chunk, "random");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)rIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+            } else if (strcmp(name, "strlen") == 0) {
+                // Map C's strlen to the Pascal-style length builtin.
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileExpression(node->children[i], chunk, ctx);
+                }
+                int lenIndex = addStringConstant(chunk, "length");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)lenIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             } else {
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
@@ -278,19 +483,12 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
         for (int i = 0; i < func->left->child_count; i++) {
             ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            VarType type = TYPE_INTEGER;
-            if (p->left) {
-                if (p->left->token.type == CLIKE_TOKEN_FLOAT) type = TYPE_REAL;
-                else if (p->left->token.type == CLIKE_TOKEN_STR) type = TYPE_STRING;
-            }
-            addLocal(&ctx, name, type);
+            addLocal(&ctx, name, p->var_type, 0, 0, TYPE_UNKNOWN);
             free(name);
             ctx.paramCount++;
         }
     }
-
-    // Collect local variable declarations recursively
-    collectLocals(func->right, &ctx);
+    ctx.maxLocalCount = ctx.localCount;
 
     int address = chunk->count;
     char* fname = tokenToCString(func->token);
@@ -299,41 +497,16 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     sym->name = strdup(fname);
     sym->bytecode_address = address;
     sym->arity = (uint8_t)ctx.paramCount;
-    sym->locals_count = (uint8_t)(ctx.localCount - ctx.paramCount);
-    sym->type = TYPE_INTEGER;
+    sym->type = func->var_type;
     sym->is_defined = true;
     hashTableInsert(procedure_table, sym);
-
-    // Initialize local variables (excluding parameters) so that builtins like
-    // `readln` know their intended types. Integers default to 0, floats to
-    // 0.0 and strings to nil.
-    if (ctx.localCount > ctx.paramCount) {
-        for (int i = ctx.paramCount; i < ctx.localCount; i++) {
-            Value init;
-            switch (ctx.locals[i].type) {
-                case TYPE_REAL:
-                    init = makeReal(0.0);
-                    break;
-                case TYPE_STRING:
-                    init = makeNil();
-                    break;
-                default:
-                    init = makeInt(0);
-                    break;
-            }
-            int idx = addConstantToChunk(chunk, &init);
-            freeValue(&init);
-            writeBytecodeChunk(chunk, OP_CONSTANT, func->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, func->token.line);
-            writeBytecodeChunk(chunk, OP_SET_LOCAL, func->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)i, func->token.line);
-        }
-    }
 
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
 
-    for (int i = 0; i < ctx.localCount; i++) {
+    sym->locals_count = (uint8_t)(ctx.maxLocalCount - ctx.paramCount);
+
+    for (int i = 0; i < ctx.paramCount; i++) {
         free(ctx.locals[i].name);
     }
     free(fname);
@@ -363,6 +536,36 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
     int mainAddress = -1;
     uint8_t mainArity = 0;
+
+    // Compile imported modules before the main program
+    for (int i = 0; i < clike_import_count; ++i) {
+        const char *path = clike_imports[i];
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            fprintf(stderr, "Could not open import '%s'\n", path);
+            continue;
+        }
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        rewind(f);
+        char *src = (char*)malloc(len + 1);
+        fread(src, 1, len, f);
+        src[len] = '\0';
+        fclose(f);
+
+        ParserClike p; initParserClike(&p, src);
+        ASTNodeClike *modProg = parseProgramClike(&p);
+        analyzeSemanticsClike(modProg);
+        for (int j = 0; j < modProg->child_count; ++j) {
+            ASTNodeClike *decl = modProg->children[j];
+            if (decl->type == TCAST_FUN_DECL) {
+                compileFunction(decl, chunk);
+            }
+        }
+        freeASTClike(modProg);
+        free(src);
+    }
+
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type != TCAST_FUN_DECL) continue;
@@ -380,5 +583,12 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         patchShort(chunk, mainAddrPatch, (uint16_t)mainAddress);
         chunk->code[mainArityPatch] = mainArity;
     }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        free(clike_imports[i]);
+    }
+    free(clike_imports);
+    clike_imports = NULL;
+    clike_import_count = 0;
 }
 

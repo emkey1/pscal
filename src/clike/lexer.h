@@ -11,10 +11,16 @@ typedef enum {
     CLIKE_TOKEN_IF,
     CLIKE_TOKEN_ELSE,
     CLIKE_TOKEN_WHILE,
+    CLIKE_TOKEN_FOR,
+    CLIKE_TOKEN_DO,
+    CLIKE_TOKEN_BREAK,
+    CLIKE_TOKEN_CONTINUE,
     CLIKE_TOKEN_RETURN,
+    CLIKE_TOKEN_IMPORT,
     CLIKE_TOKEN_IDENTIFIER,
     CLIKE_TOKEN_NUMBER,
     CLIKE_TOKEN_FLOAT_LITERAL,
+    CLIKE_TOKEN_CHAR,
     CLIKE_TOKEN_STRING,
     CLIKE_TOKEN_PLUS,
     CLIKE_TOKEN_MINUS,
@@ -47,6 +53,7 @@ typedef struct {
     const char *lexeme;
     int length;
     int line;
+    int column;
     int int_val;
     double float_val;
 } ClikeToken;
@@ -55,6 +62,7 @@ typedef struct {
     const char *src;
     int pos;
     int line;
+    int column;
 } ClikeLexer;
 
 void clike_initLexer(ClikeLexer *lexer, const char *source);

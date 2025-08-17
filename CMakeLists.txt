@@ -254,7 +254,9 @@ set(CLIKE_SOURCES
     src/clike/parser.c
     src/clike/ast.c
     src/clike/builtins.c
+    src/clike/semantics.c
     src/clike/codegen.c
+    src/clike/opt.c
     src/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
     src/compiler/bytecode.c
@@ -279,6 +281,16 @@ if(TARGET CURL::libcurl)
     target_link_libraries(clike PRIVATE CURL::libcurl m)
 else()
     target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m)
+endif()
+
+set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
+list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
+list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
+add_executable(clike-repl ${CLIKE_REPL_SOURCES})
+if(TARGET CURL::libcurl)
+    target_link_libraries(clike-repl PRIVATE CURL::libcurl m)
+else()
+    target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m)
 endif()
 
 # When SDL support is enabled, clike needs the same SDL include paths,
@@ -315,6 +327,22 @@ if(SDL)
     list(REMOVE_DUPLICATES CLIKE_SDL_LIBS)
     target_link_libraries(clike PRIVATE ${CLIKE_SDL_LIBS})
     target_compile_definitions(clike PRIVATE SDL)
+
+    target_include_directories(clike-repl PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+    )
+
+    target_link_directories(clike-repl PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
+
+    target_link_libraries(clike-repl PRIVATE ${CLIKE_SDL_LIBS})
+    target_compile_definitions(clike-repl PRIVATE SDL)
 
 endif()
 

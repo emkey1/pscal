@@ -1637,6 +1637,16 @@ comparison_error_label:
                     }
                 }
 
+                /*
+                 * Mirror the behaviour of OP_SET_LOCAL where the assigned value
+                 * remains on the stack.  This allows assignments used as
+                 * expressions to work consistently and prevents later OP_POP
+                 * instructions from underflowing the stack after an array
+                 * assignment.  Push a copy of the value we just stored so the
+                 * caller can continue to use it if needed.
+                 */
+                push(vm, makeCopyOfValue(&value_to_set));
+
                 freeValue(&value_to_set);
                 freeValue(&pointer_to_lvalue);
                 break;
