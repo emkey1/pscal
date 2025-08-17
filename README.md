@@ -67,6 +67,20 @@ Only integer variables and arithmetic are supported, but this is sufficient for
 basic experiments or teaching purposes. Example programs demonstrating the
 language can be found in `Examples/Tiny`.
 
+## Tiny C front end
+
+`tools/tinycc.py` implements a compact C-like compiler that targets the
+stand-alone `pscalvm`. The grammar covers variable and function declarations,
+conditionals, loops and expressions. VM builtins can be invoked simply by
+calling a function name that lacks a user definition.
+
+Example usage:
+
+```sh
+python tools/tinycc.py program.c out.pbc
+./build/bin/pscalvm out.pbc
+```
+
 ## Runtime library
 
 The interpreter expects access to the `etc` and `lib` directories.  When running from the repository you can create temporary symlinks:
