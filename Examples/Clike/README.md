@@ -1,10 +1,10 @@
-# Tiny language examples
+# Clike language examples
 
-These programs demonstrate the tiny language that `tools/tinyc.py` compiles to
+These programs demonstrate the clike language that `tools/clike` compiles to
 Pscal bytecode. Each source file can be compiled with:
 
 ```
-python tools/tinyc.py Examples/Tiny/<program>.tiny /tmp/<program>.pbc
+python tools/clike Examples/Clike/<program>.tiny /tmp/<program>.pbc
 ```
 
 Run the resulting bytecode with `pscalvm` from a built tree.

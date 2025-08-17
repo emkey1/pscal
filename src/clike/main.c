@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "tinyc/parser.h"
-#include "tinyc/codegen.h"
-#include "tinyc/builtins.h"
+#include "clike/parser.h"
+#include "clike/codegen.h"
+#include "clike/builtins.h"
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -13,7 +13,7 @@
 int gParamCount = 0;
 char **gParamValues = NULL;
 
-static void initSymbolSystemTinyC(void) {
+static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
@@ -21,7 +21,7 @@ static void initSymbolSystemTinyC(void) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: tinyc <source.c>\n");
+        fprintf(stderr, "Usage: clike <source.c>\n");
         return 1;
     }
     const char *path = argv[1];
@@ -30,18 +30,18 @@ int main(int argc, char **argv) {
     fseek(f, 0, SEEK_END); long len = ftell(f); rewind(f);
     char *src = (char*)malloc(len + 1); fread(src,1,len,f); src[len]='\0'; fclose(f);
 
-    ParserTinyC parser; initParserTinyC(&parser, src);
-    ASTNodeTinyC *prog = parseProgramTinyC(&parser);
+    ParserClike parser; initParserClike(&parser, src);
+    ASTNodeClike *prog = parseProgramClike(&parser);
 
-    initSymbolSystemTinyC();
-    tinyc_register_builtins();
+    initSymbolSystemClike();
+    clike_register_builtins();
 
-    BytecodeChunk chunk; tinyc_compile(prog, &chunk);
+    BytecodeChunk chunk; clike_compile(prog, &chunk);
     VM vm; initVM(&vm);
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
-    freeASTTinyC(prog);
+    freeASTClike(prog);
     free(src);
     if (globalSymbols) freeHashTable(globalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
