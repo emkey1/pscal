@@ -9,6 +9,6 @@ int fact(int n) {
 }
 
 int main() {
-    writeln(fact(5));
+    printf(fact(5));
     return 0;
 }
