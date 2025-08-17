@@ -190,6 +190,14 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 default: break;
             }
             break;
+        case TCAST_UNOP:
+            compileExpression(node->left, chunk, ctx);
+            switch (node->token.type) {
+                case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, node->token.line); break;
+                case CLIKE_TOKEN_BANG: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
+                default: break;
+            }
+            break;
         case TCAST_ASSIGN: {
             if (node->left && node->left->type == TCAST_IDENTIFIER) {
                 char* name = tokenToCString(node->left->token);
