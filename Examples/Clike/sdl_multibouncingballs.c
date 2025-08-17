@@ -34,7 +34,9 @@ int main() {
     WindowWidth = 1280;
     WindowHeight = 1024;
     TargetFPS = 60;
-    FrameDelay = 1000 / TargetFPS;
+//    FrameDelay = 1000 div TargetFPS;
+    FrameDelay = trunc(1000 / TargetFPS);
+//    FrameDelay = 1000 / TargetFPS;
     NumBalls = 90;
     MaxInitialSpeed = 250.0;
     MinInitialSpeed = 80.0;
