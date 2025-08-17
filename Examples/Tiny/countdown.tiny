@@ -2,5 +2,6 @@
 read x;
 repeat
     write x;
+    write;
     x := x - 1
 until x = 0
