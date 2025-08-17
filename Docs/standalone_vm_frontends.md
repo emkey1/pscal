@@ -15,7 +15,7 @@ reuse its runtime without touching the C sources.
 4. **Run with `pscalvm`.** Execute the resulting file just like bytecode
    produced by the main Pascal compiler.
 
-## Step-by-step: the Tiny compiler
+## Step-by-step: the tiny compiler (Python)
 
 `tools/tinyc` is a compact Python compiler for an educational language. It
 illustrates the entire pipeline for targeting the VM.
@@ -101,12 +101,66 @@ python tools/tinyc source.tiny out.pbc
 ./build/bin/pscalvm out.pbc
 ```
 
+## Step-by-step: the tinyc compiler (C)
+
+`src/tinyc` is a compact C compiler for an educational language. It
+illustrates the same pipeline using C code.
+
+### Loading opcodes
+
+Because the front end is written in C it can include the VM's opcode
+definitions directly:
+
+```c
+#include "compiler/bytecode.h"
+```
+
+This header defines the `OP_*` enum so the compiler and VM share identical
+numeric opcode values.
+
+### Preparing constants and builtins
+
+```c
+int read_idx = addStringConstant(&chunk, "readln");
+int type_integer_idx = addStringConstant(&chunk, "integer");
+```
+
+`BytecodeChunk` stores both the instruction bytes and a table of typed
+constants. Builtin routines such as `readln` are inserted into this table as
+strings.
+
+### Compiling statements
+
+When a `read` statement is parsed the compiler emits an instruction to call the
+builtin:
+
+```c
+writeBytecodeChunk(&chunk, OP_CALL_BUILTIN, line);
+emitShort(&chunk, (uint16_t)read_idx, line);
+writeBytecodeChunk(&chunk, 1, line); /* argument count */
+```
+
+Other statements translate into sequences of opcodes in the same fashion, as
+demonstrated in `src/tinyc/codegen.c`.
+
+### Writing `.pbc` bytecode
+
+```c
+#include "core/cache.h"
+saveBytecodeToCache("out.pbc", &chunk);
+```
+
+The helper writes the bytecode and constant table to disk. Run the result with:
+
+```sh
+./build/bin/pscalvm out.pbc
+```
+
 ## Calling VM builtins
 
 Opcodes `OP_CALL_BUILTIN` and `OP_CALL_BUILTIN_PROC` invoke the VM's built-in
 functions and procedures. The VM exposes a large catalog of routines described in
 `Docs/Pscal_Builtins.md`.
-
 
 To invoke a builtin from generated code:
 
@@ -116,7 +170,9 @@ To invoke a builtin from generated code:
 3. At runtime the VM resolves the name and dispatches to the builtin
    implementation.
 
-Example: call the `random` function which returns an integer:
+Example: call the `random` function which returns an integer.
+
+Python:
 
 ```python
 rand_idx = builder.add_constant(TYPE_STRING, "random")
@@ -125,13 +181,33 @@ builder.emit_short(rand_idx)
 builder.emit(0)  # no arguments; result left on stack
 ```
 
-Example: call the `halt` procedure that terminates execution:
+C:
+
+```c
+int rand_idx = addStringConstant(&chunk, "random");
+writeBytecodeChunk(&chunk, OP_CALL_BUILTIN, line);
+emitShort(&chunk, (uint16_t)rand_idx, line);
+writeBytecodeChunk(&chunk, 0, line); /* no arguments */
+```
+
+Example: call the `halt` procedure that terminates execution.
+
+Python:
 
 ```python
 halt_idx = builder.add_constant(TYPE_STRING, "halt")
 builder.emit(opcodes["OP_CALL_BUILTIN_PROC"])
 builder.emit_short(halt_idx)
 builder.emit(0)  # no arguments; no return value
+```
+
+C:
+
+```c
+int halt_idx = addStringConstant(&chunk, "halt");
+writeBytecodeChunk(&chunk, OP_CALL_BUILTIN_PROC, line);
+emitShort(&chunk, (uint16_t)halt_idx, line);
+writeBytecodeChunk(&chunk, 0, line); /* no arguments */
 ```
 
 Frontends can therefore expose console I/O, math utilities, graphics, networking
