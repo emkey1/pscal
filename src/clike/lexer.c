@@ -50,6 +50,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start) {
     if (length == 3 && strncmp(start, "int", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_INT, start, length);
     if (length == 4 && strncmp(start, "void", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_VOID, start, length);
     if (length == 5 && strncmp(start, "float", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_FLOAT, start, length);
+    if (length == 3 && strncmp(start, "str", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_STR, start, length);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length);
     if (length == 5 && strncmp(start, "while", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_WHILE, start, length);
@@ -133,6 +134,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_INT: return "TOKEN_INT";
         case CLIKE_TOKEN_VOID: return "TOKEN_VOID";
         case CLIKE_TOKEN_FLOAT: return "TOKEN_FLOAT";
+        case CLIKE_TOKEN_STR: return "TOKEN_STR";
         case CLIKE_TOKEN_IF: return "TOKEN_IF";
         case CLIKE_TOKEN_ELSE: return "TOKEN_ELSE";
         case CLIKE_TOKEN_WHILE: return "TOKEN_WHILE";

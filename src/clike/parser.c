@@ -56,7 +56,8 @@ ASTNodeClike* parseProgramClike(ParserClike *parser) {
 }
 
 static ASTNodeClike* declaration(ParserClike *p) {
-    if (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID || p->current.type == CLIKE_TOKEN_FLOAT) {
+    if (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID ||
+        p->current.type == CLIKE_TOKEN_FLOAT || p->current.type == CLIKE_TOKEN_STR) {
         ClikeToken type_tok = p->current; advanceParser(p);
         ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
         if (p->current.type == CLIKE_TOKEN_LPAREN) {
@@ -116,7 +117,8 @@ static ASTNodeClike* param(ParserClike *p) {
 static ASTNodeClike* compoundStmt(ParserClike *p) {
     expectToken(p, CLIKE_TOKEN_LBRACE, "{");
     ASTNodeClike *node = newASTNodeClike(TCAST_COMPOUND, p->current);
-    while (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID || p->current.type == CLIKE_TOKEN_FLOAT) {
+    while (p->current.type == CLIKE_TOKEN_INT || p->current.type == CLIKE_TOKEN_VOID ||
+           p->current.type == CLIKE_TOKEN_FLOAT || p->current.type == CLIKE_TOKEN_STR) {
         ClikeToken type_tok = p->current; advanceParser(p);
         ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
         ASTNodeClike *decl = varDeclaration(p, type_tok, ident);
