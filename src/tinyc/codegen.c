@@ -64,6 +64,19 @@ static void collectLocals(ASTNodeTinyC* node, FuncContext* ctx) {
 static void compileStatement(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx);
 
+// Helper to compile an l-value (currently only local identifiers) and push its
+// address onto the stack.
+static void compileLValue(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx) {
+    if (!node) return;
+    if (node->type == TCAST_IDENTIFIER) {
+        char* name = tokenToCString(node->token);
+        int idx = resolveLocal(ctx, name);
+        free(name);
+        writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
+        writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+    }
+}
+
 static void compileStatement(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncContext* ctx) {
     if (!node) return;
     switch (node->type) {
@@ -176,11 +189,11 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
             break;
         }
         case TCAST_CALL: {
-            for (int i = 0; i < node->child_count; ++i) {
-                compileExpression(node->children[i], chunk, ctx);
-            }
             char *name = tokenToCString(node->token);
             if (strcmp(name, "printf") == 0) {
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileExpression(node->children[i], chunk, ctx);
+                }
                 // Directly map printf to the WriteLn opcode. printf in tinyc is
                 // treated as a procedure that always succeeds and returns 0.
                 writeBytecodeChunk(chunk, OP_WRITE_LN, node->token.line);
@@ -193,7 +206,26 @@ static void compileExpression(ASTNodeTinyC *node, BytecodeChunk *chunk, FuncCont
                 freeValue(&zero);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else if (strcmp(name, "scanf") == 0) {
+                // Compile arguments as l-values (addresses) and call VM builtin
+                // readln. scanf in tinyc returns 0 for simplicity.
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileLValue(node->children[i], chunk, ctx);
+                }
+                int rlIndex = addStringConstant(chunk, "readln");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)rlIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+
+                Value zero = makeInt(0);
+                int idx = addConstantToChunk(chunk, &zero);
+                freeValue(&zero);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else {
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileExpression(node->children[i], chunk, ctx);
+                }
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
                 int nameIndex = addStringConstant(chunk, name);
                 if (sym) {
