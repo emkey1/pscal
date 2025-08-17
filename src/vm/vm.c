@@ -900,13 +900,30 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             }
             case OP_NOT: {
                 Value val_popped = pop(vm);
-                if (!IS_BOOLEAN(val_popped) && !IS_INTEGER(val_popped)) { // <<< FIX: Allow INTEGER
-                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or integer.");
+                bool condition_truth = false;
+                bool value_valid = true;
+
+                if (IS_BOOLEAN(val_popped)) {
+                    condition_truth = AS_BOOLEAN(val_popped);
+                } else if (IS_INTLIKE(val_popped)) {
+                    condition_truth = AS_INTEGER(val_popped) != 0;
+                } else if (IS_REAL(val_popped)) {
+                    condition_truth = AS_REAL(val_popped) != 0.0;
+                } else if (IS_CHAR(val_popped)) {
+                    condition_truth = AS_CHAR(val_popped) != '\0';
+                } else if (val_popped.type == TYPE_NIL) {
+                    condition_truth = false;
+                } else {
+                    value_valid = false;
+                }
+
+                if (!value_valid) {
+                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or numeric.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                bool bool_val = IS_BOOLEAN(val_popped) ? AS_BOOLEAN(val_popped) : (AS_INTEGER(val_popped) != 0); // <<< FIX: Coerce INTEGER to BOOLEAN
-                push(vm, makeBoolean(!bool_val));
+
+                push(vm, makeBoolean(!condition_truth));
                 freeValue(&val_popped);
                 break;
             }
