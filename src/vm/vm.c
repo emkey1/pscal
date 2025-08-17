@@ -682,15 +682,35 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
+                    long long iresult = 0; \
+                    bool overflow = false; \
                     switch (current_instruction_code) { \
-                        case OP_ADD:      result_val = makeInt(ia + ib); break; \
-                        case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
-                        case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
-                        case OP_DIVIDE:   result_val = makeReal((double)ia / (double)ib); break; \
+                        case OP_ADD: \
+                            overflow = __builtin_add_overflow(ia, ib, &iresult); \
+                            break; \
+                        case OP_SUBTRACT: \
+                            overflow = __builtin_sub_overflow(ia, ib, &iresult); \
+                            break; \
+                        case OP_MULTIPLY: \
+                            overflow = __builtin_mul_overflow(ia, ib, &iresult); \
+                            break; \
+                        case OP_DIVIDE: \
+                            result_val = makeReal((double)ia / (double)ib); \
+                            break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    if (current_instruction_code == OP_DIVIDE) { \
+                        /* result_val already set for division */ \
+                    } else if (overflow) { \
+                        runtimeError(vm, "Runtime Error: Integer overflow."); \
+                        freeValue(&a_val_popped); \
+                        freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } else { \
+                        result_val = makeInt(iresult); \
                     } \
                 } \
                 op_is_handled = true; \
