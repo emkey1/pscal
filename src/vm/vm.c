@@ -552,6 +552,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
+    // Establish a base call frame for the main program.  This allows inline
+    // routines at the top level to utilize local variable opcodes without
+    // triggering stack underflows due to the absence of an active frame.
+    CallFrame* baseFrame = &vm->frames[vm->frameCount++];
+    baseFrame->return_address = NULL;
+    baseFrame->slots = vm->stack;
+    baseFrame->function_symbol = NULL;
+    baseFrame->locals_count = 0;
+    baseFrame->upvalue_count = 0;
+    baseFrame->upvalues = NULL;
+
     #ifdef DEBUG
     if (dumpExec) { // from all.txt
         printf("\n--- VM Initial State ---\n");

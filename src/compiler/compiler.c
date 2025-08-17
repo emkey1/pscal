@@ -1394,12 +1394,26 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
 }
 
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result) {
-    if (!proc_symbol || !proc_symbol->type_def || !current_function_compiler) {
+    if (!proc_symbol || !proc_symbol->type_def) {
         // Fallback to normal call semantics handled by caller
         return;
     }
 
     AST* decl = proc_symbol->type_def;
+
+    // If we're in the top-level program (no active FunctionCompilerState),
+    // create a temporary one so the inliner can allocate locals and emit
+    // OP_GET_LOCAL/OP_SET_LOCAL instructions as usual. This mirrors how
+    // other compilers conceptually treat the main program body as a routine.
+    FunctionCompilerState temp_fc;
+    FunctionCompilerState* saved_fc = current_function_compiler;
+    if (!current_function_compiler) {
+        initFunctionCompiler(&temp_fc);
+        current_function_compiler = &temp_fc;
+        temp_fc.name = proc_symbol->name ? proc_symbol->name :
+                       (decl->token ? decl->token->value : NULL);
+        temp_fc.function_symbol = proc_symbol;
+    }
     AST* blockNode = (decl->type == AST_PROCEDURE_DECL) ? decl->right : decl->extra;
     if (!blockNode) return;
 
@@ -1429,9 +1443,9 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
 
     int result_slot = -1;
     if (decl->type == AST_FUNCTION_DECL) {
-        // Allocate slots for function name and result like normal compilation
+        // Allocate a slot for the function's result. Assignments to the
+        // function name will target this slot.
         addLocal(current_function_compiler, decl->token->value, line, false);
-        addLocal(current_function_compiler, "result", line, false);
         result_slot = current_function_compiler->local_count - 1;
     }
 
@@ -1456,6 +1470,13 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
         free(current_function_compiler->locals[i].name);
     }
     current_function_compiler->local_count = starting_local_count;
+
+    // Restore previous compiler state if we created a temporary one
+    if (!saved_fc) {
+        current_function_compiler = NULL;
+    } else {
+        current_function_compiler = saved_fc;
+    }
 }
 
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
@@ -1689,9 +1710,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             compileRValue(rvalue, chunk, getLine(rvalue));
 
-            if (current_function_compiler && lvalue->type == AST_VARIABLE &&
-                           (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                            strcasecmp(lvalue->token->value, "result") == 0) ) {
+            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                lvalue->token && lvalue->token->value &&
+                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                 strcasecmp(lvalue->token->value, "result") == 0)) {
                 
                 int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 if (return_slot != -1) {
@@ -1947,6 +1969,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
+            // Inline routine bodies directly when possible.
             if (proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_inline) {
                 compileInlineRoutine(proc_symbol, node, chunk, line, false);
                 break;
@@ -2438,6 +2461,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 func_symbol = func_symbol->real_symbol;
             }
 
+            // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
                 compileInlineRoutine(func_symbol, node, chunk, line, true);
                 break;
