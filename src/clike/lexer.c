@@ -60,6 +60,16 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start) {
 
 static ClikeToken numberToken(ClikeLexer *lexer, const char *start) {
     bool isFloat = false;
+    if (start[0] == '0' && (peek(lexer) == 'x' || peek(lexer) == 'X')) {
+        advance(lexer); // consume 'x'
+        while (isxdigit(peek(lexer))) advance(lexer);
+        int length = &lexer->src[lexer->pos] - start;
+        ClikeToken t = makeToken(lexer, CLIKE_TOKEN_NUMBER, start, length);
+        char *tmp = strndup(start, length);
+        t.int_val = (int)strtol(tmp, NULL, 0);
+        free(tmp);
+        return t;
+    }
     while (isDigit(peek(lexer))) advance(lexer);
     if (peek(lexer) == '.' && isDigit(lexer->src[lexer->pos + 1])) {
         isFloat = true;
@@ -83,15 +93,48 @@ static ClikeToken stringToken(ClikeLexer *lexer, const char *start) {
     return makeToken(lexer, CLIKE_TOKEN_STRING, start + 1, length);
 }
 
+static ClikeToken charToken(ClikeLexer *lexer, const char *start) {
+    advance(lexer); // consume opening quote
+    char c = advance(lexer);
+    if (c == '\\') {
+        char esc = advance(lexer);
+        switch (esc) {
+            case 'n': c = '\n'; break;
+            case 'r': c = '\r'; break;
+            case 't': c = '\t'; break;
+            case '\\': c = '\\'; break;
+            case '\'': c = '\''; break;
+            default: c = esc; break;
+        }
+    }
+    if (peek(lexer) == '\'') advance(lexer); // consume closing quote
+    ClikeToken t = makeToken(lexer, CLIKE_TOKEN_CHAR, start + 1, 1);
+    t.int_val = (unsigned char)c;
+    return t;
+}
+
 ClikeToken clike_nextToken(ClikeLexer *lexer) {
     while (1) {
         char c = peek(lexer);
         if (c == '\0') return makeToken(lexer, CLIKE_TOKEN_EOF, "", 0);
         if (isspace(c)) { advance(lexer); continue; }
+        if (c == '/' && lexer->src[lexer->pos + 1] == '/') {
+            while (peek(lexer) != '\n' && peek(lexer) != '\0') advance(lexer);
+            continue;
+        }
+        if (c == '/' && lexer->src[lexer->pos + 1] == '*') {
+            advance(lexer); advance(lexer);
+            while (!(peek(lexer) == '*' && lexer->src[lexer->pos + 1] == '/') && peek(lexer) != '\0') {
+                advance(lexer);
+            }
+            if (peek(lexer) == '*' && lexer->src[lexer->pos + 1] == '/') { advance(lexer); advance(lexer); }
+            continue;
+        }
         const char *start = &lexer->src[lexer->pos];
         if (isAlpha(c)) return identifierOrKeyword(lexer, start);
         if (isDigit(c)) return numberToken(lexer, start);
         if (c == '"') return stringToken(lexer, start);
+        if (c == '\'') return charToken(lexer, start);
         advance(lexer);
         switch (c) {
             case '+': return makeToken(lexer, CLIKE_TOKEN_PLUS, start, 1);
@@ -142,6 +185,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
         case CLIKE_TOKEN_FLOAT_LITERAL: return "TOKEN_FLOAT_LITERAL";
+        case CLIKE_TOKEN_CHAR: return "TOKEN_CHAR";
         case CLIKE_TOKEN_STRING: return "TOKEN_STRING";
         case CLIKE_TOKEN_PLUS: return "+";
         case CLIKE_TOKEN_MINUS: return "-";
