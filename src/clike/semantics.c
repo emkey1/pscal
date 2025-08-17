@@ -120,6 +120,19 @@ static void analyzeStmt(ASTNodeClike *node, VarTable *vt, VarType retType) {
             analyzeExpr(node->left, vt);
             analyzeStmt(node->right, vt, retType);
             break;
+        case TCAST_FOR:
+            if (node->left) analyzeExpr(node->left, vt);
+            if (node->right) analyzeExpr(node->right, vt);
+            if (node->third) analyzeExpr(node->third, vt);
+            if (node->child_count > 0) analyzeStmt(node->children[0], vt, retType);
+            break;
+        case TCAST_DO_WHILE:
+            analyzeStmt(node->right, vt, retType);
+            analyzeExpr(node->left, vt);
+            break;
+        case TCAST_BREAK:
+        case TCAST_CONTINUE:
+            break;
         case TCAST_RETURN: {
             VarType t = TYPE_VOID;
             if (node->left) t = analyzeExpr(node->left, vt);
