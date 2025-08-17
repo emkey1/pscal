@@ -1,10 +1,18 @@
 # Clike language examples
 
-These programs demonstrate the clike language that `tools/clike` compiles to
-Pscal bytecode. Each source file can be compiled with:
+This folder contains sample programs for the Pscal clike front ends.
+
+Tiny language (`.tiny`) programs can be compiled to bytecode with:
 
 ```
 tools/clike Examples/Clike/<program>.tiny /tmp/<program>.pbc
+```
+
+C-like examples (`.c`) can be executed with the native clike compiler built in
+`build/bin`:
+
+```
+build/bin/clike Examples/Clike/<program>.c
 ```
 
 ## Programs
@@ -12,4 +20,4 @@ tools/clike Examples/Clike/<program>.tiny /tmp/<program>.pbc
 - `countdown.tiny` – read an integer and count down to 1.
 - `max.tiny` – read two integers and print the larger value.
 - `sum.tiny` – compute the sum of 1..n.
-
+- `sdl_multibouncingballs.c` – SDL multi bouncing balls demo ported from Pascal.
