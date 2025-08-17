@@ -304,6 +304,7 @@ if(SDL)
     list(REMOVE_DUPLICATES TINYC_SDL_LIBS)
     target_link_libraries(tinyc PRIVATE ${TINYC_SDL_LIBS})
     target_compile_definitions(tinyc PRIVATE SDL)
+
 endif()
 
 # ---- Examples ----
