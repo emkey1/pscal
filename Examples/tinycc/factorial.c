@@ -9,6 +9,8 @@ int fact(int n) {
 }
 
 int main() {
-    printf(fact(5));
+    int n;
+    scanf(n);
+    printf(fact(n));
     return 0;
 }
