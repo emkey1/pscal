@@ -754,6 +754,12 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         }
     }
 
+    // Perform a local type annotation pass on the copied AST so that
+    // downstream compiler stages can rely on accurate var_type
+    // information.  This is especially important for nested routines
+    // that capture variables from outer scopes (upvalues).
+    annotateTypes(sym->type_def, NULL, sym->type_def);
+
     // Determine the symbol's type based on the original AST declaration node's var_type
     if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
         // For functions, 'proc_decl_ast_original->var_type' should have been set
