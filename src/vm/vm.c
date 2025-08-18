@@ -2322,7 +2322,7 @@ comparison_error_label:
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
                 if (!proc_symbol) {
-                    runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
+                    runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04d.", target_address);
                     vm->frameCount--;
                     return INTERPRET_RUNTIME_ERROR;
                 }
