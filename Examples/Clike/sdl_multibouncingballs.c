@@ -75,6 +75,7 @@ int main() {
 
     quit = 0;
     printf("Multi Bouncing Balls... Press Q in the console to quit.\n");
+    while (keypressed()) { readkey(); } // Clear any buffered key presses
     while (!quit) {
         if (keypressed()) {
             int c;
