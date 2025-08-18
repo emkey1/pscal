@@ -33,6 +33,8 @@ make
 
 Binaries are written to `build/bin` (e.g. `pscal` and `dscal`).
 
+The `dscal` binary has very verbose debugging enabled
+
 To build without SDL explicitly:
 
 ```sh
