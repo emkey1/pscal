@@ -54,6 +54,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->child_capacity = 0;
     node->type = type;
     node->is_global_scope = false;
+    node->is_inline = false;
     node->i_val = 0; // Initialize i_val
     node->symbol_table = NULL; // Initialize symbol_table
     node->unit_list = NULL; // Initialize unit_list
@@ -332,11 +333,23 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
          return sym->type_def;
      }
 
-     if (currentScopeNode && currentScopeNode != globalProgramNode) {
-         foundDecl = findDeclarationInScope(varName, currentScopeNode);
-     }
+    if (currentScopeNode && currentScopeNode != globalProgramNode) {
+        foundDecl = findDeclarationInScope(varName, currentScopeNode);
+    }
 
-     if (!foundDecl && globalProgramNode && globalProgramNode->type == AST_PROGRAM) {
+    // If not found in the immediate scope, walk up parent scopes to
+    // support nested routines accessing variables from enclosing
+    // procedures/functions (upvalues).
+    AST* parentScope = currentScopeNode ? currentScopeNode->parent : NULL;
+    while (!foundDecl && parentScope) {
+        if (parentScope->type == AST_PROCEDURE_DECL || parentScope->type == AST_FUNCTION_DECL) {
+            foundDecl = findDeclarationInScope(varName, parentScope);
+            if (foundDecl) break;
+        }
+        parentScope = parentScope->parent;
+    }
+
+    if (!foundDecl && globalProgramNode && globalProgramNode->type == AST_PROGRAM) {
           if (globalProgramNode->right && globalProgramNode->right->type == AST_BLOCK && globalProgramNode->right->child_count > 0) {
               AST* globalDeclarationsNode = globalProgramNode->right->children[0];
               if (globalDeclarationsNode && globalDeclarationsNode->type == AST_COMPOUND) {
@@ -746,10 +759,16 @@ AST *copyAST(AST *node) {
     newNode->var_type = node->var_type;
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
+    newNode->is_inline = node->is_inline;
     newNode->i_val = node->i_val;
-    // Do NOT copy unit_list or symbol_table unless you intend to deep copy them
-    newNode->unit_list = NULL;
-    newNode->symbol_table = NULL;
+    // Preserve pointers for unit_list and symbol_table (shallow copy).
+    // These structures are managed elsewhere and do not require deep copies
+    // when duplicating the AST node.  Retaining the symbol_table pointer is
+    // especially important for procedure declarations that contain nested
+    // routines; the VM relies on this table at runtime to resolve calls to
+    // inner procedures by their bytecode address.
+    newNode->unit_list = node->unit_list;
+    newNode->symbol_table = node->symbol_table;
     newNode->type_def = NULL;
     
     // Handle children first
@@ -976,6 +995,11 @@ static void dumpASTJSONRecursive(AST *node, FILE *outFile, int indentLevel, bool
         PRINT_JSON_FIELD_SEPARATOR();
         printJSONIndent(outFile, nextIndent);
         fprintf(outFile, "\"type_definition_link\": \"%s (details not expanded)\"", astTypeToString(node->type_def->type));
+    }
+    if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
+        PRINT_JSON_FIELD_SEPARATOR();
+        printJSONIndent(outFile, nextIndent);
+        fprintf(outFile, "\"is_inline\": %s", node->is_inline ? "true" : "false");
     }
     // --- End Common Node Attributes ---
 

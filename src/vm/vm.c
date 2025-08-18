@@ -390,7 +390,9 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
                            // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
+    sym->is_inline = false;
     sym->next = NULL;
+    sym->enclosing = NULL;
     sym->upvalue_count = 0;
     return sym;
 }
@@ -476,7 +478,10 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             sym->is_alias = false;
             sym->is_const = false;
             sym->is_local_var = false;
+            sym->is_inline = false;
             sym->next = NULL;
+            sym->enclosing = NULL;
+            sym->upvalue_count = 0;
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
             runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
@@ -546,6 +551,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->procedureTable = procedures; // <--- STORED procedureTable
+
+    // Establish a base call frame for the main program.  This allows inline
+    // routines at the top level to utilize local variable opcodes without
+    // triggering stack underflows due to the absence of an active frame.
+    CallFrame* baseFrame = &vm->frames[vm->frameCount++];
+    baseFrame->return_address = NULL;
+    baseFrame->slots = vm->stack;
+    baseFrame->function_symbol = NULL;
+    baseFrame->locals_count = 0;
+    baseFrame->upvalue_count = 0;
+    baseFrame->upvalues = NULL;
 
     #ifdef DEBUG
     if (dumpExec) { // from all.txt
@@ -682,15 +698,35 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
+                    long long iresult = 0; \
+                    bool overflow = false; \
                     switch (current_instruction_code) { \
-                        case OP_ADD:      result_val = makeInt(ia + ib); break; \
-                        case OP_SUBTRACT: result_val = makeInt(ia - ib); break; \
-                        case OP_MULTIPLY: result_val = makeInt(ia * ib); break; \
-                        case OP_DIVIDE:   result_val = makeReal((double)ia / (double)ib); break; \
+                        case OP_ADD: \
+                            overflow = __builtin_add_overflow(ia, ib, &iresult); \
+                            break; \
+                        case OP_SUBTRACT: \
+                            overflow = __builtin_sub_overflow(ia, ib, &iresult); \
+                            break; \
+                        case OP_MULTIPLY: \
+                            overflow = __builtin_mul_overflow(ia, ib, &iresult); \
+                            break; \
+                        case OP_DIVIDE: \
+                            result_val = makeReal((double)ia / (double)ib); \
+                            break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    if (current_instruction_code == OP_DIVIDE) { \
+                        /* result_val already set for division */ \
+                    } else if (overflow) { \
+                        runtimeError(vm, "Runtime Error: Integer overflow."); \
+                        freeValue(&a_val_popped); \
+                        freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } else { \
+                        result_val = makeInt(iresult); \
                     } \
                 } \
                 op_is_handled = true; \
@@ -1601,6 +1637,16 @@ comparison_error_label:
                     }
                 }
 
+                /*
+                 * Mirror the behaviour of OP_SET_LOCAL where the assigned value
+                 * remains on the stack.  This allows assignments used as
+                 * expressions to work consistently and prevents later OP_POP
+                 * instructions from underflowing the stack after an array
+                 * assignment.  Push a copy of the value we just stored so the
+                 * caller can continue to use it if needed.
+                 */
+                push(vm, makeCopyOfValue(&value_to_set));
+
                 freeValue(&value_to_set);
                 freeValue(&pointer_to_lvalue);
                 break;
@@ -2019,19 +2065,32 @@ comparison_error_label:
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
-                bool jump_condition_met = false;
+                bool condition_truth = false;
+                bool value_valid = true;
 
                 if (IS_BOOLEAN(condition_value)) {
-                    jump_condition_met = !AS_BOOLEAN(condition_value);
+                    condition_truth = AS_BOOLEAN(condition_value);
+                } else if (IS_INTLIKE(condition_value)) {
+                    condition_truth = AS_INTEGER(condition_value) != 0;
+                } else if (IS_REAL(condition_value)) {
+                    condition_truth = AS_REAL(condition_value) != 0.0;
+                } else if (IS_CHAR(condition_value)) {
+                    condition_truth = AS_CHAR(condition_value) != '\0';
+                } else if (condition_value.type == TYPE_NIL) {
+                    condition_truth = false;
                 } else {
-                    runtimeError(vm, "VM Error: IF condition must be a Boolean.");
+                    value_valid = false;
+                }
+
+                if (!value_valid) {
+                    runtimeError(vm, "VM Error: IF condition must be a Boolean or numeric value.");
                     freeValue(&condition_value);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
                 freeValue(&condition_value);
 
-                if (jump_condition_met) {
+                if (!condition_truth) {
                     vm->ip += (int16_t)offset_val;
                 }
                 break;
@@ -2258,16 +2317,28 @@ comparison_error_label:
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
-                    CallFrame* caller = (vm->frameCount >= 2) ? &vm->frames[vm->frameCount - 2] : NULL;
-                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
-                        if (!caller) {
-                            runtimeError(vm, "VM Error: No enclosing frame for upvalue.");
-                            return INTERPRET_RUNTIME_ERROR;
+                    CallFrame* parent_frame = NULL;
+                    if (proc_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
                         }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
                         if (proc_symbol->upvalues[i].isLocal) {
-                            frame->upvalues[i] = caller->slots + proc_symbol->upvalues[i].index;
+                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
                         } else {
-                            frame->upvalues[i] = caller->upvalues[proc_symbol->upvalues[i].index];
+                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
                         }
                     }
                 }

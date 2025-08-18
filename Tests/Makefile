@@ -10,13 +10,13 @@ TESTS = BoolTest1.p BoolTest2.p BoolTest3.p BoolTest4.p math.p FileTests.p FileT
 
 
 # Tests that are expected to fail compilation
-FAIL_TESTS = ArgumentOrderMismatch.p \
-             ArgumentTypeMismatch.p \
-             ArrayArgumentMismatch.p \
-             OpenArrayBaseTypeMismatch.p
+#FAIL_TESTS = ArgumentOrderMismatch.p \
+#             ArgumentTypeMismatch.p \
+#             ArrayArgumentMismatch.p \
+#             OpenArrayBaseTypeMismatch.p
 
 # SDL-specific tests
-SDL_TESTS = SDLFeaturesTest SDLRenderCopyTest.p
+SDL_TESTS = SDLFeaturesTest # SDLRenderCopyTest.p
 
 # Detect if SDL was enabled in the build (via CMakeCache)
 SDL_ENABLED := $(shell grep -q '^SDL:BOOL=ON$$' ../build/CMakeCache.txt 2>/dev/null && echo 1 || echo 0)

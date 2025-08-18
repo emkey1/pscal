@@ -705,6 +705,7 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
 
         // Ensure arity matches the declaration's parameter count
         existing_sym->arity = proc_decl_ast_original->child_count;
+        existing_sym->is_inline = proc_decl_ast_original->is_inline;
 
         // The update is complete. Free the constructed name and return.
         free(name_for_table);
@@ -754,6 +755,12 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
         }
     }
 
+    // Perform a local type annotation pass on the copied AST so that
+    // downstream compiler stages can rely on accurate var_type
+    // information.  This is especially important for nested routines
+    // that capture variables from outer scopes (upvalues).
+    annotateTypes(sym->type_def, NULL, sym->type_def);
+
     // Determine the symbol's type based on the original AST declaration node's var_type
     if (proc_decl_ast_original->type == AST_FUNCTION_DECL) {
         // For functions, 'proc_decl_ast_original->var_type' should have been set
@@ -775,7 +782,9 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     sym->is_const = false;
     sym->is_alias = false;
     sym->is_local_var = false;
+    sym->is_inline = proc_decl_ast_original->is_inline;
     sym->next = NULL;
+    sym->enclosing = NULL;
     sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
     sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
     sym->arity = proc_decl_ast_original->child_count; // Store parameter count for builtins and declarations
@@ -1069,15 +1078,23 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 
     HashTable *outer_table = current_procedure_table;
     HashTable *my_table = NULL;
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG PROC_DECL_BODY] Expecting SEMICOLON after header for '%s'. Current token: Type=%s, Value='%s'\n",
+            node->token->value,
+            parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+            parser->current_token && parser->current_token->value ? parser->current_token->value : "NULL");
+#endif
+    eat(parser, TOKEN_SEMICOLON);
+
+    if (parser->current_token && parser->current_token->type == TOKEN_INLINE) {
+        node->is_inline = true;
+        eat(parser, TOKEN_INLINE);
+        eat(parser, TOKEN_SEMICOLON);
+    }
+
     if (!in_interface) {
         my_table = pushProcedureTable();
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG PROC_DECL_BODY] Expecting SEMICOLON after header for '%s'. Current token: Type=%s, Value='%s'\n",
-                node->token->value,
-                parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
-                parser->current_token && parser->current_token->value ? parser->current_token->value : "NULL");
-        #endif
-        eat(parser, TOKEN_SEMICOLON);
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
@@ -1638,16 +1655,24 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
     // Handle implementation part (body) if not in an interface section
     HashTable *outer_table = current_procedure_table;
     HashTable *my_table = NULL;
-    if (!in_interface) {
+
 #ifdef DEBUG
-        fprintf(stderr, "[DEBUG FUNC_DECL_BODY] Expecting SEMICOLON after header for function '%s'. Current token: %s ('%s')\n",
-                copiedFuncNameToken->value,
-                parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
-                (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
-        fflush(stderr);
+    fprintf(stderr, "[DEBUG FUNC_DECL_BODY] Expecting SEMICOLON after header for function '%s'. Current token: %s ('%s')\n",
+            copiedFuncNameToken->value,
+            parser->current_token ? tokenTypeToString(parser->current_token->type) : "NULL_TOKEN",
+            (parser->current_token && parser->current_token->value) ? parser->current_token->value : "NULL_VALUE");
+    fflush(stderr);
 #endif
-        my_table = pushProcedureTable();
+    eat(parser, TOKEN_SEMICOLON);
+
+    if (parser->current_token && parser->current_token->type == TOKEN_INLINE) {
+        node->is_inline = true;
+        eat(parser, TOKEN_INLINE);
         eat(parser, TOKEN_SEMICOLON);
+    }
+
+    if (!in_interface) {
+        my_table = pushProcedureTable();
 
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);

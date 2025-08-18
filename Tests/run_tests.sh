@@ -13,8 +13,8 @@ fi
 CRT_UNIT="$ROOT_DIR/lib/crtvt.pl"
 PSCAL_LIB_DIR="${PSCAL_LIB_DIR:-$ROOT_DIR/test_pscal_lib}"
 export PSCAL_LIB_DIR
-install -d "$PSCAL_LIB_DIR"
-cp -a "$ROOT_DIR/lib/." "$PSCAL_LIB_DIR/"
+mkdir -p "$PSCAL_LIB_DIR"
+cp -R "$ROOT_DIR/lib/." "$PSCAL_LIB_DIR/"
 
 if [ -f "$CRT_UNIT" ]; then
   cp "$CRT_UNIT" "$PSCAL_LIB_DIR/crt.pl"
@@ -24,15 +24,7 @@ NEGATIVE_TESTS=(
   "ArgumentOrderMismatch.p"
   "ArrayArgumentMismatch.p"
   "OpenArrayBaseTypeMismatch.p"
-  # Tests currently failing or unstable
-  "FileTests.p"
-  "FileTests2.p"
-  "NestedRoutineAccessTest.p"
-  "NestedRoutine_Suite.p"
-  "ReadlnString.p"
-  "TestSuite7.p"
-  "a.p"
-  "npt.p"
+  "ArgumentTypeMismatch.p"
 )
 
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
@@ -41,7 +33,12 @@ else
   SDL_ENABLED=0
 fi
 
-mapfile -t ALL_TESTS < <(find "$SCRIPT_DIR" -name '*.p' -not -path "$SCRIPT_DIR/Archived/*" -print | sort | sed "s|^$SCRIPT_DIR/||")
+# Use a while loop for macOS compatibility instead of mapfile
+ALL_TESTS=()
+while IFS= read -r line; do
+    ALL_TESTS+=("$line")
+done < <(find "$SCRIPT_DIR" -name '*.p' -not -path "$SCRIPT_DIR/Archived/*" -print | sort | sed "s|^$SCRIPT_DIR/||")
+
 
 if [ "$SDL_ENABLED" -eq 0 ]; then
   ALL_TESTS=($(printf "%s\n" "${ALL_TESTS[@]}" | grep -v '^SDLFeaturesTest' | grep -v 'SDLRenderCopyTest.p'))

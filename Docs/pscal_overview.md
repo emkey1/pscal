@@ -95,9 +95,6 @@ ANSI terminal control compatible with Turbo Pascal’s CRT unit【F:lib/crt.pl�
 * Text attributes: `TextColor`, `TextBackground`, `NormVideo`, `HighVideo`, `LowVideo`, `InvertColors`, `BoldText`, `BlinkText`.
 * Miscellaneous: `Delay`, `Beep`, `KeyPressed`, `SaveCursor`, `RestoreCursor`.
 
-### CRTMac
-A lightweight ANSI terminal module for macOS terminals【F:lib/crtvt.pl†L1-L23】 with similar procedures (`ClrScr`, `GotoXY`, `TextColor`, etc.).
-
 ### Dos
 Provides DOS‑style file and environment operations by wrapping builtins【F:lib/dos.pl†L1-L66】.
 

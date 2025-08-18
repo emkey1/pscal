@@ -1,6 +1,8 @@
 # Pscal Language Reference
 
-Pscal implements a substantial subset of classic Pascal with a few
+Pscal is a VM backend with multiple front ends.  Pascal, tiny (a very minimal language implemented in Python) and CLike, which is a C like language.
+
+The Pascal front end is the default.  It implements a substantial subset of classic Pascal with a few
 extensions for modern convenience.  It aims to be largely compatible with
 traditional Pascal while retaining a small and understandable core.
 
@@ -55,6 +57,15 @@ Pscal provides several simple and structured types:
 - **arrays** – fixed‑length sequences: `array[1..10] of integer`.
 - **records** – aggregates of fields: `record x, y: integer; end`.
 - **pointers** – references to dynamically allocated data: `^TNode`.
+
+### Numeric limits
+
+Integers are represented as signed 64‑bit values. Arithmetic that
+produces a result outside the range `-2^63`..`2^63-1` causes the virtual
+machine to raise a runtime "Integer overflow" error. As a consequence,
+computations that grow rapidly—such as factorials beyond 20!—will halt
+once the limit is exceeded. `real` values follow the precision and range
+of IEEE‑754 double precision.
 
 ## Variables and Constants
 

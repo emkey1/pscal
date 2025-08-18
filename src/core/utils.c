@@ -113,6 +113,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_SET:           return "SET";
         case TOKEN_CARET:         return "CARET";   // <<< ADDED
         case TOKEN_NIL:           return "NIL";     // <<< ADDED
+        case TOKEN_INLINE:       return "INLINE";  // <<< ADDED
         default:
             // Create a small buffer to handle potentially large unknown enum values
             // Although, this function should ideally cover all defined TokenType values.
@@ -1392,7 +1393,9 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                 sym->is_const = true;              // Mark as constant
                 sym->is_alias = false;
                 sym->is_local_var = false;
+                sym->is_inline = false;
                 sym->next = NULL;
+                sym->enclosing = NULL;
                 freeValue(&v); // Free the temporary value from eval
                 break;
             }
@@ -1415,7 +1418,9 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                      varSym->is_const = false;
                      varSym->is_alias = false;
                      varSym->is_local_var = false; // Not local to the unit's execution scope yet
+                     varSym->is_inline = false;
                      varSym->next = NULL;
+                     varSym->enclosing = NULL;
 
                      // Append to list
                      *tail = varSym;
@@ -1444,7 +1449,9 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                 sym->is_const = false;
                 sym->is_alias = false;
                 sym->is_local_var = false;
+                sym->is_inline = decl->is_inline;
                 sym->next = NULL;
+                sym->enclosing = NULL;
                 break;
             }
             default:

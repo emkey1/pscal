@@ -24,6 +24,7 @@ struct Symbol_s {
     bool is_alias;
     bool is_local_var;
     bool is_const;
+    bool is_inline;
     struct AST *type_def;      // Use forward-declared struct AST
     struct Symbol_s *next;     // Self-referential pointer using the tag
     // --- New fields for compiled procedures/functions ---
@@ -33,6 +34,7 @@ struct Symbol_s {
     uint8_t locals_count;         // Number of local variables (excluding parameters)
     int slot_index;             // Index into the procedure's locals frame (-1 if not a local) // <--- THIS LINE IS UNCHANGED BUT CONFIRMED
     struct Symbol_s* real_symbol; // If this is an alias, this points to the real symbol
+    struct Symbol_s* enclosing;   // Enclosing procedure/function, if any
     uint8_t upvalue_count;
     struct {
         uint8_t index;
