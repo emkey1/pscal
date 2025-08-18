@@ -78,6 +78,9 @@ int main() {
     int i;
     int valid;
 
+    int playing;
+    playing = 1;
+
     max_wrong = 8;
     min_length = 6;
     max_length = 9;
@@ -114,8 +117,6 @@ int main() {
 
     randomize();
 
-    int playing;
-    playing = 1;
     while (playing) {
         str secret;
         str so_far;
