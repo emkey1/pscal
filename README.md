@@ -49,17 +49,17 @@ ctest --output-on-failure
 
 This executes `Tests/run_tests.sh` and exercises both positive and expected failure cases.
 
-## Clike language compiler
+## tiny language front end
 
-A minimal compiler for a small educational language, often called *Clike*, is
-provided in `tools/clike`.  It reads source code that follows the grammar
+A minimal compiler for a small educational language, often called *tiny*, is
+provided in `tools/tiny`.  It reads source code that follows the grammar
 described in the project documentation and emits bytecode that can be executed
 by the Pscal virtual machine.
 
 Example usage:
 
 ```sh
-python tools/clike program.tiny out.pbc
+python tools/tiny program.tiny out.pbc
 ./build/bin/pscalvm out.pbc
 ```
 
@@ -67,22 +67,22 @@ Only integer variables and arithmetic are supported, but this is sufficient for
 basic experiments or teaching purposes. Example programs demonstrating the
 language can be found in `Examples/Clike`.
 
-## Tiny C front end
+## CLike front end
 
-`tools/tinycc.py` implements a compact C-like compiler that targets the
-stand-alone `pscalvm`. The grammar covers variable and function declarations,
+`build/bin/clike/clike` implements a compact C-like compiler that integrates 
+with the pscal vm.  The grammar covers variable and function declarations,
 conditionals, loops and expressions. VM builtins can be invoked simply by
 calling a function name that lacks a user definition.
 
 Example usage:
 
 ```sh
-python tools/tinycc.py program.c out.pbc
-./build/bin/pscalvm out.pbc
+build/bin/clike program.c
+
 ```
 
 Sample programs demonstrating the Tiny C subset are available in
-`tools/tinycc/examples`.
+`Examples/clike`.
 
 ## Runtime library
 
