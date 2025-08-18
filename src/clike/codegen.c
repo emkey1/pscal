@@ -85,6 +85,7 @@ static int resolveLocal(FuncContext* ctx, const char* name) {
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
+static int countLocalDecls(ASTNodeClike *node);
 
 // Helper to compile an l-value (currently only local identifiers) and push its
 // address onto the stack.
@@ -111,6 +112,15 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
         writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
         writeBytecodeChunk(chunk, 1, node->token.line);
     }
+}
+
+static int countLocalDecls(ASTNodeClike *node) {
+    if (!node) return 0;
+    int count = (node->type == TCAST_VAR_DECL) ? 1 : 0;
+    for (int i = 0; i < node->child_count; i++) {
+        count += countLocalDecls(node->children[i]);
+    }
+    return count;
 }
 
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx) {
@@ -505,6 +515,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
             ctx.paramCount++;
         }
     }
+    int localDecls = countLocalDecls(func->right);
     ctx.maxLocalCount = ctx.localCount;
 
     int address = chunk->count;
@@ -521,7 +532,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
 
-    sym->locals_count = (uint8_t)(ctx.maxLocalCount - ctx.paramCount);
+    sym->locals_count = (uint8_t)localDecls;
 
     for (int i = 0; i < ctx.paramCount; i++) {
         free(ctx.locals[i].name);
