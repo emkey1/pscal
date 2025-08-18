@@ -1,5 +1,6 @@
 #include "clike/codegen.h"
 #include "clike/builtins.h"
+#include "backend_ast/builtin.h"
 #include "clike/parser.h"
 #include "clike/semantics.h"
 #include "core/types.h"
@@ -117,6 +118,9 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
 static int countLocalDecls(ASTNodeClike *node) {
     if (!node) return 0;
     int count = (node->type == TCAST_VAR_DECL) ? 1 : 0;
+    count += countLocalDecls(node->left);
+    count += countLocalDecls(node->right);
+    count += countLocalDecls(node->third);
     for (int i = 0; i < node->child_count; i++) {
         count += countLocalDecls(node->children[i]);
     }
@@ -145,7 +149,19 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
         case TCAST_EXPR_STMT:
             if (node->left) {
                 compileExpression(node->left, chunk, ctx);
-                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                bool needPop = true;
+                if (node->left->type == TCAST_CALL) {
+                    char* name = tokenToCString(node->left->token);
+                    Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                    BuiltinRoutineType btype = getBuiltinType(name);
+                    if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
+                        needPop = false;
+                    }
+                    free(name);
+                }
+                if (needPop) {
+                    writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                }
             }
             break;
         case TCAST_IF: {
@@ -515,7 +531,15 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
             ctx.paramCount++;
         }
     }
-    int localDecls = countLocalDecls(func->right);
+    /*
+     * Track the maximum number of locals that exist at any point during
+     * compilation.  The call frame must allocate space for this many locals
+     * (minus the parameters) when the function is executed.  We also perform a
+     * recursive pre-pass to count every local declaration in the function. If
+     * the pre-pass reports more locals than were ever simultaneously live, we
+     * still allocate the larger amount to be safe.
+     */
+    int declaredLocals = countLocalDecls(func->right);
     ctx.maxLocalCount = ctx.localCount;
 
     int address = chunk->count;
@@ -532,7 +556,12 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
 
-    sym->locals_count = (uint8_t)localDecls;
+    /* The total locals required are whichever is larger: the maximum locals
+     * seen during compilation (minus parameters) or the number of declarations
+     * discovered by the pre-pass. */
+    int needed = ctx.maxLocalCount - ctx.paramCount;
+    if (declaredLocals > needed) needed = declaredLocals;
+    sym->locals_count = (uint8_t)needed;
 
     for (int i = 0; i < ctx.paramCount; i++) {
         free(ctx.locals[i].name);
