@@ -73,10 +73,11 @@ int main() {
     int word_limit;
     str words[2048];
     int word_count;
-    int f;
+    text f;
     str line;
     int i;
     int valid;
+    int len;
 
     int playing;
     playing = 1;
@@ -93,8 +94,9 @@ int main() {
         readln(f, line);
         if (strlen(line) >= min_length && strlen(line) <= max_length) {
             valid = 1;
-            i = 0;
-            while (i < strlen(line)) {
+            len = strlen(line);
+            i = 1;
+            while (i <= len) {
                 if ((line[i] >= 'a' && line[i] <= 'z') || (line[i] >= 'A' && line[i] <= 'Z')) {
                     line[i] = upcase(line[i]);
                 } else {
@@ -130,8 +132,9 @@ int main() {
 
         secret = words[random(word_count)];
         so_far = secret;
-        i = 0;
-        while (i < strlen(so_far)) {
+        len = strlen(so_far);
+        i = 1;
+        while (i <= len) {
             so_far[i] = '-';
             i = i + 1;
         }
@@ -145,11 +148,12 @@ int main() {
             printf("Guess: ");
             scanf(guess);
             if (strlen(guess) == 0) continue;
-            ch = upcase(guess[0]);
+            ch = upcase(guess[1]);
 
             found = 0;
-            i = 0;
-            while (i < strlen(used)) {
+            len = strlen(used);
+            i = 1;
+            while (i <= len) {
                 if (used[i] == ch) {
                     found = 1;
                 }
@@ -160,13 +164,14 @@ int main() {
                 continue;
             }
 
-            i = strlen(used);
-            setlength(used, i + 1);
-            used[i] = ch;
+            len = strlen(used);
+            setlength(used, len + 1);
+            used[len + 1] = ch;
 
             found = 0;
-            i = 0;
-            while (i < strlen(secret)) {
+            len = strlen(secret);
+            i = 1;
+            while (i <= len) {
                 if (secret[i] == ch) {
                     so_far[i] = ch;
                     found = 1;
@@ -176,9 +181,10 @@ int main() {
             if (!found) {
                 wrong = wrong + 1;
             } else {
-                j = 0;
+                len = strlen(secret);
+                j = 1;
                 done = 1;
-                while (j < strlen(secret)) {
+                while (j <= len) {
                     if (so_far[j] != secret[j]) done = 0;
                     j = j + 1;
                 }
@@ -195,7 +201,7 @@ int main() {
         }
         printf("Play again (Y/N)? ");
         scanf(guess);
-        if (strlen(guess) == 0 || upcase(guess[0]) != 'Y') {
+        if (strlen(guess) == 0 || upcase(guess[1]) != 'Y') {
             playing = 0;
         }
     }

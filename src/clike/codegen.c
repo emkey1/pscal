@@ -105,7 +105,11 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
             char* name = tokenToCString(node->left->token);
             int idx = resolveLocal(ctx, name);
             free(name);
-            writeBytecodeChunk(chunk, OP_GET_LOCAL, node->left->token.line);
+            if (idx >= 0 && ctx->locals[idx].type == TYPE_STRING) {
+                writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->left->token.line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_LOCAL, node->left->token.line);
+            }
             writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
         } else {
             compileExpression(node->left, chunk, ctx);
@@ -315,9 +319,18 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             } else {
                 Value init;
                 switch (node->var_type) {
-                    case TYPE_REAL: init = makeReal(0.0); break;
-                    case TYPE_STRING: init = makeNil(); break;
-                    default: init = makeInt(0); break;
+                    case TYPE_REAL:
+                        init = makeReal(0.0);
+                        break;
+                    case TYPE_STRING:
+                        init = makeNil();
+                        break;
+                    case TYPE_FILE:
+                        init = makeValueForType(TYPE_FILE, NULL, NULL);
+                        break;
+                    default:
+                        init = makeInt(0);
+                        break;
                 }
                 int cidx = addConstantToChunk(chunk, &init);
                 freeValue(&init);
