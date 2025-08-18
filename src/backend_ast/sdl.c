@@ -952,15 +952,38 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    // Type checking for arguments
-    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER) {
-        runtimeError(vm, "FillCircle arguments must be integers.");
+    // Accept either integer or real arguments and coerce to integers.
+    // Some front ends (e.g. the clike compiler) may supply real values
+    // when calling fillcircle.  Previously this triggered a runtime
+    // error and nothing was drawn.  To make the builtin more forgiving
+    // we transparently truncate real arguments to integers.
+    int centerX, centerY, radius;
+    if (args[0].type == TYPE_INTEGER) {
+        centerX = (int)args[0].i_val;
+    } else if (args[0].type == TYPE_REAL) {
+        centerX = (int)args[0].r_val;
+    } else {
+        runtimeError(vm, "FillCircle argument 1 must be numeric.");
         return makeVoid();
     }
 
-    int centerX = (int)args[0].i_val;
-    int centerY = (int)args[1].i_val;
-    int radius = (int)args[2].i_val;
+    if (args[1].type == TYPE_INTEGER) {
+        centerY = (int)args[1].i_val;
+    } else if (args[1].type == TYPE_REAL) {
+        centerY = (int)args[1].r_val;
+    } else {
+        runtimeError(vm, "FillCircle argument 2 must be numeric.");
+        return makeVoid();
+    }
+
+    if (args[2].type == TYPE_INTEGER) {
+        radius = (int)args[2].i_val;
+    } else if (args[2].type == TYPE_REAL) {
+        radius = (int)args[2].r_val;
+    } else {
+        runtimeError(vm, "FillCircle argument 3 must be numeric.");
+        return makeVoid();
+    }
 
     if (radius < 0) return makeVoid();
 
