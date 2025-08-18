@@ -1,5 +1,6 @@
 #include "clike/codegen.h"
 #include "clike/builtins.h"
+#include "backend_ast/builtin.h"
 #include "clike/parser.h"
 #include "clike/semantics.h"
 #include "core/types.h"
@@ -85,6 +86,7 @@ static int resolveLocal(FuncContext* ctx, const char* name) {
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
+static int countLocalDecls(ASTNodeClike *node);
 
 // Helper to compile an l-value (currently only local identifiers) and push its
 // address onto the stack.
@@ -113,6 +115,18 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
     }
 }
 
+static int countLocalDecls(ASTNodeClike *node) {
+    if (!node) return 0;
+    int count = (node->type == TCAST_VAR_DECL) ? 1 : 0;
+    count += countLocalDecls(node->left);
+    count += countLocalDecls(node->right);
+    count += countLocalDecls(node->third);
+    for (int i = 0; i < node->child_count; i++) {
+        count += countLocalDecls(node->children[i]);
+    }
+    return count;
+}
+
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx) {
     if (!node) return;
     for (int i = 0; i < node->child_count; i++) {
@@ -135,7 +149,19 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
         case TCAST_EXPR_STMT:
             if (node->left) {
                 compileExpression(node->left, chunk, ctx);
-                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                bool needPop = true;
+                if (node->left->type == TCAST_CALL) {
+                    char* name = tokenToCString(node->left->token);
+                    Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                    BuiltinRoutineType btype = getBuiltinType(name);
+                    if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
+                        needPop = false;
+                    }
+                    free(name);
+                }
+                if (needPop) {
+                    writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                }
             }
             break;
         case TCAST_IF: {
@@ -378,9 +404,26 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 } else if (node->left->type == TCAST_ARRAY_ACCESS) {
-                    compileLValue(node->left, chunk, ctx);
-                    compileExpression(node->right, chunk, ctx);
-                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line);
+                    /*
+                     * In C, an assignment expression evaluates to the value
+                     * being assigned.  Our VM's OP_SET_INDIRECT no longer
+                     * leaves a copy of the value on the stack (Pascal
+                     * semantics), so we must explicitly preserve it for the
+                     * expression result.
+                     *
+                     * Evaluate the right-hand side first and duplicate it so
+                     * one copy remains after the store.  Then compute the
+                     * l-value address, swap to place the address beneath the
+                     * value and perform the indirect assignment.  The
+                     * duplicated value is left on the stack as the expression
+                     * result, allowing surrounding expression statements to
+                     * pop it without disturbing the stack.
+                     */
+                    compileExpression(node->right, chunk, ctx);      // [..., value]
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line); // [..., value, value]
+                    compileLValue(node->left, chunk, ctx);            // [..., value, value, ptr]
+                    writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
                 }
             }
             break;
@@ -488,6 +531,15 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
             ctx.paramCount++;
         }
     }
+    /*
+     * Track the maximum number of locals that exist at any point during
+     * compilation.  The call frame must allocate space for this many locals
+     * (minus the parameters) when the function is executed.  We also perform a
+     * recursive pre-pass to count every local declaration in the function. If
+     * the pre-pass reports more locals than were ever simultaneously live, we
+     * still allocate the larger amount to be safe.
+     */
+    int declaredLocals = countLocalDecls(func->right);
     ctx.maxLocalCount = ctx.localCount;
 
     int address = chunk->count;
@@ -504,7 +556,12 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
 
-    sym->locals_count = (uint8_t)(ctx.maxLocalCount - ctx.paramCount);
+    /* The total locals required are whichever is larger: the maximum locals
+     * seen during compilation (minus parameters) or the number of declarations
+     * discovered by the pre-pass. */
+    int needed = ctx.maxLocalCount - ctx.paramCount;
+    if (declaredLocals > needed) needed = declaredLocals;
+    sym->locals_count = (uint8_t)needed;
 
     for (int i = 0; i < ctx.paramCount; i++) {
         free(ctx.locals[i].name);

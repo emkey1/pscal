@@ -952,25 +952,65 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    // Type checking for arguments
-    if (args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER) {
-        runtimeError(vm, "FillCircle arguments must be integers.");
+    // Accept either integer or real arguments and coerce to integers.
+    // Some front ends (e.g. the clike compiler) may supply real values
+    // when calling fillcircle.  Previously this triggered a runtime
+    // error and nothing was drawn.  To make the builtin more forgiving
+    // we transparently truncate real arguments to integers.
+    int centerX, centerY, radius;
+    if (args[0].type == TYPE_INTEGER) {
+        centerX = (int)args[0].i_val;
+    } else if (args[0].type == TYPE_REAL) {
+        centerX = (int)args[0].r_val;
+    } else {
+        runtimeError(vm, "FillCircle argument 1 must be numeric.");
         return makeVoid();
     }
 
-    int centerX = (int)args[0].i_val;
-    int centerY = (int)args[1].i_val;
-    int radius = (int)args[2].i_val;
+    if (args[1].type == TYPE_INTEGER) {
+        centerY = (int)args[1].i_val;
+    } else if (args[1].type == TYPE_REAL) {
+        centerY = (int)args[1].r_val;
+    } else {
+        runtimeError(vm, "FillCircle argument 2 must be numeric.");
+        return makeVoid();
+    }
+
+    if (args[2].type == TYPE_INTEGER) {
+        radius = (int)args[2].i_val;
+    } else if (args[2].type == TYPE_REAL) {
+        radius = (int)args[2].r_val;
+    } else {
+        runtimeError(vm, "FillCircle argument 3 must be numeric.");
+        return makeVoid();
+    }
 
     if (radius < 0) return makeVoid();
 
     // Set the draw color from the global state
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    
-    // Efficient filling method using horizontal lines
+    SDL_SetRenderDrawColor(
+        gSdlRenderer,
+        gSdlCurrentColor.r,
+        gSdlCurrentColor.g,
+        gSdlCurrentColor.b,
+        gSdlCurrentColor.a);
+
+    /*
+     * Previous implementation used horizontal lines with sqrt/floor to
+     * compute the circle span.  On some platforms this produced rounding
+     * issues that resulted in nothing being rendered for small radii.  The
+     * implementation below simply iterates over a bounding box and plots
+     * any point that falls inside the circle (dx*dx + dy*dy <= r^2).  This
+     * is a little more brute force but guarantees that every pixel inside
+     * the circle is touched, making the balls visible on all systems.
+     */
+    int r2 = radius * radius;
     for (int dy = -radius; dy <= radius; ++dy) {
-        int dx = (int)floor(sqrt((double)(radius * radius) - (dy * dy)));
-        SDL_RenderDrawLine(gSdlRenderer, centerX - dx, centerY + dy, centerX + dx, centerY + dy);
+        for (int dx = -radius; dx <= radius; ++dx) {
+            if (dx * dx + dy * dy <= r2) {
+                SDL_RenderDrawPoint(gSdlRenderer, centerX + dx, centerY + dy);
+            }
+        }
     }
 
     return makeVoid();

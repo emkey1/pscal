@@ -1,0 +1,7 @@
+program HelloWorld;
+
+begin
+  // Write the text 'Hello, World!' to the console
+  // and move the cursor to the next line.
+  WriteLn('Hello, World!');
+end.

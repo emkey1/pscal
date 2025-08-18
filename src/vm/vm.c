@@ -900,13 +900,30 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             }
             case OP_NOT: {
                 Value val_popped = pop(vm);
-                if (!IS_BOOLEAN(val_popped) && !IS_INTEGER(val_popped)) { // <<< FIX: Allow INTEGER
-                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or integer.");
+                bool condition_truth = false;
+                bool value_valid = true;
+
+                if (IS_BOOLEAN(val_popped)) {
+                    condition_truth = AS_BOOLEAN(val_popped);
+                } else if (IS_INTLIKE(val_popped)) {
+                    condition_truth = AS_INTEGER(val_popped) != 0;
+                } else if (IS_REAL(val_popped)) {
+                    condition_truth = AS_REAL(val_popped) != 0.0;
+                } else if (IS_CHAR(val_popped)) {
+                    condition_truth = AS_CHAR(val_popped) != '\0';
+                } else if (val_popped.type == TYPE_NIL) {
+                    condition_truth = false;
+                } else {
+                    value_valid = false;
+                }
+
+                if (!value_valid) {
+                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or numeric.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                bool bool_val = IS_BOOLEAN(val_popped) ? AS_BOOLEAN(val_popped) : (AS_INTEGER(val_popped) != 0); // <<< FIX: Coerce INTEGER to BOOLEAN
-                push(vm, makeBoolean(!bool_val));
+
+                push(vm, makeBoolean(!condition_truth));
                 freeValue(&val_popped);
                 break;
             }
@@ -1638,15 +1655,18 @@ comparison_error_label:
                 }
 
                 /*
-                 * Mirror the behaviour of OP_SET_LOCAL where the assigned value
-                 * remains on the stack.  This allows assignments used as
-                 * expressions to work consistently and prevents later OP_POP
-                 * instructions from underflowing the stack after an array
-                 * assignment.  Push a copy of the value we just stored so the
-                 * caller can continue to use it if needed.
+                 * In Pascal, assignments are statements and do not yield a
+                 * value.  The previous implementation pushed a copy of the
+                 * assigned value onto the stack, mirroring C-like semantics.
+                 * This resulted in stray values accumulating on the VM stack
+                 * for every indirect assignment (e.g. array or record field
+                 * writes).  Large programs such as the SDL multi bouncing balls
+                 * demo perform many such assignments each frame, eventually
+                 * exhausting the stack and triggering a runtime stack overflow.
+                 *
+                 * To restore correct Pascal semantics and prevent the leak,
+                 * simply discard the temporary value after storing it.
                  */
-                push(vm, makeCopyOfValue(&value_to_set));
-
                 freeValue(&value_to_set);
                 freeValue(&pointer_to_lvalue);
                 break;
@@ -2305,7 +2325,7 @@ comparison_error_label:
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
                 if (!proc_symbol) {
-                    runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04X.", target_address);
+                    runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04d.", target_address);
                     vm->frameCount--;
                     return INTERPRET_RUNTIME_ERROR;
                 }

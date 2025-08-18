@@ -355,3 +355,4 @@ install(TARGETS pscal dscal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 add_test(NAME pscal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_tests.sh)
+add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)

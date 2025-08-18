@@ -1,11 +1,23 @@
-# TinyCC Examples
+# Clike language examples
 
-This directory contains sample programs for the `tinycc` compiler.
+This folder contains sample programs for the Pscal clike front ends.
 
-Compile an example into Pscal bytecode with:
+Tiny language (`.tiny`) programs can be compiled to bytecode with:
 
 ```
-python tools/tinycc.py tools/tinycc/examples/hello.c out.pbc
+tools/clike Examples/Clike/<program>.tiny /tmp/<program>.pbc
 ```
 
-Run the resulting `out.pbc` file with `pscalvm`.
+C-like examples (`.c`) can be executed with the native clike compiler built in
+`build/bin`:
+
+```
+build/bin/clike Examples/Clike/<program>.c
+```
+
+## Programs
+
+- `countdown.tiny` – read an integer and count down to 1.
+- `max.tiny` – read two integers and print the larger value.
+- `sum.tiny` – compute the sum of 1..n.
+- `sdl_multibouncingballs.c` – SDL multi bouncing balls demo ported from Pascal.

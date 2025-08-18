@@ -310,7 +310,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
             int target_addr = offset + 3 + (int16_t)jump_operand;
             const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
-            printf("%-16s %4d (to %04X)", "OP_JUMP_IF_FALSE", (int16_t)jump_operand, target_addr);
+            printf("%-16s %4d (to %04d)", "OP_JUMP_IF_FALSE", (int16_t)jump_operand, target_addr);
             if (targetName) {
                 printf(" -> %s", targetName);
             }
@@ -322,7 +322,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             int16_t jump_operand_sint = (int16_t)jump_operand_uint;
             int target_addr = offset + 3 + jump_operand_sint;
             const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
-            printf("%-16s %4d (to %04X)", "OP_JUMP", jump_operand_sint, target_addr);
+            printf("%-16s %4d (to %04d)", "OP_JUMP", jump_operand_sint, target_addr);
             if (targetName) {
                 printf(" -> %s", targetName);
             }
@@ -630,7 +630,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 AS_STRING(chunk->constants[name_index])) {
                 targetProcName = AS_STRING(chunk->constants[name_index]);
             }
-            printf("%-16s %04X (%s) (%d args)\n",
+            printf("%-16s %04d (%s) (%d args)\n",
                    "OP_CALL", address, targetProcName, declared_arity);
             return offset + 6;
         }
@@ -650,7 +650,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         // The AST_BREAK node is handled by the compiler generating jump instructions.
 
         default:
-            printf("Unknown opcode %02X\n", instruction);
+            printf("Unknown opcode %d\n", instruction);
             return offset + 1;
     }
 }
@@ -675,7 +675,7 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
                 }
             }
             printf("\n");
-            printf("--- %s %s (at %04X) ---\n", routineTypeStr, procNameAtOffset, offset);
+            printf("--- %s %s (at %04d) ---\n", routineTypeStr, procNameAtOffset, offset);
         }
         // Call the public, enhanced disassembleInstruction
         offset = disassembleInstruction(chunk, offset, procedureTable);
