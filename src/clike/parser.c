@@ -9,6 +9,7 @@ static VarType tokenTypeToVarType(ClikeTokenType t) {
         case CLIKE_TOKEN_INT: return TYPE_INTEGER;
         case CLIKE_TOKEN_FLOAT: return TYPE_REAL;
         case CLIKE_TOKEN_STR: return TYPE_STRING;
+        case CLIKE_TOKEN_TEXT: return TYPE_FILE;
         case CLIKE_TOKEN_VOID: return TYPE_VOID;
         default: return TYPE_UNKNOWN;
     }
@@ -130,7 +131,8 @@ ASTNodeClike* parseProgramClike(ParserClike *parser) {
 
 static int isTypeToken(ClikeTokenType t) {
     return t == CLIKE_TOKEN_INT || t == CLIKE_TOKEN_VOID ||
-           t == CLIKE_TOKEN_FLOAT || t == CLIKE_TOKEN_STR;
+           t == CLIKE_TOKEN_FLOAT || t == CLIKE_TOKEN_STR ||
+           t == CLIKE_TOKEN_TEXT;
 }
 
 static ASTNodeClike* declaration(ParserClike *p) {
