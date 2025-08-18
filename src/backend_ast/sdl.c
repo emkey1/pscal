@@ -965,12 +965,29 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
     if (radius < 0) return makeVoid();
 
     // Set the draw color from the global state
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    
-    // Efficient filling method using horizontal lines
+    SDL_SetRenderDrawColor(
+        gSdlRenderer,
+        gSdlCurrentColor.r,
+        gSdlCurrentColor.g,
+        gSdlCurrentColor.b,
+        gSdlCurrentColor.a);
+
+    /*
+     * Previous implementation used horizontal lines with sqrt/floor to
+     * compute the circle span.  On some platforms this produced rounding
+     * issues that resulted in nothing being rendered for small radii.  The
+     * implementation below simply iterates over a bounding box and plots
+     * any point that falls inside the circle (dx*dx + dy*dy <= r^2).  This
+     * is a little more brute force but guarantees that every pixel inside
+     * the circle is touched, making the balls visible on all systems.
+     */
+    int r2 = radius * radius;
     for (int dy = -radius; dy <= radius; ++dy) {
-        int dx = (int)floor(sqrt((double)(radius * radius) - (dy * dy)));
-        SDL_RenderDrawLine(gSdlRenderer, centerX - dx, centerY + dy, centerX + dx, centerY + dy);
+        for (int dx = -radius; dx <= radius; ++dx) {
+            if (dx * dx + dy * dy <= r2) {
+                SDL_RenderDrawPoint(gSdlRenderer, centerX + dx, centerY + dy);
+            }
+        }
     }
 
     return makeVoid();
