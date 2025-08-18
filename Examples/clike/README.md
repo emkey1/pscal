@@ -21,3 +21,4 @@ build/bin/clike Examples/Clike/<program>.c
 - `max.tiny` – read two integers and print the larger value.
 - `sum.tiny` – compute the sum of 1..n.
 - `sdl_multibouncingballs.c` – SDL multi bouncing balls demo ported from Pascal.
+- `hangman5.c` – text-based hangman game ported from Pascal.
