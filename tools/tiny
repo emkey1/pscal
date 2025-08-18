@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clike language compiler targeting the Pscal VM.
+"""tiny language compiler targeting the Pscal VM.
 
 This script parses a very small language described by the grammar in the
 repository's README and emits Pscal bytecode so the resulting program can be
@@ -8,7 +8,7 @@ which is sufficient for basic demonstrations and educational purposes.
 
 Usage::
 
-    python tools/clike source.tiny output.pbc
+    python tools/tiny source.tiny output.pbc
 
 The output file can be executed with ``pscalvm``::
 
@@ -310,7 +310,7 @@ class BytecodeBuilder:
 # Compiler
 # ---------------------------------------------------------------------------
 
-class ClikeCompiler:
+class tinyCompiler:
     def __init__(self, root: Path):
         self.root = root
         self.opcodes = load_opcodes(root)
@@ -491,14 +491,14 @@ def write_bytecode(builder: BytecodeBuilder, path: Path) -> None:
 
 def main(argv: List[str]) -> int:
     if len(argv) != 3:
-        print("Usage: clike source.tiny output.pbc", file=sys.stderr)
+        print("Usage: tiny source.tiny output.pbc", file=sys.stderr)
         return 1
     src_path = Path(argv[1])
     out_path = Path(argv[2])
     source = src_path.read_text(encoding="utf-8")
     tokens = tokenize(source)
     program = Parser(tokens).parse()
-    compiler = ClikeCompiler(Path(__file__).resolve().parent.parent)
+    compiler = tinyCompiler(Path(__file__).resolve().parent.parent)
     builder = compiler.compile(program)
     write_bytecode(builder, out_path)
     return 0
