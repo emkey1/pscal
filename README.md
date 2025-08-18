@@ -49,7 +49,7 @@ ctest --output-on-failure
 
 This executes `Tests/run_tests.sh` and exercises both positive and expected failure cases.
 
-## tiny language compiler
+## tiny language front end
 
 A minimal compiler for a small educational language, often called *tiny*, is
 provided in `tools/tiny`.  It reads source code that follows the grammar
