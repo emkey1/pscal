@@ -1655,15 +1655,18 @@ comparison_error_label:
                 }
 
                 /*
-                 * Mirror the behaviour of OP_SET_LOCAL where the assigned value
-                 * remains on the stack.  This allows assignments used as
-                 * expressions to work consistently and prevents later OP_POP
-                 * instructions from underflowing the stack after an array
-                 * assignment.  Push a copy of the value we just stored so the
-                 * caller can continue to use it if needed.
+                 * In Pascal, assignments are statements and do not yield a
+                 * value.  The previous implementation pushed a copy of the
+                 * assigned value onto the stack, mirroring C-like semantics.
+                 * This resulted in stray values accumulating on the VM stack
+                 * for every indirect assignment (e.g. array or record field
+                 * writes).  Large programs such as the SDL multi bouncing balls
+                 * demo perform many such assignments each frame, eventually
+                 * exhausting the stack and triggering a runtime stack overflow.
+                 *
+                 * To restore correct Pascal semantics and prevent the leak,
+                 * simply discard the temporary value after storing it.
                  */
-                push(vm, makeCopyOfValue(&value_to_set));
-
                 freeValue(&value_to_set);
                 freeValue(&pointer_to_lvalue);
                 break;
