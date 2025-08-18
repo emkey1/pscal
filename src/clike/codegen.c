@@ -378,9 +378,26 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 } else if (node->left->type == TCAST_ARRAY_ACCESS) {
-                    compileLValue(node->left, chunk, ctx);
-                    compileExpression(node->right, chunk, ctx);
-                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line);
+                    /*
+                     * In C, an assignment expression evaluates to the value
+                     * being assigned.  Our VM's OP_SET_INDIRECT no longer
+                     * leaves a copy of the value on the stack (Pascal
+                     * semantics), so we must explicitly preserve it for the
+                     * expression result.
+                     *
+                     * Evaluate the right-hand side first and duplicate it so
+                     * one copy remains after the store.  Then compute the
+                     * l-value address, swap to place the address beneath the
+                     * value and perform the indirect assignment.  The
+                     * duplicated value is left on the stack as the expression
+                     * result, allowing surrounding expression statements to
+                     * pop it without disturbing the stack.
+                     */
+                    compileExpression(node->right, chunk, ctx);      // [..., value]
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line); // [..., value, value]
+                    compileLValue(node->left, chunk, ctx);            // [..., value, value, ptr]
+                    writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
                 }
             }
             break;
