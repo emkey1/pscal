@@ -51,7 +51,7 @@ int main() {
 
     i = 0;
     while (i < NumBalls) {
-        ii = trunc(i);
+        ii = i;
         radius[ii] = 8 + random(13);
         x[ii] = radius[ii] + random(WindowWidth - 2 * radius[ii]);
         y[ii] = radius[ii] + random(WindowHeight - 2 * radius[ii]);
@@ -69,8 +69,7 @@ int main() {
         b[ii] = random(206) + 50;
         mass[ii] = radius[ii] * radius[ii];
         active[ii] = 1;
-        // Ensure loop index remains an integer for subsequent array indexing.
-        i = trunc(i + 1);
+        i = i + 1;
     }
 
     quit = 0;
@@ -87,7 +86,7 @@ int main() {
 
         i = 0;
         while (i < NumBalls) {
-            ii = trunc(i);
+            ii = i;
             if (active[ii]) {
                 x[ii] = x[ii] + dx[ii];
                 y[ii] = y[ii] + dy[ii];
@@ -105,9 +104,9 @@ int main() {
                     y[ii] = MaxY - radius[ii];
                     dy[ii] = -dy[ii];
                 }
-                j = trunc(i + 1);
+                j = i + 1;
                 while (j < NumBalls) {
-                    jj = trunc(j);
+                    jj = j;
                     if (active[jj]) {
                         float distSq;
                         float sumRadiiSq;
@@ -175,22 +174,20 @@ int main() {
                             }
                         }
                     }
-                    // Maintain integer type for j when incrementing.
-                    j = trunc(j + 1);
+                    j = j + 1;
                 }
             }
-            // Maintain integer type for i when incrementing.
-            i = trunc(i + 1);
+            i = i + 1;
         }
         cleardevice();
         i = 0;
         while (i < NumBalls) {
-            ii = trunc(i);
+            ii = i;
             if (active[ii]) {
                 setrgbcolor(r[ii], g[ii], b[ii]);
                 fillcircle(trunc(x[ii]), trunc(y[ii]), radius[ii]);
             }
-            i = trunc(i + 1);
+            i = i + 1;
         }
         updatescreen();
         graphloop(FrameDelay);
