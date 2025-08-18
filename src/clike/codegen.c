@@ -474,6 +474,30 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 freeValue(&zero);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else if (strcmp(name, "assign") == 0 ||
+                       strcmp(name, "reset") == 0 ||
+                       strcmp(name, "eof") == 0 ||
+                       strcmp(name, "close") == 0) {
+                // File builtins take the file variable as a VAR parameter.
+                if (node->child_count > 0) {
+                    compileLValue(node->children[0], chunk, ctx);
+                    for (int i = 1; i < node->child_count; ++i) {
+                        compileExpression(node->children[i], chunk, ctx);
+                    }
+                }
+                int fnIndex = addStringConstant(chunk, name);
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)fnIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+            } else if (strcmp(name, "readln") == 0) {
+                // readln requires all arguments by reference (file and buffer).
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileLValue(node->children[i], chunk, ctx);
+                }
+                int rlIndex = addStringConstant(chunk, "readln");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)rlIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             } else if (strcmp(name, "random") == 0) {
                 // Direct wrapper around the VM's random builtin.
                 for (int i = 0; i < node->child_count; ++i) {
