@@ -13,6 +13,7 @@
 #include "builtin.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
+#include <limits.h>    // For PATH_MAX
 
 
 const char *varTypeToString(VarType type) {
@@ -1172,33 +1173,47 @@ bool isUnitDocumented(const char *unit_name) {
 }
 
 char *findUnitFile(const char *unit_name) {
-    // Allow overriding the library search path via the PSCAL_LIB_DIR
-    // environment variable.  If it is not provided, fall back to the
-    // repository's local `lib` directory instead of the old hard-coded
-    // `/usr/local/Pscal/lib` path.  This makes the compiler work out of the
-    // box for developers running from the source tree.
-    const char *base_path = getenv("PSCAL_LIB_DIR");
-    if (base_path == NULL || *base_path == '\0') {
-        base_path = "lib";   // Default relative library path
+    const char *env_path = getenv("PSCAL_LIB_DIR");
+    if (env_path && *env_path) {
+        size_t max_len = strlen(env_path) + 1 + strlen(unit_name) + 3 + 1;
+        char *file_name = malloc(max_len);
+        if (!file_name) {
+            fprintf(stderr, "Memory allocation error in findUnitFile\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        snprintf(file_name, max_len, "%s/%s.pl", env_path, unit_name);
+        if (access(file_name, F_OK) == 0) {
+            return file_name;
+        }
+        free(file_name);
     }
 
-    // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
-    size_t max_path_len = strlen(base_path) + 1 + strlen(unit_name) + 3 + 1;
-    char *file_name = malloc(max_path_len);
-    if (!file_name) {
-        fprintf(stderr, "Memory allocation error in findUnitFile\n");
-        EXIT_FAILURE_HANDLER();
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) {
+        return NULL;
     }
 
-    // Format full path safely
-    snprintf(file_name, max_path_len, "%s/%s.pl", base_path, unit_name);
+    while (1) {
+        size_t max_len = strlen(cwd) + 1 + strlen("lib") + 1 + strlen(unit_name) + 3 + 1;
+        char *file_name = malloc(max_len);
+        if (!file_name) {
+            fprintf(stderr, "Memory allocation error in findUnitFile\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        snprintf(file_name, max_len, "%s/lib/%s.pl", cwd, unit_name);
+        if (access(file_name, F_OK) == 0) {
+            return file_name;
+        }
+        free(file_name);
 
-    if (access(file_name, F_OK) == 0) {
-        return file_name; // Caller takes ownership
+        char *slash = strrchr(cwd, '/');
+        if (!slash) {
+            break;
+        }
+        *slash = '\0';
     }
 
-    free(file_name);
-    return NULL; // Not found
+    return NULL;
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {
