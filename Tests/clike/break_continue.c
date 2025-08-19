@@ -10,6 +10,7 @@ int main() {
             break;
         }
         printf(i);
+        printf("\n");
     }
     return 0;
 }

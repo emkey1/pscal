@@ -53,6 +53,31 @@ static char* tokenToCString(ClikeToken t) {
     return s;
 }
 
+// Convert a string token's lexeme into a C string while interpreting common
+// escape sequences (currently \n, \r, \t, \\, and \" ).
+static char* tokenStringToCString(ClikeToken t) {
+    char* s = (char*)malloc(t.length + 1); // escaped string can't be longer
+    int j = 0;
+    for (int i = 0; i < t.length; i++) {
+        char c = t.lexeme[i];
+        if (c == '\\' && i + 1 < t.length) {
+            char next = t.lexeme[++i];
+            switch (next) {
+                case 'n': s[j++] = '\n'; break;
+                case 'r': s[j++] = '\r'; break;
+                case 't': s[j++] = '\t'; break;
+                case '\\': s[j++] = '\\'; break;
+                case '"': s[j++] = '"'; break;
+                default:   s[j++] = next; break;
+            }
+        } else {
+            s[j++] = c;
+        }
+    }
+    s[j] = '\0';
+    return s;
+}
+
 static void beginScope(FuncContext* ctx) { ctx->scopeDepth++; }
 
 static void endScope(FuncContext* ctx) {
@@ -418,7 +443,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             break;
         }
         case TCAST_STRING: {
-            char* s = tokenToCString(node->token);
+            char* s = tokenStringToCString(node->token);
             Value v = makeString(s);
             free(s);
             int idx = addConstantToChunk(chunk, &v);
@@ -512,9 +537,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
                 }
-                // Directly map printf to the WriteLn opcode. printf in clike is
-                // treated as a procedure that always succeeds and returns 0.
-                writeBytecodeChunk(chunk, OP_WRITE_LN, node->token.line);
+                // Map printf to the Write opcode so no implicit newline is
+                // emitted. printf in clike is treated as a procedure that
+                // always succeeds and returns 0.
+                writeBytecodeChunk(chunk, OP_WRITE, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
 
                 // Push a dummy return value (0) so expression statements remain
