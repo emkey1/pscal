@@ -170,6 +170,14 @@ To invoke a builtin from generated code:
 3. At runtime the VM resolves the name and dispatches to the builtin
    implementation.
 
+Front ends may expose additional builtins by registering handlers before the VM
+executes:
+
+```c
+initVmBuiltinRegistry();
+registerVmBuiltin("foo", vmBuiltinFoo);
+```
+
 Example: call the `random` function which returns an integer.
 
 Python:
