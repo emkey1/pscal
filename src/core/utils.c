@@ -1179,7 +1179,7 @@ char *findUnitFile(const char *unit_name) {
     // box for developers running from the source tree.
     const char *base_path = getenv("PSCAL_LIB_DIR");
     if (base_path == NULL || *base_path == '\0') {
-        base_path = "lib";   // Default relative library path
+        base_path = "/usr/local/pscal/lib";   // Default relative library path
     }
 
     // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
