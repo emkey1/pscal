@@ -38,7 +38,13 @@ end.
 
 ## Builtins
 
-Builtins are implemented in C and exposed to Pascal through a lookup table【F:src/backend_ast/builtin.c†L35-L176】. They cover:
+Builtins are implemented in C and registered with the VM at runtime. The helper
+functions `initVmBuiltinRegistry` and `registerVmBuiltin` from
+`backend_ast/builtin.h` populate a lookup table that the VM uses to dispatch
+calls. Front ends or plugins may call `registerVmBuiltin` to add new routines
+before executing bytecode.
+
+They cover:
 
 * **Math** – `abs`, `cos`, `sin`, `tan`, `exp`, `ln`, `sqrt`, `sqr`, `round`, `trunc`.
 * **Strings** – `length`, `copy`, `pos`, `chr`, `ord`, `inttostr`, `realtostr`, `upcase`.
