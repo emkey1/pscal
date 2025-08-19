@@ -1,0 +1,26 @@
+Running pscal Multi-Dimensional Array Torture Test
+
+--- Testing 2D Array (Matrix) ---
+Assigning values to matrix_a[1..3, 0..2]...
+Assignment complete.
+START: 2D Array Checksum after assignment: PASS
+Verifying individual elements...
+START: 2D Access matrix_a[1, 0]: PASS
+START: 2D Access matrix_a[1, 2] (Edge): PASS
+START: 2D Access matrix_a[2, 1]: PASS
+START: 2D Access matrix_a[3, 0] (Edge): PASS
+START: 2D Access matrix_a[3, 2] (Corner): PASS
+START: 2D Modify/Access matrix_a[2, 1]: PASS
+
+--- Testing 3D Array (Cube) ---
+Assigning values to cube_a[-1..0, 1..2, 3..4]...
+Assignment complete.
+START: 3D Array Checksum after assignment: PASS
+Verifying individual elements...
+START: 3D Access cube_a[-1, 1, 3] (Corner): PASS
+START: 3D Access cube_a[-1, 2, 4] (Edge): PASS
+START: 3D Access cube_a[0, 1, 3] (Edge): PASS
+START: 3D Access cube_a[0, 2, 4] (Corner): PASS
+START: 3D Modify/Access cube_a[0, 1, 3]: PASS
+
+Multi-Dimensional Array Torture Test Completed.
