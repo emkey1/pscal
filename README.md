@@ -83,9 +83,14 @@ build/bin/clike program.c
 
 ```
 
-Sample programs demonstrating the Tiny C subset are available in
+Sample programs demonstrating the C like fronte end are available in
 `Examples/clike`. For a step-by-step guide see
 [Docs/clike_tutorial.md](Docs/clike_tutorial.md).
+
+An interactive session is also available via `build/bin/clike-repl`, which
+reads a single line of C-like code, wraps it in `int main() { ... }`, and
+executes it immediately. For details see
+[Docs/clike_repl_tutorial.md](Docs/clike_repl_tutorial.md).
 
 ## Runtime library
 
