@@ -163,6 +163,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             node->var_type = t;
             return t;
         }
+        case TCAST_ARRAY_ACCESS: {
+            analyzeExpr(node->left, scopes);
+            for (int i = 0; i < node->child_count; ++i) {
+                analyzeExpr(node->children[i], scopes);
+            }
+            node->var_type = TYPE_UNKNOWN;
+            return TYPE_UNKNOWN;
+        }
         default:
             return TYPE_UNKNOWN;
     }

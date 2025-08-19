@@ -17,7 +17,8 @@ typedef struct {
     VarType type;
     int depth;
     int isArray;
-    int arraySize;
+    int *arrayDims;
+    int dimCount;
     VarType elemType;
 } LocalVar;
 
@@ -58,18 +59,24 @@ static void endScope(FuncContext* ctx) {
     while (ctx->localCount > ctx->paramCount &&
            ctx->locals[ctx->localCount - 1].depth >= ctx->scopeDepth) {
         free(ctx->locals[ctx->localCount - 1].name);
+        free(ctx->locals[ctx->localCount - 1].arrayDims);
         ctx->localCount--;
     }
     ctx->scopeDepth--;
 }
 
-static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArray, int arraySize, VarType elemType) {
+static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArray, int dimCount, int* arrayDims, VarType elemType) {
     ctx->locals[ctx->localCount].name = strdup(name);
     ctx->locals[ctx->localCount].index = ctx->localCount;
     ctx->locals[ctx->localCount].type = type;
     ctx->locals[ctx->localCount].depth = ctx->scopeDepth;
     ctx->locals[ctx->localCount].isArray = isArray;
-    ctx->locals[ctx->localCount].arraySize = arraySize;
+    ctx->locals[ctx->localCount].dimCount = dimCount;
+    ctx->locals[ctx->localCount].arrayDims = NULL;
+    if (isArray && dimCount > 0 && arrayDims) {
+        ctx->locals[ctx->localCount].arrayDims = (int*)malloc(sizeof(int) * dimCount);
+        memcpy(ctx->locals[ctx->localCount].arrayDims, arrayDims, sizeof(int) * dimCount);
+    }
     ctx->locals[ctx->localCount].elemType = elemType;
     ctx->localCount++;
     if (ctx->localCount > ctx->maxLocalCount) ctx->maxLocalCount = ctx->localCount;
@@ -99,23 +106,20 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
         writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
     } else if (node->type == TCAST_ARRAY_ACCESS) {
-        // Evaluate index first, then push base array
-        compileExpression(node->right, chunk, ctx);
+        for (int i = 0; i < node->child_count; ++i) {
+            compileExpression(node->children[i], chunk, ctx);
+        }
         if (node->left && node->left->type == TCAST_IDENTIFIER) {
             char* name = tokenToCString(node->left->token);
             int idx = resolveLocal(ctx, name);
             free(name);
-            if (idx >= 0 && ctx->locals[idx].type == TYPE_STRING) {
-                writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->left->token.line);
-            } else {
-                writeBytecodeChunk(chunk, OP_GET_LOCAL, node->left->token.line);
-            }
+            writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->left->token.line);
             writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
         } else {
             compileExpression(node->left, chunk, ctx);
         }
         writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
-        writeBytecodeChunk(chunk, 1, node->token.line);
+        writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
     }
 }
 
@@ -137,7 +141,7 @@ static void collectLocals(ASTNodeClike *node, FuncContext* ctx) {
         ASTNodeClike* child = node->children[i];
         if (child->type == TCAST_VAR_DECL) {
             char* name = tokenToCString(child->token);
-            addLocal(ctx, name, child->var_type, child->is_array, child->array_size, child->element_type);
+            addLocal(ctx, name, child->var_type, child->is_array, child->dim_count, child->array_dims, child->element_type);
             free(name);
         }
     }
@@ -302,18 +306,20 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             int idx = resolveLocal(ctx, name);
             free(name);
             if (node->is_array) {
-                Value lower = makeInt(0);
-                Value upper = makeInt(node->array_size - 1);
-                int lidx = addConstantToChunk(chunk, &lower);
-                int uidx = addConstantToChunk(chunk, &upper);
-                freeValue(&lower);
-                freeValue(&upper);
                 int elemNameIdx = addStringConstant(chunk, "");
                 writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
-                writeBytecodeChunk(chunk, 1, node->token.line); // dimension count
-                emitShort(chunk, (uint16_t)lidx, node->token.line);
-                emitShort(chunk, (uint16_t)uidx, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->dim_count, node->token.line);
+                for (int d = 0; d < node->dim_count; ++d) {
+                    Value lower = makeInt(0);
+                    Value upper = makeInt(node->array_dims[d] - 1);
+                    int lidx = addConstantToChunk(chunk, &lower);
+                    int uidx = addConstantToChunk(chunk, &upper);
+                    freeValue(&lower);
+                    freeValue(&upper);
+                    emitShort(chunk, (uint16_t)lidx, node->token.line);
+                    emitShort(chunk, (uint16_t)uidx, node->token.line);
+                }
                 writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
             } else {
@@ -563,7 +569,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
         for (int i = 0; i < func->left->child_count; i++) {
             ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            addLocal(&ctx, name, p->var_type, 0, 0, TYPE_UNKNOWN);
+            addLocal(&ctx, name, p->var_type, 0, 0, NULL, TYPE_UNKNOWN);
             free(name);
             ctx.paramCount++;
         }

@@ -11,6 +11,8 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     node->var_type = TYPE_UNKNOWN;
     node->is_array = 0;
     node->array_size = 0;
+    node->array_dims = NULL;
+    node->dim_count = 0;
     node->element_type = TYPE_UNKNOWN;
     node->left = node->right = node->third = NULL;
     node->children = NULL;
@@ -31,6 +33,7 @@ void freeASTClike(ASTNodeClike *node) {
     if (node->right) freeASTClike(node->right);
     if (node->third) freeASTClike(node->third);
     free(node->children);
+    free(node->array_dims);
     free(node);
 }
 
