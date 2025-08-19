@@ -68,6 +68,8 @@ static const char* nodeTypeToString(ASTNodeTypeClike type) {
         case TCAST_WHILE: return "WHILE";
         case TCAST_FOR: return "FOR";
         case TCAST_DO_WHILE: return "DO_WHILE";
+        case TCAST_SWITCH: return "SWITCH";
+        case TCAST_CASE: return "CASE";
         case TCAST_BREAK: return "BREAK";
         case TCAST_CONTINUE: return "CONTINUE";
         case TCAST_RETURN: return "RETURN";
