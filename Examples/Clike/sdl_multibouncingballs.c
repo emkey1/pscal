@@ -12,16 +12,21 @@ int main() {
     float MaxInitialSpeed;
     float MinInitialSpeed;
     float Pi;
-    float x[90];
-    float y[90];
-    float dx[90];
-    float dy[90];
-    int radius[90];
-    int r[90];
-    int g[90];
-    int b[90];
-    float mass[90];
-    int active[90];
+    /*
+     * The Pscal VM uses Pascal-style 1-based array indexing.  To mirror the
+     * Pascal version of this demo we allocate one extra element for each
+     * array and ignore index 0.  All loops therefore run from 1..NumBalls.
+     */
+    float x[91];
+    float y[91];
+    float dx[91];
+    float dy[91];
+    int radius[91];
+    int r[91];
+    int g[91];
+    int b[91];
+    float mass[91];
+    int active[91];
     int i;
     int j;
     int quit;
@@ -45,8 +50,8 @@ int main() {
     MaxX = getmaxx();
     MaxY = getmaxy();
 
-    i = 0;
-    while (i < NumBalls) {
+    i = 1;
+    while (i <= NumBalls) {
         radius[i] = 8 + random(13);
         x[i] = radius[i] + random(WindowWidth - 2 * radius[i]);
         y[i] = radius[i] + random(WindowHeight - 2 * radius[i]);
@@ -78,8 +83,8 @@ int main() {
             }
         }
 
-        i = 0;
-        while (i < NumBalls) {
+        i = 1;
+        while (i <= NumBalls) {
             if (active[i]) {
                 x[i] = x[i] + dx[i];
                 y[i] = y[i] + dy[i];
@@ -98,7 +103,7 @@ int main() {
                     dy[i] = -dy[i];
                 }
                 j = i + 1;
-                while (j < NumBalls) {
+                while (j <= NumBalls) {
                     if (active[j]) {
                         float distSq;
                         float sumRadiiSq;
@@ -172,8 +177,8 @@ int main() {
             i = i + 1;
         }
         cleardevice();
-        i = 0;
-        while (i < NumBalls) {
+        i = 1;
+        while (i <= NumBalls) {
             if (active[i]) {
                 setrgbcolor(r[i], g[i], b[i]);
                 fillcircle(trunc(x[i]), trunc(y[i]), radius[i]);
