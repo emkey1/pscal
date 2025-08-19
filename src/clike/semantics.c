@@ -183,6 +183,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             char *name = tokenToCString(node->token);
             ss_add(scopes, name, node->var_type);
             free(name);
+            if (node->left) analyzeExpr(node->left, scopes);
             break;
         }
         case TCAST_COMPOUND:
@@ -216,7 +217,9 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             for (int i = 0; i < node->child_count; ++i) {
                 ASTNodeClike *c = node->children[i];
                 analyzeExpr(c->left, scopes);
-                if (c->child_count > 0) analyzeStmt(c->children[0], scopes, retType);
+                for (int j = 0; j < c->child_count; ++j) {
+                    analyzeStmt(c->children[j], scopes, retType);
+                }
             }
             if (node->right) analyzeStmt(node->right, scopes, retType);
             break;

@@ -54,6 +54,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 5 && strncmp(start, "float", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_FLOAT, start, length, column);
     if (length == 3 && strncmp(start, "str", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_STR, start, length, column);
     if (length == 4 && strncmp(start, "text", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_TEXT, start, length, column);
+    if (length == 4 && strncmp(start, "char", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_CHAR, start, length, column);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length, column);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length, column);
     if (length == 5 && strncmp(start, "while", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_WHILE, start, length, column);
@@ -120,7 +121,7 @@ static ClikeToken charToken(ClikeLexer *lexer, const char *start, int column) {
         }
     }
     if (peek(lexer) == '\'') advance(lexer); // consume closing quote
-    ClikeToken t = makeToken(lexer, CLIKE_TOKEN_CHAR, start + 1, 1, column);
+    ClikeToken t = makeToken(lexer, CLIKE_TOKEN_CHAR_LITERAL, start + 1, 1, column);
     t.int_val = (unsigned char)c;
     return t;
 }
@@ -130,6 +131,10 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
         char c = peek(lexer);
         if (c == '\0') return makeToken(lexer, CLIKE_TOKEN_EOF, "", 0, lexer->column);
         if (isspace(c)) { advance(lexer); continue; }
+        if (c == '#') {
+            while (peek(lexer) != '\n' && peek(lexer) != '\0') advance(lexer);
+            continue;
+        }
         if (c == '/' && lexer->src[lexer->pos + 1] == '/') {
             while (peek(lexer) != '\n' && peek(lexer) != '\0') advance(lexer);
             continue;
@@ -226,7 +231,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
         case CLIKE_TOKEN_FLOAT_LITERAL: return "TOKEN_FLOAT_LITERAL";
-        case CLIKE_TOKEN_CHAR: return "TOKEN_CHAR";
+        case CLIKE_TOKEN_CHAR_LITERAL: return "TOKEN_CHAR";
         case CLIKE_TOKEN_STRING: return "TOKEN_STRING";
         case CLIKE_TOKEN_PLUS: return "+";
         case CLIKE_TOKEN_MINUS: return "-";
