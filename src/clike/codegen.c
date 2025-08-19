@@ -294,12 +294,13 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
                 int skip = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 writeBytecodeChunk(chunk, OP_POP, node->token.line);
-                if (br->child_count > 0) compileStatement(br->children[0], chunk, ctx);
+                for (int j = 0; j < br->child_count; ++j) {
+                    compileStatement(br->children[j], chunk, ctx);
+                }
                 writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
                 int endJump = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 endJumps = realloc(endJumps, sizeof(int)*(endCount+1)); endJumps[endCount++] = endJump;
                 patchShort(chunk, skip, (uint16_t)(chunk->count - (skip + 2)));
-                writeBytecodeChunk(chunk, OP_POP, node->token.line);
             }
             if (node->right) {
                 writeBytecodeChunk(chunk, OP_POP, node->token.line);
@@ -360,25 +361,29 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
             } else {
-                Value init;
-                switch (node->var_type) {
-                    case TYPE_REAL:
-                        init = makeReal(0.0);
-                        break;
-                    case TYPE_STRING:
-                        init = makeNil();
-                        break;
-                    case TYPE_FILE:
-                        init = makeValueForType(TYPE_FILE, NULL, NULL);
-                        break;
-                    default:
-                        init = makeInt(0);
-                        break;
+                if (node->left) {
+                    compileExpression(node->left, chunk, ctx);
+                } else {
+                    Value init;
+                    switch (node->var_type) {
+                        case TYPE_REAL:
+                            init = makeReal(0.0);
+                            break;
+                        case TYPE_STRING:
+                            init = makeNil();
+                            break;
+                        case TYPE_FILE:
+                            init = makeValueForType(TYPE_FILE, NULL, NULL);
+                            break;
+                        default:
+                            init = makeInt(0);
+                            break;
+                    }
+                    int cidx = addConstantToChunk(chunk, &init);
+                    freeValue(&init);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
                 }
-                int cidx = addConstantToChunk(chunk, &init);
-                freeValue(&init);
-                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
                 writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             }
