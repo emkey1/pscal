@@ -1213,6 +1213,19 @@ char *findUnitFile(const char *unit_name) {
         *slash = '\0';
     }
 
+    const char *default_path = "/usr/local/pscal/lib";
+    size_t max_len = strlen(default_path) + 1 + strlen(unit_name) + 3 + 1;
+    char *file_name = malloc(max_len);
+    if (!file_name) {
+        fprintf(stderr, "Memory allocation error in findUnitFile\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    snprintf(file_name, max_len, "%s/%s.pl", default_path, unit_name);
+    if (access(file_name, F_OK) == 0) {
+        return file_name;
+    }
+    free(file_name);
+
     return NULL;
 }
 
