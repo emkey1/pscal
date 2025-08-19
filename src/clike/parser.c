@@ -154,14 +154,25 @@ static ASTNodeClike* varDeclaration(ParserClike *p, ClikeToken type_token, Clike
     node->right = newASTNodeClike(TCAST_IDENTIFIER, type_token);
     node->right->var_type = node->var_type;
     if (matchToken(p, CLIKE_TOKEN_LBRACKET)) {
-        ClikeToken num = p->current; expectToken(p, CLIKE_TOKEN_NUMBER, "array size");
-        node->left = newASTNodeClike(TCAST_NUMBER, num);
-        node->left->var_type = TYPE_INTEGER;
+        int capacity = 4;
+        int count = 0;
+        int *dims = (int*)malloc(sizeof(int) * capacity);
+        do {
+            ClikeToken num = p->current; expectToken(p, CLIKE_TOKEN_NUMBER, "array size");
+            if (count >= capacity) {
+                capacity *= 2;
+                dims = (int*)realloc(dims, sizeof(int) * capacity);
+            }
+            dims[count++] = (int)num.int_val;
+            expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
+        } while (matchToken(p, CLIKE_TOKEN_LBRACKET));
+
         node->is_array = 1;
-        node->array_size = (int)num.int_val;
+        node->array_size = count > 0 ? dims[0] : 0;
+        node->array_dims = dims;
+        node->dim_count = count;
         node->element_type = node->var_type;
         node->var_type = TYPE_ARRAY;
-        expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
     }
     expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
     return node;
@@ -452,17 +463,19 @@ static ASTNodeClike* factor(ParserClike *p) {
         if (p->current.type == CLIKE_TOKEN_LPAREN) {
             return call(p, ident);
         }
+        ASTNodeClike *idNode = newASTNodeClike(TCAST_IDENTIFIER, ident);
         if (p->current.type == CLIKE_TOKEN_LBRACKET) {
-            advanceParser(p);
-            ASTNodeClike *index = expression(p);
-            expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
-            ASTNodeClike *idNode = newASTNodeClike(TCAST_IDENTIFIER, ident);
             ASTNodeClike *access = newASTNodeClike(TCAST_ARRAY_ACCESS, ident);
             access->left = idNode;
-            access->right = index;
+            do {
+                advanceParser(p);
+                ASTNodeClike *index = expression(p);
+                expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
+                addChildClike(access, index);
+            } while (p->current.type == CLIKE_TOKEN_LBRACKET);
             return access;
         }
-        return newASTNodeClike(TCAST_IDENTIFIER, ident);
+        return idNode;
     }
     fprintf(stderr, "Unexpected token %s at line %d\n", clikeTokenTypeToString(p->current.type), p->current.line);
     advanceParser(p);

@@ -35,6 +35,8 @@ typedef struct ASTNodeClike {
     VarType var_type; // Inferred or declared type
     int is_array;           // Non-zero if this declaration is an array
     int array_size;         // Size of array for single-dimensional arrays
+    int *array_dims;        // Sizes for each dimension in multi-dimensional arrays
+    int dim_count;          // Number of dimensions if this node represents an array
     VarType element_type;   // Element type if this node represents an array
     struct ASTNodeClike *left;
     struct ASTNodeClike *right;
