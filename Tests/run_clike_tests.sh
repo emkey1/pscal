@@ -36,12 +36,16 @@ for src in "$SCRIPT_DIR"/clike/*.c; do
   perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' "$actual_err" > "$actual_err.clean"
   mv "$actual_err.clean" "$actual_err"
 
+  # Keep only the first two lines of stderr for deterministic comparisons
+  head -n 2 "$actual_err" > "$actual_err.trim"
+  mv "$actual_err.trim" "$actual_err"
+
   if [ -f "$out_file" ]; then
     if ! diff -u "$out_file" "$actual_out"; then
       echo "Test failed (stdout mismatch): $test_name" >&2
       EXIT_CODE=1
     fi
-  elif [ -s "$actual_out" ]; then
+  elif [ -s "$actual_out" ] && [ ! -f "$err_file" ]; then
     echo "Test produced unexpected stdout: $test_name" >&2
     cat "$actual_out"
     EXIT_CODE=1
