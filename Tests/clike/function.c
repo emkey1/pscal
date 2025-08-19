@@ -9,6 +9,7 @@ int main() {
     int res;
     res = fact(5);
     printf(res);
+    printf("\n");
     return 0;
 }
 

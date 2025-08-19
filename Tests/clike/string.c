@@ -2,6 +2,7 @@ int main() {
     str s;
     s = "foo";
     printf(s);
-    printf("bar");
+    printf("\n");
+    printf("bar\n");
     return 0;
 }

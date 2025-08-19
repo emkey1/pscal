@@ -6,5 +6,6 @@ int main() {
     float f;
     f = add(1.5, 2.5);
     printf(f);
+    printf("\n");
     return 0;
 }
