@@ -74,13 +74,16 @@ static ASTNodeClike* foldUnary(ASTNodeClike* node) {
 
 static ASTNodeClike* optimizeNode(ASTNodeClike* node) {
     if (!node) return NULL;
-    node->left = optimizeNode(node->left);
-    node->right = optimizeNode(node->right);
-    node->third = optimizeNode(node->third);
+    setLeftClike(node, optimizeNode(node->left));
+    setRightClike(node, optimizeNode(node->right));
+    setThirdClike(node, optimizeNode(node->third));
     int j = 0;
     for (int i = 0; i < node->child_count; ++i) {
-        node->children[i] = optimizeNode(node->children[i]);
-        if (node->children[i]) node->children[j++] = node->children[i];
+        ASTNodeClike *child = optimizeNode(node->children[i]);
+        if (child) {
+            child->parent = node;
+            node->children[j++] = child;
+        }
     }
     node->child_count = j;
 

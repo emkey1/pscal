@@ -728,7 +728,22 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
         ParserClike p; initParserClike(&p, src);
         ASTNodeClike *modProg = parseProgramClike(&p);
+
+        if (!verifyASTClikeLinks(modProg, NULL)) {
+            fprintf(stderr, "AST verification failed for module '%s' after parsing.\n", path);
+            freeASTClike(modProg);
+            free(src);
+            exit(1);
+        }
+
         analyzeSemanticsClike(modProg);
+
+        if (!verifyASTClikeLinks(modProg, NULL)) {
+            fprintf(stderr, "AST verification failed for module '%s' after semantic analysis.\n", path);
+            freeASTClike(modProg);
+            free(src);
+            exit(1);
+        }
         for (int j = 0; j < modProg->child_count; ++j) {
             ASTNodeClike *decl = modProg->children[j];
             if (decl->type == TCAST_FUN_DECL) {

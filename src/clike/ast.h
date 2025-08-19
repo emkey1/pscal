@@ -4,6 +4,7 @@
 #include "clike/lexer.h"
 #include "core/types.h"
 #include <stdio.h>
+#include <stdbool.h>
 
 typedef enum {
     TCAST_PROGRAM,
@@ -45,10 +46,15 @@ typedef struct ASTNodeClike {
     struct ASTNodeClike *third; // else branch or additional pointer
     struct ASTNodeClike **children;
     int child_count;
+    struct ASTNodeClike *parent;
 } ASTNodeClike;
 
 ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token);
 void addChildClike(ASTNodeClike *parent, ASTNodeClike *child);
+void setLeftClike(ASTNodeClike *parent, ASTNodeClike *child);
+void setRightClike(ASTNodeClike *parent, ASTNodeClike *child);
+void setThirdClike(ASTNodeClike *parent, ASTNodeClike *child);
+bool verifyASTClikeLinks(ASTNodeClike *node, ASTNodeClike *expectedParent);
 void freeASTClike(ASTNodeClike *node);
 void dumpASTClikeJSON(ASTNodeClike *node, FILE *out);
 

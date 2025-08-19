@@ -70,6 +70,13 @@ int main(int argc, char **argv) {
     ParserClike parser; initParserClike(&parser, src);
     ASTNodeClike *prog = parseProgramClike(&parser);
 
+    if (!verifyASTClikeLinks(prog, NULL)) {
+        fprintf(stderr, "AST verification failed after parsing.\n");
+        freeASTClike(prog);
+        free(src);
+        return 1;
+    }
+
     if (dump_ast_json_flag) {
         fprintf(stderr, "--- Dumping AST to JSON (stdout) ---\n");
         dumpASTClikeJSON(prog, stdout);
@@ -88,6 +95,15 @@ int main(int argc, char **argv) {
     clike_register_builtins();
     analyzeSemanticsClike(prog);
 
+    if (!verifyASTClikeLinks(prog, NULL)) {
+        fprintf(stderr, "AST verification failed after semantic analysis.\n");
+        freeASTClike(prog);
+        free(src);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return 1;
+    }
+
     if (clike_warning_count > 0) {
         fprintf(stderr, "Compilation finished with %d warning(s).\n", clike_warning_count);
     }
@@ -100,6 +116,15 @@ int main(int argc, char **argv) {
         return clike_error_count > 255 ? 255 : clike_error_count;
     }
     prog = optimizeClikeAST(prog);
+
+    if (!verifyASTClikeLinks(prog, NULL)) {
+        fprintf(stderr, "AST verification failed after optimization.\n");
+        freeASTClike(prog);
+        free(src);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return 1;
+    }
 
     BytecodeChunk chunk; clike_compile(prog, &chunk);
     if (dump_bytecode_flag) {
