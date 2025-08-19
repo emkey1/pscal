@@ -71,7 +71,7 @@ language can be found in `Examples/Clike`.
 
 ## CLike front end
 
-`build/bin/clike/clike` implements a compact C-like compiler that integrates 
+`build/bin/clike` implements a compact C-like compiler that integrates
 with the pscal vm.  The grammar covers variable and function declarations,
 conditionals, loops and expressions. VM builtins can be invoked simply by
 calling a function name that lacks a user definition.
@@ -84,7 +84,13 @@ build/bin/clike program.c
 ```
 
 Sample programs demonstrating the Tiny C subset are available in
-`Examples/clike`.
+`Examples/clike`. For a step-by-step guide see
+[Docs/clike_tutorial.md](Docs/clike_tutorial.md).
+
+An interactive session is also available via `build/bin/clike-repl`, which
+reads a single line of C-like code, wraps it in `int main() { ... }`, and
+executes it immediately. For details see
+[Docs/clike_repl_tutorial.md](Docs/clike_repl_tutorial.md).
 
 ## Runtime library
 
