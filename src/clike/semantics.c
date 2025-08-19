@@ -211,6 +211,15 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             analyzeStmt(node->right, scopes, retType);
             analyzeExpr(node->left, scopes);
             break;
+        case TCAST_SWITCH:
+            analyzeExpr(node->left, scopes);
+            for (int i = 0; i < node->child_count; ++i) {
+                ASTNodeClike *c = node->children[i];
+                analyzeExpr(c->left, scopes);
+                if (c->child_count > 0) analyzeStmt(c->children[0], scopes, retType);
+            }
+            if (node->right) analyzeStmt(node->right, scopes, retType);
+            break;
         case TCAST_BREAK:
         case TCAST_CONTINUE:
             break;

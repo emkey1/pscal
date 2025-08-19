@@ -281,6 +281,43 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             ctx->loopDepth--;
             break;
         }
+        case TCAST_SWITCH: {
+            LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
+            loop->breakCount = loop->continueCount = 0;
+            compileExpression(node->left, chunk, ctx);
+            int *endJumps = NULL; int endCount = 0;
+            for (int i = 0; i < node->child_count; ++i) {
+                ASTNodeClike *br = node->children[i];
+                writeBytecodeChunk(chunk, OP_DUP, node->token.line);
+                compileExpression(br->left, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_EQUAL, node->token.line);
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+                int skip = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                if (br->child_count > 0) compileStatement(br->children[0], chunk, ctx);
+                writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+                int endJump = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
+                endJumps = realloc(endJumps, sizeof(int)*(endCount+1)); endJumps[endCount++] = endJump;
+                patchShort(chunk, skip, (uint16_t)(chunk->count - (skip + 2)));
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+            }
+            if (node->right) {
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                compileStatement(node->right, chunk, ctx);
+            } else {
+                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+            }
+            int end = chunk->count;
+            for (int i = 0; i < endCount; ++i) {
+                patchShort(chunk, endJumps[i], (uint16_t)(end - (endJumps[i] + 2)));
+            }
+            free(endJumps);
+            for (int i = 0; i < loop->breakCount; i++) {
+                patchShort(chunk, loop->breakAddrs[i], (uint16_t)(end - (loop->breakAddrs[i] + 2)));
+            }
+            ctx->loopDepth--;
+            break;
+        }
         case TCAST_BREAK: {
             writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
             int patch = chunk->count;
@@ -401,6 +438,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_BANG_EQUAL: writeBytecodeChunk(chunk, OP_NOT_EQUAL, node->token.line); break;
                 case CLIKE_TOKEN_AND_AND: writeBytecodeChunk(chunk, OP_AND, node->token.line); break;
                 case CLIKE_TOKEN_OR_OR: writeBytecodeChunk(chunk, OP_OR, node->token.line); break;
+                case CLIKE_TOKEN_BIT_AND: writeBytecodeChunk(chunk, OP_AND, node->token.line); break;
+                case CLIKE_TOKEN_BIT_OR: writeBytecodeChunk(chunk, OP_OR, node->token.line); break;
+                case CLIKE_TOKEN_SHL: writeBytecodeChunk(chunk, OP_SHL, node->token.line); break;
+                case CLIKE_TOKEN_SHR: writeBytecodeChunk(chunk, OP_SHR, node->token.line); break;
                 default: break;
             }
             break;
@@ -409,6 +450,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             switch (node->token.type) {
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, node->token.line); break;
                 case CLIKE_TOKEN_BANG: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
+                case CLIKE_TOKEN_TILDE: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
                 default: break;
             }
             break;

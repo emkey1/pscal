@@ -15,6 +15,8 @@ typedef enum {
     TCAST_WHILE,
     TCAST_FOR,
     TCAST_DO_WHILE,
+    TCAST_SWITCH,
+    TCAST_CASE,
     TCAST_BREAK,
     TCAST_CONTINUE,
     TCAST_RETURN,
