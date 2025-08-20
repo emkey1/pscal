@@ -21,10 +21,10 @@ if [ -f "$CRT_UNIT" ]; then
 fi
 
 NEGATIVE_TESTS=(
-  "ArgumentOrderMismatch.p"
-  "ArrayArgumentMismatch.p"
-  "OpenArrayBaseTypeMismatch.p"
-  "ArgumentTypeMismatch.p"
+  "Pascal/ArgumentOrderMismatch.p"
+  "Pascal/ArrayArgumentMismatch.p"
+  "Pascal/OpenArrayBaseTypeMismatch.p"
+  "Pascal/ArgumentTypeMismatch.p"
 )
 
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
@@ -41,7 +41,7 @@ done < <(find "$SCRIPT_DIR" -name '*.p' -not -path "$SCRIPT_DIR/Archived/*" -pri
 
 
 if [ "$SDL_ENABLED" -eq 0 ]; then
-  ALL_TESTS=($(printf "%s\n" "${ALL_TESTS[@]}" | grep -v '^SDLFeaturesTest' | grep -v 'SDLRenderCopyTest.p'))
+  ALL_TESTS=($(printf "%s\n" "${ALL_TESTS[@]}" | grep -v '^Pascal/SDLFeaturesTest' | grep -v 'Pascal/SDLRenderCopyTest.p'))
 fi
 
 POSITIVE_TESTS=()
