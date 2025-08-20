@@ -1,0 +1,8 @@
+{ compute factorial of input n }
+read n;
+fact := 1;
+repeat
+  fact := fact * n;
+  n := n - 1
+until n < 2;
+write fact
