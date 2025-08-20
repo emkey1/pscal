@@ -168,6 +168,8 @@ end;
 
 procedure DisplayScorecard;
 // Uses global k, scoreStr
+var
+  labelStr: string[2];
 begin
   TextColor(Yellow); HighVideo;
   GotoXY(40, 2); Write('Upper Section');
@@ -176,7 +178,9 @@ begin
   begin
     if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
     GotoXY(40, 2 + k);
-    Write(k:2, '. ', scorecard[k].name:12);
+    labelStr := IntToStr(k);
+    if Length(labelStr) < 2 then labelStr := ' ' + labelStr;
+    Write(labelStr, '. ', scorecard[k].name:12);
     if scorecard[k].used then
     begin
        scoreStr := IntToStr(scorecard[k].score);
@@ -210,7 +214,12 @@ begin
   begin
     if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
     GotoXY(40, 13 + (k-6));
-    Write(k:2, '. ', scorecard[k].name:12);
+    if k <= 9 then
+      labelStr := IntToStr(k)
+    else
+      labelStr := Chr(Ord('A') + (k - 10));
+    if Length(labelStr) < 2 then labelStr := ' ' + labelStr;
+    Write(labelStr, '. ', scorecard[k].name:12);
     if scorecard[k].used then
     begin
        scoreStr := IntToStr(scorecard[k].score);
@@ -387,7 +396,7 @@ begin
   ScoreChance := score;
 end;
 
-// Modified to use ReadKey for simplified input (1-9)
+// Modified to use ReadKey for simplified input (1-9, A-D)
 procedure ChooseCategory;
 var
   validChoice: boolean;
@@ -395,7 +404,7 @@ var
   tempChoice: integer;
 begin
   TextColor(Yellow); HighVideo;
-  Print(5, 10, 'Choose category number (1-9): '); ClrEol; // Simplified prompt for now
+  Print(5, 10, 'Choose category (1-9, A-D): '); ClrEol;
   NormVideo; TextColor(White);
   repeat
     validChoice := false;
@@ -404,42 +413,37 @@ begin
 
     choiceChar := ReadKey; // Read a single character
 
-    // Check if it's a digit '1' through '9'
+    // Check if it's a digit '1' through '9' or letter 'A'..'D'
     if (choiceChar >= '1') and (choiceChar <= '9') then
-    begin
-       tempChoice := Ord(choiceChar) - Ord('0'); // Convert char '1'..'9' to integer 1..9
+       tempChoice := Ord(choiceChar) - Ord('0')
+    else if (UpCase(choiceChar) >= 'A') and (UpCase(choiceChar) <= 'D') then
+       tempChoice := 10 + (Ord(UpCase(choiceChar)) - Ord('A'))
+    else
+       tempChoice := -1; // Invalid
 
-       // Check if the category is valid and not used
-       if (tempChoice >= 1) and (tempChoice <= NUM_CATEGORIES) then // Still check range 1..13
-       begin
-          if scorecard[tempChoice].used then
-          begin
-             TextColor(LightRed);
-             Print(5, 11, 'Category already used. Choose another.'); ClrEol; Beep;
-             TextColor(White);
-             GotoXY(35, 10); // Position for next ReadKey attempt
-          end
-          else
-          begin
-             categoryChoice := tempChoice; // Store the valid choice
-             validChoice := true;
-             ClearLine(11); // Clear error message line
-             Write(choiceChar); // Echo the chosen digit
-          end;
-       end
-       else
-       begin
-         // Should not happen if input is '1'-'9'
-         Print(5, 11, 'Invalid range (Internal Error). Enter 1-9.'); ClrEol; Beep;
-         GotoXY(35, 10);
-       end;
-    end
-    else // Not a digit '1'-'9'
+    if (tempChoice >= 1) and (tempChoice <= NUM_CATEGORIES) then
     begin
+      if scorecard[tempChoice].used then
+      begin
         TextColor(LightRed);
-        Print(5, 11, 'Invalid choice. Enter 1-9.'); ClrEol; Beep;
+        Print(5, 11, 'Category already used. Choose another.'); ClrEol; Beep;
         TextColor(White);
         GotoXY(35, 10); // Position for next ReadKey attempt
+      end
+      else
+      begin
+        categoryChoice := tempChoice; // Store the valid choice
+        validChoice := true;
+        ClearLine(11); // Clear error message line
+        Write(UpCase(choiceChar)); // Echo the chosen character
+      end;
+    end
+    else
+    begin
+      TextColor(LightRed);
+      Print(5, 11, 'Invalid choice. Enter 1-9 or A-D.'); ClrEol; Beep;
+      TextColor(White);
+      GotoXY(35, 10); // Position for next ReadKey attempt
     end;
 
   until validChoice;
@@ -517,13 +521,6 @@ begin // Main program execution start
     // Display Scorecard
     DisplayScorecard;
 
-    // Add extra clearing just in case ClrScr wasn't fully effective
-    ClearLine(5);
-    ClearLine(6);
-    ClearLine(8);
-    ClearLine(10);
-    ClearLine(11);
-
     // Reset keep array for the new turn
     for i := 1 to NUM_DICE do keep[i] := false;
     rollsLeft := MAX_ROLLS;
@@ -549,7 +546,7 @@ begin // Main program execution start
     // --- Scoring Phase ---
     ClearLine(8); // Clear toggle prompt line just in case
     DisplayDice; // Show final dice state
-    ChooseCategory; // Gets input 1-9, prompts on line 10, errors on 11
+    ChooseCategory; // Gets input 1-9 or A-D, prompts on line 10, errors on 11
     ScoreTurn;      // Scores the turn using categoryChoice, updates display
 
     // Check for game end
@@ -558,7 +555,7 @@ begin // Main program execution start
     // --- Wait for user before next turn ---
     if not gameOver then
     begin
-      Print(5, 11, 'Press any key for next turn...'); ClrEol;
+      Print(5, 24, 'Press any key for next turn...'); ClrEol;
       inputChar := ReadKey; // Read the key press to continue
 
       // Clear Input Buffer
@@ -567,11 +564,8 @@ begin // Main program execution start
         inputChar := ReadKey; // ...read and discard them
       end;
 
-      // Clear relevant lines before next turn's ClrScr (optional redundancy)
-      ClearLine(11);
-      ClearLine(5);
-      ClearLine(6);
-      ClearLine(10); // Also clear category prompt line space
+      // Clear message line before next turn
+      ClearLine(24);
     end;
 
   until gameOver;
