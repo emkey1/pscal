@@ -2017,8 +2017,27 @@ Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "Length requires 1 string argument."); return makeInt(0); }
-    return makeInt(args[0].s_val ? strlen(args[0].s_val) : 0);
+    if (arg_count != 1) {
+        runtimeError(vm, "Length expects 1 argument.");
+        return makeInt(0);
+    }
+
+    if (args[0].type == TYPE_STRING) {
+        return makeInt(args[0].s_val ? (long long)strlen(args[0].s_val) : 0);
+    }
+
+    if (args[0].type == TYPE_ARRAY) {
+        long long len = 0;
+        if (args[0].dimensions > 0 && args[0].upper_bounds && args[0].lower_bounds) {
+            len = args[0].upper_bounds[0] - args[0].lower_bounds[0] + 1;
+        } else {
+            len = args[0].upper_bound - args[0].lower_bound + 1;
+        }
+        return makeInt(len);
+    }
+
+    runtimeError(vm, "Length expects a string or array argument.");
+    return makeInt(0);
 }
 
 
