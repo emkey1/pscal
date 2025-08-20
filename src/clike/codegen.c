@@ -420,6 +420,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                         if (node->right->token.type == CLIKE_TOKEN_IDENTIFIER) {
                             char *tname = tokenToCString(node->right->token);
                             base = clike_lookup_struct(tname);
+                            if (!base) base = lookupType(tname);
                             free(tname);
                         } else {
                             base = makeBuiltinTypeASTFromToken(node->right->token);

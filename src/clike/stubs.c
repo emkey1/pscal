@@ -2,10 +2,34 @@
 #include "symbol/symbol.h"
 #include "core/types.h"
 #include "core/utils.h"
+#include "clike/parser.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
-AST* lookupType(const char* name) { (void)name; return NULL; }
+AST* lookupType(const char* name) {
+    AST* base = clike_lookup_struct(name);
+    if (!base) {
+        base = newASTNode(AST_VARIABLE, NULL);
+        if (!base) return NULL;
+
+        if      (strcasecmp(name, "integer") == 0) setTypeAST(base, TYPE_INTEGER);
+        else if (strcasecmp(name, "real")    == 0) setTypeAST(base, TYPE_REAL);
+        else if (strcasecmp(name, "char")    == 0) setTypeAST(base, TYPE_CHAR);
+        else if (strcasecmp(name, "string")  == 0) setTypeAST(base, TYPE_STRING);
+        else if (strcasecmp(name, "boolean") == 0) setTypeAST(base, TYPE_BOOLEAN);
+        else if (strcasecmp(name, "byte")    == 0) setTypeAST(base, TYPE_BYTE);
+        else if (strcasecmp(name, "word")    == 0) setTypeAST(base, TYPE_WORD);
+        else { freeAST(base); return NULL; }
+    }
+
+    AST* ptr = newASTNode(AST_POINTER_TYPE, NULL);
+    if (!ptr) { freeAST(base); return NULL; }
+    setRight(ptr, base);
+    setTypeAST(ptr, TYPE_POINTER);
+    return ptr;
+}
+
 Value evaluateCompileTimeValue(AST* node) { (void)node; return makeNil(); }
 void insertType(const char* name, AST* typeDef) { (void)name; (void)typeDef; }
 
