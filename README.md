@@ -105,6 +105,14 @@ sudo ln -s "${REPO_DIR}/lib" /usr/local/Pscal/lib
 
 Alternatively, set the `PSCAL_LIB_DIR` environment variable to point at a copy of the `lib` directory.
 
+## Extending built-ins
+
+Additional VM primitives can be linked in by dropping C source files into
+`src/ext_builtins`.  Each file should implement a `registerExtendedBuiltins`
+function that registers its routines.  See
+[Docs/extending_builtins.md](Docs/extending_builtins.md) for details and an
+example that exposes the host process ID in `src/ext_builtins/getpid.c`.
+
 ## License
 
 Pscal is released into the public domain under [The Unlicense](LICENSE).
