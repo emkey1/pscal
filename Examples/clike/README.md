@@ -22,3 +22,4 @@ build/bin/clike Examples/Clike/<program>.c
 - `sum.tiny` – compute the sum of 1..n.
 - `sdl_multibouncingballs.c` – SDL multi bouncing balls demo ported from Pascal.
 - `hangman5.c` – text-based hangman game ported from Pascal.
+- `show_pid.c` – demonstrates calling an externally linked `getpid` builtin.
