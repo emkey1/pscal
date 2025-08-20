@@ -1,4 +1,4 @@
-program ComprehensiveTypeTest;
+program TypeTestSuite;
 
 //uses CRT; // For WriteLn, Write, etc.
 
