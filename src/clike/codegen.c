@@ -419,19 +419,14 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     if (node->right && node->right->type == TCAST_IDENTIFIER) {
                         if (node->right->token.type == CLIKE_TOKEN_IDENTIFIER) {
                             char *tname = tokenToCString(node->right->token);
-                            base = clike_lookup_struct(tname);
+                            Token *tok = makeIdentTokenLocal(tname);
+                            base = newASTNode(AST_VARIABLE, tok);
                             free(tname);
                         } else {
                             base = makeBuiltinTypeASTFromToken(node->right->token);
                         }
                     }
-                    AST *ptrType = NULL;
-                    if (base) {
-                        ptrType = newASTNode(AST_POINTER_TYPE, NULL);
-                        setRight(ptrType, base);
-                        setTypeAST(ptrType, TYPE_POINTER);
-                    }
-                    Value init = makeValueForType(TYPE_POINTER, ptrType, NULL);
+                    Value init = makePointer(NULL, base);
                     int cidx = addConstantToChunk(chunk, &init);
                     freeValue(&init);
                     writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
