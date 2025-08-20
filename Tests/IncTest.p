@@ -1,4 +1,4 @@
-program inc;
+program IncTest;
 
 var x: integer;
 begin

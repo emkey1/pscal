@@ -1,4 +1,4 @@
-program NestedRoutine_Suite;
+program NestedRoutineSuite;
 
 var g: integer;
 
