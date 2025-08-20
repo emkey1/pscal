@@ -1,0 +1,14 @@
+#/bin/bash
+echo "Running Pascal Tests"
+./run_tests.sh
+echo "Pascal Tests End"
+echo "====================================="
+echo
+echo "Running Clike Tests"
+./run_clike_tests.sh
+echo "Pascal Tests End"
+echo "====================================="
+echo 
+echo "Running Tiny Tests"
+./run_tiny_tests.sh
+echo "Tiny Tests End"
