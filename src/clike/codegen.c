@@ -368,7 +368,19 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             char* name = tokenToCString(node->token);
             int idx = resolveLocal(ctx, name);
             free(name);
-            if (node->is_array) {
+            if (node->var_type == TYPE_POINTER) {
+                if (node->left) {
+                    compileExpression(node->left, chunk, ctx);
+                } else {
+                    Value init; memset(&init, 0, sizeof(Value));
+                    init.type = TYPE_POINTER;
+                    int cidx = addConstantToChunk(chunk, &init);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                }
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else if (node->is_array) {
                 int elemNameIdx = addStringConstant(chunk, "");
                 writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -502,6 +514,13 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 default: break;
             }
             break;
+        case TCAST_ADDR:
+            compileLValue(node->left, chunk, ctx);
+            break;
+        case TCAST_DEREF:
+            compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
+            break;
         case TCAST_ASSIGN: {
             if (node->left) {
                 if (node->left->type == TCAST_IDENTIFIER) {
@@ -531,6 +550,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     compileExpression(node->right, chunk, ctx);      // [..., value]
                     writeBytecodeChunk(chunk, OP_DUP, node->token.line); // [..., value, value]
                     compileLValue(node->left, chunk, ctx);            // [..., value, value, ptr]
+                    writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
+                } else if (node->left->type == TCAST_DEREF) {
+                    compileExpression(node->right, chunk, ctx);      // [..., value]
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line); // [..., value, value]
+                    compileExpression(node->left->left, chunk, ctx); // [..., value, value, ptr]
                     writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
                     writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
                 }
