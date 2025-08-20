@@ -648,16 +648,30 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) {
-        runtimeError(vm, "ReadKey expects 0 arguments.");
+    if (arg_count != 0 && arg_count != 1) {
+        runtimeError(vm, "ReadKey expects 0 or 1 argument.");
         return makeChar('\0');
     }
     vmEnableRawMode();
 
     char c;
     if (read(STDIN_FILENO, &c, 1) != 1) {
-        return makeChar('\0');
+        c = '\0';
     }
+
+    if (arg_count == 1) {
+        if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
+            runtimeError(vm, "ReadKey argument must be a VAR char.");
+        } else {
+            Value* dst = (Value*)args[0].ptr_val;
+            if (dst->type == TYPE_CHAR) {
+                dst->c_val = c;
+            } else {
+                runtimeError(vm, "ReadKey argument must be of type CHAR.");
+            }
+        }
+    }
+
     return makeChar(c);
 }
 

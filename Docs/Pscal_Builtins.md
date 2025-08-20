@@ -29,7 +29,7 @@ This document lists the built-in procedures and functions provided by Pscal.
 - `wherey` – Current cursor Y position.
 - `gotoxy` – Move cursor.
 - `keypressed` – True if key waiting.
-- `readkey` – Read key.
+- `readkey` – Read key. Optionally accepts a `VAR` char to store the key pressed.
 - `textcolor` – Set text color.
 - `textbackground` – Set background color.
 - `textcolore` – Extended text color.
