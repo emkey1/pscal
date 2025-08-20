@@ -42,7 +42,7 @@ Builtins are implemented in C and exposed to Pascal through a lookup table【F:s
 
 * **Math** – `abs`, `cos`, `sin`, `tan`, `exp`, `ln`, `sqrt`, `sqr`, `round`, `trunc`.
 * **Strings** – `length`, `copy`, `pos`, `chr`, `ord`, `inttostr`, `realtostr`, `upcase`.
-* **I/O** – `readln`, `writeln`, `readkey`, `halt`, `gotoxy`, `whereX`, `textcolor`.
+* **I/O** – `readln`, `writeln`, `readkey` (optional char parameter), `halt`, `gotoxy`, `whereX`, `textcolor`.
 * **Files & streams** – `assign`, `reset`, `rewrite`, `close`, `eof`, memory stream helpers (`mstreamcreate`, `mstreamloadfromfile`, etc.).
 * **Random numbers** – `randomize`, `random`.
 * **System utilities** – `paramcount`, `paramstr`, `exit`, `ioresult`.
