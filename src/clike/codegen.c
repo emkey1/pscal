@@ -426,13 +426,12 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                             base = makeBuiltinTypeASTFromToken(node->right->token);
                         }
                     }
-                    AST *ptrType = NULL;
+                    Value init;
                     if (base) {
-                        ptrType = newASTNode(AST_POINTER_TYPE, NULL);
-                        setRight(ptrType, base);
-                        setTypeAST(ptrType, TYPE_POINTER);
+                        init = makePointer(NULL, base);
+                    } else {
+                        init = makeValueForType(TYPE_POINTER, NULL, NULL);
                     }
-                    Value init = makeValueForType(TYPE_POINTER, ptrType, NULL);
                     int cidx = addConstantToChunk(chunk, &init);
                     freeValue(&init);
                     writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);

@@ -1613,9 +1613,14 @@ comparison_error_label:
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_POINTER && (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
-                        target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
-                        if (value_to_set.type == TYPE_POINTER && value_to_set.base_type_node) {
-                            target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
+                        if (value_to_set.type == TYPE_NIL) {
+                            // Preserve base type when assigning nil
+                            target_lvalue_ptr->ptr_val = NULL;
+                        } else {
+                            target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
+                            if (value_to_set.base_type_node) {
+                                target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
+                            }
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
@@ -1955,7 +1960,11 @@ comparison_error_label:
                 Value value_from_stack = pop(vm);
 
                 // --- START CORRECTED LOGIC ---
-                if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                if (target_slot->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
+                    // Assigning nil to a pointer variable preserves its base type and type
+                    target_slot->ptr_val = NULL;
+                    // type and base_type_node remain unchanged
+                } else if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
                     // Special case: Assignment to a fixed-length string.
                     const char* source_str = "";
                     char char_buf[2] = {0};
@@ -1981,6 +1990,15 @@ comparison_error_label:
                     }
                 }
                 // --- END CORRECTED LOGIC ---
+                if (target_slot->type == TYPE_POINTER) {
+                    fprintf(stderr,
+                            "[DEBUG set_local] slot %u ptr=%p base=%p (%s) val=%p\n",
+                            (unsigned)slot,
+                            (void*)target_slot,
+                            (void*)target_slot->base_type_node,
+                            target_slot->base_type_node ? astTypeToString(target_slot->base_type_node->type) : "NULL",
+                            target_slot->ptr_val);
+                }
 
                 // Free the temporary value that was popped from the stack.
                 freeValue(&value_from_stack);
