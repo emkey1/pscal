@@ -1,37 +1,0 @@
-Script started on Wed Aug 20 14:28:15 2025
-Restored session: Tue Aug 12 08:59:22 PDT 2025
-[1m[7m%[27m[1m[0m                                                                                                                                                                                              ]7;file://MacBookPro.lan/Users/mke/Library/CloudStorage/Dropbox/PBuild/Misc[0m[27m[24m[Jmke@MacBookPro Misc % [K[?2004h../build/bin/pscal taw[?2004l
-Compilation successful. Bytecode size: 2373 bytes, Constants: 157
-[2JTest Start...
-Attempting GotoXY(10, 5) via raw ANSI: [5;10HHere
-Line Before Clear ->[K<- Line After Clear
-Normal, [31mRed?[0m, Normal Again.
-Normal BG, [44mBlue BG?[0m, Normal BG Again.
-...Test End.
-Press any key to exit.ReadKey expects 0 arguments.
-[Error Location] Offset: 2370, Line: 0
-
---- VM Crash Context ---
-Instruction Pointer (IP): 0x13400bf43
-Code Base: 0x13400b600
-Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):
-2371    | OP_POP
-
-Last Instructions Executed (leading to crash, up to 10 bytes before error point):
-2360    | OP_CONSTANT         1 'oslinux'
-2362    | Unknown opcode 154
-2363    | OP_WRITE            1 (args)
-2365    0 OP_CONSTANT       155 '128'
-2367    | OP_CALL_BUILTIN    156 'readkey' (1 args)
-
---- VM State Dump (Full Stack at Crash) ---
-Stack Size: 1, Frame Count: 1
-Stack Contents (bottom to top):
-  [ 128 ]
---------------------------
-[1m[7m%[27m[1m[0m                                                                                                                                                                                              ]7;file://MacBookPro.lan/Users/mke/Library/CloudStorage/Dropbox/PBuild/Misc[0m[27m[24m[Jmke@MacBookPro Misc % [K[?2004heexit[?2004l
-
-Saving session...completed.
-Deleting expired sessions...       1 completed.
-
-Script done on Wed Aug 20 14:28:22 2025
