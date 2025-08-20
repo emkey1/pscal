@@ -63,4 +63,5 @@ test:
 	else \
 	echo "Skipping SDL tests (SDL option is OFF)"; \
 	fi
+	@rm -f *.txt
 	

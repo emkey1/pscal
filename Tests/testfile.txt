@@ -1,3 +1,0 @@
-Test File Handling
-Line 1: Hello, world!
-Line 2: This is a test.
