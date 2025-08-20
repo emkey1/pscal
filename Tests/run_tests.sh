@@ -63,9 +63,16 @@ EXIT_CODE=0
 echo "Running positive tests..."
 for t in "${POSITIVE_TESTS[@]}"; do
   echo "---- $t ----"
-  if ! (cd "$SCRIPT_DIR" && "$PSCAL_BIN" "$t"); then
-    echo "Test failed: $t" >&2
-    EXIT_CODE=1
+  if [ "$t" = "RuntimeBuiltinRegistryTest.p" ]; then
+    if ! (cd "$SCRIPT_DIR" && PSC_TEST_DYNAMIC_BUILTIN=1 "$PSCAL_BIN" "$t"); then
+      echo "Test failed: $t" >&2
+      EXIT_CODE=1
+    fi
+  else
+    if ! (cd "$SCRIPT_DIR" && "$PSCAL_BIN" "$t"); then
+      echo "Test failed: $t" >&2
+      EXIT_CODE=1
+    fi
   fi
   echo
   echo
