@@ -160,6 +160,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 }
             }
             free(name);
+            for (int i = 0; i < node->child_count; ++i) {
+                analyzeExpr(node->children[i], scopes);
+            }
             node->var_type = t;
             return t;
         }

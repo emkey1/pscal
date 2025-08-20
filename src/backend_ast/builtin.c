@@ -32,23 +32,6 @@ static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
 
-#ifndef SDL
-// Stubbed graphics state for non-SDL builds
-static int gStubGraphWidth = 0;
-static int gStubGraphHeight = 0;
-
-// Forward declarations for stubbed graphics built-ins
-static Value vmBuiltinInitgraph(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinClosegraph(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinCleardevice(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinFillcircle(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinGetmaxx(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinGetmaxy(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinGraphloop(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinSetrgbcolor(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinUpdatescreen(struct VM_s* vm, int arg_count, Value* args);
-#endif
-
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
@@ -67,10 +50,14 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
     {"chr", vmBuiltinChr},
+#ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
+#endif
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
+#ifdef SDL
     {"closegraph", vmBuiltinClosegraph},
+#endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
 #ifdef SDL
@@ -101,25 +88,29 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"eof", vmBuiltinEof},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
-    {"fillcircle", vmBuiltinFillcircle},
 #ifdef SDL
+    {"fillcircle", vmBuiltinFillcircle},
     {"fillrect", vmBuiltinFillrect},
 #endif
     {"getenv", vmBuiltinGetenv},
+#ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
-#ifdef SDL
     {"getmousestate", vmBuiltinGetmousestate},
     {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
 #endif
+#ifdef SDL
     {"graphloop", vmBuiltinGraphloop},
+#endif
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
     {"high", vmBuiltinHigh},
     {"inc", vmBuiltinInc},
+#ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
+#endif
 #ifdef SDL
     {"initsoundsystem", vmBuiltinInitsoundsystem},
     {"inittextsystem", vmBuiltinInittextsystem},
@@ -187,7 +178,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"setcolor", vmBuiltinSetcolor}, // Moved
     {"setrendertarget", vmBuiltinSetrendertarget}, // Moved
 #endif
+#ifdef SDL
     {"setrgbcolor", vmBuiltinSetrgbcolor},
+#endif
     {"sin", vmBuiltinSin},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
@@ -200,8 +193,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"trunc", vmBuiltinTrunc},
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
+ #ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
-#ifdef SDL
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
     {"val", vmBuiltinVal},
@@ -2241,62 +2234,4 @@ void registerAllBuiltins(void) {
     registerExtendedBuiltins();
 }
 
-#ifndef SDL
-// ---------------------------------------------------------------------------
-// Stub implementations for graphics-related built-ins when SDL support is
-// not available. These provide no-op behavior so programs can still run on
-// platforms without the SDL dependency.
-
-static Value vmBuiltinInitgraph(struct VM_s* vm, int arg_count, Value* args) {
-    if (arg_count == 3 && args[0].type == TYPE_INTEGER && args[1].type == TYPE_INTEGER) {
-        gStubGraphWidth  = (int)args[0].i_val;
-        gStubGraphHeight = (int)args[1].i_val;
-    } else {
-        runtimeError(vm, "initgraph expects (Integer, Integer, String)");
-    }
-    return makeVoid();
-}
-
-static Value vmBuiltinClosegraph(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinCleardevice(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinFillcircle(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinSetrgbcolor(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinUpdatescreen(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinGraphloop(struct VM_s* vm, int arg_count, Value* args) {
-    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
-        usleep((useconds_t)args[0].i_val * 1000);
-    }
-    return makeVoid();
-}
-
-static Value vmBuiltinGetmaxx(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeInt(gStubGraphWidth > 0 ? gStubGraphWidth - 1 : 0);
-}
-
-static Value vmBuiltinGetmaxy(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeInt(gStubGraphHeight > 0 ? gStubGraphHeight - 1 : 0);
-}
-#endif
 
