@@ -1293,10 +1293,50 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         }
         case AST_CONST_DECL: {
             if (current_function_compiler == NULL && node->token) {
-                Value const_val = evaluateCompileTimeValue(node->left);
+                Value const_val = makeVoid();
+                AST* type_specifier_node = node->right;
+                AST* actual_type_def_node = type_specifier_node;
+                if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                    AST* resolved = lookupType(actual_type_def_node->token->value);
+                    if (resolved) actual_type_def_node = resolved;
+                }
+
+                if (node->var_type == TYPE_ARRAY && node->left && node->left->type == AST_ARRAY_LITERAL && actual_type_def_node) {
+                    if (actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
+                        int dimension_count = actual_type_def_node->child_count;
+                        if (dimension_count == 1) {
+                            AST* sub = actual_type_def_node->children[0];
+                            Value low_v = evaluateCompileTimeValue(sub->left);
+                            Value high_v = evaluateCompileTimeValue(sub->right);
+                            int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
+                            int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
+                            freeValue(&low_v);
+                            freeValue(&high_v);
+                            int lb[1] = { low };
+                            int ub[1] = { high };
+                            AST* elem_type_node = actual_type_def_node->right;
+                            VarType elem_type = elem_type_node->var_type;
+                            Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
+                            int total = calculateArrayTotalSize(&arr_val);
+                            for (int j = 0; j < total && j < node->left->child_count; j++) {
+                                Value ev = evaluateCompileTimeValue(node->left->children[j]);
+                                freeValue(&arr_val.array_val[j]);
+                                arr_val.array_val[j] = makeCopyOfValue(&ev);
+                                freeValue(&ev);
+                            }
+                            const_val = arr_val;
+                        } else {
+                            const_val = evaluateCompileTimeValue(node->left);
+                        }
+                    } else {
+                        const_val = evaluateCompileTimeValue(node->left);
+                    }
+                } else {
+                    const_val = evaluateCompileTimeValue(node->left);
+                }
 
                 // Insert into global symbol table so subsequent declarations can reference it.
-                insertGlobalSymbol(node->token->value, const_val.type, NULL);
+                insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
                 Symbol* sym = lookupGlobalSymbol(node->token->value);
                 if (sym && sym->value) {
                     freeValue(sym->value);
