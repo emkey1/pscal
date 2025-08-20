@@ -13,6 +13,7 @@
 #include "builtin.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
+#include <limits.h>    // For PATH_MAX
 
 
 const char *varTypeToString(VarType type) {
@@ -1185,20 +1186,18 @@ char *findUnitFile(const char *unit_name) {
     // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
     size_t max_path_len = strlen(base_path) + 1 + strlen(unit_name) + 3 + 1;
     char *file_name = malloc(max_path_len);
+
     if (!file_name) {
         fprintf(stderr, "Memory allocation error in findUnitFile\n");
         EXIT_FAILURE_HANDLER();
     }
-
-    // Format full path safely
-    snprintf(file_name, max_path_len, "%s/%s.pl", base_path, unit_name);
-
+    snprintf(file_name, max_len, "%s/%s.pl", default_path, unit_name);
     if (access(file_name, F_OK) == 0) {
-        return file_name; // Caller takes ownership
+        return file_name;
     }
-
     free(file_name);
-    return NULL; // Not found
+
+    return NULL;
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {
