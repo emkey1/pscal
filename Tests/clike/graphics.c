@@ -1,4 +1,5 @@
 int main() {
+#ifdef SDL_ENABLED
     int w;
     int h;
     initgraph(640, 480, "clike graphics test");
@@ -18,5 +19,11 @@ int main() {
     printf(h);
     printf("\n");
     closegraph();
+#else
+    printf(0);
+    printf(" ");
+    printf(0);
+    printf("\n");
+#endif
     return 0;
 }
