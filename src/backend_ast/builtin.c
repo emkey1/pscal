@@ -27,34 +27,6 @@
 #include <sys/time.h> // For gettimeofday
 #include <stdio.h>   // For printf, fprintf
 
-// Runtime builtin registry
-static VmBuiltinMapping* runtime_builtins = NULL;
-static size_t runtime_builtin_count = 0;
-static size_t runtime_builtin_capacity = 0;
-static bool runtime_builtins_initialized = false;
-
-void registerVmBuiltin(const char* name, VmBuiltinFn handler) {
-    if (!name || !handler) return;
-    if (runtime_builtin_count == runtime_builtin_capacity) {
-        size_t new_cap = runtime_builtin_capacity < 8 ? 8 : runtime_builtin_capacity * 2;
-        runtime_builtins = realloc(runtime_builtins, new_cap * sizeof(VmBuiltinMapping));
-        runtime_builtin_capacity = new_cap;
-    }
-    runtime_builtins[runtime_builtin_count].name = name;
-    runtime_builtins[runtime_builtin_count].handler = handler;
-    runtime_builtin_count++;
-}
-
-VmBuiltinFn getVmBuiltinHandler(const char *name) {
-    if (!name) return NULL;
-    for (size_t i = 0; i < runtime_builtin_count; i++) {
-        if (strcasecmp(name, runtime_builtins[i].name) == 0) {
-            return runtime_builtins[i].handler;
-        }
-    }
-    return NULL;
-}
-
 static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 
 // Terminal cursor helper
@@ -240,14 +212,17 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"wherey", vmBuiltinWherey},
 };
 
-void initVmBuiltinRegistry(void) {
-    if (runtime_builtins_initialized) return;
-    runtime_builtins_initialized = true;
-    size_t count = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
-    for (size_t i = 0; i < count; i++) {
-        registerVmBuiltin(vmBuiltinDispatchTable[i].name,
-                          vmBuiltinDispatchTable[i].handler);
+static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
+
+// This function now comes AFTER the table and comparison function it uses.
+VmBuiltinFn getVmBuiltinHandler(const char *name) {
+    if (!name) return NULL;
+    for (size_t i = 0; i < num_vm_builtins; i++) {
+        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+            return vmBuiltinDispatchTable[i].handler;
+        }
     }
+    return NULL;
 }
 
 Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
@@ -2100,7 +2075,6 @@ BuiltinRoutineType getBuiltinType(const char *name) {
 }
 
 void registerAllBuiltins(void) {
-    initVmBuiltinRegistry();
     /* Graphics stubs (usable even without SDL) */
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);

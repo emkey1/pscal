@@ -2,27 +2,6 @@
 
 This document lists the built-in procedures and functions provided by Pscal.
 
-### Registering custom builtins
-
-Additional routines may be added at runtime using the builtin registry API.
-Include `backend_ast/builtin.h` and call `initVmBuiltinRegistry()` once during
-startup, then register new handlers:
-
-```c
-#include "backend_ast/builtin.h"
-
-static Value vmBuiltinFoo(VM* vm, int arg_count, Value* args) {
-    /* ... */
-    return makeInt(0);
-}
-
-void register_foo(void) {
-    registerVmBuiltin("foo", vmBuiltinFoo);
-}
-```
-
-Once registered, Pascal code can call `foo` like any other builtin.
-
 ## General
 - `inttostr` – Convert integer to string.
 - `length` – Length of string or array.

@@ -14,9 +14,6 @@ typedef struct {
     VmBuiltinFn handler;
 } VmBuiltinMapping;
 
-/* Runtime builtin registry API */
-void registerVmBuiltin(const char* name, VmBuiltinFn handler);
-void initVmBuiltinRegistry(void);
 VmBuiltinFn getVmBuiltinHandler(const char* name);
 
 /* VM-native general built-ins */
