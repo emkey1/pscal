@@ -66,18 +66,24 @@ void draw_hangman(int wrong) {
     }
 }
 
+struct WordNode {
+    str word;
+    struct WordNode* next;
+};
+
 int main() {
     int max_wrong;
     int min_length;
     int max_length;
     int word_limit;
-    str words[2048];
+    struct WordNode* words;
     int word_count;
     text f;
     str line;
     int i;
     int valid;
     int len;
+    struct WordNode* tmp;
 
     int playing;
     playing = 1;
@@ -87,6 +93,7 @@ int main() {
     max_length = 9;
     word_limit = 2048;
     word_count = 0;
+    words = NULL;
 
     assign(f, "etc/words");
     reset(f);
@@ -105,7 +112,11 @@ int main() {
                 i = i + 1;
             }
             if (valid) {
-                words[word_count] = line;
+                struct WordNode* node;
+                new(&node);
+                node->word = line;
+                node->next = words;
+                words = node;
                 word_count = word_count + 1;
             }
         }
@@ -129,8 +140,16 @@ int main() {
         int ch;
         int j;
         int found;
+        struct WordNode* current;
+        int index;
 
-        secret = words[random(word_count)];
+        index = random(word_count);
+        current = words;
+        while (index > 0) {
+            current = current->next;
+            index = index - 1;
+        }
+        secret = current->word;
         so_far = secret;
         len = strlen(so_far);
         i = 1;
@@ -205,6 +224,15 @@ int main() {
             playing = 0;
         }
     }
+
+    tmp = words;
+    while (tmp != NULL) {
+        struct WordNode* next;
+        next = tmp->next;
+        dispose(&tmp);
+        tmp = next;
+    }
+
     return 0;
 }
 
