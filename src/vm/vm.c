@@ -1868,7 +1868,10 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
 
-                if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
+                if (sym->value->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
+                    // Preserve pointer type information when assigning NIL.
+                    sym->value->ptr_val = NULL;
+                } else if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
                     const char* source_str = "";
                     char char_buf[2] = {0};
 
@@ -1883,6 +1886,7 @@ comparison_error_label:
                     sym->value->s_val[sym->value->max_length] = '\0';
 
                 } else {
+                    // Deep-copy all other types.
                     AST* preserved_base = sym->value->base_type_node;
                     freeValue(sym->value);
                     *(sym->value) = makeCopyOfValue(&value_from_stack);
@@ -1925,7 +1929,10 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
 
-                if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
+                if (sym->value->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
+                    // Maintain pointer type when assigning NIL.
+                    sym->value->ptr_val = NULL;
+                } else if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
                     const char* source_str = "";
                     char char_buf[2] = {0};
                     if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
@@ -2024,7 +2031,10 @@ comparison_error_label:
                 Value* target_slot = frame->upvalues[slot];
                 Value value_from_stack = pop(vm);
 
-                if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
+                if (target_slot->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
+                    // Preserve pointer metadata when assigning NIL.
+                    target_slot->ptr_val = NULL;
+                } else if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
                     const char* source_str = "";
                     char char_buf[2] = {0};
                     if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
