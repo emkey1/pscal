@@ -1154,6 +1154,12 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     }
 
     AST *baseTypeNode = pointerVarValuePtr->base_type_node;
+    fprintf(stderr, "[DEBUG new] ptrVar=%p type=%s ptr_val=%p base=%p (%s)\n",
+            (void*)pointerVarValuePtr,
+            varTypeToString(pointerVarValuePtr->type),
+            pointerVarValuePtr->ptr_val,
+            (void*)baseTypeNode,
+            baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL");
     if (!baseTypeNode) {
         runtimeError(vm, "Cannot determine base type for pointer variable in new().");
         return makeVoid();

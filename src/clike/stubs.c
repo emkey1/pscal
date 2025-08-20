@@ -8,26 +8,24 @@
 #include <strings.h>
 
 AST* lookupType(const char* name) {
-    AST* base = clike_lookup_struct(name);
-    if (!base) {
-        base = newASTNode(AST_VARIABLE, NULL);
-        if (!base) return NULL;
+    // First, see if this name refers to a previously-declared struct.
+    AST* type = clike_lookup_struct(name);
+    if (type) return type;
 
-        if      (strcasecmp(name, "integer") == 0) setTypeAST(base, TYPE_INTEGER);
-        else if (strcasecmp(name, "real")    == 0) setTypeAST(base, TYPE_REAL);
-        else if (strcasecmp(name, "char")    == 0) setTypeAST(base, TYPE_CHAR);
-        else if (strcasecmp(name, "string")  == 0) setTypeAST(base, TYPE_STRING);
-        else if (strcasecmp(name, "boolean") == 0) setTypeAST(base, TYPE_BOOLEAN);
-        else if (strcasecmp(name, "byte")    == 0) setTypeAST(base, TYPE_BYTE);
-        else if (strcasecmp(name, "word")    == 0) setTypeAST(base, TYPE_WORD);
-        else { freeAST(base); return NULL; }
-    }
+    // Otherwise, create a simple AST node for one of the builtin types.
+    type = newASTNode(AST_VARIABLE, NULL);
+    if (!type) return NULL;
 
-    AST* ptr = newASTNode(AST_POINTER_TYPE, NULL);
-    if (!ptr) { freeAST(base); return NULL; }
-    setRight(ptr, base);
-    setTypeAST(ptr, TYPE_POINTER);
-    return ptr;
+    if      (strcasecmp(name, "integer") == 0) setTypeAST(type, TYPE_INTEGER);
+    else if (strcasecmp(name, "real")    == 0) setTypeAST(type, TYPE_REAL);
+    else if (strcasecmp(name, "char")    == 0) setTypeAST(type, TYPE_CHAR);
+    else if (strcasecmp(name, "string")  == 0) setTypeAST(type, TYPE_STRING);
+    else if (strcasecmp(name, "boolean") == 0) setTypeAST(type, TYPE_BOOLEAN);
+    else if (strcasecmp(name, "byte")    == 0) setTypeAST(type, TYPE_BYTE);
+    else if (strcasecmp(name, "word")    == 0) setTypeAST(type, TYPE_WORD);
+    else { freeAST(type); return NULL; }
+
+    return type;
 }
 
 Value evaluateCompileTimeValue(AST* node) { (void)node; return makeNil(); }
