@@ -126,53 +126,67 @@ begin
   rollsLeft := rollsLeft - 1;
 end;
 
+procedure DrawDie(x, y, value: integer; kept: boolean);
+var
+  bg: byte;
+  pip: array[1..3,1..3] of char;
+  r, c: integer;
+begin
+  bg := LightGray;
+  if kept then bg := LightGreen;
+  for r := 1 to 3 do
+    for c := 1 to 3 do pip[r,c] := ' ';
+  case value of
+    1: pip[2,2] := 'o';
+    2: begin pip[1,1] := 'o'; pip[3,3] := 'o'; end;
+    3: begin pip[1,1] := 'o'; pip[2,2] := 'o'; pip[3,3] := 'o'; end;
+    4: begin pip[1,1] := 'o'; pip[1,3] := 'o'; pip[3,1] := 'o'; pip[3,3] := 'o'; end;
+    5: begin pip[1,1] := 'o'; pip[1,3] := 'o'; pip[2,2] := 'o'; pip[3,1] := 'o'; pip[3,3] := 'o'; end;
+    6: begin pip[1,1] := 'o'; pip[1,3] := 'o'; pip[2,1] := 'o'; pip[2,3] := 'o'; pip[3,1] := 'o'; pip[3,3] := 'o'; end;
+  end;
+  TextColor(Black);
+  TextBackground(bg);
+  GotoXY(x, y);     Write('+---+');
+  GotoXY(x, y+1);   Write('|', pip[1,1], pip[1,2], pip[1,3], '|');
+  GotoXY(x, y+2);   Write('|', pip[2,1], pip[2,2], pip[2,3], '|');
+  GotoXY(x, y+3);   Write('|', pip[3,1], pip[3,2], pip[3,3], '|');
+  GotoXY(x, y+4);   Write('+---+');
+  NormVideo;
+end;
+
 procedure DisplayDice;
 var
   i: integer;
-  diceStr: string[2]; // String to hold single digit + null terminator
-  rollsStr: string[2]; // String for rolls left
 begin
-  GotoXY(5, 5);
-  Write('Dice: ');
   for i := 1 to NUM_DICE do
-  begin
-    // Display die value using function call assignment
-    diceStr := IntToStr(dice[i]);
-    Write(diceStr, ' ');
-
-    // Indicate if kept
-    if keep[i] then
-      Write('[K] ')
-    else
-      Write('[ ] ');
-  end;
-  ClrEol; // Clear rest of the line
-
-  GotoXY(5, 6);
-  // Write Rolls Left using multiple writes
-  Write('Rolls Left: ');
-  rollsStr := IntToStr(rollsLeft);
-  Write(rollsStr);
+    DrawDie(5 + (i-1)*6, 5, dice[i], keep[i]);
+  TextColor(White); TextBackground(Black);
+  GotoXY(5, 11);
+  Write('Rolls Left: ', rollsLeft:1);
   ClrEol;
 end;
 
 procedure DisplayScorecard;
 // Uses global k, scoreStr
 begin
+  TextColor(Yellow); HighVideo;
   GotoXY(40, 2); Write('Upper Section');
+  NormVideo;
   for k := 1 to 6 do
   begin
+    if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
     GotoXY(40, 2 + k);
-    Write(k:2, '. ', scorecard[k].name:12); // Assuming formatted write works
+    Write(k:2, '. ', scorecard[k].name:12);
     if scorecard[k].used then
     begin
        scoreStr := IntToStr(scorecard[k].score);
-       Write(scoreStr:4); // Assuming formatted write works
+       Write(scoreStr:4);
     end
     else
        Write(' (-)');
   end;
 
+  TextColor(White);
   GotoXY(40, 10); Write('Upper Bonus:');
   if bonusScore > 0 then
   begin
@@ -189,10 +203,12 @@ begin
   end
   else Write('   -');
 
-
+  TextColor(Yellow); HighVideo;
   GotoXY(40, 13); Write('Lower Section');
-   for k := 7 to NUM_CATEGORIES do
+  NormVideo;
+  for k := 7 to NUM_CATEGORIES do
   begin
+    if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
     GotoXY(40, 13 + (k-6));
     Write(k:2, '. ', scorecard[k].name:12);
     if scorecard[k].used then
@@ -204,22 +220,25 @@ begin
        Write(' (-)');
   end;
 
+  TextColor(White);
   GotoXY(40, 22); Write('Lower Total:');
-   if lowerScore > 0 then
-   begin
+  if lowerScore > 0 then
+  begin
       scoreStr := IntToStr(lowerScore);
       Write(scoreStr:4)
-   end
-   else Write('   -');
+  end
+  else Write('   -');
 
-   GotoXY(40, 23); HighVideo; Write('GRAND TOTAL:'); NormVideo; Write(' ');
-   if totalScore > 0 then
-   begin
+  GotoXY(40, 23); HighVideo; BlinkText;
+  Write('GRAND TOTAL:');
+  NormVideo; Write(' ');
+  if totalScore > 0 then
+  begin
      scoreStr := IntToStr(totalScore);
-     Write(scoreStr:4)
-   end
-   else Write('   -');
-   NormVideo;
+     TextColor(Yellow); Write(scoreStr:4); TextColor(White);
+  end
+  else Write('   -');
+  NormVideo;
 end;
 
 // Modified to avoid Exit, takes var parameter to signal action
@@ -231,7 +250,9 @@ var
   // inputChar is now global
 begin
   userAction := ' '; // Default action (continue loop)
+  TextColor(Yellow); HighVideo;
   Print(5, 8, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: '); ClrEol;
+  NormVideo; TextColor(White);
 
   // Need to clear space where input will be echoed or error shown
   GotoXY(60, 8); ClrEol;
@@ -256,7 +277,9 @@ begin
          validDieInput := true; // Mark that a valid die toggle happened
          DisplayDice; // Update dice display immediately
          // Reprint prompt and reposition cursor for next input
+         TextColor(Yellow); HighVideo;
          Print(5, 8, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: '); ClrEol;
+         NormVideo; TextColor(White);
          GotoXY(60, 8); // Reposition for next input
        // end; // End inner if dieNum in range - removed as redundant
        // No 'else' needed here for dieNum range check
@@ -371,7 +394,9 @@ var
   choiceChar: char;
   tempChoice: integer;
 begin
+  TextColor(Yellow); HighVideo;
   Print(5, 10, 'Choose category number (1-9): '); ClrEol; // Simplified prompt for now
+  NormVideo; TextColor(White);
   repeat
     validChoice := false;
     GotoXY(35, 10); ClrEol; // Clear previous input/error space
@@ -389,7 +414,9 @@ begin
        begin
           if scorecard[tempChoice].used then
           begin
+             TextColor(LightRed);
              Print(5, 11, 'Category already used. Choose another.'); ClrEol; Beep;
+             TextColor(White);
              GotoXY(35, 10); // Position for next ReadKey attempt
           end
           else
@@ -409,7 +436,9 @@ begin
     end
     else // Not a digit '1'-'9'
     begin
+        TextColor(LightRed);
         Print(5, 11, 'Invalid choice. Enter 1-9.'); ClrEol; Beep;
+        TextColor(White);
         GotoXY(35, 10); // Position for next ReadKey attempt
     end;
 
@@ -474,6 +503,7 @@ begin // Main program execution start
 
     // Display turn info using multiple writes
     GotoXY(5, 2);
+    TextColor(Cyan); HighVideo;
     Write('--- Turn ');
     turnStr := IntToStr(turn);
     Write(turnStr);
@@ -481,6 +511,7 @@ begin // Main program execution start
     totalStr := IntToStr(NUM_CATEGORIES);
     Write(totalStr);
     Write(' ---');
+    NormVideo; TextColor(White);
     ClrEol; // Clear rest of line 2
 
     // Display Scorecard
@@ -548,7 +579,9 @@ begin // Main program execution start
   // --- Game Over Display ---
   ClrScr; // Clear before final display
   DisplayScorecard; // Show final scores
-  PrintColor(25, 12, '>>> GAME OVER <<<', Yellow, Black);
+  TextColor(Yellow); HighVideo; BlinkText;
+  GotoXY(25, 12); Write('>>> GAME OVER <<<');
+  NormVideo; TextColor(White);
   GotoXY(25, 14);
   Write('Final Score: ');
   scoreStr := IntToStr(totalScore);
