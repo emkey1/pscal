@@ -1191,7 +1191,8 @@ char *findUnitFile(const char *unit_name) {
         fprintf(stderr, "Memory allocation error in findUnitFile\n");
         EXIT_FAILURE_HANDLER();
     }
-    snprintf(file_name, max_len, "%s/%s.pl", default_path, unit_name);
+    // Compose the full path using the resolved base path.
+    snprintf(file_name, max_path_len, "%s/%s.pl", base_path, unit_name);
     if (access(file_name, F_OK) == 0) {
         return file_name;
     }
