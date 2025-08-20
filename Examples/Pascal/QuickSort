@@ -1,0 +1,45 @@
+program QuickSortDemo;
+
+uses crt;          { optional – for input / output }
+
+var
+  a : array[1..20] of integer = (34, 12, 77, 5, 23, 18, 9, 42, 1, 88,
+                                3, 56, 7, 90, 2, 11, 19, 6, 99, 30);
+
+{ ------------------------------------------------------------------ }
+procedure quicksort(var arr: array of integer; lo, hi: integer);
+  procedure partition(var l, r: integer; var pivotIndex: integer);
+  var
+    i, j, tmp, p: integer;
+  begin
+    p := arr[(l + r) div 2];
+    i := l; j := r;
+    repeat
+      while arr[i] < p do Inc(i);
+      while arr[j] > p do Dec(j);
+      if i <= j then begin
+        tmp := arr[i]; arr[i] := arr[j]; arr[j] := tmp;
+        Inc(i); Dec(j);
+      end;
+    until i > j;
+    pivotIndex := i;
+  end;
+
+var
+  pivot: integer;
+begin
+  if lo < hi then begin
+    partition(lo, hi, pivot);
+    quicksort(arr, lo, pivot - 1);
+    quicksort(arr, pivot, hi);
+  end;
+end;
+
+var
+  i: integer;
+begin
+  quicksort(a, 1, Length(a));
+  writeln('Sorted array:');
+  for i := 1 to Length(a) do write(a[i]:4, ' ');
+  writeln;
+end.
