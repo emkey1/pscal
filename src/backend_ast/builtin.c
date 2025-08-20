@@ -1332,16 +1332,19 @@ Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
-    FILE* stream = stdin;
+    FILE* stream = NULL;
 
     if (arg_count == 0) {
         if (vm->vmGlobalSymbols) {
             Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
             if (inputSym && inputSym->value &&
-                inputSym->value->type == TYPE_FILE &&
-                inputSym->value->f_val) {
+                inputSym->value->type == TYPE_FILE) {
                 stream = inputSym->value->f_val;
             }
+        }
+        if (!stream) {
+            // No default input file has been opened; treat as EOF
+            return makeBoolean(true);
         }
     } else if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
