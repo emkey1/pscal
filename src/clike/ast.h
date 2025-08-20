@@ -29,9 +29,11 @@ typedef enum {
     TCAST_STRING,
     TCAST_IDENTIFIER,
     TCAST_ARRAY_ACCESS,
+    TCAST_MEMBER,
     TCAST_ADDR,
     TCAST_DEREF,
-    TCAST_CALL
+    TCAST_CALL,
+    TCAST_STRUCT_DECL
 } ASTNodeTypeClike;
 
 typedef struct ASTNodeClike {

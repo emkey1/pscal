@@ -1614,8 +1614,8 @@ comparison_error_label:
                     }
                     else if (target_lvalue_ptr->type == TYPE_POINTER && (value_to_set.type == TYPE_POINTER || value_to_set.type == TYPE_NIL)) {
                         target_lvalue_ptr->ptr_val = value_to_set.ptr_val;
-                        if (value_to_set.type == TYPE_POINTER) {
-                             target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
+                        if (value_to_set.type == TYPE_POINTER && value_to_set.base_type_node) {
+                            target_lvalue_ptr->base_type_node = value_to_set.base_type_node;
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
@@ -1878,8 +1878,12 @@ comparison_error_label:
                     sym->value->s_val[sym->value->max_length] = '\0';
 
                 } else {
+                    AST* preserved_base = sym->value->base_type_node;
                     freeValue(sym->value);
                     *(sym->value) = makeCopyOfValue(&value_from_stack);
+                    if (sym->value->type == TYPE_POINTER && sym->value->base_type_node == NULL) {
+                        sym->value->base_type_node = preserved_base;
+                    }
                 }
 
                 freeValue(&value_from_stack);
@@ -1928,8 +1932,12 @@ comparison_error_label:
                     strncpy(sym->value->s_val, source_str, sym->value->max_length);
                     sym->value->s_val[sym->value->max_length] = '\0';
                 } else {
+                    AST* preserved_base = sym->value->base_type_node;
                     freeValue(sym->value);
                     *(sym->value) = makeCopyOfValue(&value_from_stack);
+                    if (sym->value->type == TYPE_POINTER && sym->value->base_type_node == NULL) {
+                        sym->value->base_type_node = preserved_base;
+                    }
                 }
                 freeValue(&value_from_stack);
                 break;
@@ -1965,8 +1973,12 @@ comparison_error_label:
                 } else {
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.
+                    AST* preserved_base = target_slot->base_type_node;
                     freeValue(target_slot);
                     *target_slot = makeCopyOfValue(&value_from_stack);
+                    if (target_slot->type == TYPE_POINTER && target_slot->base_type_node == NULL) {
+                        target_slot->base_type_node = preserved_base;
+                    }
                 }
                 // --- END CORRECTED LOGIC ---
 
@@ -2006,8 +2018,12 @@ comparison_error_label:
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
                     target_slot->s_val[target_slot->max_length] = '\0';
                 } else {
+                    AST* preserved_base = target_slot->base_type_node;
                     freeValue(target_slot);
                     *target_slot = makeCopyOfValue(&value_from_stack);
+                    if (target_slot->type == TYPE_POINTER && target_slot->base_type_node == NULL) {
+                        target_slot->base_type_node = preserved_base;
+                    }
                 }
                 freeValue(&value_from_stack);
                 break;

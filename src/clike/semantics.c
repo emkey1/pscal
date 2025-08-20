@@ -105,6 +105,11 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             return node->var_type;
         case TCAST_IDENTIFIER: {
             char *name = tokenToCString(node->token);
+            if (strcmp(name, "NULL") == 0) {
+                free(name);
+                node->var_type = TYPE_POINTER;
+                return TYPE_POINTER;
+            }
             VarType t = ss_get(scopes, name);
             node->var_type = t;
             if (t == TYPE_UNKNOWN) {
@@ -182,6 +187,10 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             node->var_type = TYPE_UNKNOWN;
             return TYPE_UNKNOWN;
         }
+        case TCAST_MEMBER:
+            analyzeExpr(node->left, scopes);
+            node->var_type = TYPE_UNKNOWN;
+            return TYPE_UNKNOWN;
         default:
             return TYPE_UNKNOWN;
     }
@@ -197,6 +206,8 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             if (node->left) analyzeExpr(node->left, scopes);
             break;
         }
+        case TCAST_STRUCT_DECL:
+            break;
         case TCAST_COMPOUND:
             ss_push(scopes);
             for (int i = 0; i < node->child_count; ++i) {

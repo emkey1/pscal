@@ -1,5 +1,6 @@
 #include "clike/parser.h"
 #include "clike/errors.h"
+#include "frontend/ast.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,8 @@ static void expectToken(ParserClike *p, ClikeTokenType type, const char *msg) {
 static ASTNodeClike* declaration(ParserClike *p);
 static ASTNodeClike* varDeclaration(ParserClike *p, ClikeToken type_token, ClikeToken ident, int isPointer);
 static ASTNodeClike* funDeclaration(ParserClike *p, ClikeToken type_token, ClikeToken ident, int isPointer);
+static ASTNodeClike* structDeclaration(ParserClike *p, ClikeToken nameTok);
+static ASTNodeClike* structVarDeclaration(ParserClike *p, ClikeToken nameTok, ClikeToken ident, int isPointer);
 static ASTNodeClike* params(ParserClike *p);
 static ASTNodeClike* param(ParserClike *p);
 static ASTNodeClike* compoundStmt(ParserClike *p);
@@ -82,6 +85,68 @@ static ASTNodeClike* switchStatement(ParserClike *p);
 char **clike_imports = NULL;
 int clike_import_count = 0;
 static int clike_import_capacity = 0;
+
+typedef struct {
+    char *name;
+    AST *ast; // core AST representing struct layout
+} ClikeStructDef;
+
+static ClikeStructDef clike_structs[256];
+static int clike_struct_count = 0;
+
+AST* clike_lookup_struct(const char *name) {
+    for (int i = 0; i < clike_struct_count; ++i) {
+        if (strcmp(clike_structs[i].name, name) == 0) return clike_structs[i].ast;
+    }
+    return NULL;
+}
+
+void clike_register_struct(const char *name, AST *ast) {
+    for (int i = 0; i < clike_struct_count; ++i) {
+        if (strcmp(clike_structs[i].name, name) == 0) {
+            clike_structs[i].ast = ast;
+            return;
+        }
+    }
+    if (clike_struct_count < 256) {
+        clike_structs[clike_struct_count].name = strdup(name);
+        clike_structs[clike_struct_count].ast = ast;
+        clike_struct_count++;
+    }
+}
+
+static Token* makeIdentToken(const char *s) {
+    Token *t = (Token*)malloc(sizeof(Token));
+    t->type = TOKEN_IDENTIFIER;
+    t->value = strdup(s);
+    t->line = 0;
+    t->column = 0;
+    return t;
+}
+
+static char* clikeTokenToCString(ClikeToken t) {
+    char *s = (char*)malloc(t.length + 1);
+    memcpy(s, t.lexeme, t.length);
+    s[t.length] = '\0';
+    return s;
+}
+
+static AST* makeBuiltinTypeAST(ClikeToken t) {
+    const char *name = NULL;
+    VarType vt = TYPE_UNKNOWN;
+    switch (t.type) {
+        case CLIKE_TOKEN_INT: name = "integer"; vt = TYPE_INTEGER; break;
+        case CLIKE_TOKEN_FLOAT: name = "real"; vt = TYPE_REAL; break;
+        case CLIKE_TOKEN_STR: name = "string"; vt = TYPE_STRING; break;
+        case CLIKE_TOKEN_TEXT: name = "text"; vt = TYPE_FILE; break;
+        case CLIKE_TOKEN_CHAR: name = "char"; vt = TYPE_CHAR; break;
+        default: name = "integer"; vt = TYPE_INTEGER; break;
+    }
+    Token *tok = makeIdentToken(name);
+    AST *node = newASTNode(AST_VARIABLE, tok);
+    setTypeAST(node, vt);
+    return node;
+}
 
 static void queueImportPath(ParserClike *p, ClikeToken tok) {
     char *path = (char*)malloc(tok.length + 1);
@@ -148,6 +213,18 @@ static int isTypeToken(ClikeTokenType t) {
 }
 
 static ASTNodeClike* declaration(ParserClike *p) {
+    if (p->current.type == CLIKE_TOKEN_STRUCT) {
+        advanceParser(p);
+        ClikeToken nameTok = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "struct name");
+        if (p->current.type == CLIKE_TOKEN_LBRACE) {
+            return structDeclaration(p, nameTok);
+        } else {
+            int isPtr = 0;
+            if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
+            ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
+            return structVarDeclaration(p, nameTok, ident, isPtr);
+        }
+    }
     if (isTypeToken(p->current.type)) {
         ClikeToken type_tok = p->current; advanceParser(p);
         int isPtr = 0;
@@ -196,6 +273,102 @@ static ASTNodeClike* varDeclaration(ParserClike *p, ClikeToken type_token, Clike
     return node;
 }
 
+static ASTNodeClike* structVarDeclaration(ParserClike *p, ClikeToken nameTok, ClikeToken ident, int isPointer) {
+    ASTNodeClike *node = newASTNodeClike(TCAST_VAR_DECL, ident);
+    node->var_type = isPointer ? TYPE_POINTER : TYPE_RECORD;
+    node->element_type = isPointer ? TYPE_RECORD : TYPE_UNKNOWN;
+    setRightClike(node, newASTNodeClike(TCAST_IDENTIFIER, nameTok));
+    node->right->var_type = node->var_type;
+    if (matchToken(p, CLIKE_TOKEN_EQUAL)) {
+        setLeftClike(node, expression(p));
+    }
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    return node;
+}
+
+static ASTNodeClike* structDeclaration(ParserClike *p, ClikeToken nameTok) {
+    ASTNodeClike *node = newASTNodeClike(TCAST_STRUCT_DECL, nameTok);
+    AST *recordAst = newASTNode(AST_RECORD_TYPE, NULL);
+    setTypeAST(recordAst, TYPE_RECORD);
+
+    expectToken(p, CLIKE_TOKEN_LBRACE, "{");
+    while (p->current.type != CLIKE_TOKEN_RBRACE && p->current.type != CLIKE_TOKEN_EOF) {
+        ClikeToken typeTok = p->current; advanceParser(p);
+        ClikeToken structTypeTok; structTypeTok.lexeme = NULL; structTypeTok.length = 0;
+        if (typeTok.type == CLIKE_TOKEN_STRUCT) {
+            structTypeTok = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "struct name");
+        }
+        int isPtr = 0;
+        if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
+        ClikeToken fieldName = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "field name");
+        expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+
+        ASTNodeClike *fieldDecl = NULL;
+        if (typeTok.type == CLIKE_TOKEN_STRUCT) {
+            fieldDecl = newASTNodeClike(TCAST_VAR_DECL, fieldName);
+            fieldDecl->var_type = isPtr ? TYPE_POINTER : TYPE_RECORD;
+            fieldDecl->element_type = isPtr ? TYPE_RECORD : TYPE_UNKNOWN;
+            setRightClike(fieldDecl, newASTNodeClike(TCAST_IDENTIFIER, structTypeTok));
+            fieldDecl->right->var_type = fieldDecl->var_type;
+        } else {
+            fieldDecl = newASTNodeClike(TCAST_VAR_DECL, fieldName);
+            fieldDecl->var_type = isPtr ? TYPE_POINTER : tokenTypeToVarType(typeTok.type);
+            fieldDecl->element_type = isPtr ? tokenTypeToVarType(typeTok.type) : TYPE_UNKNOWN;
+            setRightClike(fieldDecl, newASTNodeClike(TCAST_IDENTIFIER, typeTok));
+            fieldDecl->right->var_type = fieldDecl->var_type;
+        }
+        addChildClike(node, fieldDecl);
+
+        // Build core AST field declaration
+        AST *fieldAst = newASTNode(AST_VAR_DECL, NULL);
+        char *fnameStr = clikeTokenToCString(fieldName);
+        Token *fnameTok = makeIdentToken(fnameStr);
+        free(fnameStr);
+        AST *varNode = newASTNode(AST_VARIABLE, fnameTok);
+        addChild(fieldAst, varNode);
+
+        AST *typeAst = NULL;
+        if (typeTok.type == CLIKE_TOKEN_STRUCT) {
+            AST *base = NULL;
+            char *stype = clikeTokenToCString(structTypeTok);
+            if (strncmp(stype, nameTok.lexeme, nameTok.length) == 0 && strlen(stype) == (size_t)nameTok.length) {
+                base = recordAst;
+            } else {
+                base = clike_lookup_struct(stype);
+            }
+            if (isPtr) {
+                AST *ptrAst = newASTNode(AST_POINTER_TYPE, NULL);
+                setRight(ptrAst, base);
+                setTypeAST(ptrAst, TYPE_POINTER);
+                typeAst = ptrAst;
+            } else {
+                typeAst = base;
+            }
+            free(stype);
+        } else {
+            AST *base = makeBuiltinTypeAST(typeTok);
+            if (isPtr) {
+                AST *ptrAst = newASTNode(AST_POINTER_TYPE, NULL);
+                setRight(ptrAst, base);
+                setTypeAST(ptrAst, TYPE_POINTER);
+                typeAst = ptrAst;
+            } else {
+                typeAst = base;
+            }
+        }
+        setRight(fieldAst, typeAst);
+        setTypeAST(fieldAst, typeAst ? typeAst->var_type : TYPE_UNKNOWN);
+        addChild(recordAst, fieldAst);
+    }
+    expectToken(p, CLIKE_TOKEN_RBRACE, "}");
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+
+    char *name = clikeTokenToCString(nameTok);
+    clike_register_struct(name, recordAst);
+    free(name);
+    return node;
+}
+
 static ASTNodeClike* funDeclaration(ParserClike *p, ClikeToken type_token, ClikeToken ident, int isPointer) {
     expectToken(p, CLIKE_TOKEN_LPAREN, "(");
     ASTNodeClike *paramsNode = params(p);
@@ -240,7 +413,20 @@ static ASTNodeClike* compoundStmt(ParserClike *p) {
     expectToken(p, CLIKE_TOKEN_LBRACE, "{");
     ASTNodeClike *node = newASTNodeClike(TCAST_COMPOUND, p->current);
     while (p->current.type != CLIKE_TOKEN_RBRACE && p->current.type != CLIKE_TOKEN_EOF) {
-        if (isTypeToken(p->current.type)) {
+        if (p->current.type == CLIKE_TOKEN_STRUCT) {
+            advanceParser(p);
+            ClikeToken nameTok = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "struct name");
+            if (p->current.type == CLIKE_TOKEN_LBRACE) {
+                ASTNodeClike *decl = structDeclaration(p, nameTok);
+                addChildClike(node, decl);
+            } else {
+                int isPtr = 0;
+                if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
+                ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
+                ASTNodeClike *decl = structVarDeclaration(p, nameTok, ident, isPtr);
+                addChildClike(node, decl);
+            }
+        } else if (isTypeToken(p->current.type)) {
             ClikeToken type_tok = p->current; advanceParser(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
@@ -605,6 +791,26 @@ static ASTNodeClike* factor(ParserClike *p) {
                 addChildClike(access, index);
             } while (p->current.type == CLIKE_TOKEN_LBRACKET);
             idNode = access;
+        }
+        while (p->current.type == CLIKE_TOKEN_ARROW) {
+            ClikeToken arrow = p->current; advanceParser(p);
+            ClikeToken field = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "field");
+            ASTNodeClike *fieldId = newASTNodeClike(TCAST_IDENTIFIER, field);
+            ASTNodeClike *member = newASTNodeClike(TCAST_MEMBER, arrow);
+            setLeftClike(member, idNode);
+            setRightClike(member, fieldId);
+            idNode = member;
+            while (p->current.type == CLIKE_TOKEN_LBRACKET) {
+                ASTNodeClike *access = newASTNodeClike(TCAST_ARRAY_ACCESS, field);
+                setLeftClike(access, idNode);
+                do {
+                    advanceParser(p);
+                    ASTNodeClike *index = expression(p);
+                    expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
+                    addChildClike(access, index);
+                } while (p->current.type == CLIKE_TOKEN_LBRACKET);
+                idNode = access;
+            }
         }
         if (p->current.type == CLIKE_TOKEN_PLUS_PLUS || p->current.type == CLIKE_TOKEN_MINUS_MINUS) {
             ClikeToken op = p->current; advanceParser(p);
