@@ -39,6 +39,15 @@ const char *PSCAL_USAGE =
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "   or: pscal (with no arguments to display version and usage)";
 
+static Value vmBuiltinTestDynamic(struct VM_s* vm, int arg_count, Value* args) {
+    (void)vm;
+    (void)args;
+    if (arg_count != 0) {
+        return makeInt(-1);
+    }
+    return makeInt(123);
+}
+
 void initSymbolSystem(void) {
 #ifdef DEBUG
     inserted_global_names = createList();
@@ -70,6 +79,12 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
+
+    const char *dyn_env = getenv("PSC_TEST_DYNAMIC_BUILTIN");
+    if (dyn_env) {
+        registerBuiltinFunction("TestDynamicBuiltin", AST_FUNCTION_DECL, NULL);
+        registerVmBuiltin("testdynamicbuiltin", vmBuiltinTestDynamic);
+    }
     
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
