@@ -459,7 +459,25 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
                 case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
-                case CLIKE_TOKEN_SLASH: writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line); break;
+                case CLIKE_TOKEN_SLASH:
+                    if (node->var_type == TYPE_INTEGER &&
+                        node->left && node->right &&
+                        node->left->var_type == TYPE_INTEGER &&
+                        node->right->var_type == TYPE_INTEGER) {
+                        /*
+                         * In C, dividing two integers performs integer division
+                         * (truncating toward zero).  The VM has a dedicated
+                         * opcode for this behaviour (OP_INT_DIV), whereas
+                         * OP_DIVIDE always produces a real result.  Without this
+                         * check, expressions like `w / 4` would yield a real
+                         * value, which breaks APIs expecting integer arguments
+                         * (e.g. drawrect in the graphics tests).
+                         */
+                        writeBytecodeChunk(chunk, OP_INT_DIV, node->token.line);
+                    } else {
+                        writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line);
+                    }
+                    break;
                 case CLIKE_TOKEN_GREATER: writeBytecodeChunk(chunk, OP_GREATER, node->token.line); break;
                 case CLIKE_TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, node->token.line); break;
                 case CLIKE_TOKEN_LESS: writeBytecodeChunk(chunk, OP_LESS, node->token.line); break;
