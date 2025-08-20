@@ -46,6 +46,23 @@ end.
 Running the program prints the current process ID:
 
 ```sh
-$ build/bin/pscal show_pid.p
+$ build/bin/pscal Examples/Pascal/show_pid.p
+PID = 12345
+```
+
+The same builtin is available to the C-like front end.  An equivalent
+program can be written as:
+
+```c
+int main() {
+  printf("PID = %d\n", getpid());
+  return 0;
+}
+```
+
+Running it with the `clike` compiler yields the same output:
+
+```sh
+$ build/bin/clike Examples/CLike/show_pid.c
 PID = 12345
 ```
