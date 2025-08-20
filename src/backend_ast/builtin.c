@@ -214,12 +214,36 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
 
+/* Dynamic registry for user-supplied VM built-ins. */
+static VmBuiltinMapping *extra_vm_builtins = NULL;
+static size_t num_extra_vm_builtins = 0;
+
+void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
+    if (!name || !handler) return;
+    VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
+        sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
+    if (!new_table) return;
+    extra_vm_builtins = new_table;
+    extra_vm_builtins[num_extra_vm_builtins].name = strdup(name);
+    extra_vm_builtins[num_extra_vm_builtins].handler = handler;
+    num_extra_vm_builtins++;
+}
+
+/* Weak hook that external modules can override to register additional
+ * built-ins.  The default implementation does nothing. */
+__attribute__((weak)) void registerExtendedBuiltins(void) {}
+
 // This function now comes AFTER the table and comparison function it uses.
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
     if (!name) return NULL;
     for (size_t i = 0; i < num_vm_builtins; i++) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
             return vmBuiltinDispatchTable[i].handler;
+        }
+    }
+    for (size_t i = 0; i < num_extra_vm_builtins; i++) {
+        if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
+            return extra_vm_builtins[i].handler;
         }
     }
     return NULL;
@@ -1308,16 +1332,19 @@ Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
-    FILE* stream = stdin;
+    FILE* stream = NULL;
 
     if (arg_count == 0) {
         if (vm->vmGlobalSymbols) {
             Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
             if (inputSym && inputSym->value &&
-                inputSym->value->type == TYPE_FILE &&
-                inputSym->value->f_val) {
+                inputSym->value->type == TYPE_FILE) {
                 stream = inputSym->value->f_val;
             }
+        }
+        if (!stream) {
+            // No default input file has been opened; treat as EOF
+            return makeBoolean(true);
         }
     } else if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
@@ -2035,10 +2062,14 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
 
 int getBuiltinIDForCompiler(const char *name) {
     if (!name) return -1;
-    size_t count = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < num_vm_builtins; ++i) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
             return (int)i;
+        }
+    }
+    for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
+        if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
+            return (int)(num_vm_builtins + i);
         }
     }
     return -1;
@@ -2205,6 +2236,9 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
+
+    /* Allow externally linked modules to add more builtins. */
+    registerExtendedBuiltins();
 }
 
 #ifndef SDL

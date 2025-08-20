@@ -15,6 +15,11 @@ typedef struct {
 } VmBuiltinMapping;
 
 VmBuiltinFn getVmBuiltinHandler(const char* name);
+void registerVmBuiltin(const char *name, VmBuiltinFn handler);
+
+/* Optional hook for externally linked built-ins.  The weak
+ * definition in builtin.c does nothing unless overridden. */
+void registerExtendedBuiltins(void);
 
 /* VM-native general built-ins */
 Value vmBuiltinInttostr(struct VM_s* vm, int arg_count, Value* args);

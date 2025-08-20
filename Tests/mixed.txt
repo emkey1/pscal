@@ -1,2 +1,0 @@
-LineOne PartA PartB
-LineTwo PartC PartD

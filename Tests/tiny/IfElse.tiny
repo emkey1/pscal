@@ -1,0 +1,7 @@
+{ read a number and output 0 if < 10 else 1 }
+read x;
+if x < 10 then
+  write 0
+else
+  write 1
+end

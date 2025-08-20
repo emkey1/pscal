@@ -38,10 +38,35 @@ int main(void) {
 
         ParserClike parser; initParserClike(&parser, src);
         ASTNodeClike *prog = parseProgramClike(&parser);
+
+        if (!verifyASTClikeLinks(prog, NULL)) {
+            fprintf(stderr, "AST verification failed after parsing.\n");
+            freeASTClike(prog);
+            free(src);
+            exit(1);
+        }
         initSymbolSystemClike();
         clike_register_builtins();
         analyzeSemanticsClike(prog);
+
+        if (!verifyASTClikeLinks(prog, NULL)) {
+            fprintf(stderr, "AST verification failed after semantic analysis.\n");
+            freeASTClike(prog);
+            free(src);
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (procedure_table) freeHashTable(procedure_table);
+            exit(1);
+        }
         prog = optimizeClikeAST(prog);
+
+        if (!verifyASTClikeLinks(prog, NULL)) {
+            fprintf(stderr, "AST verification failed after optimization.\n");
+            freeASTClike(prog);
+            free(src);
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (procedure_table) freeHashTable(procedure_table);
+            exit(1);
+        }
         if (clike_error_count == 0) {
             BytecodeChunk chunk; clike_compile(prog, &chunk);
             VM vm; initVM(&vm);

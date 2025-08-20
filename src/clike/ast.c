@@ -11,10 +11,13 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     node->var_type = TYPE_UNKNOWN;
     node->is_array = 0;
     node->array_size = 0;
+    node->array_dims = NULL;
+    node->dim_count = 0;
     node->element_type = TYPE_UNKNOWN;
     node->left = node->right = node->third = NULL;
     node->children = NULL;
     node->child_count = 0;
+    node->parent = NULL;
     return node;
 }
 
@@ -22,6 +25,25 @@ void addChildClike(ASTNodeClike *parent, ASTNodeClike *child) {
     if (!parent || !child) return;
     parent->children = (ASTNodeClike**)realloc(parent->children, sizeof(ASTNodeClike*) * (parent->child_count + 1));
     parent->children[parent->child_count++] = child;
+    child->parent = parent;
+}
+
+void setLeftClike(ASTNodeClike *parent, ASTNodeClike *child) {
+    if (!parent) return;
+    parent->left = child;
+    if (child) child->parent = parent;
+}
+
+void setRightClike(ASTNodeClike *parent, ASTNodeClike *child) {
+    if (!parent) return;
+    parent->right = child;
+    if (child) child->parent = parent;
+}
+
+void setThirdClike(ASTNodeClike *parent, ASTNodeClike *child) {
+    if (!parent) return;
+    parent->third = child;
+    if (child) child->parent = parent;
 }
 
 void freeASTClike(ASTNodeClike *node) {
@@ -31,6 +53,7 @@ void freeASTClike(ASTNodeClike *node) {
     if (node->right) freeASTClike(node->right);
     if (node->third) freeASTClike(node->third);
     free(node->children);
+    free(node->array_dims);
     free(node);
 }
 
@@ -65,6 +88,8 @@ static const char* nodeTypeToString(ASTNodeTypeClike type) {
         case TCAST_WHILE: return "WHILE";
         case TCAST_FOR: return "FOR";
         case TCAST_DO_WHILE: return "DO_WHILE";
+        case TCAST_SWITCH: return "SWITCH";
+        case TCAST_CASE: return "CASE";
         case TCAST_BREAK: return "BREAK";
         case TCAST_CONTINUE: return "CONTINUE";
         case TCAST_RETURN: return "RETURN";
@@ -148,4 +173,22 @@ static void dumpASTClikeJSONRecursive(ASTNodeClike *node, FILE *out, int level) 
 
 void dumpASTClikeJSON(ASTNodeClike *node, FILE *out) {
     dumpASTClikeJSONRecursive(node, out, 0);
+}
+
+bool verifyASTClikeLinks(ASTNodeClike *node, ASTNodeClike *expectedParent) {
+    if (!node) return true;
+    bool links_ok = true;
+    if (node->parent != expectedParent) {
+        fprintf(stderr,
+                "[VERIFY] Node %p has parent %p but expected %p\n",
+                (void*)node, (void*)node->parent, (void*)expectedParent);
+        links_ok = false;
+    }
+    if (!verifyASTClikeLinks(node->left, node)) links_ok = false;
+    if (!verifyASTClikeLinks(node->right, node)) links_ok = false;
+    if (!verifyASTClikeLinks(node->third, node)) links_ok = false;
+    for (int i = 0; i < node->child_count; ++i) {
+        if (!verifyASTClikeLinks(node->children[i], node)) links_ok = false;
+    }
+    return links_ok;
 }

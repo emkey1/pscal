@@ -4,7 +4,7 @@
 PSCAL = ../build/bin/pscal
 
 # List of test files
-TESTS = BoolTest1.p BoolTest2.p BoolTest3.p BoolTest4.p math.p FileTests.p FileTests2.p TestCase.p inc.p pass-by-reference.p \
+TESTS = BoolTest.p TestMath.p FileTests.p FileTests2.p TestCase.p IncTest.p TestVarParam.p \
         StringTruncationTest.p LowHighCharTest.p GlobalEnumTest.p EnumComparisonTest.p EnumCaseTest.p RecordFieldIndexTest.p \
         ProgramFileList.p EofDefaultInput.p OpenArrayParam.p PrimitiveArgCall.p SwapArrayElements.p
 
@@ -16,7 +16,7 @@ TESTS = BoolTest1.p BoolTest2.p BoolTest3.p BoolTest4.p math.p FileTests.p FileT
 #             OpenArrayBaseTypeMismatch.p
 
 # SDL-specific tests
-SDL_TESTS = SDLFeaturesTest # SDLRenderCopyTest.p
+SDL_TESTS = SDLFeaturesTest.p # SDLRenderCopyTest.p
 
 # Detect if SDL was enabled in the build (via CMakeCache)
 SDL_ENABLED := $(shell grep -q '^SDL:BOOL=ON$$' ../build/CMakeCache.txt 2>/dev/null && echo 1 || echo 0)
@@ -63,4 +63,5 @@ test:
 	else \
 	echo "Skipping SDL tests (SDL option is OFF)"; \
 	fi
+	@rm -f *.txt
 	

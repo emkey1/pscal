@@ -552,6 +552,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
+    // Initialize default file variables if present but not yet opened.
+    if (vm->vmGlobalSymbols) {
+        Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
+        if (inputSym && inputSym->value &&
+            inputSym->value->type == TYPE_FILE &&
+            inputSym->value->f_val == NULL) {
+            inputSym->value->f_val = stdin;
+        }
+
+        Symbol* outputSym = hashTableLookup(vm->vmGlobalSymbols, "output");
+        if (outputSym && outputSym->value &&
+            outputSym->value->type == TYPE_FILE &&
+            outputSym->value->f_val == NULL) {
+            outputSym->value->f_val = stdout;
+        }
+    }
+
     // Establish a base call frame for the main program.  This allows inline
     // routines at the top level to utilize local variable opcodes without
     // triggering stack underflows due to the absence of an active frame.

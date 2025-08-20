@@ -1,0 +1,29 @@
+Testing FOR loop break...
+1
+2
+3
+4
+5
+Breaking FOR loop at i = 5
+After FOR loop.
+
+Testing WHILE loop break...
+1
+2
+3
+4
+5
+6
+Breaking WHILE loop at i = 6
+After WHILE loop.
+
+Testing DO-WHILE loop break...
+1
+2
+3
+4
+5
+6
+7
+Breaking DO-WHILE loop at i = 7
+After DO-WHILE loop.

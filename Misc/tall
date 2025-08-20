@@ -9,7 +9,7 @@ PSCAL="${PSCAL:-$ROOT/build/bin/pscal}"       # plain interpreter
 
 for f in "$TESTS/TestSuite7.p" \
          "$TESTS/MathSuite01.p" \
-         "$TESTS/tid.p" "$TESTS/tcs" "$TESTS/tb"
+         "$TESTS/TestIncDecWithVerify.p" "$TESTS/tcs" "$TESTS/tb"
 do
   [ -r "$f" ] || echo "Missing test file: $f"
 done
@@ -28,17 +28,17 @@ run () {
 }
 
 # ---------- individual suites ----------
-run "MDArray"        "$PSCAL" "$TESTS/MDArray_Suite.p"
+run "MDArray"        "$PSCAL" "$TESTS/MultiDimArrayTest.p"
 run "TestSuite"      "$PSCAL" "$TESTS/TestSuite7.p"
 run "MathSuite"      "$PSCAL" "$TESTS/MathSuite01.p"
-run "BitwiseSuite"      "$PSCAL" "$TESTS/BitWiseSuite"
-run "TypeTestSuite"      "$PSCAL" "$TESTS/TypeTestSuite"
-run "FormattingTestSuite"      "$PSCAL" "$TESTS/FormattingTestSuite"
-run "FileIOSuite"      "$PSCAL" "$TESTS/FileIOSuite"
-run "PointerTortureTest"      "$PSCAL" "$TESTS/PointerTortureTest"
+run "BitwiseAndExprSuite"      "$PSCAL" "$TESTS/BitwiseAndExprSuite.p"
+run "TypeTestSuite"      "$PSCAL" "$TESTS/TypeTestSuite.p"
+run "FormattingTestSuite"      "$PSCAL" "$TESTS/FormattingTestSuite.p"
+run "TestFileOperations"      "$PSCAL" "$TESTS/TestFileOperations.p"
+run "PointerTortureTest"      "$PSCAL" "$TESTS/PointerTortureTest.p"
 
 # assorted one‑offs
-run "Assorted (tid)" "$PSCAL" "$TESTS/tid.p"
+run "Assorted (tid)" "$PSCAL" "$TESTS/TestIncDecWithVerify.p"
 run "Assorted (tcs)" "$PSCAL" "$TESTS/tcs"
 run "Assorted (tb)"  "$PSCAL" "$TESTS/tb"
 

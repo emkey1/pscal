@@ -163,6 +163,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             node->var_type = t;
             return t;
         }
+        case TCAST_ARRAY_ACCESS: {
+            analyzeExpr(node->left, scopes);
+            for (int i = 0; i < node->child_count; ++i) {
+                analyzeExpr(node->children[i], scopes);
+            }
+            node->var_type = TYPE_UNKNOWN;
+            return TYPE_UNKNOWN;
+        }
         default:
             return TYPE_UNKNOWN;
     }
@@ -175,6 +183,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             char *name = tokenToCString(node->token);
             ss_add(scopes, name, node->var_type);
             free(name);
+            if (node->left) analyzeExpr(node->left, scopes);
             break;
         }
         case TCAST_COMPOUND:
@@ -202,6 +211,17 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
         case TCAST_DO_WHILE:
             analyzeStmt(node->right, scopes, retType);
             analyzeExpr(node->left, scopes);
+            break;
+        case TCAST_SWITCH:
+            analyzeExpr(node->left, scopes);
+            for (int i = 0; i < node->child_count; ++i) {
+                ASTNodeClike *c = node->children[i];
+                analyzeExpr(c->left, scopes);
+                for (int j = 0; j < c->child_count; ++j) {
+                    analyzeStmt(c->children[j], scopes, retType);
+                }
+            }
+            if (node->right) analyzeStmt(node->right, scopes, retType);
             break;
         case TCAST_BREAK:
         case TCAST_CONTINUE:
