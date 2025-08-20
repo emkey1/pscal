@@ -1,4 +1,9 @@
+// Request a keypress before exiting to allow interactive inspection of the
+// rendered graphics.
+#include <stdio.h>
+
 int main() {
+    str dummy;
 #ifdef SDL_ENABLED
     int w;
     int h;
@@ -26,5 +31,7 @@ int main() {
     printf(479);
     printf("\n");
 #endif
+    printf("Press Enter to exit...\n");
+    scanf(dummy);
     return 0;
 }
