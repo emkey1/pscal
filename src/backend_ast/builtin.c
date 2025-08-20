@@ -32,23 +32,6 @@ static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
 
-#ifndef SDL
-// Stubbed graphics state for non-SDL builds
-static int gStubGraphWidth = 0;
-static int gStubGraphHeight = 0;
-
-// Forward declarations for stubbed graphics built-ins
-static Value vmBuiltinInitgraph(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinClosegraph(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinCleardevice(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinFillcircle(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinGetmaxx(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinGetmaxy(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinGraphloop(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinSetrgbcolor(struct VM_s* vm, int arg_count, Value* args);
-static Value vmBuiltinUpdatescreen(struct VM_s* vm, int arg_count, Value* args);
-#endif
-
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
@@ -67,10 +50,14 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
     {"chr", vmBuiltinChr},
+#ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
+#endif
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
+#ifdef SDL
     {"closegraph", vmBuiltinClosegraph},
+#endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
 #ifdef SDL
@@ -101,25 +88,29 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"eof", vmBuiltinEof},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
-    {"fillcircle", vmBuiltinFillcircle},
 #ifdef SDL
+    {"fillcircle", vmBuiltinFillcircle},
     {"fillrect", vmBuiltinFillrect},
 #endif
     {"getenv", vmBuiltinGetenv},
+#ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
-#ifdef SDL
     {"getmousestate", vmBuiltinGetmousestate},
     {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
 #endif
+#ifdef SDL
     {"graphloop", vmBuiltinGraphloop},
+#endif
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
     {"high", vmBuiltinHigh},
     {"inc", vmBuiltinInc},
+#ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
+#endif
 #ifdef SDL
     {"initsoundsystem", vmBuiltinInitsoundsystem},
     {"inittextsystem", vmBuiltinInittextsystem},
@@ -187,7 +178,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"setcolor", vmBuiltinSetcolor}, // Moved
     {"setrendertarget", vmBuiltinSetrendertarget}, // Moved
 #endif
+#ifdef SDL
     {"setrgbcolor", vmBuiltinSetrgbcolor},
+#endif
     {"sin", vmBuiltinSin},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
@@ -200,8 +193,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"trunc", vmBuiltinTrunc},
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
+ #ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
-#ifdef SDL
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
     {"val", vmBuiltinVal},
@@ -655,16 +648,30 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) {
-        runtimeError(vm, "ReadKey expects 0 arguments.");
+    if (arg_count != 0 && arg_count != 1) {
+        runtimeError(vm, "ReadKey expects 0 or 1 argument.");
         return makeChar('\0');
     }
     vmEnableRawMode();
 
     char c;
     if (read(STDIN_FILENO, &c, 1) != 1) {
-        return makeChar('\0');
+        c = '\0';
     }
+
+    if (arg_count == 1) {
+        if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
+            runtimeError(vm, "ReadKey argument must be a VAR char.");
+        } else {
+            Value* dst = (Value*)args[0].ptr_val;
+            if (dst->type == TYPE_CHAR) {
+                dst->c_val = c;
+            } else {
+                runtimeError(vm, "ReadKey argument must be of type CHAR.");
+            }
+        }
+    }
+
     return makeChar(c);
 }
 
@@ -1161,6 +1168,14 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     }
 
     AST *baseTypeNode = pointerVarValuePtr->base_type_node;
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG new] ptrVar=%p type=%s ptr_val=%p base=%p (%s)\n",
+            (void*)pointerVarValuePtr,
+            varTypeToString(pointerVarValuePtr->type),
+            pointerVarValuePtr->ptr_val,
+            (void*)baseTypeNode,
+            baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL");
+#endif
     if (!baseTypeNode) {
         runtimeError(vm, "Cannot determine base type for pointer variable in new().");
         return makeVoid();
@@ -2018,8 +2033,27 @@ Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "Length requires 1 string argument."); return makeInt(0); }
-    return makeInt(args[0].s_val ? strlen(args[0].s_val) : 0);
+    if (arg_count != 1) {
+        runtimeError(vm, "Length expects 1 argument.");
+        return makeInt(0);
+    }
+
+    if (args[0].type == TYPE_STRING) {
+        return makeInt(args[0].s_val ? (long long)strlen(args[0].s_val) : 0);
+    }
+
+    if (args[0].type == TYPE_ARRAY) {
+        long long len = 0;
+        if (args[0].dimensions > 0 && args[0].upper_bounds && args[0].lower_bounds) {
+            len = args[0].upper_bounds[0] - args[0].lower_bounds[0] + 1;
+        } else {
+            len = args[0].upper_bound - args[0].lower_bound + 1;
+        }
+        return makeInt(len);
+    }
+
+    runtimeError(vm, "Length expects a string or array argument.");
+    return makeInt(0);
 }
 
 
@@ -2241,62 +2275,4 @@ void registerAllBuiltins(void) {
     registerExtendedBuiltins();
 }
 
-#ifndef SDL
-// ---------------------------------------------------------------------------
-// Stub implementations for graphics-related built-ins when SDL support is
-// not available. These provide no-op behavior so programs can still run on
-// platforms without the SDL dependency.
-
-static Value vmBuiltinInitgraph(struct VM_s* vm, int arg_count, Value* args) {
-    if (arg_count == 3 && args[0].type == TYPE_INTEGER && args[1].type == TYPE_INTEGER) {
-        gStubGraphWidth  = (int)args[0].i_val;
-        gStubGraphHeight = (int)args[1].i_val;
-    } else {
-        runtimeError(vm, "initgraph expects (Integer, Integer, String)");
-    }
-    return makeVoid();
-}
-
-static Value vmBuiltinClosegraph(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinCleardevice(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinFillcircle(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinSetrgbcolor(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinUpdatescreen(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeVoid();
-}
-
-static Value vmBuiltinGraphloop(struct VM_s* vm, int arg_count, Value* args) {
-    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
-        usleep((useconds_t)args[0].i_val * 1000);
-    }
-    return makeVoid();
-}
-
-static Value vmBuiltinGetmaxx(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeInt(gStubGraphWidth > 0 ? gStubGraphWidth - 1 : 0);
-}
-
-static Value vmBuiltinGetmaxy(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)arg_count; (void)args;
-    return makeInt(gStubGraphHeight > 0 ? gStubGraphHeight - 1 : 0);
-}
-#endif
 

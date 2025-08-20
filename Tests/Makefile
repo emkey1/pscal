@@ -4,19 +4,18 @@
 PSCAL = ../build/bin/pscal
 
 # List of test files
-TESTS = BoolTest.p TestMath.p FileTests.p FileTests2.p TestCase.p IncTest.p TestVarParam.p \
-        StringTruncationTest.p LowHighCharTest.p GlobalEnumTest.p EnumComparisonTest.p EnumCaseTest.p RecordFieldIndexTest.p \
-        ProgramFileList.p EofDefaultInput.p OpenArrayParam.p PrimitiveArgCall.p SwapArrayElements.p
+TESTS := \
+  $(wildcard Pascal/*.p)
 
 
 # Tests that are expected to fail compilation
-#FAIL_TESTS = ArgumentOrderMismatch.p \
-#             ArgumentTypeMismatch.p \
-#             ArrayArgumentMismatch.p \
-#             OpenArrayBaseTypeMismatch.p
+#FAIL_TESTS = Pascal/ArgumentOrderMismatch.p \
+#             Pascal/ArgumentTypeMismatch.p \
+#             Pascal/ArrayArgumentMismatch.p \
+#             Pascal/OpenArrayBaseTypeMismatch.p
 
 # SDL-specific tests
-SDL_TESTS = SDLFeaturesTest.p # SDLRenderCopyTest.p
+SDL_TESTS = Pascal/SDLFeaturesTest.p # Pascal/SDLRenderCopyTest.p
 
 # Detect if SDL was enabled in the build (via CMakeCache)
 SDL_ENABLED := $(shell grep -q '^SDL:BOOL=ON$$' ../build/CMakeCache.txt 2>/dev/null && echo 1 || echo 0)

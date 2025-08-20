@@ -1118,6 +1118,43 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             }
                         }
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
+
+                        // Handle optional initializer for global variables
+                        if (node->left) {
+                            if (node->var_type == TYPE_ARRAY && node->left->type == AST_ARRAY_LITERAL) {
+                                AST* array_type = actual_type_def_node;
+                                int dimension_count = array_type->child_count;
+                                if (dimension_count == 1) {
+                                    AST* sub = array_type->children[0];
+                                    Value low_v = evaluateCompileTimeValue(sub->left);
+                                    Value high_v = evaluateCompileTimeValue(sub->right);
+                                    int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
+                                    int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
+                                    freeValue(&low_v); freeValue(&high_v);
+                                    int lb[1] = { low };
+                                    int ub[1] = { high };
+                                    AST* elem_type_node = array_type->right;
+                                    VarType elem_type = elem_type_node->var_type;
+                                    Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
+                                    int total = calculateArrayTotalSize(&arr_val);
+                                    for (int j = 0; j < total && j < node->left->child_count; j++) {
+                                        Value ev = evaluateCompileTimeValue(node->left->children[j]);
+                                        freeValue(&arr_val.array_val[j]);
+                                        arr_val.array_val[j] = makeCopyOfValue(&ev);
+                                        freeValue(&ev);
+                                    }
+                                    int constIdx = addConstantToChunk(chunk, &arr_val);
+                                    freeValue(&arr_val);
+                                    emitConstant(chunk, constIdx, getLine(node));
+                                } else {
+                                    compileRValue(node->left, chunk, getLine(node->left));
+                                }
+                            } else {
+                                compileRValue(node->left, chunk, getLine(node->left));
+                            }
+                            int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
+                            emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16, name_idx_set, getLine(varNameNode));
+                        }
                     }
                 }
             } else { // Local variables
@@ -1212,6 +1249,43 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             type_name = actual_type_def_node->token->value;
                         }
                         emitConstantIndex16(chunk, addStringConstant(chunk, type_name), getLine(varNameNode));
+                    }
+
+                    // Handle optional initializer for local variables
+                    if (node->left) {
+                        if (node->var_type == TYPE_ARRAY && node->left->type == AST_ARRAY_LITERAL) {
+                            AST* array_type = actual_type_def_node;
+                            int dimension_count = array_type->child_count;
+                            if (dimension_count == 1) {
+                                AST* sub = array_type->children[0];
+                                Value low_v = evaluateCompileTimeValue(sub->left);
+                                Value high_v = evaluateCompileTimeValue(sub->right);
+                                int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
+                                int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
+                                freeValue(&low_v); freeValue(&high_v);
+                                int lb[1] = { low };
+                                int ub[1] = { high };
+                                AST* elem_type_node = array_type->right;
+                                VarType elem_type = elem_type_node->var_type;
+                                Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
+                                int total = calculateArrayTotalSize(&arr_val);
+                                for (int j = 0; j < total && j < node->left->child_count; j++) {
+                                    Value ev = evaluateCompileTimeValue(node->left->children[j]);
+                                    freeValue(&arr_val.array_val[j]);
+                                    arr_val.array_val[j] = makeCopyOfValue(&ev);
+                                    freeValue(&ev);
+                                }
+                                int constIdx = addConstantToChunk(chunk, &arr_val);
+                                freeValue(&arr_val);
+                                emitConstant(chunk, constIdx, getLine(node));
+                            } else {
+                                compileRValue(node->left, chunk, getLine(node->left));
+                            }
+                        } else {
+                            compileRValue(node->left, chunk, getLine(node->left));
+                        }
+                        writeBytecodeChunk(chunk, OP_SET_LOCAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     }
                 }
             }
@@ -1983,7 +2057,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     is_var_param = true;
                 }
                 else if (calleeName && (
-                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0)) ||
+                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
                     (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR

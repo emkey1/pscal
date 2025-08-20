@@ -3,6 +3,7 @@
 #include "backend_ast/builtin.h"
 #include "clike/parser.h"
 #include "clike/semantics.h"
+#include "frontend/ast.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
@@ -78,6 +79,34 @@ static char* tokenStringToCString(ClikeToken t) {
     return s;
 }
 
+// Local helper to construct identifier tokens for core AST nodes
+static Token* makeIdentTokenLocal(const char* s) {
+    Token* t = (Token*)malloc(sizeof(Token));
+    t->type = TOKEN_IDENTIFIER;
+    t->value = strdup(s);
+    t->line = 0;
+    t->column = 0;
+    return t;
+}
+
+// Create a core AST node representing a builtin type token
+static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
+    const char* name = NULL;
+    VarType vt = TYPE_UNKNOWN;
+    switch (t.type) {
+        case CLIKE_TOKEN_INT:   name = "integer"; vt = TYPE_INTEGER; break;
+        case CLIKE_TOKEN_FLOAT: name = "real";    vt = TYPE_REAL;    break;
+        case CLIKE_TOKEN_STR:   name = "string";  vt = TYPE_STRING;  break;
+        case CLIKE_TOKEN_TEXT:  name = "text";    vt = TYPE_FILE;    break;
+        case CLIKE_TOKEN_CHAR:  name = "char";    vt = TYPE_CHAR;    break;
+        default: return NULL;
+    }
+    Token* tok = makeIdentTokenLocal(name);
+    AST* node = newASTNode(AST_VARIABLE, tok);
+    setTypeAST(node, vt);
+    return node;
+}
+
 static void beginScope(FuncContext* ctx) { ctx->scopeDepth++; }
 
 static void endScope(FuncContext* ctx) {
@@ -145,6 +174,20 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
         }
         writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+    } else if (node->type == TCAST_MEMBER) {
+        compileExpression(node->left, chunk, ctx);
+        if (node->right && node->right->type == TCAST_IDENTIFIER) {
+            char *fname = tokenToCString(node->right->token);
+            int idx = addStringConstant(chunk, fname);
+            if (idx < 256) {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, node->token.line);
+                emitShort(chunk, (uint16_t)idx, node->token.line);
+            }
+            free(fname);
+        }
     }
 }
 
@@ -368,7 +411,35 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             char* name = tokenToCString(node->token);
             int idx = resolveLocal(ctx, name);
             free(name);
-            if (node->is_array) {
+            if (node->var_type == TYPE_POINTER) {
+                if (node->left) {
+                    compileExpression(node->left, chunk, ctx);
+                } else {
+                    AST *base = NULL;
+                    if (node->right && node->right->type == TCAST_IDENTIFIER) {
+                        if (node->right->token.type == CLIKE_TOKEN_IDENTIFIER) {
+                            char *tname = tokenToCString(node->right->token);
+                            base = clike_lookup_struct(tname);
+                            if (!base) base = lookupType(tname);
+                            free(tname);
+                        } else {
+                            base = makeBuiltinTypeASTFromToken(node->right->token);
+                        }
+                    }
+                    Value init;
+                    if (base) {
+                        init = makePointer(NULL, base);
+                    } else {
+                        init = makeValueForType(TYPE_POINTER, NULL, NULL);
+                    }
+                    int cidx = addConstantToChunk(chunk, &init);
+                    freeValue(&init);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                }
+                writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else if (node->is_array) {
                 int elemNameIdx = addStringConstant(chunk, "");
                 writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -459,7 +530,25 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
                 case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
-                case CLIKE_TOKEN_SLASH: writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line); break;
+                case CLIKE_TOKEN_SLASH:
+                    if (node->var_type == TYPE_INTEGER &&
+                        node->left && node->right &&
+                        node->left->var_type == TYPE_INTEGER &&
+                        node->right->var_type == TYPE_INTEGER) {
+                        /*
+                         * In C, dividing two integers performs integer division
+                         * (truncating toward zero).  The VM has a dedicated
+                         * opcode for this behaviour (OP_INT_DIV), whereas
+                         * OP_DIVIDE always produces a real result.  Without this
+                         * check, expressions like `w / 4` would yield a real
+                         * value, which breaks APIs expecting integer arguments
+                         * (e.g. drawrect in the graphics tests).
+                         */
+                        writeBytecodeChunk(chunk, OP_INT_DIV, node->token.line);
+                    } else {
+                        writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line);
+                    }
+                    break;
                 case CLIKE_TOKEN_GREATER: writeBytecodeChunk(chunk, OP_GREATER, node->token.line); break;
                 case CLIKE_TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, node->token.line); break;
                 case CLIKE_TOKEN_LESS: writeBytecodeChunk(chunk, OP_LESS, node->token.line); break;
@@ -483,6 +572,13 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_TILDE: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
                 default: break;
             }
+            break;
+        case TCAST_ADDR:
+            compileLValue(node->left, chunk, ctx);
+            break;
+        case TCAST_DEREF:
+            compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
             break;
         case TCAST_ASSIGN: {
             if (node->left) {
@@ -515,12 +611,33 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     compileLValue(node->left, chunk, ctx);            // [..., value, value, ptr]
                     writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
                     writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
+                } else if (node->left->type == TCAST_DEREF) {
+                    compileExpression(node->right, chunk, ctx);      // [..., value]
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line); // [..., value, value]
+                    compileExpression(node->left->left, chunk, ctx); // [..., value, value, ptr]
+                    writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
+                } else if (node->left->type == TCAST_MEMBER) {
+                    compileExpression(node->right, chunk, ctx);      // [..., value]
+                    writeBytecodeChunk(chunk, OP_DUP, node->token.line); // [..., value, value]
+                    compileLValue(node->left, chunk, ctx);           // [..., value, value, ptr]
+                    writeBytecodeChunk(chunk, OP_SWAP, node->token.line); // [..., value, ptr, value]
+                    writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line); // [..., value]
                 }
             }
             break;
         }
         case TCAST_IDENTIFIER: {
             char* name = tokenToCString(node->token);
+            if (strcmp(name, "NULL") == 0) {
+                Value v; memset(&v, 0, sizeof(Value));
+                v.type = TYPE_POINTER;
+                int cidx = addConstantToChunk(chunk, &v);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                free(name);
+                break;
+            }
             int idx = resolveLocal(ctx, name);
             free(name);
             writeBytecodeChunk(chunk, OP_GET_LOCAL, node->token.line);
@@ -529,6 +646,22 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         }
         case TCAST_ARRAY_ACCESS:
             compileLValue(node, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
+            break;
+        case TCAST_MEMBER:
+            compileExpression(node->left, chunk, ctx);
+            if (node->right && node->right->type == TCAST_IDENTIFIER) {
+                char *fname = tokenToCString(node->right->token);
+                int idx = addStringConstant(chunk, fname);
+                if (idx < 256) {
+                    writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                } else {
+                    writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, node->token.line);
+                    emitShort(chunk, (uint16_t)idx, node->token.line);
+                }
+                free(fname);
+            }
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
             break;
         case TCAST_CALL: {

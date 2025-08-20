@@ -6,6 +6,7 @@
 #include "clike/builtins.h"
 #include "clike/semantics.h"
 #include "clike/opt.h"
+#include "clike/preproc.h"
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -36,7 +37,14 @@ int main(void) {
         char *src = (char*)malloc(len);
         snprintf(src, len, "%s%s%s", prefix, line, suffix);
 
-        ParserClike parser; initParserClike(&parser, src);
+        const char *defines[1];
+        int define_count = 0;
+#ifdef SDL
+        defines[define_count++] = "SDL_ENABLED";
+#endif
+        char *pre_src = clike_preprocess(src, defines, define_count);
+
+        ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
         ASTNodeClike *prog = parseProgramClike(&parser);
 
         if (!verifyASTClikeLinks(prog, NULL)) {
@@ -75,6 +83,7 @@ int main(void) {
             freeBytecodeChunk(&chunk);
         }
         freeASTClike(prog);
+        if (pre_src) free(pre_src);
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);

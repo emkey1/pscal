@@ -1507,12 +1507,23 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
     AST *originalTypeNode = typeSpecifier(parser, 0);
     if (!originalTypeNode) { /* error handling */ freeAST(groupNode); return NULL; }
 
+    // Optional initializer after type
+    AST *initNode = NULL;
+    if (parser->current_token && parser->current_token->type == TOKEN_EQUAL) {
+        eat(parser, TOKEN_EQUAL);
+        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+            initNode = parseArrayInitializer(parser);
+        } else {
+            initNode = expression(parser);
+        }
+    }
+
     AST *finalCompoundNode = newASTNode(AST_COMPOUND, NULL);
 
     // 3. Create final VAR_DECL nodes, creating COPIES of type nodes for each
     for (int i = 0; i < groupNode->child_count; ++i) {
         AST *var_decl_node = newASTNode(AST_VAR_DECL, NULL);
-        if (!var_decl_node) { /* Malloc check */ freeAST(groupNode); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
+        if (!var_decl_node) { /* Malloc check */ freeAST(groupNode); freeAST(initNode); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
         // var_type will be set after copying the type node.
 
         // Transfer the name node (AST_VARIABLE) from groupNode
@@ -1531,6 +1542,13 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
         AST* typeNodeCopy = copyAST(originalTypeNode);
         if (!typeNodeCopy) { /* error handling */ freeAST(groupNode); freeAST(originalTypeNode); freeAST(var_decl_node); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
         setRight(var_decl_node, typeNodeCopy); // Link VAR_DECL to the UNIQUE copy
+
+        // Copy initializer, if any
+        if (initNode) {
+            AST *initCopy = copyAST(initNode);
+            if (!initCopy) { freeAST(groupNode); freeAST(originalTypeNode); freeAST(initNode); freeAST(var_decl_node); freeAST(finalCompoundNode); EXIT_FAILURE_HANDLER(); }
+            setLeft(var_decl_node, initCopy);
+        }
 
         // Ensure the declared variable's type matches the copied type node.
         // This avoids cases where a previous declaration (e.g., an array)
@@ -1554,6 +1572,7 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
 
     // --- Free the ORIGINAL typeNode returned by typeSpecifier ---
     freeAST(originalTypeNode);
+    if (initNode) freeAST(initNode);
 
     // Free the temporary groupNode (its children pointers were nulled out)
     freeAST(groupNode);

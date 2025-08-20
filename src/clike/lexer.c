@@ -161,6 +161,7 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
             }
             case '-': {
                 if (match(lexer, '-')) return makeToken(lexer, CLIKE_TOKEN_MINUS_MINUS, start, 2, startColumn);
+                if (match(lexer, '>')) return makeToken(lexer, CLIKE_TOKEN_ARROW, start, 2, startColumn);
                 return makeToken(lexer, CLIKE_TOKEN_MINUS, start, 1, startColumn);
             }
             case '*': return makeToken(lexer, CLIKE_TOKEN_STAR, start, 1, startColumn);
@@ -256,6 +257,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_OR_OR: return "||";
         case CLIKE_TOKEN_COLON: return ":";
         case CLIKE_TOKEN_DOT: return ".";
+        case CLIKE_TOKEN_ARROW: return "->";
         case CLIKE_TOKEN_SEMICOLON: return ";";
         case CLIKE_TOKEN_COMMA: return ",";
         case CLIKE_TOKEN_LPAREN: return "(";

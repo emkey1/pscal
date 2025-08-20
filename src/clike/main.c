@@ -7,6 +7,7 @@
 #include "clike/semantics.h"
 #include "clike/errors.h"
 #include "clike/opt.h"
+#include "clike/preproc.h"
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -67,7 +68,14 @@ int main(int argc, char **argv) {
     fseek(f, 0, SEEK_END); long len = ftell(f); rewind(f);
     char *src = (char*)malloc(len + 1); fread(src,1,len,f); src[len]='\0'; fclose(f);
 
-    ParserClike parser; initParserClike(&parser, src);
+    const char *defines[1];
+    int define_count = 0;
+#ifdef SDL
+    defines[define_count++] = "SDL_ENABLED";
+#endif
+    char *pre_src = clike_preprocess(src, defines, define_count);
+
+    ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
     ASTNodeClike *prog = parseProgramClike(&parser);
 
     if (!verifyASTClikeLinks(prog, NULL)) {
@@ -139,6 +147,7 @@ int main(int argc, char **argv) {
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);
     free(src);
+    if (pre_src) free(pre_src);
     if (globalSymbols) freeHashTable(globalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
     return result == INTERPRET_OK ? 0 : 1;

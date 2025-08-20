@@ -3,7 +3,7 @@
 #   PSCAL=/path/to/pscal ./tall
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TESTS="${TESTS:-$ROOT/Tests}"  # all your .p / .pas files live here
+TESTS="${TESTS:-$ROOT/Tests/Pascal}"  # all your .p / .pas files live here
 
 PSCAL="${PSCAL:-$ROOT/build/bin/pscal}"       # plain interpreter
 

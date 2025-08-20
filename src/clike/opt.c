@@ -25,7 +25,17 @@ static ASTNodeClike* foldBinary(ASTNodeClike* node) {
         case CLIKE_TOKEN_PLUS: res = lv + rv; break;
         case CLIKE_TOKEN_MINUS: res = lv - rv; break;
         case CLIKE_TOKEN_STAR: res = lv * rv; break;
-        case CLIKE_TOKEN_SLASH: res = lv / rv; result_is_float = 1; break;
+        case CLIKE_TOKEN_SLASH:
+            if (lf || rf) {
+                /* If either operand is float, perform floating-point division. */
+                res = lv / rv;
+                result_is_float = 1;
+            } else {
+                /* Both operands are integers: mimic C's integer division. */
+                res = (double)((long long)lv / (long long)rv);
+                result_is_float = 0;
+            }
+            break;
         case CLIKE_TOKEN_EQUAL_EQUAL: res = (lv == rv); result_is_float = 0; break;
         case CLIKE_TOKEN_BANG_EQUAL: res = (lv != rv); result_is_float = 0; break;
         case CLIKE_TOKEN_LESS: res = (lv < rv); result_is_float = 0; break;

@@ -263,6 +263,7 @@ set(CLIKE_SOURCES
     src/clike/semantics.c
     src/clike/codegen.c
     src/clike/opt.c
+    src/clike/preproc.c
     src/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
     src/compiler/bytecode.c

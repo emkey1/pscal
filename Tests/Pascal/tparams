@@ -1,0 +1,36 @@
+program TestParams;
+
+uses Crt; // For WriteLn
+
+var
+  i: Integer;
+  numParams: Integer;
+  paramValue: string;
+
+begin
+  WriteLn('--- Command Line Parameter Test ---');
+
+  // Get the number of command-line parameters passed *after* the program name
+  numParams := ParamCount;
+
+  Writeln('ParamCount reported: ', numParams);
+  Writeln;
+
+  if numParams > 0 then
+  begin
+    Writeln('Parameters received:');
+    // Loop through parameters (ParamStr is typically 1-based in Pascal)
+    for i := 1 to numParams do
+    begin
+      paramValue := ParamStr(i);
+      Writeln('  ParamStr(', i, '): "', paramValue, '"');
+    end;
+  end
+  else
+  begin
+    Writeln('No command line parameters were provided (after the program name).');
+  end;
+
+  Writeln;
+  Writeln('--- Test Complete ---');
+end.
