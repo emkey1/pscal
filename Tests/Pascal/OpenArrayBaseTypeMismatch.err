@@ -1,2 +1,2 @@
-L10: Compiler Error: argument 1 to 'proc' expects type ARRAY but got ARRAY.
+L10: Compiler Error: argument 1 to 'proc' expects type ARRAY OF INTEGER but got ARRAY OF REAL.
 Compilation failed with errors.
