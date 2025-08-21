@@ -692,20 +692,25 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                                 seg[seglen++] = '%';
                                 i++; // skip second %
                             } else {
-                                if (seglen > 0) {
-                                    seg[seglen] = '\0';
-                                    Value strv = makeString(seg);
-                                    int cidx = addConstantToChunk(chunk, &strv);
-                                    freeValue(&strv);
-                                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
-                                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
-                                    write_arg_count++;
-                                    seglen = 0;
+                                size_t j = i + 1;
+                                const char *specifiers = "cdiuoxXfFeEgGaAspn";
+                                while (j < flen && strchr(specifiers, fmt[j]) == NULL) {
+                                    j++;
                                 }
-                                if (arg_index < node->child_count) {
+                                if (j < flen && arg_index < node->child_count) {
+                                    if (seglen > 0) {
+                                        seg[seglen] = '\0';
+                                        Value strv = makeString(seg);
+                                        int cidx = addConstantToChunk(chunk, &strv);
+                                        freeValue(&strv);
+                                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                                        writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                                        write_arg_count++;
+                                        seglen = 0;
+                                    }
                                     compileExpression(node->children[arg_index++], chunk, ctx);
                                     write_arg_count++;
-                                    i++; // skip specifier char
+                                    i = j; // skip full format specifier
                                 } else {
                                     seg[seglen++] = '%';
                                 }
