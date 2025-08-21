@@ -1,27 +1,39 @@
 # Pscal Project Overview
 
-Pscal is a Pascal‑like language implemented in C.  The code base contains
-three major components:
+Pscal is a Pascal‑like language implemented in C. The project now ships with
+multiple front ends that all target a shared virtual machine:
 
-* **Front end** – hand written lexer and parser.
-* **Bytecode compiler** – generates a compact instruction stream.
-* **Virtual machine** – executes the bytecode and provides built‑in routines.
+* **Pascal compiler** – hand‑written lexer and parser.
+* **Clike compiler** – compact C‑style syntax compiled to the same bytecode.
+* **Tiny compiler** – educational front end written in Python.
 
-Optional SDL2 and libcurl integrations add graphics, audio and basic
-networking capabilities.
+All front ends emit a compact bytecode stream executed by a stack‑based virtual
+machine. The VM provides built‑in routines and optional SDL2 and libcurl
+integrations for graphics, audio and networking.
+
+## Requirements
+
+* C compiler with C11 support
+* [CMake](https://cmake.org/) 3.24 or newer
+* [libcurl](https://curl.se/libcurl/)
+* **Optional**: SDL2, SDL2_image, SDL2_mixer and SDL2_ttf when building with
+  `-DSDL=ON`
 
 ## Building
 
-Pscal uses CMake.  A typical non‑SDL build looks like:
-
 ```sh
 mkdir build && cd build
-cmake -DSDL=OFF ..
+cmake ..            # add -DSDL=ON to enable SDL support
 make
 ```
 
-Enable SDL support by passing `-DSDL=ON` and ensuring the SDL2 development
-libraries are installed.
+To explicitly disable SDL support:
+
+```sh
+cmake -DSDL=OFF ..
+```
+
+Binaries are placed in `build/bin` (e.g. `pascal`, `clike` and `pscalvm`).
 
 ## Testing
 
@@ -33,12 +45,14 @@ cd Tests; ./run_all_tests
 
 ## Directory Layout
 
-* `src/` – compiler and virtual machine sources
+* `src/` – core compiler and virtual machine sources
 * `lib/pascal/` – standard library units written in Pscal
 * `lib/clike/` – standard modules written in clike
 * `lib/sounds/` – audio assets shared by front ends
-* `Examples/` – small sample programs
+* `Examples/` – sample programs for each front end
 * `Docs/` – project and language documentation
+* `tools/` – additional front ends and utilities (e.g. `tools/tiny`)
+* `Tests/` – regression suite
 
 ## License
 
