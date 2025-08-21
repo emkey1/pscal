@@ -6,7 +6,7 @@ USES CRT; // For console WriteLn and ReadKey
 CONST
   ScreenWidth  = 1024;
   ScreenHeight = 768;
-  Title        = 'Pscal SDL Features Test';
+  Title        = 'Pascal SDL Features Test';
   FontPath     = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf'; // Make sure this path is correct for your system
   FontSize     = 18;
 
@@ -60,7 +60,7 @@ BEGIN
 
     // --- Text Output ---
     SetRGBColor(255, 255, 0); // Yellow text
-    OutTextXY(10, 10, 'Pscal SDL Test Program!');
+    OutTextXY(10, 10, 'Pascal SDL Test Program!');
     OutTextXY(10, 30, 'Mouse X: ' + IntToStr(mx) + ' Y: ' + IntToStr(my));
     OutTextXY(10, 50, 'Buttons: ' + IntToStr(buttons));
     OutTextXY(10, ScreenHeight - 30, eventInfo);
