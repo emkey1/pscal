@@ -1,0 +1,8 @@
+import "math_utils.cl";
+
+int main() {
+    int value = 5;
+    printf("%d squared is %d\n", value, square(value));
+    printf("%d cubed is %d\n", value, cube(value));
+    return 0;
+}
