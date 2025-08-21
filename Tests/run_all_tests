@@ -1,6 +1,6 @@
 #/bin/bash
 echo "Running Pascal Tests"
-./run_tests.sh
+./run_pascal_tests.sh
 echo "Pascal Tests End"
 echo "====================================="
 echo

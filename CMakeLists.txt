@@ -364,5 +364,5 @@ include(GNUInstallDirs)
 install(TARGETS pascal dascal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
-add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_tests.sh)
+add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)

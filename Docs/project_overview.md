@@ -28,16 +28,14 @@ libraries are installed.
 After compiling, run the regression suite:
 
 ```sh
-ctest --output-on-failure
+cd Tests; ./run_all_tests
 ```
-
-This executes `Tests/run_tests.sh` and exercises positive and expected
-failure cases.
 
 ## Directory Layout
 
 * `src/` – compiler and virtual machine sources
 * `lib/pascal/` – standard library units written in Pscal
+* `lib/clike/` – standard modules written in clike
 * `lib/sounds/` – audio assets shared by front ends
 * `Examples/` – small sample programs
 * `Docs/` – project and language documentation
