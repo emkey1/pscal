@@ -13,6 +13,7 @@
 #include "builtin.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
+#include <sys/stat.h>  // For stat
 
 
 const char *varTypeToString(VarType type) {
@@ -1180,6 +1181,12 @@ char *findUnitFile(const char *unit_name) {
     const char *base_path = getenv("PSCAL_LIB_DIR");
     if (base_path == NULL || *base_path == '\0') {
         base_path = "/usr/local/pscal/Pascal/lib/pascal";   // Default relative library path
+    }
+
+    struct stat dir_info;
+    if (stat(base_path, &dir_info) != 0 || !S_ISDIR(dir_info.st_mode)) {
+        fprintf(stderr, "Error: Pascal library directory not found. Searched path: %s\n", base_path);
+        EXIT_FAILURE_HANDLER();
     }
 
     // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
