@@ -162,8 +162,8 @@ int main() {
         done = 0;
         while (!done) {
             draw_hangman(wrong);
-            printf("Word: ", so_far);
-            printf("Used: ", used);
+            printf("Word: %s", so_far);
+            printf("Used: %s", used);
             printf("Guess: ");
             scanf(guess);
             if (strlen(guess) == 0) continue;
@@ -214,9 +214,9 @@ int main() {
         }
         if (wrong >= max_wrong) {
             draw_hangman(wrong);
-            printf("You lose! The word was ", secret);
+            printf("You lose! The word was %s", secret);
         } else {
-            printf("You win! The word was ", secret);
+            printf("You win! The word was %s", secret);
         }
         printf("Play again (Y/N)? ");
         scanf(guess);

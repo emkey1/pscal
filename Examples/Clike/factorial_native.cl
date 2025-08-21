@@ -14,6 +14,10 @@ int main() {
     gotoxy(1,1);
     printf("Please enter an integer value to calculate a factorial: ");
     scanf(n);
-    printf(fact(n),"\n");
+    if (n < 0 || n > 20) {
+        printf("Input must be between 0 and 20\n");
+        return 0;
+    }
+    printf("%d\n", fact(n));
     return 0;
 }

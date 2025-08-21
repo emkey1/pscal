@@ -1,7 +1,6 @@
 int main() {
     str t;
     scanf(t);
-    printf(t);
-    printf("\n");
+    printf("%s\n", t);
     return 0;
 }

@@ -2,8 +2,7 @@ int main() {
     int i;
     printf("Testing FOR loop break...\n");
     for (i = 1; i <= 10; i = i + 1) {
-        printf(i);
-        printf("\n");
+        printf("%d\n", i);
         if (i == 5) {
             printf("Breaking FOR loop at i = 5\n");
             break;
@@ -16,8 +15,7 @@ int main() {
     i = 0;
     while (i < 10) {
         i = i + 1;
-        printf(i);
-        printf("\n");
+        printf("%d\n", i);
         if (i == 6) {
             printf("Breaking WHILE loop at i = 6\n");
             break;
@@ -30,8 +28,7 @@ int main() {
     i = 0;
     do {
         i = i + 1;
-        printf(i);
-        printf("\n");
+        printf("%d\n", i);
         if (i == 7) {
             printf("Breaking DO-WHILE loop at i = 7\n");
             break;

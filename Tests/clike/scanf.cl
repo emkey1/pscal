@@ -1,7 +1,6 @@
 int main() {
     int x;
     scanf(x);
-    printf(x);
-    printf("\n");
+    printf("%d\n", x);
     return 0;
 }
