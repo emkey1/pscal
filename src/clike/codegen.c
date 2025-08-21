@@ -577,6 +577,22 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 default: break;
             }
             break;
+        case TCAST_TERNARY: {
+            compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+            int elseJump = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            compileExpression(node->right, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+            int endJump = chunk->count;
+            emitShort(chunk, 0xFFFF, node->token.line);
+            uint16_t elseOffset = (uint16_t)(chunk->count - (elseJump + 2));
+            patchShort(chunk, elseJump, elseOffset);
+            compileExpression(node->third, chunk, ctx);
+            uint16_t endOffset = (uint16_t)(chunk->count - (endJump + 2));
+            patchShort(chunk, endJump, endOffset);
+            break;
+        }
         case TCAST_UNOP:
             compileExpression(node->left, chunk, ctx);
             switch (node->token.type) {

@@ -139,6 +139,15 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_UNOP:
             node->var_type = analyzeExpr(node->left, scopes);
             return node->var_type;
+        case TCAST_TERNARY: {
+            analyzeExpr(node->left, scopes);
+            VarType rt = analyzeExpr(node->right, scopes);
+            VarType ft = analyzeExpr(node->third, scopes);
+            if (rt == TYPE_REAL || ft == TYPE_REAL) node->var_type = TYPE_REAL;
+            else if (rt == TYPE_STRING || ft == TYPE_STRING) node->var_type = TYPE_STRING;
+            else node->var_type = rt != TYPE_UNKNOWN ? rt : ft;
+            return node->var_type;
+        }
         case TCAST_ADDR:
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_POINTER;
