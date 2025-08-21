@@ -1,5 +1,5 @@
-int fact(int n) {
-    int result;
+int fact(long n) {
+    long result;
     result = 1;
     while (n > 1) {
         result = result * n;
@@ -14,10 +14,10 @@ int main() {
     gotoxy(1,1);
     printf("Please enter an integer value to calculate a factorial: ");
     scanf(n);
-    if (n < 0 || n > 20) {
+    if (n < 0 || n > 52) {
         printf("Input must be between 0 and 20\n");
         return 0;
     }
-    printf("%d\n", fact(n));
+    printf("%lld\n", fact(n));
     return 0;
 }

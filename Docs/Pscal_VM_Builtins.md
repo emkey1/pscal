@@ -1,6 +1,10 @@
 # Pscal Built-in Functions
 
-This document lists the built-in procedures and functions provided by Pscal.
+This document lists the built-in procedures and functions provided by the Pscal
+VM.
+
+They should generally be available in all front ends, and are in the Pascal and
+CLike ones.
 
 ## General
 - `inttostr` – Convert integer to string.
