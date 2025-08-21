@@ -15,7 +15,7 @@ if [[ -n ${TINYCC_VERBOSE:-} ]]; then
 fi
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 [-v] <input.c> <output>" >&2
+  echo "Usage: $0 [-v] <input.cl> <output>" >&2
   exit 1
 fi
 
@@ -30,7 +30,7 @@ if ! command -v "$TCC_BIN" >/dev/null 2>&1; then
 fi
 
 # Invoke compiler
-"$TCC_BIN" "$INPUT" -o "$OUTPUT"
+"$TCC_BIN" -x c "$INPUT" -o "$OUTPUT"
 
 if [[ ! -f "$OUTPUT" ]]; then
   echo "Error: compilation failed, output $OUTPUT not created" >&2

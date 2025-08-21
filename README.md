@@ -79,7 +79,7 @@ calling a function name that lacks a user definition.
 Example usage:
 
 ```sh
-build/bin/clike program.c
+build/bin/clike program.cl
 
 ```
 
