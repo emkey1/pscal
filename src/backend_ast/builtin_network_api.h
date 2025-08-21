@@ -9,7 +9,7 @@
 #define BUILTIN_NETWORK_API_H
 
 #include "core/types.h"
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 
 // Prototypes for AST-based handlers
 

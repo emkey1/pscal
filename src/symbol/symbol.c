@@ -4,7 +4,7 @@
 //
 //  Created by Michael Miller on 3/25/25.
 //
-#include "frontend/lexer.h"
+#include "Pascal/lexer.h"
 #include "core/utils.h"
 #include "globals.h"
 #include <string.h>
@@ -13,7 +13,7 @@
 #include "symbol/symbol.h"
 #include <assert.h>
 #include "core/list.h"
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 
 // --- Hash Table Implementation ---
 

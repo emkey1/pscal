@@ -5,7 +5,7 @@
 Pscal follows a traditional compiler pipeline composed of a front end, a bytecode compiler, and a virtual machine.
 
 ### Front End
-The front end tokenises source text with a hand‑written lexer that recognises Pascal keywords such as `begin`, `record`, `set`, `while` and `writeln`【F:src/frontend/lexer.c†L10-L33】. The parser builds an abstract syntax tree (AST) for programs, units, and type declarations, supporting constructs like enums and records.
+The front end tokenises source text with a hand‑written lexer that recognises Pascal keywords such as `begin`, `record`, `set`, `while` and `writeln`【F:src/Pascal/lexer.c†L10-L33】. The parser builds an abstract syntax tree (AST) for programs, units, and type declarations, supporting constructs like enums and records.
 
 ### Bytecode Compiler
 The compiler walks the AST and emits bytecode instructions into a `BytecodeChunk`. It maintains scope information for locals, loop handling, and constant pools【F:src/compiler/compiler.c†L1-L72】.

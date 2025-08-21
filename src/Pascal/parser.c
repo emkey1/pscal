@@ -3,7 +3,7 @@
 
 #include "core/list.h"
 #include "compiler/compiler.h"
-#include "frontend/parser.h"
+#include "Pascal/parser.h"
 #include "core/utils.h"
 #include "core/types.h"
 #include "globals.h"
@@ -1113,9 +1113,9 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 }
 
 // constDeclaration: Calls expression or parseArrayInitializer
-// In src/frontend/parser.c
+// In src/Pascal/parser.c
 
-// src/frontend/parser.c
+// src/Pascal/parser.c
 
 AST *constDeclaration(Parser *parser) {
 #ifdef DEBUG

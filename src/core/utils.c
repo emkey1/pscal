@@ -4,7 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include "documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>

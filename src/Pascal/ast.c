@@ -1,10 +1,10 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include "globals.h"
 #include "symbol/symbol.h"
-#include "frontend/parser.h"
+#include "Pascal/parser.h"
 #include "backend_ast/builtin.h"
 
 bool isNodeInTypeTable(AST* nodeToFind) {
