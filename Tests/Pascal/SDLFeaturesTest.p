@@ -7,8 +7,9 @@ CONST
   ScreenWidth  = 1024;
   ScreenHeight = 768;
   Title        = 'Pascal SDL Features Test';
-  FontPath     = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf'; // Make sure this path is correct for your system
-  FontSize     = 18;
+  SystemFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  RepoFontPath    = 'fonts/Roboto/static/Roboto-Regular.ttf';
+  FontSize        = 18;
 
   // Mouse button constants (example mapping)
   ButtonLeft   = 1;
@@ -24,7 +25,10 @@ VAR
 
 BEGIN
   InitGraph(ScreenWidth, ScreenHeight, Title);
-  InitTextSystem(FontPath, FontSize); // Initialize font system
+  if FileExists(SystemFontPath) then
+    InitTextSystem(SystemFontPath, FontSize)
+  else
+    InitTextSystem(RepoFontPath, FontSize); // Initialize font system
 
   quit := False;
   frameCount := 0;
