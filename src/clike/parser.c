@@ -65,6 +65,7 @@ static ASTNodeClike* compoundStmt(ParserClike *p);
 static ASTNodeClike* statement(ParserClike *p);
 static ASTNodeClike* expression(ParserClike *p);
 static ASTNodeClike* assignment(ParserClike *p);
+static ASTNodeClike* conditional(ParserClike *p);
 static ASTNodeClike* logicalOr(ParserClike *p);
 static ASTNodeClike* logicalAnd(ParserClike *p);
 static ASTNodeClike* bitwiseOr(ParserClike *p);
@@ -669,7 +670,7 @@ static ASTNodeClike* expressionStatement(ParserClike *p) {
 static ASTNodeClike* expression(ParserClike *p) { return assignment(p); }
 
 static ASTNodeClike* assignment(ParserClike *p) {
-    ASTNodeClike *node = logicalOr(p);
+    ASTNodeClike *node = conditional(p);
     if (p->current.type == CLIKE_TOKEN_EQUAL) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *right = assignment(p);
@@ -677,6 +678,22 @@ static ASTNodeClike* assignment(ParserClike *p) {
         setLeftClike(assign, node);
         setRightClike(assign, right);
         return assign;
+    }
+    return node;
+}
+
+static ASTNodeClike* conditional(ParserClike *p) {
+    ASTNodeClike *node = logicalOr(p);
+    if (p->current.type == CLIKE_TOKEN_QUESTION) {
+        ClikeToken op = p->current; advanceParser(p);
+        ASTNodeClike *thenBranch = assignment(p);
+        expectToken(p, CLIKE_TOKEN_COLON, ":");
+        ASTNodeClike *elseBranch = assignment(p);
+        ASTNodeClike *cond = newASTNodeClike(TCAST_TERNARY, op);
+        setLeftClike(cond, node);
+        setRightClike(cond, thenBranch);
+        setThirdClike(cond, elseBranch);
+        return cond;
     }
     return node;
 }
