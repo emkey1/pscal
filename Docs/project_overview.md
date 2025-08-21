@@ -1,13 +1,13 @@
 # Pscal Project Overview
 
-Pscal is a Pascal‑like language implemented in C. The project now ships with
-multiple front ends that all target a shared virtual machine:
+Pscal is an extensible VM implemented in C. The project ships with
+multiple front ends that all target the shared virtual machine:
 
 * **Pascal compiler** – hand‑written lexer and parser.
-* **Clike compiler** – compact C‑style syntax compiled to the same bytecode.
+* **Clike compiler** – compact C‑style syntax example
 * **Tiny compiler** – educational front end written in Python.
 
-All front ends emit a compact bytecode stream executed by a stack‑based virtual
+All front ends emit a compact bytecode stream executed by the stack‑based virtual
 machine. The VM provides built‑in routines and optional SDL2 and libcurl
 integrations for graphics, audio and networking.
 
