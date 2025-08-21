@@ -1,2 +1,2 @@
-L32: Compiler Error: argument 1 to 'proc' expects an array but got INTEGER.
+L12: Compiler Error: argument 1 to 'proc' expects an array but got INTEGER.
 Compilation failed with errors.

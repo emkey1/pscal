@@ -205,7 +205,9 @@ void advance(Lexer *lexer) {
 
 Token *identifier(Lexer *lexer) {
     size_t start = lexer->pos;
-    
+    int token_line = lexer->line;
+    int token_column = lexer->column;
+
     while (lexer->current_char && (isalnum((unsigned char)lexer->current_char) || lexer->current_char == '_'))
         advance(lexer);
     size_t len = lexer->pos - start;
@@ -228,6 +230,8 @@ Token *identifier(Lexer *lexer) {
 
     Token *token = malloc(sizeof(Token));
     token->type = TOKEN_IDENTIFIER; // Default to IDENTIFIER
+    token->line = token_line;
+    token->column = token_column;
     for (int i = 0; i < (int)NUM_KEYWORDS; i++) {
         // ADD DEBUG PRINT 3: See the comparison being made
         // DEBUG_PRINT("identifier: Comparing \"_%s_\" with keyword \"_%s_\"\n", id_str, keywords[i].keyword);

@@ -1,2 +1,2 @@
-L5: Compiler Error: argument 1 to 'proc' expects type ARRAY but got ARRAY.
+L10: Compiler Error: argument 1 to 'proc' expects type ARRAY but got ARRAY.
 Compilation failed with errors.
