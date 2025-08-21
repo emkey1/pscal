@@ -8,7 +8,9 @@
 static VarType tokenTypeToVarType(ClikeTokenType t) {
     switch (t) {
         case CLIKE_TOKEN_INT: return TYPE_INTEGER;
+        case CLIKE_TOKEN_LONG: return TYPE_INTEGER;
         case CLIKE_TOKEN_FLOAT: return TYPE_REAL;
+        case CLIKE_TOKEN_DOUBLE: return TYPE_REAL;
         case CLIKE_TOKEN_STR: return TYPE_STRING;
         case CLIKE_TOKEN_TEXT: return TYPE_FILE;
         case CLIKE_TOKEN_VOID: return TYPE_VOID;
@@ -138,7 +140,9 @@ static AST* makeBuiltinTypeAST(ClikeToken t) {
     VarType vt = TYPE_UNKNOWN;
     switch (t.type) {
         case CLIKE_TOKEN_INT: name = "integer"; vt = TYPE_INTEGER; break;
+        case CLIKE_TOKEN_LONG: name = "integer"; vt = TYPE_INTEGER; break;
         case CLIKE_TOKEN_FLOAT: name = "real"; vt = TYPE_REAL; break;
+        case CLIKE_TOKEN_DOUBLE: name = "real"; vt = TYPE_REAL; break;
         case CLIKE_TOKEN_STR: name = "string"; vt = TYPE_STRING; break;
         case CLIKE_TOKEN_TEXT: name = "text"; vt = TYPE_FILE; break;
         case CLIKE_TOKEN_CHAR: name = "char"; vt = TYPE_CHAR; break;
@@ -209,8 +213,9 @@ ASTNodeClike* parseProgramClike(ParserClike *parser) {
 }
 
 static int isTypeToken(ClikeTokenType t) {
-    return t == CLIKE_TOKEN_INT || t == CLIKE_TOKEN_VOID ||
-           t == CLIKE_TOKEN_FLOAT || t == CLIKE_TOKEN_STR ||
+    return t == CLIKE_TOKEN_INT || t == CLIKE_TOKEN_LONG ||
+           t == CLIKE_TOKEN_VOID || t == CLIKE_TOKEN_FLOAT ||
+           t == CLIKE_TOKEN_DOUBLE || t == CLIKE_TOKEN_STR ||
            t == CLIKE_TOKEN_TEXT || t == CLIKE_TOKEN_CHAR;
 }
 

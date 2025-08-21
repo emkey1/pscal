@@ -95,7 +95,9 @@ static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
     VarType vt = TYPE_UNKNOWN;
     switch (t.type) {
         case CLIKE_TOKEN_INT:   name = "integer"; vt = TYPE_INTEGER; break;
+        case CLIKE_TOKEN_LONG:  name = "integer"; vt = TYPE_INTEGER; break;
         case CLIKE_TOKEN_FLOAT: name = "real";    vt = TYPE_REAL;    break;
+        case CLIKE_TOKEN_DOUBLE:name = "real";    vt = TYPE_REAL;    break;
         case CLIKE_TOKEN_STR:   name = "string";  vt = TYPE_STRING;  break;
         case CLIKE_TOKEN_TEXT:  name = "text";    vt = TYPE_FILE;    break;
         case CLIKE_TOKEN_CHAR:  name = "char";    vt = TYPE_CHAR;    break;
