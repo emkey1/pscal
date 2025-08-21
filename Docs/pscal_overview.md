@@ -63,7 +63,7 @@ end.
 ## Included Units
 
 ### StringUtil
-Provides simple string helpers such as reversing text【F:lib/StringUtil.pl†L1-L28】.
+Provides simple string helpers such as reversing text【F:lib/pascal/StringUtil.pl†L1-L28】.
 
 * `ReverseString(s: string): string` – returns the characters of `s` in reverse order.
 
@@ -76,27 +76,27 @@ end.
 ```
 
 ### Base64
-Implements Base64 encoding and decoding【F:lib/base64.pl†L1-L155】.
+Implements Base64 encoding and decoding【F:lib/pascal/base64.pl†L1-L155】.
 
 * `EncodeStringBase64(s: string): string`
 * `DecodeStringBase64(s: string): string`
 
 ### CalculateArea
-Provides geometry helpers【F:lib/calculatearea.pl†L1-L31】.
+Provides geometry helpers【F:lib/pascal/calculatearea.pl†L1-L31】.
 
 * `RectangleArea(length, width: real): real`
 * `CircleArea(radius: real): real`
 * `TriangleArea(side1, side2, side3: real): real` – uses Heron’s formula.
 
 ### CRT
-ANSI terminal control compatible with Turbo Pascal’s CRT unit【F:lib/crt.pl†L26-L57】.
+ANSI terminal control compatible with Turbo Pascal’s CRT unit【F:lib/pascal/crt.pl†L26-L57】.
 
 * Screen and cursor routines: `ClrScr`, `GotoXY`, `ClrEol`, `Window`, `WhereX`, `WhereY`.
 * Text attributes: `TextColor`, `TextBackground`, `NormVideo`, `HighVideo`, `LowVideo`, `InvertColors`, `BoldText`, `BlinkText`.
 * Miscellaneous: `Delay`, `Beep`, `KeyPressed`, `SaveCursor`, `RestoreCursor`.
 
 ### Dos
-Provides DOS‑style file and environment operations by wrapping builtins【F:lib/dos.pl†L1-L66】.
+Provides DOS‑style file and environment operations by wrapping builtins【F:lib/pascal/dos.pl†L1-L66】.
 
 * `FindFirst`, `FindNext`
 * `GetFAttr`, `MkDir`, `RmDir`
@@ -105,14 +105,14 @@ Provides DOS‑style file and environment operations by wrapping builtins【F:li
 * `Exec`
 
 ### MathLib
-Advanced mathematical routines【F:lib/mathlib.pl†L1-L136】.
+Advanced mathematical routines【F:lib/pascal/mathlib.pl†L1-L136】.
 
 * Trigonometry: `ArcTan`, `ArcSin`, `ArcCos`, `Cotan`
 * Exponentials: `Power`, `Log10`, `Sinh`, `Cosh`, `Tanh`
 * Helpers: `Max`, `Min`, `Floor`, `Ceil`
 
 ### mylib
-Example user unit exporting a record type and routines【F:lib/mylib.pl†L1-L40】.
+Example user unit exporting a record type and routines【F:lib/pascal/mylib.pl†L1-L40】.
 
 * `Greet(name: string)`
 * `Add(a, b: integer): integer`
@@ -120,7 +120,7 @@ Example user unit exporting a record type and routines【F:lib/mylib.pl†L1-L40
 * `TPerson` record and `GlobalCounter` variable
 
 ### SysUtils
-Common utility routines【F:lib/sysutils.pl†L1-L132】.
+Common utility routines【F:lib/pascal/sysutils.pl†L1-L132】.
 
 * `UpperCase`, `LowerCase`, `Trim`, `QuotedStr`
 * `FileExists`
