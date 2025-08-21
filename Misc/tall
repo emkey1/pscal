@@ -9,7 +9,7 @@ PASCAL="${PASCAL:-$ROOT/build/bin/pascal}"       # plain interpreter
 
 for f in "$TESTS/TestSuite7.p" \
          "$TESTS/MathSuite01.p" \
-         "$TESTS/TestIncDecWithVerify.p" "$TESTS/tcs" "$TESTS/tb"
+         "$TESTS/TestIncDecWithVerify.p" "$TESTS/CaseStatementSuite.p" "$TESTS/BreakLoopTest.p"
 do
   [ -r "$f" ] || echo "Missing test file: $f"
 done
@@ -37,8 +37,7 @@ run "FormattingTestSuite"      "$PASCAL" "$TESTS/FormattingTestSuite.p"
 run "TestFileOperations"      "$PASCAL" "$TESTS/TestFileOperations.p"
 run "PointerTortureTest"      "$PASCAL" "$TESTS/PointerTortureTest.p"
 
-# assorted one‑offs
-run "Assorted (tid)" "$PASCAL" "$TESTS/TestIncDecWithVerify.p"
-run "Assorted (tcs)" "$PASCAL" "$TESTS/tcs"
-run "Assorted (tb)"  "$PASCAL" "$TESTS/tb"
+run "TestIncDecWithVerify.p" "$PASCAL" "$TESTS/TestIncDecWithVerify.p"
+run "aseStatementSuite.p" "$PASCAL" "$TESTS/CaseStatementSuite.p"
+run "BreakLoopTest.p"  "$PASCAL" "$TESTS/BreakLoopTest.p"
 
