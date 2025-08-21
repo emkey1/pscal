@@ -2,6 +2,7 @@
 #include "core/utils.h"
 #include "clike/errors.h"
 #include "clike/builtins.h"
+#include "clike/parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -305,6 +306,77 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
     if (!program) return;
     functionCount = 0;
     registerBuiltinFunctions();
+
+    typedef struct {
+        ASTNodeClike *prog;
+        char *source;
+        char *allocated_path;
+    } ImportModule;
+
+    ImportModule *modules = NULL;
+    if (clike_import_count > 0) {
+        modules = (ImportModule *)malloc(sizeof(ImportModule) * clike_import_count);
+    }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        const char *orig_path = clike_imports[i];
+        const char *path = orig_path;
+        char *allocated_path = NULL;
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            const char *lib_dir = getenv("CLIKE_LIB_DIR");
+            if (lib_dir && *lib_dir) {
+                size_t len = strlen(lib_dir) + 1 + strlen(orig_path) + 1;
+                allocated_path = (char *)malloc(len);
+                snprintf(allocated_path, len, "%s/%s", lib_dir, orig_path);
+                f = fopen(allocated_path, "rb");
+                if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+            }
+        }
+        if (!f) {
+            const char *default_dir = "/usr/local/pscal/clike/lib";
+            size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
+            allocated_path = (char *)malloc(len);
+            snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);
+            f = fopen(allocated_path, "rb");
+            if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+        }
+        if (!f) {
+            fprintf(stderr, "Could not open import '%s'\n", orig_path);
+            modules[i].prog = NULL;
+            modules[i].source = NULL;
+            modules[i].allocated_path = NULL;
+            continue;
+        }
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        rewind(f);
+        char *src = (char *)malloc(len + 1);
+        fread(src, 1, len, f);
+        src[len] = '\0';
+        fclose(f);
+
+        ParserClike p; initParserClike(&p, src);
+        ASTNodeClike *modProg = parseProgramClike(&p);
+
+        modules[i].prog = modProg;
+        modules[i].source = src;
+        modules[i].allocated_path = allocated_path;
+    }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
+            if (decl->type == TCAST_FUN_DECL) {
+                char *name = tokenToCString(decl->token);
+                functions[functionCount].name = name;
+                functions[functionCount].type = decl->var_type;
+                functionCount++;
+            }
+        }
+    }
+
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_FUN_DECL) {
@@ -314,9 +386,26 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
             functionCount++;
         }
     }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
+            if (decl->type == TCAST_FUN_DECL) analyzeFunction(decl);
+        }
+    }
+
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_FUN_DECL) analyzeFunction(decl);
     }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (modules[i].prog) freeASTClike(modules[i].prog);
+        if (modules[i].source) free(modules[i].source);
+        if (modules[i].allocated_path) free(modules[i].allocated_path);
+    }
+    free(modules);
+
     for (int i = 0; i < functionCount; ++i) free(functions[i].name);
 }
