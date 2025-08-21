@@ -18,18 +18,18 @@ This generates `build/bin/clike`.
 Invoke the compiler with a source file:
 
 ```sh
-build/bin/clike path/to/program.c
+build/bin/clike path/to/program.cl
 ```
 
 For example, run the text-based Hangman game:
 
 ```sh
-build/bin/clike Examples/Clike/hangman5.c
+build/bin/clike Examples/Clike/hangman5.cl
 ```
 
 The compiler translates the source to VM bytecode and executes it immediately.
 
 ## Sample programs
 
-Additional examples live in `Examples/Clike`, including `sdl_multibouncingballs.c` for an SDL demo and `hangman5.c` for a console game.
+Additional examples live in `Examples/Clike`, including `sdl_multibouncingballs.cl` for an SDL demo and `hangman5.cl` for a console game.
 

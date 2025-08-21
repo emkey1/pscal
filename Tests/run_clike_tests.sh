@@ -12,8 +12,8 @@ fi
 
 EXIT_CODE=0
 
-for src in "$SCRIPT_DIR"/clike/*.c; do
-  test_name=$(basename "$src" .c)
+for src in "$SCRIPT_DIR"/clike/*.cl; do
+  test_name=$(basename "$src" .cl)
   in_file="$SCRIPT_DIR/clike/$test_name.in"
   out_file="$SCRIPT_DIR/clike/$test_name.out"
   err_file="$SCRIPT_DIR/clike/$test_name.err"

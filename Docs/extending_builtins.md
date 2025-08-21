@@ -127,6 +127,6 @@ int main() {
 Running it with the `clike` compiler yields the same output:
 
 ```sh
-$ build/bin/clike Examples/CLike/show_pid.c
+$ build/bin/clike Examples/CLike/show_pid.cl
 PID = 12345
 ```
