@@ -82,6 +82,14 @@ cd Tests; ./run_all_tests
 ## Directory Layout
 
 * src/: Core compiler(s) and virtual machine sources
+    * backend_ast: Contains the backend of the compiler, focusing on the Abstract Syntax Tree (AST). It includes the code for built-in functions and interface.s
+    * clike: The complete frontend for the C-like language. 
+    * compiler: Contains core components of the compiler that are shared across the different language frontends such as bytecode definition and the portion that translates the AST into bytecode.
+    * core: Houses fundamental utilities and data structures used throughout the project. This includes implementations for lists, bytecode caching, and common type definitions.
+    * ext_builtins: The source code for additional, "external" built-in functions. This modular design allows for new features to be added to the language easily. 
+    * pascal: The Pascal-like language frontend, containing its lexer, parser, and AST implementation.
+    * symbol: The implementation of the symbol table, which is a critical component for the compiler to manage identifiers such as variables and functions.
+    * vm: The source code for the stack-based virtual machine that executes the bytecode produced by the front ends.
 * lib/pascal/: Standard library units written in Pscal
 * lib/clike/: Standard modules written in clike
 * lib/sounds/: Audio assets shared by front ends

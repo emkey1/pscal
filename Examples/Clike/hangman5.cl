@@ -99,6 +99,7 @@ int main() {
     reset(f);
     while (!eof(f) && word_count < word_limit) {
         readln(f, line);
+        ClrScr();
         if (strlen(line) >= min_length && strlen(line) <= max_length) {
             valid = 1;
             len = strlen(line);
