@@ -2,7 +2,21 @@ int fib(int n) {
     if (n < 2) {
         return n;
     }
-    return fib(n - 1) + fib(n - 2);
+
+    int a = 0;
+    int b = 1;
+    int temp;
+
+    // Loop from 2 up to n
+    for (int i = 2; i <= n; i++) {
+        // Calculate the next number in the sequence
+        temp = a + b;
+        // Update the previous two numbers
+        a = b;
+        b = temp;
+    }
+
+    return b;
 }
 
 int main() {
