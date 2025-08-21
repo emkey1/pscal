@@ -37,7 +37,8 @@ failure cases.
 ## Directory Layout
 
 * `src/` – compiler and virtual machine sources
-* `lib/` – standard library units written in Pscal
+* `lib/pascal/` – standard library units written in Pscal
+* `lib/sounds/` – audio assets shared by front ends
 * `Examples/` – small sample programs
 * `Docs/` – project and language documentation
 

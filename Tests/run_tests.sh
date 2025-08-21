@@ -10,11 +10,12 @@ if [ ! -x "$PASCAL_BIN" ]; then
   exit 1
 fi
 
-CRT_UNIT="$ROOT_DIR/lib/crtvt.pl"
-PSCAL_LIB_DIR="${PSCAL_LIB_DIR:-$ROOT_DIR/test_pscal_lib}"
+CRT_UNIT="$ROOT_DIR/lib/pascal/crtvt.pl"
+PSCAL_LIB_ROOT="${PSCAL_LIB_DIR:-$ROOT_DIR/test_pscal_lib}"
+PSCAL_LIB_DIR="$PSCAL_LIB_ROOT/pascal"
 export PSCAL_LIB_DIR
-mkdir -p "$PSCAL_LIB_DIR"
-cp -R "$ROOT_DIR/lib/." "$PSCAL_LIB_DIR/"
+mkdir -p "$PSCAL_LIB_ROOT"
+cp -R "$ROOT_DIR/lib/." "$PSCAL_LIB_ROOT/"
 
 if [ -f "$CRT_UNIT" ]; then
   cp "$CRT_UNIT" "$PSCAL_LIB_DIR/crt.pl"

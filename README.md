@@ -94,17 +94,20 @@ executes it immediately. For details see
 
 ## Runtime library
 
-The interpreter expects access to the `etc` and `lib` directories.  When running from the repository you 
-can create temporary symlinks:
+The interpreter expects access to the `etc` directory and Pascal units in
+`lib/pascal`. Shared audio assets remain in `lib/sounds`. When running from the
+repository you can create temporary symlinks:
 
 ```sh
 REPO_DIR="$(pwd)"
-sudo mkdir -p /usr/local/Pscal
-sudo ln -s "${REPO_DIR}/etc" /usr/local/Pscal/etc
-sudo ln -s "${REPO_DIR}/lib" /usr/local/Pscal/lib
+sudo mkdir -p /usr/local/pscal/Pascal/lib
+sudo ln -s "${REPO_DIR}/etc" /usr/local/pscal/Pascal/etc
+sudo ln -s "${REPO_DIR}/lib/pascal" /usr/local/pscal/Pascal/lib/pascal
+sudo ln -s "${REPO_DIR}/lib/sounds" /usr/local/pscal/lib/sounds
 ```
 
-Alternatively, set the `PSCAL_LIB_DIR` environment variable to point at a copy of the `lib` directory.
+Alternatively, set the `PSCAL_LIB_DIR` environment variable to point at a copy
+of the `lib/pascal` directory.
 
 ## Extending built-ins
 
