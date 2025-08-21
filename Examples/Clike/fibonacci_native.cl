@@ -28,7 +28,7 @@ int main() {
     printf("Please enter an integer value for fibonacci: ");
     scanf(j);
     while (i <= j) {
-        printf(fib(i),"\n");
+        printf("%d\n", fib(i));
         i = i + 1;
     }
     return 0;

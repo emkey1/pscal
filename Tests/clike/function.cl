@@ -8,8 +8,6 @@ int fact(int n) {
 int main() {
     int res;
     res = fact(5);
-    printf(res);
-    printf("\n");
+    printf("%d\n", res);
     return 0;
 }
-

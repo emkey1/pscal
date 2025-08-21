@@ -7,7 +7,7 @@ int main() {
     printf("Please enter an integer value for fibonacci: ");
     scanf(j);
     while (i <= j) {
-        printf(fibonacci(i),"\n");
+        printf("%d\n", fibonacci(i));
         i = i + 1;
     }
     return 0;

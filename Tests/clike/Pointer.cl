@@ -2,10 +2,8 @@ int main() {
     int x = 42;
     int* p;
     p = &x;
-    printf(*p);
-    printf("\n");
+    printf("%d\n", *p);
     *p = 7;
-    printf(x);
-    printf("\n");
+    printf("%d\n", x);
     return 0;
 }

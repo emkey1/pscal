@@ -1,6 +1,4 @@
 int main() {
-    printf("PID = ");
-    printf(getpid());
-    printf("\n");
+    printf("PID = %d\n", getpid());
     return 0;
 }

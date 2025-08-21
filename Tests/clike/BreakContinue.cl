@@ -9,9 +9,7 @@ int main() {
         if (i == 4) {
             break;
         }
-        printf(i);
-        printf("\n");
+        printf("%d\n", i);
     }
     return 0;
 }
-
