@@ -644,7 +644,11 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             char* name = tokenToCString(node->token);
             if (strcmp(name, "NULL") == 0) {
                 Value v; memset(&v, 0, sizeof(Value));
-                v.type = TYPE_POINTER;
+                // Emit a NIL constant instead of a zeroed POINTER to preserve
+                // the base type of pointer variables when assigning NULL.
+                // Using TYPE_POINTER here would clear the base type and later
+                // operations (e.g. dereferencing) would fail.
+                v.type = TYPE_NIL;
                 int cidx = addConstantToChunk(chunk, &v);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
