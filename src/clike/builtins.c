@@ -13,4 +13,5 @@ int clike_get_builtin_id(const char *name) {
 
 void clike_register_builtins(void) {
     registerAllBuiltins();
+    registerBuiltinFunction("printf", AST_FUNCTION_DECL, NULL);
 }

@@ -1596,6 +1596,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+
 Value vmBuiltinIoresult(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "IOResult requires 0 arguments."); return makeInt(0); }
     int err = last_io_error;
