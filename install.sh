@@ -24,3 +24,7 @@ cp -r lib/pascal/* /usr/local/pscal/pascal/lib/
 # Install C-like library
 mkdir -p /usr/local/pscal/clike/lib
 cp -r lib/clike/* /usr/local/pscal/clike/lib/
+
+# Install fonts
+mkdir -p /usr/local/pscal/fonts
+cp -r fonts/* /usr/local/pscal/fonts
