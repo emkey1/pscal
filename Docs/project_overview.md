@@ -1,30 +1,63 @@
 # Pscal Project Overview
 
-Pscal is an extensible VM implemented in C. The project ships with
-multiple front ends that all target the shared virtual machine:
+Pscal is an extensible virtual machine and compiler suite implemented in C. The project ships with multiple frontends that all target the shared, stack-based virtual machine:
 
-* **Pascal compiler** – hand‑written lexer and parser.
-* **Clike compiler** – compact C‑style language example.
-* **Tiny compiler** – educational front end written in Python.
+* **Pascal compiler**: A frontend for a Pascal-like language with a hand-written lexer and parser.
+* **Clike compiler**: A compact, C-style language frontend that includes its own preprocessor and a REPL for interactive sessions.
+* **Tiny compiler**: An educational frontend written in Python.
 
-All front ends generate a compact bytecode stream executed by the stack‑based virtual
-machine. The VM provides built‑in routines and optional SDL2 and libcurl
-integrations for graphics, audio and networking.  It also offers easy integration of 
-additional builtins that can be called as functions by the Pascal and CLike front ends.
+All frontends generate a compact bytecode stream that is executed by the VM. This virtual machine provides a rich set of built-in routines and offers optional integrations with **SDL2** for graphics and audio, and **libcurl** for networking. The system is designed to be easily extensible, allowing for the addition of new built-in functions.
+
+---
+
+## Core Architecture
+
+The project follows a classic compiler and virtual machine design:
+
+* **Frontends**: Each frontend is responsible for parsing its respective language (Pascal-like or C-like) and constructing an Abstract Syntax Tree (AST).
+* **Compiler**: A compiler processes the AST, performs semantic analysis (for the C-like language), and generates bytecode. The C-like frontend also includes an optimization pass to improve the generated code.
+* **Virtual Machine (VM)**: A stack-based VM executes the bytecode, providing a portable runtime environment.
+* **Symbol Table**: A hash table-based symbol table manages variables, functions, and types during compilation.
+
+---
+
+## Key Features and Capabilities
+
+* **Dual Language Support**: The ability to compile both Pascal-like and C-like code to the same bytecode is a major feature.
+* **Graphics and Audio**: Through SDL bindings, the language supports creating graphical applications with audio capabilities, including window creation, shape and text rendering, and sound playback.
+* **Networking**: A networking API using `libcurl` allows for making HTTP requests and handling responses.
+* **Rich Built-in Library**: A comprehensive set of built-in functions is provided for:
+    * File I/O (`readln`, `writeln`, `fileexists`).
+    * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`).
+    * String manipulation (`copy`, `pos`, `length`).
+    * System interaction (`getpid`, `dos_exec`).
+* **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified.
+
+---
+
+## How It Works
+
+1.  **Parsing**: Source code is processed by the appropriate lexer and parser to build an Abstract Syntax Tree (AST).
+2.  **Semantic Analysis**: For the C-like language, a semantic analysis pass checks the AST for correctness, such as type errors.
+3.  **Compilation**: The compiler traverses the AST to generate a portable, low-level bytecode representation of the program.
+4.  **Execution**: The virtual machine executes the bytecode. As a stack-based machine, it uses a stack for data manipulation and calculations while processing the bytecode instructions.
+
+---
 
 ## Requirements
 
 * C compiler with C11 support
 * [CMake](https://cmake.org/) 3.24 or newer
 * [libcurl](https://curl.se/libcurl/)
-* **Optional**: SDL2, SDL2_image, SDL2_mixer and SDL2_ttf when building with
-  `-DSDL=ON`
+* **Optional**: SDL2, SDL2\_image, SDL2\_mixer and SDL2\_ttf when building with `-DSDL=ON`
+
+---
 
 ## Building
 
 ```sh
 mkdir build && cd build
-cmake ..            # add -DSDL=ON to enable SDL support
+cmake ..          # add -DSDL=ON to enable SDL support
 make
 ```
 
@@ -34,7 +67,7 @@ To explicitly disable SDL support:
 cmake -DSDL=OFF ..
 ```
 
-Binaries are placed in `build/bin` (e.g. `pascal`, `clike` and `pscalvm`).
+---
 
 ## Testing
 
@@ -44,18 +77,18 @@ After compiling, run the regression suite:
 cd Tests; ./run_all_tests
 ```
 
+---
+
 ## Directory Layout
 
-* `src/` – core compiler and virtual machine sources
-* `lib/pascal/` – standard library units written in Pscal
-* `lib/clike/` – standard modules written in clike
-* `lib/sounds/` – audio assets shared by front ends
-* `Examples/` – sample programs for each front end
-* `Docs/` – project and language documentation
-* `tools/` – additional front ends and utilities (e.g. `tools/tiny`)
-* `Tests/` – regression suite
+* src/: Core compiler(s) and virtual machine sources
+* lib/pascal/: Standard library units written in Pscal
+* lib/clike/: Standard modules written in clike
+* lib/sounds/: Audio assets shared by front ends
+* Examples/: Sample programs for each front end
+* Docs/: Project and language documentation
+* tools/: Additional front ends and utilities (e.g. tools/tiny)
+* Tests/: Regression suite
 
 ## License
-
-Pscal is released under [The Unlicense](../LICENSE).
-
+Pscal is released under The Unlicense.
