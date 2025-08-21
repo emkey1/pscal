@@ -678,22 +678,65 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
             if (strcmp(name, "printf") == 0) {
-                for (int i = 0; i < node->child_count; ++i) {
-                    compileExpression(node->children[i], chunk, ctx);
+                int arg_index = 0;
+                int write_arg_count = 0;
+                if (node->child_count > 0 && node->children[0]->type == TCAST_STRING) {
+                    arg_index = 1;
+                    char* fmt = tokenStringToCString(node->children[0]->token);
+                    size_t flen = strlen(fmt);
+                    char* seg = malloc(flen + 1);
+                    size_t seglen = 0;
+                    for (size_t i = 0; i < flen; ++i) {
+                        if (fmt[i] == '%' && i + 1 < flen) {
+                            if (fmt[i + 1] == '%') {
+                                seg[seglen++] = '%';
+                                i++; // skip second %
+                            } else {
+                                if (seglen > 0) {
+                                    seg[seglen] = '\0';
+                                    Value strv = makeString(seg);
+                                    int cidx = addConstantToChunk(chunk, &strv);
+                                    freeValue(&strv);
+                                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                                    write_arg_count++;
+                                    seglen = 0;
+                                }
+                                if (arg_index < node->child_count) {
+                                    compileExpression(node->children[arg_index++], chunk, ctx);
+                                    write_arg_count++;
+                                    i++; // skip specifier char
+                                } else {
+                                    seg[seglen++] = '%';
+                                }
+                            }
+                        } else {
+                            seg[seglen++] = fmt[i];
+                        }
+                    }
+                    if (seglen > 0) {
+                        seg[seglen] = '\0';
+                        Value strv = makeString(seg);
+                        int cidx = addConstantToChunk(chunk, &strv);
+                        freeValue(&strv);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                        write_arg_count++;
+                    }
+                    free(seg);
+                    free(fmt);
                 }
-                // Map printf to the Write opcode so no implicit newline is
-                // emitted. printf in clike is treated as a procedure that
-                // always succeeds and returns 0.
+                for (; arg_index < node->child_count; ++arg_index) {
+                    compileExpression(node->children[arg_index], chunk, ctx);
+                    write_arg_count++;
+                }
                 writeBytecodeChunk(chunk, OP_WRITE, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
-
-                // Push a dummy return value (0) so expression statements remain
-                // balanced on the stack.
+                writeBytecodeChunk(chunk, (uint8_t)write_arg_count, node->token.line);
                 Value zero = makeInt(0);
-                int idx = addConstantToChunk(chunk, &zero);
+                int zidx = addConstantToChunk(chunk, &zero);
                 freeValue(&zero);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)zidx, node->token.line);
             } else if (strcmp(name, "scanf") == 0) {
                 // Compile arguments as l-values (addresses) and call VM builtin
                 // readln. scanf in clike returns 0 for simplicity.
