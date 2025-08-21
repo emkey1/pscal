@@ -54,6 +54,7 @@ typedef struct ASTNodeClike {
 } ASTNodeClike;
 
 ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token);
+ASTNodeClike *cloneASTClike(ASTNodeClike *node);
 void addChildClike(ASTNodeClike *parent, ASTNodeClike *child);
 void setLeftClike(ASTNodeClike *parent, ASTNodeClike *child);
 void setRightClike(ASTNodeClike *parent, ASTNodeClike *child);

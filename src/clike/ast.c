@@ -46,6 +46,28 @@ void setThirdClike(ASTNodeClike *parent, ASTNodeClike *child) {
     if (child) child->parent = parent;
 }
 
+ASTNodeClike *cloneASTClike(ASTNodeClike *node) {
+    if (!node) return NULL;
+    ASTNodeClike *copy = newASTNodeClike(node->type, node->token);
+    if (!copy) return NULL;
+    copy->var_type = node->var_type;
+    copy->is_array = node->is_array;
+    copy->array_size = node->array_size;
+    copy->dim_count = node->dim_count;
+    copy->element_type = node->element_type;
+    if (node->dim_count > 0 && node->array_dims) {
+        copy->array_dims = (int*)malloc(sizeof(int) * node->dim_count);
+        memcpy(copy->array_dims, node->array_dims, sizeof(int) * node->dim_count);
+    }
+    setLeftClike(copy, cloneASTClike(node->left));
+    setRightClike(copy, cloneASTClike(node->right));
+    setThirdClike(copy, cloneASTClike(node->third));
+    for (int i = 0; i < node->child_count; ++i) {
+        addChildClike(copy, cloneASTClike(node->children[i]));
+    }
+    return copy;
+}
+
 void freeASTClike(ASTNodeClike *node) {
     if (!node) return;
     for (int i = 0; i < node->child_count; ++i) freeASTClike(node->children[i]);
