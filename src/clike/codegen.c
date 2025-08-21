@@ -856,10 +856,30 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
     // Compile imported modules before the main program
     for (int i = 0; i < clike_import_count; ++i) {
-        const char *path = clike_imports[i];
+        const char *orig_path = clike_imports[i];
+        const char *path = orig_path;
+        char *allocated_path = NULL;
         FILE *f = fopen(path, "rb");
         if (!f) {
-            fprintf(stderr, "Could not open import '%s'\n", path);
+            const char *lib_dir = getenv("CLIKE_LIB_DIR");
+            if (lib_dir && *lib_dir) {
+                size_t len = strlen(lib_dir) + 1 + strlen(orig_path) + 1;
+                allocated_path = (char*)malloc(len);
+                snprintf(allocated_path, len, "%s/%s", lib_dir, orig_path);
+                f = fopen(allocated_path, "rb");
+                if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+            }
+        }
+        if (!f) {
+            const char *default_dir = "/usr/local/pscal/clike/lib";
+            size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
+            allocated_path = (char*)malloc(len);
+            snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);
+            f = fopen(allocated_path, "rb");
+            if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+        }
+        if (!f) {
+            fprintf(stderr, "Could not open import '%s'\n", orig_path);
             continue;
         }
         fseek(f, 0, SEEK_END);
@@ -896,6 +916,7 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         }
         freeASTClike(modProg);
         free(src);
+        if (allocated_path) free(allocated_path);
     }
 
     for (int i = 0; i < program->child_count; ++i) {
