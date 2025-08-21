@@ -810,7 +810,7 @@ static ASTNodeClike* unary(ParserClike *p) {
         ASTNodeClike *one = newASTNodeClike(TCAST_NUMBER, oneTok); one->var_type = TYPE_INTEGER;
         ClikeToken opTok = op; opTok.type = (op.type == CLIKE_TOKEN_PLUS_PLUS) ? CLIKE_TOKEN_PLUS : CLIKE_TOKEN_MINUS; opTok.lexeme = (op.type == CLIKE_TOKEN_PLUS_PLUS)?"+":"-"; opTok.length = 1;
         ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, opTok);
-        setLeftClike(bin, operand);
+        setLeftClike(bin, cloneASTClike(operand));
         setRightClike(bin, one);
         ClikeToken eqTok = op; eqTok.type = CLIKE_TOKEN_EQUAL; eqTok.lexeme = "="; eqTok.length = 1;
         ASTNodeClike *assign = newASTNodeClike(TCAST_ASSIGN, eqTok);
@@ -882,7 +882,7 @@ static ASTNodeClike* factor(ParserClike *p) {
             ASTNodeClike *one = newASTNodeClike(TCAST_NUMBER, oneTok); one->var_type = TYPE_INTEGER;
             ClikeToken opTok = op; opTok.type = (op.type == CLIKE_TOKEN_PLUS_PLUS)?CLIKE_TOKEN_PLUS:CLIKE_TOKEN_MINUS; opTok.lexeme = (op.type==CLIKE_TOKEN_PLUS_PLUS)?"+":"-"; opTok.length=1;
             ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, opTok);
-            setLeftClike(bin, idNode);
+            setLeftClike(bin, cloneASTClike(idNode));
             setRightClike(bin, one);
             ClikeToken eqTok = op; eqTok.type = CLIKE_TOKEN_EQUAL; eqTok.lexeme = "="; eqTok.length =1;
             ASTNodeClike *assign = newASTNodeClike(TCAST_ASSIGN, eqTok);
