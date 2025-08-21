@@ -223,6 +223,9 @@ Please enter an integer value for fibonacci: 92
 fibonacci_native.cl  0.02s user 0.01s system 0% cpu 3.157 total
 ```
 
-The performance improvement is small using the extended buildin C fibonacci function from 
+The performance improvement is small using the extended builtin C fibonacci function from 
 the src/ext_builtins directory, but it is there.  Other tasks might see a more substantial
 improvement.
+
+I'm favorably impressed by how fast the byte code compiled version is frankly.
+
