@@ -1,6 +1,6 @@
 #include "clike/parser.h"
 #include "clike/errors.h"
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

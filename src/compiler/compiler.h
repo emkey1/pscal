@@ -1,7 +1,7 @@
 #ifndef PSCAL_COMPILER_H // Ensure include guards
 #define PSCAL_COMPILER_H
 
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include "compiler/bytecode.h"
 // Assuming MAX_COMPILER_CONSTANTS is defined here or in another included header like types.h/globals.h
 // If not, define it here. For example: #define MAX_COMPILER_CONSTANTS 128

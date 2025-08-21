@@ -1,6 +1,6 @@
-// src/frontend/lexer.c
+// src/Pascal/lexer.c
 
-#include "frontend/lexer.h"
+#include "Pascal/lexer.h"
 #include "core/utils.h"
 #include "globals.h"
 #include <string.h>
