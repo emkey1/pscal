@@ -80,7 +80,7 @@ static ClikeToken numberToken(ClikeLexer *lexer, const char *start, int column) 
         int length = &lexer->src[lexer->pos] - start;
         ClikeToken t = makeToken(lexer, CLIKE_TOKEN_NUMBER, start, length, column);
         char *tmp = strndup(start, length);
-        t.int_val = (int)strtol(tmp, NULL, 0);
+        t.int_val = strtoll(tmp, NULL, 0);
         free(tmp);
         return t;
     }
@@ -92,7 +92,7 @@ static ClikeToken numberToken(ClikeLexer *lexer, const char *start, int column) 
     }
     int length = &lexer->src[lexer->pos] - start;
     ClikeToken t = makeToken(lexer, isFloat ? CLIKE_TOKEN_FLOAT_LITERAL : CLIKE_TOKEN_NUMBER, start, length, column);
-    if (isFloat) t.float_val = atof(start); else t.int_val = atoi(start);
+    if (isFloat) t.float_val = atof(start); else t.int_val = strtoll(start, NULL, 10);
     return t;
 }
 
