@@ -1997,6 +1997,7 @@ comparison_error_label:
                     }
                 }
                 // --- END CORRECTED LOGIC ---
+                #ifdef DEBUG
                 if (target_slot->type == TYPE_POINTER) {
                     fprintf(stderr,
                             "[DEBUG set_local] slot %u ptr=%p base=%p (%s) val=%p\n",
@@ -2006,6 +2007,7 @@ comparison_error_label:
                             target_slot->base_type_node ? astTypeToString(target_slot->base_type_node->type) : "NULL",
                             target_slot->ptr_val);
                 }
+                #endif
 
                 // Free the temporary value that was popped from the stack.
                 freeValue(&value_from_stack);
