@@ -2,8 +2,10 @@
 
 void registerGetPidBuiltin(void);
 void registerSwapBuiltin(void);
+void registerFactorialBuiltin(void);
 
 void registerExtendedBuiltins(void) {
     registerGetPidBuiltin();
     registerSwapBuiltin();
+    registerFactorialBuiltin();
 }
