@@ -1,4 +1,4 @@
-program TestBreak;
+program BreakLoopTest;
 uses CRT; // Include CRT for WriteLn
 
 var

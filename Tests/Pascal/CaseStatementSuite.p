@@ -1,4 +1,4 @@
-program TestCaseStatementsWithVerify;
+program CaseStatementSuite;
 
 type
   TColor = (cRed, cGreen, cBlue, cYellow); // Enum for testing

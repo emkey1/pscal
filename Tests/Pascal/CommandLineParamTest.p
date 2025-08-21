@@ -1,4 +1,4 @@
-program TestParams;
+program CommandLineParamTest;
 
 uses Crt; // For WriteLn
 
