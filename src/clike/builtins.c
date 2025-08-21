@@ -8,6 +8,10 @@ int clike_get_builtin_id(const char *name) {
     if (strcmp(name, "strlen") == 0) {
         name = "length";
     }
+    // Map C-like `exit` to Pascal's `halt` so an optional exit code may be supplied.
+    if (strcmp(name, "exit") == 0) {
+        name = "halt";
+    }
     return getBuiltinIDForCompiler(name);
 }
 

@@ -802,6 +802,15 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)lenIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+            } else if (strcmp(name, "exit") == 0) {
+                // Map C-like exit to the VM's halt builtin to allow an optional exit code.
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileExpression(node->children[i], chunk, ctx);
+                }
+                int hIndex = addStringConstant(chunk, "halt");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)hIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             } else {
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);

@@ -14,6 +14,7 @@
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
+#include <limits.h>    // For PATH_MAX
 
 
 const char *varTypeToString(VarType type) {

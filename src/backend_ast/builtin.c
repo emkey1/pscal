@@ -2076,9 +2076,11 @@ Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     long long code = 0;
-    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
+    if (arg_count == 0) {
+        // No exit code supplied, default to 0.
+    } else if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
         code = args[0].i_val;
-    } else if (arg_count > 1) {
+    } else {
         runtimeError(vm, "Halt expects 0 or 1 integer argument.");
     }
     exit((int)code);
