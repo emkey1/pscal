@@ -1,0 +1,29 @@
+--- Testing CASE Statements with Verification ---
+
+Testing INTEGER CASE:
+START: Integer Case (i=0): PASS
+START: Integer Case (i=1): PASS
+START: Integer Case (i=2): PASS
+START: Integer Case (i=3): PASS
+START: Integer Case (i=4): PASS
+START: Integer Case (i=5): PASS
+START: Integer Case (i=6): PASS
+
+Testing CHAR CASE:
+START: Char Case (ch='X'): PASS
+START: Char Case (ch='Y'): PASS
+START: Char Case (ch='Z'): PASS
+START: Char Case (ch='['): PASS
+START: Char Case (ch='\'): PASS
+START: Char Case (ch=']'): PASS
+
+Testing ENUM CASE (TColor):
+START: Enum TColor Case (Ord=0): PASS
+START: Enum TColor Case (Ord=1): PASS
+START: Enum TColor Case (Ord=2): PASS
+START: Enum TColor Case (Ord=3): PASS
+
+Testing ENUM CASE (TSize):
+START: Enum TSize Case (size=sMedium, Ord=1): PASS
+
+--- Test Complete ---

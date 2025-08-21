@@ -1,0 +1,10 @@
+--- Starting File I/O Edge Tests ---
+Test: Setup: create edge_input.txt ... PASS
+Test: Reset edge_input.txt ... PASS
+Test: Empty line -> s="" ... PASS
+Test: Mixed types parse (i=99, r~3.14, c=Z, s="hello there") ... PASS
+Test: Token split without space (i=42, s="abc") ... PASS
+Test: Spaces-only line triggers IOResult<>0 ... PASS
+Test: Single char line -> c=Z ... PASS
+Test: Close edge_input.txt ... PASS
+--- Edge Tests Complete ---

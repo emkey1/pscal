@@ -1,0 +1,18 @@
+Running MathLib tests
+
+--- Testing MathLib ---
+START: ArcTan(1): PASS
+START: ArcSin(0.5): PASS
+START: ArcCos(0.5): PASS
+START: Cotan(pi/4): PASS
+START: Power(2,3): PASS
+START: Log10(1000): PASS
+START: Sinh(0): PASS
+START: Cosh(0): PASS
+START: Tanh(0): PASS
+START: Max(2,1): PASS
+START: Min(2,1): PASS
+START: Floor(3.7): PASS
+START: Ceil(3.1): PASS
+
+MathLib tests completed.

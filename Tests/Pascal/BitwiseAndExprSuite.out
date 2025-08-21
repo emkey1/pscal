@@ -1,0 +1,28 @@
+Running pscal Bitwise Shift and Expression Precedence Test Suite
+
+--- Testing Simple SHL/SHR ---
+START: Simple 5 shl 1: PASS
+START: Simple 5 shl 3: PASS
+START: Simple 5 shl 10 (Shift out): PASS
+START: Simple 160 shr 1: PASS
+START: Simple 160 shr 4: PASS
+START: Simple 160 shr 8 (Shift out): PASS
+
+--- Testing Mixed Precedence ---
+START: a shl 1 + b: PASS
+START: a + b shl 1: PASS
+START: a shl b - c: PASS
+START: a * b shl c: PASS
+START: a shl c * b: PASS
+START: a and b shl 1: PASS
+START: a shr 1 or b: PASS
+START: a or b shr 1: PASS
+START: (a + b) shl c: PASS
+START: a shl (b - c): PASS
+
+--- Testing Boolean/Relational Precedence with Shifts ---
+START: a shl 1 > b: PASS
+START: a > b and b_a: PASS
+START: not b_b and (a shr 1 = b): PASS
+
+Bitwise Shift and Expression Precedence Test Suite Completed.

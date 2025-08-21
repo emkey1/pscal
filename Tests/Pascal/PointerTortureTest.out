@@ -1,0 +1,64 @@
+Running pscal Pointer Torture Test
+
+--- Testing Integer Pointers ---
+1. Initialization and Nil Checks...
+START: intPtr1 initialized to nil: PASS
+START: intPtr2 initialized to nil: PASS
+START: intPtr1 = intPtrNil (nil comparison): PASS
+START: intPtr1 <> nil (should be false): PASS
+2. Allocation with new()...
+START: intPtr1 is not nil after new(): PASS
+3. Assignment via Dereference...
+START: Assign and read intPtr1^: PASS
+4. Pointer Assignment (Aliasing)...
+START: intPtr2 is not nil after assignment: PASS
+START: intPtr1 = intPtr2 (same address): PASS
+START: Read intPtr2^ after aliasing: PASS
+5. Modifying through alias...
+START: Read intPtr2^ after modification: PASS
+START: Read intPtr1^ after modification via intPtr2: PASS
+START: Read intPtr1^ after modification: PASS
+START: Read intPtr2^ after modification via intPtr1: PASS
+6. Disposal...
+START: intPtr1 is nil after dispose(intPtr1): PASS
+7. Disposing nil pointer...
+START: intPtrNil is nil before dispose: PASS
+START: intPtrNil is still nil after dispose(nil): PASS
+8. Disposing already disposed memory (via alias)...
+   Skipping dispose(intPtr2) because it was already nil (implies dispose(p1) affects aliases).
+9. Re-allocating disposed pointer...
+START: intPtr1 is not nil after re-allocation: PASS
+START: Assign/read after re-allocation: PASS
+START: intPtr1 is nil after final dispose: PASS
+
+--- Testing String Pointers ---
+START: strPtr1 initialized to nil: PASS
+START: strPtr1 not nil after new(): PASS
+START: strPtr1^ initial value: PASS
+START: Assign/read strPtr1^: PASS
+START: Read strPtr1^ after modification via strPtr2: PASS
+START: strPtr1 is nil after dispose: PASS
+
+--- Testing Record Pointers ---
+START: recPtrA initialized to nil: PASS
+START: recPtrA = recPtrNil: PASS
+2. Allocation...
+START: recPtrA not nil after new(): PASS
+START: Initial recPtrA^.id: PASS
+START: Initial recPtrA^.label: PASS
+START: Initial recPtrA^.value: PASS
+3. Assigning field values...
+START: Read recPtrA^.id after assignment: PASS
+START: Read recPtrA^.label after assignment: PASS
+START: Read recPtrA^.value after assignment: PASS
+4. Pointer Assignment (Aliasing)...
+START: recPtrA = recPtrB: PASS
+START: Read recPtrB^.id via alias: PASS
+5. Modifying via alias...
+START: Read recPtrA^.id after modification via B: PASS
+START: Read recPtrA^.label after modification via B: PASS
+6. Disposal...
+START: recPtrA is nil after dispose: PASS
+START: recPtrNil is still nil after dispose(nil): PASS
+
+Pointer Torture Test Completed.
