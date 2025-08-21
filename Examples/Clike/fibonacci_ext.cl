@@ -1,13 +1,17 @@
 int main() {
-    int i;
-    int j;
+    double i;
+    double j;
     i = 0;
     clrscr();
     gotoxy(1,1);
     printf("Please enter an integer value for fibonacci: ");
     scanf(j);
+    if(j > 92) {
+       printf("Values > 92 not supported\n");
+       exit();
+    }
     while (i <= j) {
-        printf("%d\n", fibonacci(i));
+        printf("%d: %lld\n", i, fibonacci(i));
         i = i + 1;
     }
     return 0;

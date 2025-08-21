@@ -14,10 +14,10 @@ int main() {
     gotoxy(1,1);
     printf("Please enter an integer value to calculate a factorial: ");
     scanf(n);
-    if (n < 0 || n > 20) {
+    if(n > 20) {
         printf("64 bit ints don't support factorial > 20\n");
         return 1;
     }
-    printf("%d: %lld\n", n, fact(n));
+    printf("%d: %lld\n", n, factorial(n));
     return 0;
 }

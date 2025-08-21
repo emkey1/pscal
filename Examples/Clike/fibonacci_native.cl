@@ -1,11 +1,11 @@
-int fib(int n) {
+long fib(long n) {
     if (n < 2) {
         return n;
     }
 
-    int a = 0;
-    int b = 1;
-    int temp;
+    long a = 0;
+    long b = 1;
+    long temp;
 
     // Loop from 2 up to n
     for (int i = 2; i <= n; i++) {
@@ -20,15 +20,19 @@ int fib(int n) {
 }
 
 int main() {
-    int i;
-    int j;
+    long i;
+    long j;
     i = 0;
     clrscr();
     gotoxy(1,1);
     printf("Please enter an integer value for fibonacci: ");
     scanf(j);
+    if(j > 92) {
+       printf("Values > 92 not supported\n");
+       exit();
+    }
     while (i <= j) {
-        printf("%d\n", fib(i));
+        printf("%d:%lld\n", i, fib(i));
         i = i + 1;
     }
     return 0;
