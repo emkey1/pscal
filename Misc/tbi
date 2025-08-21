@@ -15,7 +15,7 @@ const
 
 type
   // Define types needed for tests if not built-in
-  TMemoryStream = Pointer; // Representing the MemoryStream handle type if needed
+  TMemoryStream = mstream; // Representing the MemoryStream handle type if needed
                            // Adjust if pscal maps it to a specific type like Integer
 
 var
