@@ -71,7 +71,7 @@ typedef struct {
     int length;
     int line;
     int column;
-    int int_val;
+    long long int_val;
     double float_val;
 } ClikeToken;
 
