@@ -206,8 +206,8 @@ function(add_pscal_executable target_name)
 
     list(APPEND TARGET_LINK_LIBS m) # Math library
 
-    # Specific options for dscal (ASan)
-    if(${target_name} STREQUAL "dscal")
+    # Specific options for dascal (ASan)
+    if(${target_name} STREQUAL "dascal")
         list(APPEND TARGET_LINK_LIBS "-fsanitize=address")
     endif()
 
@@ -224,14 +224,14 @@ function(add_pscal_executable target_name)
     endif()
 
     # Specific compile definitions and options
-    if(${target_name} STREQUAL "pscal")
+    if(${target_name} STREQUAL "pascal")
         target_compile_options(${target_name} PRIVATE -O3)
         if(RELEASE_BUILD)
             target_compile_definitions(${target_name} PRIVATE RELEASE)
         else()
             target_compile_definitions(${target_name} PRIVATE DEBUGNOT)
         endif()
-    elseif(${target_name} STREQUAL "dscal")
+    elseif(${target_name} STREQUAL "dascal")
         target_compile_definitions(${target_name} PRIVATE DEBUG)
         target_compile_options(${target_name} PRIVATE -fsanitize=address -g)
     elseif(${target_name} STREQUAL "hscal")
@@ -240,8 +240,8 @@ function(add_pscal_executable target_name)
     endif()
 endfunction()
 
-add_pscal_executable(pscal)
-add_pscal_executable(dscal)
+add_pscal_executable(pascal)
+add_pscal_executable(dascal)
 # add_pscal_executable(hscal) // Lets not build this normally
 
 # Standalone VM binary
@@ -361,8 +361,8 @@ add_subdirectory(Examples)
 
 # ---- optional install ----
 include(GNUInstallDirs)
-install(TARGETS pscal dscal pscalvm
+install(TARGETS pascal dascal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
-add_test(NAME pscal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_tests.sh)
+add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)

@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM MandelbrotASCII;
 
 USES Crt;  // For GotoXY, Write, ScreenCols, ScreenRows, ClrScr, ReadKey

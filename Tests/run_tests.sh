@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-PSCAL_BIN="$ROOT_DIR/build/bin/pscal"
+PASCAL_BIN="$ROOT_DIR/build/bin/pascal"
 
-if [ ! -x "$PSCAL_BIN" ]; then
-  echo "pscal binary not found at $PSCAL_BIN" >&2
+if [ ! -x "$PASCAL_BIN" ]; then
+  echo "pascal binary not found at $PASCAL_BIN" >&2
   exit 1
 fi
 
@@ -63,7 +63,7 @@ EXIT_CODE=0
 echo "Running positive tests..."
 for t in "${POSITIVE_TESTS[@]}"; do
   echo "---- $t ----"
-  if ! (cd "$SCRIPT_DIR" && "$PSCAL_BIN" "$t"); then
+  if ! (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "$t"); then
     echo "Test failed: $t" >&2
     EXIT_CODE=1
   fi
@@ -77,7 +77,7 @@ for t in "${NEGATIVE_TESTS[@]}"; do
     continue
   fi
   echo "---- $t (expected failure) ----"
-  if (cd "$SCRIPT_DIR" && "$PSCAL_BIN" "$t") >/tmp/pscal_output 2>&1; then
+  if (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "$t") >/tmp/pscal_output 2>&1; then
     echo "ERROR: $t unexpectedly succeeded" >&2
     cat /tmp/pscal_output
     EXIT_CODE=1

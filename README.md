@@ -31,9 +31,9 @@ cmake ..            # add -DSDL=ON to enable SDL support
 make
 ```
 
-Binaries are written to `build/bin` (e.g. `pscal` and `dscal`).
+Binaries are written to `build/bin` (e.g. `pascal` and `dascal`).
 
-The `dscal` binary has very verbose debugging enabled
+The `dascal` binary has very verbose debugging enabled
 
 To build without SDL explicitly:
 
