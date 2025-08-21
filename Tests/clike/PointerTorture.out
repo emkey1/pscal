@@ -1,6 +1,58 @@
-30 20 10 0
-99 25 10 30
-99
-99
-25
-30
+Running CLike Pointer Torture Test
+START: intPtr1 initialized to NULL: PASS
+START: intPtr2 initialized to NULL: PASS
+START: intPtr1 == intPtrNil (NULL comparison): PASS
+2. Allocation with new()...
+START: intPtr1 not NULL after new(): PASS
+3. Assignment via Dereference...
+START: Assign and read *intPtr1: PASS
+4. Pointer Assignment (Aliasing)...
+START: intPtr2 not NULL after assignment: PASS
+START: intPtr1 == intPtr2 (same address): PASS
+START: Read *intPtr2 after aliasing: PASS
+5. Modifying through alias...
+START: Read *intPtr2 after modification: PASS
+START: Read *intPtr1 after modification via intPtr2: PASS
+6. Disposal...
+START: intPtr1 is NULL after dispose(intPtr1): PASS
+START: intPtr2 is NULL after disposing intPtr1: PASS
+7. Disposing NULL pointer...
+START: intPtrNil is NULL before dispose: PASS
+START: intPtrNil is still NULL after dispose(NULL): PASS
+8. Re-allocating disposed pointer...
+START: intPtr1 not NULL after re-allocation: PASS
+START: Assign/read after re-allocation: PASS
+START: intPtr1 is NULL after final dispose: PASS
+
+--- Testing String Pointers ---
+START: strPtr1 initialized to NULL: PASS
+START: strPtr1 not NULL after new(): PASS
+START: strPtr1 initial value: PASS
+START: Assign/read strPtr1: PASS
+START: Read strPtr1 after modification via strPtr2: PASS
+START: strPtr1 is NULL after dispose: PASS
+
+--- Testing Record Pointers ---
+START: recPtrA initialized to NULL: PASS
+START: recPtrA == recPtrNil: PASS
+2. Allocation...
+START: recPtrA not NULL after new(): PASS
+START: Initial recPtrA->id: PASS
+START: Initial recPtrA->label: PASS
+START: Initial recPtrA->value: PASS
+3. Assigning field values...
+START: Read recPtrA->id after assignment: PASS
+START: Read recPtrA->label after assignment: PASS
+START: Read recPtrA->value after assignment: PASS
+4. Pointer Assignment (Aliasing)...
+START: recPtrA == recPtrB: PASS
+START: Read recPtrB->id via alias: PASS
+5. Modifying via alias...
+START: Read recPtrA->id after modification via B: PASS
+START: Read recPtrA->label after modification via B: PASS
+6. Disposal...
+START: recPtrA is NULL after dispose: PASS
+START: recPtrB is NULL after disposing recPtrA: PASS
+START: recPtrNil is still NULL after dispose(NULL): PASS
+
+Pointer Torture Test Completed.
