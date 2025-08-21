@@ -14,6 +14,6 @@ int main() {
     gotoxy(1,1);
     printf("Please enter an integer value to calculate a factorial: ");
     scanf(n);
-    printf(factorial(n),"\n");
+    printf(fact(n),"\n");
     return 0;
 }
