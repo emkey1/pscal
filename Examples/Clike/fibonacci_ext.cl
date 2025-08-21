@@ -6,7 +6,7 @@ int main() {
     gotoxy(1,1);
     printf("Please enter an integer value for fibonacci: ");
     scanf(j);
-    while (i < j) {
+    while (i <= j) {
         printf(fibonacci(i),"\n");
         i = i + 1;
     }
