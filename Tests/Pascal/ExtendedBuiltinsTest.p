@@ -22,6 +22,17 @@ begin
     halt(1);
   end;
 
+  if not FileExists('Pascal/ExtendedBuiltinsTest.p') then
+  begin
+    writeln('FileExists failed to detect existing file');
+    halt(1);
+  end;
+  if FileExists('Pascal/nonexistent.file') then
+  begin
+    writeln('FileExists falsely reported missing file');
+    halt(1);
+  end;
+
   writeln('Extended builtins test passed: pid=', pid, ' a=', a^, ' b=', b^);
   Dispose(a); Dispose(b);
 end.
