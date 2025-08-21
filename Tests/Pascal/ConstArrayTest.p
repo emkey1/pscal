@@ -29,9 +29,9 @@ begin
 
   // Test string array constant access
   writeln('Testing CardValues (String Array):');
-  writeln('CardValues[1] = ', CardValues[1]);   // Expected: A
-  writeln('CardValues[10] = ', CardValues[10]); // Expected: 10
-  writeln('CardValues[13] = ', CardValues[13]); // Expected: K
+  writeln('CardValues[1] = ', CardValues[1], '(A)');   // Expected: A
+  writeln('CardValues[10] = ', CardValues[10], '(10)'); // Expected: 10
+  writeln('CardValues[13] = ', CardValues[13], '(K)'); // Expected: K
 
   // Assign an element to a variable
   s := CardValues[11];
@@ -40,9 +40,9 @@ begin
 
   // Test integer array constant access
   writeln('Testing IntSequence (Integer Array):');
-  writeln('IntSequence[0] = ', IntSequence[0]); // Expected: 10
-  writeln('IntSequence[1] = ', IntSequence[1]); // Expected: -5
-  writeln('IntSequence[4] = ', IntSequence[4]); // Expected: 42
+  writeln('IntSequence[0] = ', IntSequence[0], '(10)'); // Expected: 10
+  writeln('IntSequence[1] = ', IntSequence[1], '(-5)'); // Expected: -5
+  writeln('IntSequence[4] = ', IntSequence[4], '(42)'); // Expected: 42
 
   // Loop through and print integer array
   writeln('Looping through IntSequence:');

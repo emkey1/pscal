@@ -225,10 +225,18 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             analyzeStmt(node->right, scopes, retType);
             break;
         case TCAST_FOR:
-            if (node->left) analyzeExpr(node->left, scopes);
+            ss_push(scopes);
+            if (node->left) {
+                if (node->left->type == TCAST_VAR_DECL) {
+                    analyzeStmt(node->left, scopes, retType);
+                } else {
+                    analyzeExpr(node->left, scopes);
+                }
+            }
             if (node->right) analyzeExpr(node->right, scopes);
             if (node->third) analyzeExpr(node->third, scopes);
             if (node->child_count > 0) analyzeStmt(node->children[0], scopes, retType);
+            ss_pop(scopes);
             break;
         case TCAST_DO_WHILE:
             analyzeStmt(node->right, scopes, retType);

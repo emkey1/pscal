@@ -84,7 +84,8 @@ void registerExtendedBuiltins(void) {
 ```
 
 Any additional files added to `src/ext_builtins` will be picked up the
-next time you run CMake and `make`.
+next time you run CMake and `make`, assuming you have also added it to the 
+src/ext_builtins/register.c file, as shown above.
 
 ## Using the builtins
 
@@ -127,7 +128,7 @@ int main() {
 Running it with the `clike` compiler yields the same output:
 
 ```sh
-$ build/bin/clike Examples/CLike/show_pid.c
+$ build/bin/clike Examples/CLike/show_pid.cl
 PID = 12345
 ```
 

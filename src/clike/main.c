@@ -27,7 +27,7 @@ static void initSymbolSystemClike(void) {
 }
 
 static const char *CLIKE_USAGE =
-    "Usage: clike <options> <source.c> [program_parameters...]\n"
+    "Usage: clike <options> <source.cl> [program_parameters...]\n"
     "   Options:\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n";

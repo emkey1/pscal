@@ -288,9 +288,19 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
         case TCAST_FOR: {
             LoopInfo* loop = &ctx->loops[ctx->loopDepth++];
             loop->breakCount = loop->continueCount = 0;
+            beginScope(ctx);
             if (node->left) {
-                compileExpression(node->left, chunk, ctx);
-                writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                if (node->left->type == TCAST_VAR_DECL) {
+                    char* name = tokenToCString(node->left->token);
+                    addLocal(ctx, name, node->left->var_type, node->left->is_array,
+                             node->left->dim_count, node->left->array_dims,
+                             node->left->element_type);
+                    free(name);
+                    compileStatement(node->left, chunk, ctx);
+                } else {
+                    compileExpression(node->left, chunk, ctx);
+                    writeBytecodeChunk(chunk, OP_POP, node->token.line);
+                }
             }
             int loopStart = chunk->count;
             int exitJump = -1;
@@ -321,6 +331,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             for (int i = 0; i < loop->breakCount; i++) {
                 patchShort(chunk, loop->breakAddrs[i], (uint16_t)(loopEnd - (loop->breakAddrs[i] + 2)));
             }
+            endScope(ctx);
             ctx->loopDepth--;
             break;
         }

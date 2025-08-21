@@ -2,8 +2,12 @@
 
 void registerGetPidBuiltin(void);
 void registerSwapBuiltin(void);
+void registerFactorialBuiltin(void);
+void registerFibonacciBuiltin(void);
 
 void registerExtendedBuiltins(void) {
     registerGetPidBuiltin();
     registerSwapBuiltin();
+    registerFactorialBuiltin();
+    registerFibonacciBuiltin();
 }

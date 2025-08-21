@@ -1140,17 +1140,36 @@ AST *constDeclaration(Parser *parser) {
     }
     eat(parser, TOKEN_IDENTIFIER); // Use the MACRO 'eat'
 
+    AST *type_node = NULL;
+    if (parser->current_token && parser->current_token->type == TOKEN_COLON) {
+        eat(parser, TOKEN_COLON);
+        type_node = typeSpecifier(parser, 0);
+        if (!type_node || type_node->type == AST_NOOP) {
+            errorParser(parser, "Invalid type specification for constant");
+            freeToken(cn);
+            if (type_node) freeAST(type_node);
+            return NULL;
+        }
+    }
+
     if (!parser->current_token || parser->current_token->type != TOKEN_EQUAL) {
         errorParser(parser, "Expected '=' after constant name");
         freeToken(cn); // Free 'cn' before returning on error
+        if (type_node) freeAST(type_node);
         return NULL;
     }
     eat(parser, TOKEN_EQUAL); // Use the MACRO 'eat'
 
-    AST *val_node = expression(parser);
+    AST *val_node = NULL;
+    if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+        val_node = parseArrayInitializer(parser);
+    } else {
+        val_node = expression(parser);
+    }
     if (!val_node || val_node->type == AST_NOOP) {
         errorParser(parser, "Invalid constant value expression");
         freeToken(cn);
+        if (type_node) freeAST(type_node);
         if (val_node) freeAST(val_node);
         return NULL;
     }
@@ -1165,9 +1184,16 @@ AST *constDeclaration(Parser *parser) {
         freeValue(&const_eval_result);
         freeAST(val_node);
         freeToken(cn); // Free 'cn' before returning on error
+        if (type_node) freeAST(type_node);
         return NULL;
     }
     setLeft(node, val_node);
+    if (type_node) {
+        setRight(node, type_node);
+        if (type_node->var_type != TYPE_UNKNOWN && type_node->var_type != TYPE_VOID) {
+            setTypeAST(node, type_node->var_type);
+        }
+    }
 
     if (const_eval_result.type != TYPE_VOID && const_eval_result.type != TYPE_UNKNOWN) {
         // Use cn->value and cn->line, as 'cn' is still valid.
@@ -1180,8 +1206,10 @@ AST *constDeclaration(Parser *parser) {
             fprintf(stderr, "[DEBUG PARSER constDecl] VERIFY ADD: FAILED to find '%s' immediately after add!\n", cn->value);
         }
 #endif
-        setTypeAST(node, const_eval_result.type);
-    } else {
+        if (!type_node) {
+            setTypeAST(node, const_eval_result.type);
+        }
+    } else if (!type_node) {
 #ifdef DEBUG
         // Use cn->value and cn->line, as 'cn' is still valid.
         fprintf(stderr, "[DEBUG %s] Parser Info: Constant '%s' value is non-literal or could not be folded by parser at line %d.\n",
@@ -1191,7 +1219,7 @@ AST *constDeclaration(Parser *parser) {
             setTypeAST(node, val_node->var_type);
         }
     }
-    
+
     freeValue(&const_eval_result);
 
     // <<<< FIX: Move freeToken(cn) here, to the end of the function >>>>
