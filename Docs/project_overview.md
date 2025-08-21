@@ -4,12 +4,13 @@ Pscal is an extensible VM implemented in C. The project ships with
 multiple front ends that all target the shared virtual machine:
 
 * **Pascal compiler** – hand‑written lexer and parser.
-* **Clike compiler** – compact C‑style syntax example
+* **Clike compiler** – compact C‑style language example.
 * **Tiny compiler** – educational front end written in Python.
 
-All front ends emit a compact bytecode stream executed by the stack‑based virtual
+All front ends generate a compact bytecode stream executed by the stack‑based virtual
 machine. The VM provides built‑in routines and optional SDL2 and libcurl
-integrations for graphics, audio and networking.
+integrations for graphics, audio and networking.  It also offers easy integration of 
+additional builtins that can be called as functions by the Pascal and CLike front ends.
 
 ## Requirements
 
