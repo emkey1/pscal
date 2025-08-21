@@ -80,6 +80,10 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("scanf");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
+    // `exit` behaves like C's exit, terminating the program with an optional code.
+    functions[functionCount].name = strdup("exit");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
 }
 
 static VarType getFunctionType(const char *name) {
@@ -160,6 +164,30 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         }
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
+            // `exit` behaves like C's exit: allow 0 or 1 integer argument.
+            if (strcmp(name, "exit") == 0) {
+                if (node->child_count > 1) {
+                    fprintf(stderr,
+                            "Type error: exit expects at most 1 argument at line %d, column %d\n",
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                }
+                if (node->child_count == 1) {
+                    VarType at = analyzeExpr(node->children[0], scopes);
+                    if (at != TYPE_INTEGER) {
+                        fprintf(stderr,
+                                "Type error: exit argument must be an integer at line %d, column %d\n",
+                                node->token.line,
+                                node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                free(name);
+                node->var_type = TYPE_VOID;
+                return TYPE_VOID;
+            }
+
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
                 if (clike_get_builtin_id(name) != -1) {
