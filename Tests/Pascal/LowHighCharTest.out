@@ -1,0 +1,4 @@
+START: low(char): PASS
+START: high(char): PASS
+START: low(TColor): PASS
+START: high(TColor): PASS

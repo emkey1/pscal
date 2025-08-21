@@ -1,0 +1,2 @@
+L32: Compiler Error: argument 2 to 'foo' expects type REAL but got INTEGER.
+Compilation failed with errors.

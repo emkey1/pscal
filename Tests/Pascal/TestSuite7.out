@@ -1,0 +1,43 @@
+Running pscal Test Suite
+START: Addition Test: PASS
+START: Subtraction Test: PASS
+START: Multiplication Test: PASS
+START: Integer Division Test: PASS
+START: Operator Precedence Test: PASS
+START: For Loop Test: PASS
+START: While Loop Test: PASS
+START: Repeat Loop Test: PASS
+START: For Downto Test: PASS
+START: String Assignment Test: PASS
+START: String Concatenation Test: PASS
+START: Upcase Test: PASS
+START: Record Field (id) Test: PASS
+START: Record Field (name) Test: PASS
+START: Array Access Test: PASS
+START: Pass by Reference Test: PASS
+START: Function Test: PASS
+START: Boolean AND Test: PASS
+START: Boolean OR Test: PASS
+START: Boolean NOT Test: PASS
+START: Case Statement Test: PASS
+START: File I/O Test: PASS
+START: Write/Read Roundtrip: PASS
+START: Writeln/Readln Roundtrip: PASS
+START: Cosine of 0: PASS
+START: Sine of 0: PASS
+START: Tangent of 0: PASS
+START: Square Root of 4: PASS
+START: Ln(exp(1)): PASS
+START: Exp(1): PASS
+START: Abs(-5.5): PASS
+START: Trunc(3.7): PASS
+START: Trunc(-3.7): PASS
+START: Copy Function Test: PASS
+START: Pos Function Test: PASS
+START: Length Function Test: PASS
+START: Inc Function Test: PASS
+START: Upcase Function Test: PASS
+START: File I/O Builtins Test: PASS
+START: IOResult Test: PASS
+START: RecordPassing Test: PASS
+Test Suite Completed

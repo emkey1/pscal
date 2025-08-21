@@ -1,0 +1,2 @@
+api_send: curl_easy_perform() failed: HTTP response code said error
+[Error Location] Offset: 32, Line: 8
