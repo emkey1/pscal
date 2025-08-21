@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM ColorPalette256Demo;
 
 USES Crt; // Assumes CRT contains ClrScr, GotoXY, TextColorE, TextColor, Write, WriteLn, ReadKey, NormVideo
@@ -17,7 +17,7 @@ BEGIN
   ClrScr; // Clear the terminal screen
 
   GotoXY(1, 1);
-  WriteLn('pscal 256-Color Palette Demonstration');
+  WriteLn('pascal 256-Color Palette Demonstration');
   WriteLn('--------------------------------------');
   WriteLn('(Requires a terminal emulator supporting 256 colors)');
 

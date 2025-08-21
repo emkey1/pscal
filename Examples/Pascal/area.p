@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 Program Calculate_Area (input, output);
 uses crt;
 var 

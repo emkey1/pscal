@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM SDLPlasma256Color;
 
 // USES System; // Implicitly used for Sin, Sqrt, Trunc if not global

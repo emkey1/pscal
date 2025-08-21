@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM SDLFeaturesTest;
 
 USES CRT; // For console WriteLn and ReadKey

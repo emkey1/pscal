@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 program SierpinskiTriangle;
 
 uses CRT; // Assuming your CRT unit provides GotoXY, ClrScr, Write, ReadKey

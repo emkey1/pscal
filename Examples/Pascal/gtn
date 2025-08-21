@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 program GuessTheNumber;
 
 uses CRT; // Uses the CRT unit for screen control and ReadKey

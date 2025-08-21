@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 program PscalBreakout;
 
 uses CRT; // For Delay, potentially KeyPressed/ReadKey if not using full GraphLoop for input
