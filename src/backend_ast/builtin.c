@@ -12,6 +12,7 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
 #include <errno.h>   // For errno
@@ -505,6 +506,13 @@ static void vmAtExitCleanup(void) {
     }
 }
 
+// Signal handler to ensure terminal state is restored on interrupts.
+static void vmSignalHandler(int signum) {
+    vmAtExitCleanup();
+    signal(signum, SIG_DFL);
+    raise(signum);
+}
+
 void vmInitTerminalState(void) {
     if (!vm_termios_saved) {
         if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
@@ -513,6 +521,12 @@ void vmInitTerminalState(void) {
     }
     if (!vm_restore_registered) {
         atexit(vmAtExitCleanup);
+        struct sigaction sa;
+        sa.sa_handler = vmSignalHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
         vm_restore_registered = 1;
     }
     if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
