@@ -10,6 +10,9 @@ if [ ! -x "$CLIKE_BIN" ]; then
   exit 1
 fi
 
+# Ensure tests run from repository root so relative paths resolve correctly
+cd "$ROOT_DIR"
+
 EXIT_CODE=0
 
 for src in "$SCRIPT_DIR"/clike/*.cl; do
