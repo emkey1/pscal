@@ -2044,14 +2044,13 @@ AST *statement(Parser *parser) {
             else {
                 char error_msg[256]; // Increased buffer size
                 const char* lval_desc = "<unknown_lvalue_structure>";
+                char lval_desc_buf[128];
                 if (lval_or_proc_id->token && lval_or_proc_id->token->value) {
                     lval_desc = lval_or_proc_id->token->value;
                 } else if (lval_or_proc_id->left && lval_or_proc_id->left->token && lval_or_proc_id->left->token->value) {
                     // Attempt to get a more descriptive name for complex lvalues like array access
-                    char temp_desc[128];
-                    snprintf(temp_desc, sizeof(temp_desc), "%s[...]", lval_or_proc_id->left->token->value);
-                    lval_desc = temp_desc; // NOTE: temp_desc is on stack, be careful if error_msg outlives this scope significantly
-                                           // For immediate errorParser call, it's okay.
+                    snprintf(lval_desc_buf, sizeof(lval_desc_buf), "%s[...]", lval_or_proc_id->left->token->value);
+                    lval_desc = lval_desc_buf;
                 }
 
                 snprintf(error_msg, sizeof(error_msg),
