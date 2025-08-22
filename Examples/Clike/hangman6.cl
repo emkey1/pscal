@@ -42,42 +42,46 @@ struct WordNode {
     struct WordNode* next;
 };
 
-// Loads words from a file into a linked list
+// Loads words from a file into a linked list using memory streams
 struct WordNode* load_words(int* word_count, int min_length, int max_length, int word_limit) {
     struct WordNode* words = NULL;
-    text f;
-    str line;
-    int i, len, valid;
+    mstream ms;
+    str buffer;
+    int len, start, i, j, word_len, valid;
 
-    assign(f, "etc/words");
-    reset(f);
-    while (!eof(f) && *word_count < word_limit) {
-        readln(f, line);
-        // Finalise the read and stop if we hit EOF or encountered an error.
-        if (ioresult() != 0 || eof(f)) break;
-        len = strlen(line);
-        if (len >= min_length && len <= max_length) {
-            valid = 1;
-            i = 1;
-            while (i <= len) {
-                if ((line[i] >= 'a' && line[i] <= 'z') || (line[i] >= 'A' && line[i] <= 'Z')) {
-                    line[i] = upcase(line[i]);
-                } else {
-                    valid = 0;
+    ms = mstreamcreate();
+    mstreamloadfromfile(&ms, "etc/words");
+    buffer = mstreambuffer(ms) + "\n";
+    len = strlen(buffer);
+    start = 1;
+    for (i = 1; i <= len && *word_count < word_limit; i++) {
+        if (buffer[i] == '\n') {
+            word_len = i - start;
+            if (word_len >= min_length && word_len <= max_length) {
+                valid = 1;
+                j = start;
+                while (j < start + word_len) {
+                    if ((buffer[j] >= 'a' && buffer[j] <= 'z') ||
+                        (buffer[j] >= 'A' && buffer[j] <= 'Z')) {
+                        buffer[j] = upcase(buffer[j]);
+                    } else {
+                        valid = 0;
+                    }
+                    j++;
                 }
-                i++;
+                if (valid) {
+                    struct WordNode* node;
+                    new(&node);
+                    node->word = copy(buffer, start, word_len);
+                    node->next = words;
+                    words = node;
+                    *word_count = *word_count + 1;
+                }
             }
-            if (valid) {
-                struct WordNode* node;
-                new(&node);
-                node->word = copy(line, 1, len);
-                node->next = words;
-                words = node;
-                *word_count = *word_count + 1;
-            }
+            start = i + 1;
         }
     }
-    close(f);
+    mstreamfree(&ms);
     return words;
 }
 
