@@ -774,9 +774,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 freeValue(&zero);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)zidx, node->token.line);
-            } else if (strcmp(name, "scanf") == 0) {
-                // Compile arguments as l-values (addresses) and call VM builtin
-                // readln. scanf in clike returns 0 for simplicity.
+            } else if (strcmp(name, "scanf") == 0 || strcmp(name, "readln") == 0) {
+                // Compile arguments as l-values (addresses) and call the VM's
+                // `readln` builtin. `scanf` returns 0 to mimic C semantics,
+                // while `readln` is treated as a procedure.
                 for (int i = 0; i < node->child_count; ++i) {
                     compileLValue(node->children[i], chunk, ctx);
                 }
@@ -785,11 +786,13 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 emitShort(chunk, (uint16_t)rlIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
 
-                Value zero = makeInt(0);
-                int idx = addConstantToChunk(chunk, &zero);
-                freeValue(&zero);
-                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                if (strcmp(name, "scanf") == 0) {
+                    Value zero = makeInt(0);
+                    int idx = addConstantToChunk(chunk, &zero);
+                    freeValue(&zero);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                }
             } else if (strcmp(name, "assign") == 0 ||
                        strcmp(name, "reset") == 0 ||
                        strcmp(name, "eof") == 0 ||
@@ -804,15 +807,6 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 int fnIndex = addStringConstant(chunk, name);
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)fnIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
-            } else if (strcmp(name, "readln") == 0) {
-                // readln requires all arguments by reference (file and buffer).
-                for (int i = 0; i < node->child_count; ++i) {
-                    compileLValue(node->children[i], chunk, ctx);
-                }
-                int rlIndex = addStringConstant(chunk, "readln");
-                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)rlIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             } else if (strcmp(name, "random") == 0) {
                 // Direct wrapper around the VM's random builtin.
