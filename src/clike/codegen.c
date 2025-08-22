@@ -532,6 +532,11 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             Value v;
             if (node->token.type == CLIKE_TOKEN_FLOAT_LITERAL) {
                 v = makeReal(node->token.float_val);
+            } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL ||
+                       node->var_type == TYPE_CHAR) {
+                // Treat character literals distinctly from integers so
+                // they are emitted as CHAR constants in the bytecode.
+                v = makeChar((char)node->token.int_val);
             } else {
                 v = makeInt(node->token.int_val);
             }
