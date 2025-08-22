@@ -189,7 +189,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
         if (strlen(guessed) > 0) printf("Letters chosen so far: %s", guessed);
         GotoXY(1, 14);
         printf("Enter a letter (A-Z, or ? for hint): ");
-        if (scanf(guess) != 1) continue;
+        scanf(guess);
         if (strlen(guess) == 0) continue;
         if (guess[1] == '?') {
             show_hint(secret, so_far, &hint_used);
@@ -272,7 +272,7 @@ int main() {
         if (result) wins++; else losses++;
         printf("Score: %d wins / %d losses\n", wins, losses);
         printf("Play again? (Y/Enter=Yes, N=No): ");
-        if (scanf(input) != 1) break;
+        scanf(input);
         if (strlen(input) == 0) continue;
         if (upcase(input[1]) != 'Y') playing = 0;
     }
