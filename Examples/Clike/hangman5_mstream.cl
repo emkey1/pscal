@@ -180,14 +180,14 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
         ClrScr();
         GotoXY(1, 1);
         draw_hangman(wrong);
-        GotoXY(1, 9);
+        GotoXY(1, 7);
         printf("Word: %s", so_far);
-        GotoXY(1, 10);
+        GotoXY(1, 8);
         show_guesses_bar(wrong, max_wrong);
-        GotoXY(1, 12);
+        GotoXY(1, 10);
         sort_string(&guessed);
         if (strlen(guessed) > 0) printf("Letters chosen so far: %s", guessed);
-        GotoXY(1, 14);
+        GotoXY(1, 11);
         printf("Enter a letter (A-Z, or ? for hint): ");
         scanf(guess);
         if (strlen(guess) == 0) continue;
@@ -270,6 +270,7 @@ int main() {
     while (playing) {
         result = play_round(words, word_count, 8);
         if (result) wins++; else losses++;
+        GotoXY(1,12);
         printf("Score: %d wins / %d losses\n", wins, losses);
         printf("Play again? (Y/Enter=Yes, N=No): ");
         scanf(input);
