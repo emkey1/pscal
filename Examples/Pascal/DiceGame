@@ -1,4 +1,5 @@
-program YahtzeeGame;
+#!/usr/bin/env pascal
+program DiceGame;
 
 uses CRT; // Use the provided CRT unit
 
@@ -208,12 +209,12 @@ begin
   else Write('   -');
 
   TextColor(Yellow); HighVideo;
-  GotoXY(40, 13); Write('Lower Section');
+  GotoXY(40, 14); Write('Lower Section');
   NormVideo;
   for k := 7 to NUM_CATEGORIES do
   begin
     if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
-    GotoXY(40, 13 + (k-6));
+    GotoXY(40, 14 + (k-6));
     if k <= 9 then
       labelStr := IntToStr(k)
     else
@@ -238,7 +239,7 @@ begin
   end
   else Write('   -');
 
-  GotoXY(40, 23); HighVideo; BlinkText;
+  GotoXY(40, 24); HighVideo;// BlinkText;
   Write('GRAND TOTAL:');
   NormVideo; Write(' ');
   if totalScore > 0 then
