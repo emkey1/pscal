@@ -28,3 +28,7 @@ cp -r lib/clike/* /usr/local/pscal/clike/lib/
 # Install fonts
 mkdir -p /usr/local/pscal/fonts
 cp -r fonts/* /usr/local/pscal/fonts
+
+# Install etc
+mkdir -p /usr/local/pscal/etc
+cp -r etc/* /usr/local/pscal/etc
