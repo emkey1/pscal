@@ -502,15 +502,16 @@ static void vmRestoreTerminal(void) {
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
     if (vm_alt_screen) {
-        const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
-        const char reset_attr[] = "\x1B[0m";    // Reset colors/styles
+        const char reset_attr[] = "\x1B[0m";    // Reset colors/styles in alt screen
+        const char exit_alt[]   = "\x1B[?1049l"; // Leave alternate screen buffer
         write(STDOUT_FILENO, reset_attr, sizeof(reset_attr) - 1);
-        write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
+        write(STDOUT_FILENO, exit_alt,   sizeof(exit_alt) - 1);
         vm_alt_screen = 0;
+    } else {
+        const char reset_attr[] = "\x1B[0m";    // Reset colors/styles when no alt screen
+        write(STDOUT_FILENO, reset_attr, sizeof(reset_attr) - 1);
     }
-    const char reset_attr[] = "\x1B[0m";    // Reset colors/styles
     const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
-    write(STDOUT_FILENO, reset_attr, sizeof(reset_attr) - 1);
     write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
 }
 
