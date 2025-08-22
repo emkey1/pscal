@@ -2227,48 +2227,9 @@ comparison_error_label:
 
                 bool color_was_applied = false; // Flag to track if we change the color
 
-                // Apply console colors only if writing to stdout and colors are not default.
+                // Apply console colors only if writing to stdout
                 if (output_stream == stdout) {
-                    // Check if the current color settings are the default ones.
-                    bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
-                                             !gCurrentTextBold && !gCurrentTextUnderline && !gCurrentTextBlink &&
-                                             !gCurrentColorIsExt && !gCurrentBgIsExt);
-
-                    if (!is_default_state) {
-                        color_was_applied = true; // Mark that we're applying custom colors.
-                        char escape_sequence[64] = "\x1B[";
-                        char code_str[64];
-                        bool first_attr = true;
-                        if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-                        if (gCurrentTextUnderline) {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            strcat(escape_sequence, "4");
-                            first_attr = false;
-                        }
-                        if (gCurrentTextBlink) {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            strcat(escape_sequence, "5");
-                            first_attr = false;
-                        }
-                        if (gCurrentColorIsExt) {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-                        } else {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
-                        }
-                        strcat(escape_sequence, code_str);
-                        first_attr = false;
-                        strcat(escape_sequence, ";");
-                        if (gCurrentBgIsExt) {
-                            snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-                        } else {
-                            snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
-                        }
-                        strcat(escape_sequence, code_str);
-                        strcat(escape_sequence, "m");
-                        fprintf(output_stream, "%s", escape_sequence);
-                    }
+                    color_was_applied = applyCurrentTextAttributes(output_stream);
                 }
 
                 // Print the arguments (strings as full buffers; chars as a single byte)
@@ -2297,7 +2258,7 @@ comparison_error_label:
 
                 // Reset console colors only if they were applied in this call.
                 if (color_was_applied) {
-                    fprintf(output_stream, "\x1B[0m");
+                    resetTextAttributes(output_stream);
                 }
 
                 fflush(output_stream);
