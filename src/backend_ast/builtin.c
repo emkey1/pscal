@@ -485,12 +485,24 @@ static struct termios vm_orig_termios;
 static int vm_raw_mode = 0;
 static int vm_termios_saved = 0;
 static int vm_restore_registered = 0;
+static int vm_alt_screen = 0; // Track if alternate screen buffer is active
 
 static void vmRestoreTerminal(void) {
     if (vm_termios_saved) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
     }
     vm_raw_mode = 0;
+}
+
+// atexit handler: restore terminal settings and leave alternate screen
+static void vmAtExitCleanup(void) {
+    vmRestoreTerminal();
+    if (vm_alt_screen) {
+        const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
+        write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
+        fflush(stdout);
+        vm_alt_screen = 0;
+    }
 }
 
 void vmInitTerminalState(void) {
@@ -500,8 +512,14 @@ void vmInitTerminalState(void) {
         }
     }
     if (!vm_restore_registered) {
-        atexit(vmRestoreTerminal);
+        atexit(vmAtExitCleanup);
         vm_restore_registered = 1;
+    }
+    if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
+        const char enter_alt[] = "\x1B[?1049h"; // Switch to alternate screen buffer
+        write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
+        fflush(stdout);
+        vm_alt_screen = 1;
     }
 }
 
