@@ -1184,7 +1184,7 @@ char *findUnitFile(const char *unit_name) {
         lib_path[PATH_MAX - 1] = '\0'; // Ensure null-termination
     } else {
         // Fall back to the default hard-coded path.
-        strncpy(lib_path, "/usr/local/pscal/Pascal/lib", PATH_MAX - 1);
+        strncpy(lib_path, "/usr/local/pscal/pascal/lib", PATH_MAX - 1);
         lib_path[PATH_MAX - 1] = '\0';
     }
 
