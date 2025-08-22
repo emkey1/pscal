@@ -422,87 +422,96 @@ end;
 // --- Main Game ---
 
 begin
-  // <-- MODIFIED: Set background, calculate offsets, and clear screen first
+  // <-- MODIFIED: Set background, calculate offsets
   Randomize;
   hOffset := (ScreenCols - GAME_WIDTH) div 2;
   vOffset := (ScreenRows - GAME_HEIGHT) div 2;
   if hOffset < 0 then hOffset := 0;
   if vOffset < 0 then vOffset := 0;
-  ClearScreenWithColor(Black);
-  HideCursor;
-
-  InitializeScorecard;
-  turn := 0;
-  gameOver := false;
-  userChoice := ' ';
 
   repeat
-    ClearScreenWithColor(Black); // Clear screen at start of each turn
+    ClearScreenWithColor(Black);
+    HideCursor;
 
-    GotoXY(5 + hOffset, 2 + vOffset);
-    TextColor(Cyan);
-    Write('--- Turn ');
-    turnStr := IntToStr(turn + 1);
-    Write(turnStr);
-    Write(' of ');
-    totalStr := IntToStr(NUM_CATEGORIES);
-    Write(totalStr);
-    Write(' ---');
-    NormVideo;
-    TextBackground(Black);
-    TextColor(White);
-    ClrEol;
-
-    DisplayScorecard;
-
-    for i := 1 to NUM_DICE do keep[i] := false;
-    rollsLeft := MAX_ROLLS;
+    InitializeScorecard;
+    turn := 0;
+    gameOver := false;
     userChoice := ' ';
 
     repeat
-      RollDice;
+      ClearScreenWithColor(Black); // Clear screen at start of each turn
+
+      GotoXY(5 + hOffset, 2 + vOffset);
+      TextColor(Cyan);
+      Write('--- Turn ');
+      turnStr := IntToStr(turn + 1);
+      Write(turnStr);
+      Write(' of ');
+      totalStr := IntToStr(NUM_CATEGORIES);
+      Write(totalStr);
+      Write(' ---');
+      NormVideo;
+      TextBackground(Black);
+      TextColor(White);
+      ClrEol;
+
+      DisplayScorecard;
+
+      for i := 1 to NUM_DICE do keep[i] := false;
+      rollsLeft := MAX_ROLLS;
+      userChoice := ' ';
+
+      repeat
+        RollDice;
+        DisplayDice;
+        if rollsLeft > 0 then
+        begin
+          ToggleKeep(userChoice);
+        end
+        else
+        begin
+          userChoice := 'S';
+        end;
+      until (userChoice = 'S') or (rollsLeft <= 0);
+
+      ClearLine(8);
       DisplayDice;
-      if rollsLeft > 0 then
-      begin
-        ToggleKeep(userChoice);
-      end
-      else
-      begin
-        userChoice := 'S';
-      end;
-    until (userChoice = 'S') or (rollsLeft <= 0);
+      ChooseCategory;
+      ScoreTurn;
 
-    ClearLine(8);
-    DisplayDice;
-    ChooseCategory;
-    ScoreTurn;
-    
-    turn := turn + 1;
-    if turn >= NUM_CATEGORIES then gameOver := true;
+      turn := turn + 1;
+      if turn >= NUM_CATEGORIES then gameOver := true;
 
-    if not gameOver then
-    begin
-      Print(5, 24, 'Press any key for next turn...'); ClrEol;
-      inputChar := ReadKey;
-      while KeyPressed do
+      if not gameOver then
       begin
+        Print(5, 24, 'Press any key for next turn...'); ClrEol;
         inputChar := ReadKey;
+        while KeyPressed do
+        begin
+          inputChar := ReadKey;
+        end;
+        ClearLine(24);
       end;
-      ClearLine(24);
-    end;
-  until gameOver;
+    until gameOver;
 
-  ClearScreenWithColor(Black);
-  DisplayScorecard;
-  TextColor(Yellow);
-  GotoXY(1 + hOffset, 12 + vOffset); Write('>>> GAME OVER <<<');
-  NormVideo;
-  TextBackground(Black);
-  TextColor(White);
-  GotoXY(15 + hOffset, 14 + vOffset);
-  Write('Final Score: ');
-  scoreStr := IntToStr(totalScore);
-  Write(scoreStr);
+    ClearScreenWithColor(Black);
+    DisplayScorecard;
+    TextColor(Yellow);
+    GotoXY(1 + hOffset, 12 + vOffset); Write('>>> GAME OVER <<<');
+    NormVideo;
+    TextBackground(Black);
+    TextColor(White);
+    GotoXY(15 + hOffset, 14 + vOffset);
+    Write('Final Score: ');
+    scoreStr := IntToStr(totalScore);
+    Write(scoreStr);
+    ShowCursor;
+    GotoXY(15 + hOffset, 16 + vOffset);
+    Write('Play again? (Y/N): ');
+    repeat
+      userChoice := UpCase(ReadKey);
+    until userChoice in ['Y', 'N'];
+  until userChoice = 'N';
 
   GotoXY(1, ScreenRows);
   ShowCursor;
