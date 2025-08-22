@@ -79,12 +79,6 @@ end;
 
 // --- CRT Helper Procedures (Now with Centering) ---
 
-procedure ClearLine(y: integer);
-begin
-  GotoXY(1 + hOffset, y + vOffset);
-  ClrEol;
-end;
-
 procedure Print(x, y: integer; s: string);
 begin
   GotoXY(x + hOffset, y + vOffset);
@@ -190,7 +184,7 @@ begin
   TextBackground(Black);
   GotoXY(5 + hOffset, 11 + vOffset);
   Write('Rolls Left: ', rollsLeft:1);
-  ClrEol;
+  //ClrEol;
 end;
 
 procedure DisplayScorecard;
@@ -200,7 +194,7 @@ begin
   TextColor(Yellow);
   GotoXY(40 + hOffset, 2 + vOffset);
   Write('Upper Section');
-  ClrEol;  
+  //ClrEol;  
 
   NormVideo;
   TextBackground(Black);
@@ -218,7 +212,7 @@ begin
     end
     else
       Write(' (-)');
-    ClrEol; 
+    //ClrEol; 
   end;
 
   TextColor(White);
@@ -229,7 +223,7 @@ begin
     Write(scoreStr:4)
   end
   else Write('   -');
-  ClrEol; 
+  //ClrEol; 
 
   GotoXY(40 + hOffset, 11 + vOffset); Write('Upper Total:');
   if upperScore > 0 then
@@ -238,11 +232,11 @@ begin
     Write(scoreStr:4)
   end
   else Write('   -');
-  ClrEol;
+  //ClrEol;
 
   TextColor(Yellow);
-  GotoXY(40 + hOffset, 14 + vOffset); Write('Lower Section');
-  ClrEol;
+  GotoXY(40 + hOffset, 15 + vOffset); Write('Lower Section');
+  //ClrEol;
 
   NormVideo;
   TextBackground(Black);
@@ -263,7 +257,7 @@ begin
     end
     else
       Write(' (-)');
-    ClrEol;
+    //ClrEol;
   end;
 
   TextColor(White);
@@ -274,7 +268,7 @@ begin
     Write(scoreStr:4)
   end
   else Write('   -');
-  ClrEol;
+  //ClrEol;
 
   GotoXY(40 + hOffset, 24 + vOffset);
   TextColor(Yellow);
@@ -288,7 +282,7 @@ begin
     TextColor(Yellow); Write(scoreStr:4); TextColor(White);
   end
   else Write('   -');
-  ClrEol;
+  //ClrEol;
   NormVideo;
   TextBackground(Black);
 end;
@@ -299,13 +293,13 @@ var
 begin
   userAction := ' ';
   TextColor(Yellow);
-  Print(5, 12, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: ');
-  ClrEol;
+  Print(5, 13, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: ');
+  //ClrEol;
   NormVideo;
   TextBackground(Black);
   TextColor(White);
 
-  GotoXY(60 + hOffset, 8 + vOffset); ClrEol;
+  GotoXY(60 + hOffset, 8 + vOffset); //ClrEol;
   GotoXY(60 + hOffset, 8 + vOffset);
 
   repeat
@@ -321,8 +315,8 @@ begin
       keep[dieNum] := not keep[dieNum];
       DisplayDice;
       TextColor(Yellow);
-      Print(5, 12, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: ');
-      ClrEol;
+      Print(5, 13, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: ');
+      //ClrEol;
       NormVideo;
       TextBackground(Black);
       TextColor(White);
@@ -334,7 +328,6 @@ begin
       GotoXY(60 + hOffset, 8 + vOffset);
     end;
   until (userAction = 'R') or (userAction = 'S');
-  ClearLine(8);
 end;
 
 // All scoring functions are unchanged...
@@ -354,13 +347,13 @@ var
 begin
   TextColor(Yellow);
   Print(5, 10, 'Choose category (1-9, A-D): ');
-  ClrEol;
+  //ClrEol;
   NormVideo;
   TextBackground(Black);
   TextColor(White);
   repeat
     validChoice := false;
-    GotoXY(35 + hOffset, 10 + vOffset); ClrEol;
+    GotoXY(35 + hOffset, 10 + vOffset); //ClrEol;
     GotoXY(35 + hOffset, 10 + vOffset);
 
     choiceChar := ReadKey;
@@ -377,7 +370,7 @@ begin
       if scorecard[tempChoice].used then
       begin
         TextColor(LightRed);
-        Print(5, 11, 'Category already used. Choose another.'); ClrEol; Beep;
+        Print(5, 11, 'Category already used. Choose another.'); //ClrEol; Beep;
         TextColor(White);
         GotoXY(35 + hOffset, 10 + vOffset);
       end
@@ -385,14 +378,13 @@ begin
       begin
         categoryChoice := tempChoice;
         validChoice := true;
-        ClearLine(11);
         Write(UpCase(choiceChar));
       end;
     end
     else
     begin
       TextColor(LightRed);
-      Print(5, 11, 'Invalid choice. Enter 1-9 or A-D.'); ClrEol; Beep;
+      Print(5, 11, 'Invalid choice. Enter 1-9 or A-D.'); //ClrEol; Beep;
       TextColor(White);
       GotoXY(35 + hOffset, 10 + vOffset);
     end;
@@ -453,7 +445,7 @@ begin
       NormVideo;
       TextBackground(Black);
       TextColor(White);
-      ClrEol;
+      //ClrEol;
 
       DisplayScorecard;
 
@@ -474,23 +466,22 @@ begin
         end;
       until (userChoice = 'S') or (rollsLeft <= 0);
 
-      ClearLine(8);
       DisplayDice;
       ChooseCategory;
       ScoreTurn;
 
       turn := turn + 1;
+      TextColor(White);
       if turn >= NUM_CATEGORIES then gameOver := true;
 
       if not gameOver then
       begin
-        Print(5, 24, 'Press any key for next turn...'); ClrEol;
+        Print(5, 24, 'Press any key for next turn...'); //ClrEol;
         inputChar := ReadKey;
         while KeyPressed do
         begin
           inputChar := ReadKey;
         end;
-        ClearLine(24);
       end;
     until gameOver;
 

@@ -28,13 +28,11 @@ const
   LineH = '═'; LineV = '║';
 
 type
-  { *** ADDED: Linked List for Word Storage *** }
   PWordNode = ^TWordNode;
   TWordNode = record
     data: string[MAX_LENGTH]; { Store word directly - adjust size if needed }
     next: PWordNode;
   end;
-  { *** END ADDED *** }
 
 var
   chosen: string;
@@ -488,6 +486,7 @@ end;
 ---------------------------------------------------------------------}
 begin
   ClrScr;
+  writeln('\e]11;#090909\a');
   writeln('Initializing Hangman...');
 
   // --- Load word list ONCE ---
