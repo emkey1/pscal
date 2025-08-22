@@ -488,6 +488,9 @@ static int vm_termios_saved = 0;
 static int vm_restore_registered = 0;
 static int vm_alt_screen = 0; // Track if alternate screen buffer is active
 
+static void vmEnableRawMode(void); // Forward declaration
+static void vmSetupTermHandlers(void);
+
 static void vmRestoreTerminal(void) {
     if (vm_termios_saved && vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
@@ -500,6 +503,8 @@ static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
     if (vm_alt_screen) {
         const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
+        const char reset_attr[] = "\x1B[0m";    // Reset colors/styles
+        write(STDOUT_FILENO, reset_attr, sizeof(reset_attr) - 1);
         write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
         vm_alt_screen = 0;
     }
@@ -514,7 +519,7 @@ static void vmSignalHandler(int signum) {
     _exit(128 + signum);
 }
 
-void vmInitTerminalState(void) {
+static void vmSetupTermHandlers(void) {
     if (!vm_termios_saved) {
         if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
             vm_termios_saved = 1;
@@ -528,22 +533,26 @@ void vmInitTerminalState(void) {
         sa.sa_flags = 0;
         sigaction(SIGINT, &sa, NULL);
         sigaction(SIGTERM, &sa, NULL);
+        sigaction(SIGQUIT, &sa, NULL);
+        sigaction(SIGABRT, &sa, NULL);
+        sigaction(SIGSEGV, &sa, NULL);
         vm_restore_registered = 1;
     }
+}
+
+void vmInitTerminalState(void) {
+    vmSetupTermHandlers();
     if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
         const char enter_alt[] = "\x1B[?1049h"; // Switch to alternate screen buffer
         write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
         fflush(stdout);
         vm_alt_screen = 1;
     }
+    vmEnableRawMode();
 }
 
 static void vmEnableRawMode(void) {
-    if (!vm_termios_saved) {
-        vmInitTerminalState();
-        if (!vm_termios_saved)
-            return; // Failed to save state; avoid messing with terminal
-    }
+    vmSetupTermHandlers();
     if (vm_raw_mode)
         return;
 
@@ -1534,6 +1543,10 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
 
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }
 
+    if (input_stream == stdin) {
+        vmEnableRawMode();
+    }
+
     return makeVoid();
 }
 
@@ -1570,6 +1583,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
         last_io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
+        if (input_stream == stdin) vmEnableRawMode();
         return makeVoid();
     }
     line_buffer[strcspn(line_buffer, "\r\n")] = '\0';
@@ -1646,6 +1660,10 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
     // ***NEW***: neuter FILE-by-value arg so VM cleanup won’t fclose()
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
+
+    if (input_stream == stdin) {
+        vmEnableRawMode();
+    }
 
     return makeVoid();
 }
