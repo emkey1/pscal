@@ -35,6 +35,7 @@ static void initSymbolSystem(void) {
 }
 
 int main(int argc, char* argv[]) {
+    vmInitTerminalState();
     if (argc < 2) {
         fprintf(stderr, "Usage: pscalvm <bytecode_file> [program_parameters...]\n");
         return 1;

@@ -175,6 +175,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 
 // Consistent main function structure for argument parsing
 int main(int argc, char *argv[]) {
+    vmInitTerminalState();
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     const char *sourceFile = NULL;
