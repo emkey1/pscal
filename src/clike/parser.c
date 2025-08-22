@@ -59,6 +59,7 @@ static ASTNodeClike* structDeclaration(ParserClike *p, ClikeToken nameTok);
 static ASTNodeClike* structVarDeclaration(ParserClike *p, ClikeToken nameTok, ClikeToken ident, int isPointer);
 static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token, ClikeToken ident, int isPointer);
 static ASTNodeClike* structVarDeclarationNoSemi(ParserClike *p, ClikeToken nameTok, ClikeToken ident, int isPointer);
+static ASTNodeClike* structFunDeclaration(ParserClike *p, ClikeToken nameTok, ClikeToken ident, int isPointer);
 static ASTNodeClike* params(ParserClike *p);
 static ASTNodeClike* param(ParserClike *p);
 static ASTNodeClike* compoundStmt(ParserClike *p);
@@ -230,7 +231,11 @@ static ASTNodeClike* declaration(ParserClike *p) {
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
             ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
-            return structVarDeclaration(p, nameTok, ident, isPtr);
+            if (p->current.type == CLIKE_TOKEN_LPAREN) {
+                return structFunDeclaration(p, nameTok, ident, isPtr);
+            } else {
+                return structVarDeclaration(p, nameTok, ident, isPtr);
+            }
         }
     }
     if (isTypeToken(p->current.type)) {
@@ -291,6 +296,20 @@ static ASTNodeClike* structVarDeclaration(ParserClike *p, ClikeToken nameTok, Cl
         setLeftClike(node, expression(p));
     }
     expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    return node;
+}
+
+static ASTNodeClike* structFunDeclaration(ParserClike *p, ClikeToken nameTok, ClikeToken ident, int isPointer) {
+    (void)nameTok;
+    expectToken(p, CLIKE_TOKEN_LPAREN, "(");
+    ASTNodeClike *paramsNode = params(p);
+    expectToken(p, CLIKE_TOKEN_RPAREN, ")");
+    ASTNodeClike *body = compoundStmt(p);
+    ASTNodeClike *node = newASTNodeClike(TCAST_FUN_DECL, ident);
+    node->var_type = isPointer ? TYPE_POINTER : TYPE_RECORD;
+    node->element_type = isPointer ? TYPE_RECORD : TYPE_UNKNOWN;
+    setLeftClike(node, paramsNode);
+    setRightClike(node, body);
     return node;
 }
 
