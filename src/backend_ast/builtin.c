@@ -799,20 +799,49 @@ Value vmBuiltinNormvideo(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+static void colorIndexToHex(int colorIndex, bool isExtended, char* out_hex) {
+    static const char* hex16[16] = {
+        "#000000", "#000080", "#008000", "#008080",
+        "#800000", "#800080", "#808000", "#c0c0c0",
+        "#808080", "#0000ff", "#00ff00", "#00ffff",
+        "#ff0000", "#ff00ff", "#ffff00", "#ffffff"
+    };
+
+    if (!isExtended) {
+        strcpy(out_hex, hex16[colorIndex % 16]);
+        return;
+    }
+    if (colorIndex < 16) {
+        strcpy(out_hex, hex16[colorIndex]);
+        return;
+    }
+    if (colorIndex >= 16 && colorIndex <= 231) {
+        int c = colorIndex - 16;
+        int r = c / 36;
+        int g = (c % 36) / 6;
+        int b = c % 6;
+        int vals[6] = {0, 95, 135, 175, 215, 255};
+        snprintf(out_hex, 8, "#%02X%02X%02X", vals[r], vals[g], vals[b]);
+        return;
+    }
+    if (colorIndex >= 232 && colorIndex <= 255) {
+        int gray = 8 + (colorIndex - 232) * 10;
+        snprintf(out_hex, 8, "#%02X%02X%02X", gray, gray, gray);
+        return;
+    }
+    strcpy(out_hex, "#000000");
+}
+
 Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
     (void)args;
     if (arg_count != 0) {
         runtimeError(vm, "ClrScr expects no arguments.");
         return makeVoid();
     }
-    /*
-     * ClrScr should clear the screen using the current text/background
-     * attributes. The VM only emits color escape codes when writing output,
-     * so if the user changes TextBackground and then calls ClrScr without
-     * writing anything, the terminal would still use the previous colors.
-     * Emit the appropriate escape sequence here before clearing so the
-     * cleared area uses the active background color.
-     */
+
+    char bg_hex[8];
+    colorIndexToHex(gCurrentTextBackground, gCurrentBgIsExt, bg_hex);
+    printf("\x1B]11;%s\x07", bg_hex);
 
     bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
                              !gCurrentTextBold && !gCurrentTextUnderline &&
@@ -857,7 +886,7 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         printf("%s", escape_sequence);
     }
 
-    printf("\x1B[2J");
+    printf("\x1B[2J\x1B[H");
     fflush(stdout);
     return makeVoid();
 }
