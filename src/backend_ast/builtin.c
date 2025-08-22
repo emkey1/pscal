@@ -489,10 +489,10 @@ static int vm_restore_registered = 0;
 static int vm_alt_screen = 0; // Track if alternate screen buffer is active
 
 static void vmRestoreTerminal(void) {
-    if (vm_termios_saved) {
+    if (vm_termios_saved && vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
+        vm_raw_mode = 0;
     }
-    vm_raw_mode = 0;
 }
 
 // atexit handler: restore terminal settings and leave alternate screen
@@ -509,7 +509,8 @@ static void vmAtExitCleanup(void) {
 
 // Signal handler to ensure terminal state is restored on interrupts.
 static void vmSignalHandler(int signum) {
-    vmAtExitCleanup();
+    if (vm_raw_mode || vm_alt_screen)
+        vmAtExitCleanup();
     _exit(128 + signum);
 }
 
@@ -540,6 +541,8 @@ void vmInitTerminalState(void) {
 static void vmEnableRawMode(void) {
     if (!vm_termios_saved) {
         vmInitTerminalState();
+        if (!vm_termios_saved)
+            return; // Failed to save state; avoid messing with terminal
     }
     if (vm_raw_mode)
         return;
