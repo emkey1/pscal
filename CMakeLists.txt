@@ -126,7 +126,7 @@ endif()
 set(PSCAL_SOURCES
     src/main.c src/globals.c
     src/core/types.c src/core/utils.c src/core/list.c
-    src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/ast.c
+    src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c

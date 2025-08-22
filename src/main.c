@@ -1,6 +1,7 @@
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 #include "Pascal/ast.h"
+#include "Pascal/opt.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
@@ -99,6 +100,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
             overall_success_status = true;
         } else {
+            GlobalAST = optimizePascalAST(GlobalAST);
             used_cache = loadBytecodeFromCache(programName, &chunk);
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
