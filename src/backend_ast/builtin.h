@@ -2,7 +2,7 @@
 #define BUILTIN_H
 
 #include "core/types.h"
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include "globals.h"
 
 struct VM_s;
@@ -81,6 +81,7 @@ Value vmBuiltinMstreamcreate(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamloadfromfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamsavetofile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamfree(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinMstreambuffer(struct VM_s* vm, int arg_count, Value* args);
 
 /* VM-native math functions */
 Value vmBuiltinSqrt(struct VM_s* vm, int arg_count, Value* args);

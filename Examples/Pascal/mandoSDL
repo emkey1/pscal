@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM SDLMandelbrotWithStatus;
 
 // USES System; // Implicit for Sqrt, Trunc, WriteLn etc. if not global

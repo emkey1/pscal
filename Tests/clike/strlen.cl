@@ -1,5 +1,4 @@
 int main() {
-    printf(strlen("foo"));
-    printf("\n");
+    printf("%d\n", strlen("foo"));
     return 0;
 }

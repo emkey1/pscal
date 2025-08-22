@@ -1,0 +1,15 @@
+Before calling Increase: x = 10
+Inside Increase: n = 10, delta = 5
+Inside Increase after modification: n = 15
+After calling Increase: x = 15
+
+Before calling Test: x = 15, y = 20
+Inside Test: inVal = 15, refVal = 20
+Inside Test after modifying refVal: refVal = 40
+After calling Test: x = 15, y = 40
+
+Before calling Double: x = 15
+Inside Double: n = 15
+Inside Double after modification: n = 30
+Result of Double: 30
+After calling Double: x = 30

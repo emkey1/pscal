@@ -1,7 +1,6 @@
 int main() {
     int x;
     x = 1 + 2 * 3;
-    printf(x);
-    printf("\n");
+    printf("%d\n", x);
     return 0;
 }

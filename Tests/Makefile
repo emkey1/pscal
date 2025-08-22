@@ -1,7 +1,7 @@
 .PHONY: all test
 
-# pscal binary is assumed to be one directory up
-PSCAL = ../build/bin/pscal
+# pascal binary is assumed to be one directory up
+PASCAL = ../build/bin/pascal
 
 # List of test files
 TESTS := \
@@ -27,7 +27,7 @@ test:
 	@for t in $(TESTS); do \
 	echo "----------------------------------------------------"; \
 	echo "Running $$t:"; \
-	$(PSCAL) $$t; \
+        $(PASCAL) $$t; \
 	echo "----------------------------------------------------"; \
 	echo ""; \
 	done
@@ -35,7 +35,7 @@ test:
 	@for t in $(FAIL_TESTS); do \
 	echo "----------------------------------------------------"; \
 	echo "Running $$t (expected failure):"; \
-	if $(PSCAL) $$t >/tmp/pscal_output 2>&1; then \
+        if $(PASCAL) $$t >/tmp/pscal_output 2>&1; then \
 	echo "ERROR: $$t unexpectedly succeeded"; \
 	cat /tmp/pscal_output; \
 	exit 1; \
@@ -55,7 +55,7 @@ test:
 	for t in $(SDL_TESTS); do \
 	echo "----------------------------------------------------"; \
 	echo "Running $$t:"; \
-	$(PSCAL) $$t; \
+        $(PASCAL) $$t; \
 	echo "----------------------------------------------------"; \
 	echo ""; \
 	done; \

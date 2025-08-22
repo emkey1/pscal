@@ -1,5 +1,4 @@
 int main() {
-    printf(random(1));
-    printf("\n");
+    printf("%d\n", random(1));
     return 0;
 }

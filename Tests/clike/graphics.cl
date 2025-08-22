@@ -19,17 +19,11 @@ int main() {
     updatescreen();
     graphloop(10);
 
-    printf(w);
-    printf(" ");
-    printf(h);
-    printf("\n");
+    printf("%d %d\n", w, h);
     closegraph();
 #else
 // Fake it if you can't make it
-    printf(639);
-    printf(" ");
-    printf(479);
-    printf("\n");
+    printf("639 479\n");
 #endif
     printf("Press Enter to exit...\n");
     scanf(dummy);

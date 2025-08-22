@@ -1,0 +1,184 @@
+===== pscal Comprehensive Type Test =====
+
+--- Testing INTEGER / LONGINT / CARDINAL ---
+START: Integer Assign: PASS
+START: LongInt Assign: PASS
+START: Cardinal Assign: PASS
+START: Integer Addition: PASS
+START: Integer Subtraction: PASS
+START: Integer Multiplication: PASS
+START: Integer Division (DIV): PASS
+START: Integer Modulo (MOD): PASS
+START: Integer Comparison (<): PASS
+START: Integer Comparison (>): PASS
+START: Integer Comparison (=): PASS
+START: Integer Comparison (<>): PASS
+START: Integer Comparison (<=): PASS
+START: Integer Comparison (>=): PASS
+START: Inc(Integer): PASS
+START: Inc(Integer, 5): PASS
+START: Dec(Integer): PASS
+START: Dec(Integer, 10): PASS
+
+--- Testing REAL ---
+START: Real Assign: PASS
+START: Real Addition: PASS
+START: Real Subtraction: PASS
+START: Real Multiplication: PASS
+START: Real Division (/): PASS
+START: Real Comparison (>): PASS
+START: Real Comparison (<): PASS
+START: Real Comparison (=, approx): PASS
+START: Real Comparison (<>, approx): PASS
+START: Trunc(Real): PASS
+START: Trunc(Negative Real): PASS
+
+--- Testing STRING (Dynamic and Fixed) ---
+START: Dynamic String Assign: PASS
+START: Fixed String Assign: PASS
+START: String Concatenation: PASS
+START: String Length: PASS
+START: Fixed String Length: PASS
+START: Fixed String Truncation: PASS
+START: Fixed String Length after truncate: PASS
+START: Assign Char to String: PASS
+START: String Comparison (<): PASS
+START: String Comparison (>): PASS
+START: String Comparison (=): PASS
+START: String Comparison (<>) - Case Sensitive?: PASS
+START: Copy(1,1): PASS
+START: Copy(4,7): PASS
+START: Copy past end: PASS
+START: Copy start past end: PASS
+START: Pos(P, Programming): PASS
+START: Pos(gram, Programming): PASS
+START: Pos(xyz, Programming): PASS
+START: Pos(p, Programming) - Case Sensitive?: PASS
+START: Pos finds first: PASS
+
+--- Testing CHAR ---
+START: Char Assign Literal: PASS
+START: Char Assign from String[1]: PASS
+START: Char Comparison (<): PASS
+START: Char Comparison (>): PASS
+START: Char Comparison (=): PASS
+START: Char Comparison (<>): PASS
+START: Ord(A): PASS
+START: Chr(65): PASS
+START: Upcase(a): PASS
+START: Upcase(A): PASS
+START: Upcase(1): PASS
+START: Low(char): PASS
+START: High(char): PASS
+START: Ord(Low(char)): PASS
+START: Ord(High(char)): PASS
+START: Succ(A): PASS
+
+--- Testing BOOLEAN ---
+START: Boolean Assign true: PASS
+START: Boolean AssertTrue (true): PASS
+START: Boolean Assign false: PASS
+START: Boolean AssertFalse (false): PASS
+START: Boolean Comparison (= true): PASS
+START: Boolean Comparison (= false): PASS
+START: Boolean Comparison (<>): PASS
+START: Boolean AND (T, T): PASS
+START: Boolean AND (T, F): PASS
+START: Boolean AND (F, T): PASS
+START: Boolean AND (F, F): PASS
+START: Boolean OR (T, T): PASS
+START: Boolean OR (T, F): PASS
+START: Boolean OR (F, T): PASS
+START: Boolean OR (F, F): PASS
+START: Boolean NOT (T): PASS
+START: Boolean NOT (F): PASS
+
+--- Testing BYTE ---
+START: Byte Assign 0: PASS
+START: Byte Assign 255: PASS
+START: Byte Addition: PASS
+START: Byte Subtraction: PASS
+START: Low(byte): PASS
+START: High(byte): PASS
+START: Inc(Byte): PASS
+START: Dec(Byte, 5): PASS
+START: Assign Integer to Byte: PASS
+
+--- Testing WORD ---
+START: Word Assign 0: PASS
+START: Word Assign 65535: PASS
+START: Word Addition: PASS
+START: Word Subtraction: PASS
+START: Low(word): PASS
+START: High(word): PASS
+START: Inc(Word): PASS
+START: Dec(Word, 500): PASS
+START: Assign Integer to Word: PASS
+
+--- Testing ENUM (TColor) ---
+START: Enum Assign cRed: PASS
+START: Enum Assign cYellow: PASS
+START: Enum Comparison (<): PASS
+START: Enum Comparison (>): PASS
+START: Enum Comparison (=): PASS
+START: Enum Comparison (<>): PASS
+START: Ord(cRed): PASS
+START: Ord(cYellow): PASS
+START: Low(TColor): PASS
+START: High(TColor): PASS
+START: Succ(cRed): PASS
+START: Succ(cGreen): PASS
+START: Succ(cBlue): PASS
+START: Succ(Succ(cRed)): PASS
+
+--- Testing RECORD (TPerson) ---
+START: Record Assign/Access name: PASS
+START: Record Assign/Access age: PASS
+START: Record Assign/Access height: PASS
+START: Record Assign/Access isStudent: PASS
+START: Record Assign/Access favColor: PASS
+START: Record Modify age: PASS
+START: Record Assignment name check: PASS
+START: Record Assignment age check: PASS
+START: Record Assignment favColor check: PASS
+START: Record Original unchanged (name): PASS
+START: Record Original unchanged (age): PASS
+START: Record Copy changed (name): PASS
+START: Record Copy changed (age): PASS
+
+--- Testing ARRAY ---
+Testing 1D Integer Array...
+START: Array[0]: PASS
+START: Array[2]: PASS
+START: Array[4]: PASS
+START: Array Modify/Access: PASS
+Testing 2D Real Array...
+START: Matrix[1,1]: PASS
+START: Matrix[1,2]: PASS
+START: Matrix[2,1]: PASS
+START: Matrix[2,2]: PASS
+START: Matrix Modify/Access: PASS
+Testing Array of Records...
+START: Array Record[1].name: PASS
+START: Array Record[2].age: PASS
+START: Array Record[3].favColor: PASS
+START: Array Record Modify/Access: PASS
+
+--- Testing SET ---
+START: Set IN [vowels] (a): PASS
+START: Set NOT IN [vowels] (b): PASS
+START: Set IN [vowels+b..d] (c): PASS
+START: Set NOT IN after difference (o): PASS
+START: Set IN after difference (a): PASS
+START: Set IN after intersection (d): PASS
+START: Set NOT IN after intersection (A): PASS
+START: Set IN [Colors] (cRed): PASS
+START: Set NOT IN [Colors] (cGreen): PASS
+START: Set IN [All-Green] (cYellow): PASS
+START: Set NOT IN [All-Green] (cGreen): PASS
+START: Set IN [Bytes] (0): PASS
+START: Set IN [Bytes] (25): PASS
+START: Set NOT IN [Bytes] (15): PASS
+START: Set IN [Bytes] (255): PASS
+
+===== Comprehensive Type Test Completed =====

@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM SDLFeaturesTest;
 
 USES CRT; // For console WriteLn and ReadKey
@@ -6,9 +6,10 @@ USES CRT; // For console WriteLn and ReadKey
 CONST
   ScreenWidth  = 1024;
   ScreenHeight = 768;
-  Title        = 'Pscal SDL Features Test';
-  FontPath     = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf'; // Make sure this path is correct for your system
-  FontSize     = 18;
+  Title        = 'Pascal SDL Features Test';
+  SystemFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  RepoFontPath    = 'fonts/Roboto/static/Roboto-Regular.ttf';
+  FontSize        = 18;
 
   // Mouse button constants (example mapping)
   ButtonLeft   = 1;
@@ -24,7 +25,10 @@ VAR
 
 BEGIN
   InitGraph(ScreenWidth, ScreenHeight, Title);
-  InitTextSystem(FontPath, FontSize); // Initialize font system
+  if FileExists(SystemFontPath) then
+    InitTextSystem(SystemFontPath, FontSize)
+  else
+    InitTextSystem(RepoFontPath, FontSize); // Initialize font system
 
   quit := False;
   frameCount := 0;
@@ -60,7 +64,7 @@ BEGIN
 
     // --- Text Output ---
     SetRGBColor(255, 255, 0); // Yellow text
-    OutTextXY(10, 10, 'Pscal SDL Test Program!');
+    OutTextXY(10, 10, 'Pascal SDL Test Program!');
     OutTextXY(10, 30, 'Mouse X: ' + IntToStr(mx) + ' Y: ' + IntToStr(my));
     OutTextXY(10, 50, 'Buttons: ' + IntToStr(buttons));
     OutTextXY(10, ScreenHeight - 30, eventInfo);

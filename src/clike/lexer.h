@@ -5,10 +5,13 @@
 
 typedef enum {
     CLIKE_TOKEN_INT,
+    CLIKE_TOKEN_LONG,
     CLIKE_TOKEN_VOID,
     CLIKE_TOKEN_FLOAT,
+    CLIKE_TOKEN_DOUBLE,
     CLIKE_TOKEN_STR,
     CLIKE_TOKEN_TEXT,
+    CLIKE_TOKEN_MSTREAM,
     CLIKE_TOKEN_IF,
     CLIKE_TOKEN_ELSE,
     CLIKE_TOKEN_WHILE,
@@ -50,6 +53,7 @@ typedef enum {
     CLIKE_TOKEN_GREATER_EQUAL,
     CLIKE_TOKEN_AND_AND,
     CLIKE_TOKEN_OR_OR,
+    CLIKE_TOKEN_QUESTION,
     CLIKE_TOKEN_COLON,
     CLIKE_TOKEN_DOT,
     CLIKE_TOKEN_ARROW,
@@ -71,7 +75,7 @@ typedef struct {
     int length;
     int line;
     int column;
-    int int_val;
+    long long int_val;
     double float_val;
 } ClikeToken;
 

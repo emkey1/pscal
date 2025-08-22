@@ -119,6 +119,7 @@ static const char* nodeTypeToString(ASTNodeTypeClike type) {
         case TCAST_ASSIGN: return "ASSIGN";
         case TCAST_BINOP: return "BINOP";
         case TCAST_UNOP: return "UNOP";
+        case TCAST_TERNARY: return "TERNARY";
         case TCAST_NUMBER: return "NUMBER";
         case TCAST_STRING: return "STRING";
         case TCAST_IDENTIFIER: return "IDENTIFIER";

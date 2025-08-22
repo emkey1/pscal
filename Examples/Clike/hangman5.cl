@@ -99,6 +99,7 @@ int main() {
     reset(f);
     while (!eof(f) && word_count < word_limit) {
         readln(f, line);
+        ClrScr();
         if (strlen(line) >= min_length && strlen(line) <= max_length) {
             valid = 1;
             len = strlen(line);
@@ -114,7 +115,8 @@ int main() {
             if (valid) {
                 struct WordNode* node;
                 new(&node);
-                node->word = line;
+                /* copy the line so subsequent reads don't overwrite */
+                node->word = copy(line, 1, strlen(line));
                 node->next = words;
                 words = node;
                 word_count = word_count + 1;
@@ -162,10 +164,10 @@ int main() {
         done = 0;
         while (!done) {
             draw_hangman(wrong);
-            printf("Word: ", so_far);
-            printf("Used: ", used);
+            printf("Word: %s", so_far);
+            printf("Used: %s", used);
             printf("Guess: ");
-            scanf(guess);
+            if (scanf(guess) != 1) continue;
             if (strlen(guess) == 0) continue;
             ch = upcase(guess[1]);
 
@@ -183,9 +185,7 @@ int main() {
                 continue;
             }
 
-            len = strlen(used);
-            setlength(used, len + 1);
-            used[len + 1] = ch;
+            used = used + chr(ch);
 
             found = 0;
             len = strlen(secret);
@@ -214,13 +214,12 @@ int main() {
         }
         if (wrong >= max_wrong) {
             draw_hangman(wrong);
-            printf("You lose! The word was ", secret);
+            printf("You lose! The word was %s", secret);
         } else {
-            printf("You win! The word was ", secret);
+            printf("You win! The word was %s", secret);
         }
         printf("Play again (Y/N)? ");
-        scanf(guess);
-        if (strlen(guess) == 0 || upcase(guess[1]) != 'Y') {
+        if (scanf(guess) != 1 || strlen(guess) == 0 || upcase(guess[1]) != 'Y') {
             playing = 0;
         }
     }
@@ -229,6 +228,7 @@ int main() {
     while (tmp != NULL) {
         struct WordNode* next;
         next = tmp->next;
+        dispose(&tmp->word);
         dispose(&tmp);
         tmp = next;
     }

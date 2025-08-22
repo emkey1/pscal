@@ -4,7 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include "documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
@@ -13,6 +13,8 @@
 #include "builtin.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
+#include <sys/stat.h>  // For stat
+#include <limits.h>    // For PATH_MAX
 
 
 const char *varTypeToString(VarType type) {
@@ -1172,34 +1174,46 @@ bool isUnitDocumented(const char *unit_name) {
 }
 
 char *findUnitFile(const char *unit_name) {
-    // Allow overriding the library search path via the PSCAL_LIB_DIR
-    // environment variable.  If it is not provided, fall back to the
-    // repository's local `lib` directory instead of the old hard-coded
-    // `/usr/local/Pscal/lib` path.  This makes the compiler work out of the
-    // box for developers running from the source tree.
-    const char *base_path = getenv("PSCAL_LIB_DIR");
-    if (base_path == NULL || *base_path == '\0') {
-        base_path = "/usr/local/pscal/lib";   // Default relative library path
+    // 1. Determine the library search path in a safe, writable buffer.
+    char lib_path[PATH_MAX];
+    const char *env_path = getenv("PASCAL_LIB_DIR");
+
+    if (env_path != NULL && *env_path != '\0') {
+        // An override path was provided, so use it.
+        strncpy(lib_path, env_path, PATH_MAX - 1);
+        lib_path[PATH_MAX - 1] = '\0'; // Ensure null-termination
+    } else {
+        // Fall back to the default hard-coded path.
+        strncpy(lib_path, "/usr/local/pscal/pascal/lib", PATH_MAX - 1);
+        lib_path[PATH_MAX - 1] = '\0';
     }
 
-    // Allocate enough space: path + '/' + unit name + ".pl" + null terminator
-    size_t max_path_len = strlen(base_path) + 1 + strlen(unit_name) + 3 + 1;
-    char *file_name = malloc(max_path_len);
+    // 2. Check if the resolved library directory actually exists.
+    struct stat dir_info;
+    if (stat(lib_path, &dir_info) != 0 || !S_ISDIR(dir_info.st_mode)) {
+        fprintf(stderr, "Error: Pascal library directory not found. Searched path: %s\n", lib_path);
+        EXIT_FAILURE_HANDLER();
+    }
+
+    // 3. Allocate enough space for the full file path.
+    //    (path + '/' + unit_name + ".pl" + null)
+    size_t required_len = strlen(lib_path) + 1 + strlen(unit_name) + 3 + 1;
+    char *file_name = malloc(required_len);
     if (!file_name) {
         fprintf(stderr, "Memory allocation error in findUnitFile\n");
         EXIT_FAILURE_HANDLER();
     }
 
-    // Compose the full path using the resolved base path.
+    // 4. Compose the full path using the resolved base path.
+    snprintf(file_name, required_len, "%s/%s.pl", lib_path, unit_name);
 
-    snprintf(file_name, max_path_len, "%s/%s.pl", base_path, unit_name);
-
+    // 5. Check if the file exists and return it, otherwise clean up.
     if (access(file_name, F_OK) == 0) {
-        return file_name; // Caller takes ownership
+        return file_name; // Success: Caller takes ownership and must free() this memory.
     }
 
     free(file_name);
-    return NULL; // Not found
+    return NULL; // Not found.
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {

@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM Mandelbrot256Color;
 
 USES Crt; // Assumes CRT.pas contains TextColorE, GotoXY, etc.

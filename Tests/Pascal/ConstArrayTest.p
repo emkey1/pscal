@@ -55,6 +55,4 @@ begin
 
   writeln;
   writeln('Test complete.');
-  readln; // Pause before ending
-
 end.

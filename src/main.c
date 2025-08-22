@@ -1,6 +1,6 @@
-#include "frontend/lexer.h"
-#include "frontend/parser.h"
-#include "frontend/ast.h"
+#include "Pascal/lexer.h"
+#include "Pascal/parser.h"
+#include "Pascal/ast.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
@@ -17,7 +17,7 @@
 #include <SDL2/SDL_ttf.h>
 #endif
 #include "vm/vm.h"
-// frontend/ast.h is already included via globals.h or directly, no need for duplicate
+// Pascal/ast.h is already included via globals.h or directly, no need for duplicate
 
 /* Global variables */
 int gParamCount = 0;
@@ -31,13 +31,13 @@ List *inserted_global_names = NULL;
 #define PROGRAM_VERSION "undefined.version_DEV"
 #endif
 
-const char *PSCAL_USAGE =
-    "Usage: pscal <options> <source_file> [program_parameters...]\n"
+const char *PASCAL_USAGE =
+    "Usage: pascal <options> <source_file> [program_parameters...]\n"
     "   Options:\n"
     "     -v                          Display version.\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
-    "   or: pscal (with no arguments to display version and usage)";
+    "   or: pascal (with no arguments to display version and usage)";
 
 void initSymbolSystem(void) {
 #ifdef DEBUG
@@ -181,7 +181,7 @@ int main(int argc, char *argv[]) {
 
     if (argc == 1) {
         printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
-        printf("%s\n", PSCAL_USAGE);
+        printf("%s\n", PASCAL_USAGE);
         return EXIT_SUCCESS;
     }
 
@@ -197,7 +197,7 @@ int main(int argc, char *argv[]) {
             dump_bytecode_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
-            fprintf(stderr, "%s\n", PSCAL_USAGE);
+            fprintf(stderr, "%s\n", PASCAL_USAGE);
             return EXIT_FAILURE;
         } else {
             // First non-option argument is the source file
@@ -224,7 +224,7 @@ int main(int argc, char *argv[]) {
 
     if (!sourceFile) {
         fprintf(stderr, "Error: No source file specified.\n");
-        fprintf(stderr, "%s\n", PSCAL_USAGE);
+        fprintf(stderr, "%s\n", PASCAL_USAGE);
         return EXIT_FAILURE;
     }
 

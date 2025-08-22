@@ -133,6 +133,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamfree", vmBuiltinMstreamfree},
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
+    {"mstreambuffer", vmBuiltinMstreambuffer},
     {"new", vmBuiltinNew},
     {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
@@ -1596,6 +1597,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+
 Value vmBuiltinIoresult(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "IOResult requires 0 arguments."); return makeInt(0); }
     int err = last_io_error;
@@ -1987,6 +1989,20 @@ Value vmBuiltinMstreamfree(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinMstreambuffer(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "MStreamBuffer expects 1 argument (MStream).");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_MEMORYSTREAM || args[0].mstream == NULL) {
+        runtimeError(vm, "MStreamBuffer: Argument is not a valid MStream.");
+        return makeVoid();
+    }
+    MStream* mstream = args[0].mstream;
+    const char* buffer_content = mstream->buffer ? (char*)mstream->buffer : "";
+    return makeString(buffer_content);
+}
+
 Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "Real() expects 1 argument.");
@@ -2075,9 +2091,11 @@ Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     long long code = 0;
-    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
+    if (arg_count == 0) {
+        // No exit code supplied, default to 0.
+    } else if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
         code = args[0].i_val;
-    } else if (arg_count > 1) {
+    } else {
         runtimeError(vm, "Halt expects 0 or 1 integer argument.");
     }
     exit((int)code);
@@ -2225,6 +2243,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("MStreamFree", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("MStreamBuffer", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("New", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Ord", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamCount", AST_FUNCTION_DECL, NULL);

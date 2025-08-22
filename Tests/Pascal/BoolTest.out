@@ -1,0 +1,13 @@
+flag is true
+flag is false
+a and b is false
+a or b is true
+not a is false
+Complex expression evaluated to true
+x > 5 is true
+(x < 5) or (x = 10) is true
+Iteration: 1
+Iteration: 2
+Iteration: 3
+Iteration: 4
+Iteration: 5

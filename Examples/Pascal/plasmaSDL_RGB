@@ -1,4 +1,4 @@
-#!/usr/bin/env pscal
+#!/usr/bin/env pascal
 PROGRAM SDLPlasmaRGB;
 
 // USES System; // Implicit for Sin, Sqrt, Trunc if not global

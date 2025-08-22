@@ -7,7 +7,7 @@
 #include "backend_ast/builtin.h" // For isBuiltin
 #include "core/utils.h"
 #include "core/types.h"
-#include "frontend/ast.h"
+#include "Pascal/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID
@@ -2041,6 +2041,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                             "L%d: Compiler Error: argument %d to '%s' expects %s but got an array.\n",
                                             line, i + 1, calleeName,
                                             varTypeToString(param_actual->var_type));
+                                } else if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
+                                    AST* param_elem = resolveTypeAlias(param_actual->right);
+                                    AST* arg_elem   = resolveTypeAlias(arg_actual->right);
+                                    const char* exp_str = param_elem ? varTypeToString(param_elem->var_type) : "UNKNOWN";
+                                    const char* got_str = arg_elem ? varTypeToString(arg_elem->var_type) : "UNKNOWN";
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %d to '%s' expects type ARRAY OF %s but got ARRAY OF %s.\n",
+                                            line, i + 1, calleeName,
+                                            exp_str,
+                                            got_str);
                                 } else {
                                     fprintf(stderr,
                                             "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",

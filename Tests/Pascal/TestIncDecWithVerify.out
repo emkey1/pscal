@@ -1,0 +1,28 @@
+--- Testing Inc/Dec with Verification ---
+
+Testing Simple Variable (myVar)...
+Initial myVar: 10
+START: Simple Inc(myVar): PASS
+START: Simple Dec(myVar)*2: PASS
+START: Simple Inc(myVar, 5): PASS
+START: Simple Dec(myVar, 3): PASS
+
+Testing Record Field (myRecord.count)...
+Initial myRecord.count: 50
+START: Record Inc(myRecord.count): PASS
+START: Record Dec(myRecord.count)*2: PASS
+START: Record Inc(myRecord.count, 10): PASS
+START: Record Dec(myRecord.count, 4): PASS
+
+Testing Array Element (myArray[2])...
+Initial myArray[2]: 200
+START: Array Inc(myArray[2]): PASS
+START: Array Dec(myArray[2])*2: PASS
+START: Array Inc(myArray[2], 20): PASS
+START: Array Dec(myArray[2], 9): PASS
+
+Verifying other array elements...
+START: Array Unchanged myArray[1]: PASS
+START: Array Unchanged myArray[3]: PASS
+
+--- Test Complete ---

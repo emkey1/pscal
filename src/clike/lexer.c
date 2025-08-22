@@ -50,10 +50,13 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     while (isAlpha(peek(lexer)) || isDigit(peek(lexer))) advance(lexer);
     int length = &lexer->src[lexer->pos] - start;
     if (length == 3 && strncmp(start, "int", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_INT, start, length, column);
+    if (length == 4 && strncmp(start, "long", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_LONG, start, length, column);
     if (length == 4 && strncmp(start, "void", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_VOID, start, length, column);
     if (length == 5 && strncmp(start, "float", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_FLOAT, start, length, column);
+    if (length == 6 && strncmp(start, "double", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_DOUBLE, start, length, column);
     if (length == 3 && strncmp(start, "str", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_STR, start, length, column);
     if (length == 4 && strncmp(start, "text", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_TEXT, start, length, column);
+    if (length == 7 && strncmp(start, "mstream", 7) == 0) return makeToken(lexer, CLIKE_TOKEN_MSTREAM, start, length, column);
     if (length == 4 && strncmp(start, "char", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_CHAR, start, length, column);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length, column);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length, column);
@@ -80,7 +83,7 @@ static ClikeToken numberToken(ClikeLexer *lexer, const char *start, int column) 
         int length = &lexer->src[lexer->pos] - start;
         ClikeToken t = makeToken(lexer, CLIKE_TOKEN_NUMBER, start, length, column);
         char *tmp = strndup(start, length);
-        t.int_val = (int)strtol(tmp, NULL, 0);
+        t.int_val = strtoll(tmp, NULL, 0);
         free(tmp);
         return t;
     }
@@ -92,7 +95,7 @@ static ClikeToken numberToken(ClikeLexer *lexer, const char *start, int column) 
     }
     int length = &lexer->src[lexer->pos] - start;
     ClikeToken t = makeToken(lexer, isFloat ? CLIKE_TOKEN_FLOAT_LITERAL : CLIKE_TOKEN_NUMBER, start, length, column);
-    if (isFloat) t.float_val = atof(start); else t.int_val = atoi(start);
+    if (isFloat) t.float_val = atof(start); else t.int_val = strtoll(start, NULL, 10);
     return t;
 }
 
@@ -197,12 +200,13 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
                 if (match(lexer,'&')) return makeToken(lexer, CLIKE_TOKEN_AND_AND, start, 2, startColumn);
                 return makeToken(lexer, CLIKE_TOKEN_BIT_AND, start, 1, startColumn);
             }
-            case '|': {
-                if (match(lexer,'|')) return makeToken(lexer, CLIKE_TOKEN_OR_OR, start, 2, startColumn);
-                return makeToken(lexer, CLIKE_TOKEN_BIT_OR, start, 1, startColumn);
-            }
-            case ':': return makeToken(lexer, CLIKE_TOKEN_COLON, start, 1, startColumn);
-            case '.': return makeToken(lexer, CLIKE_TOKEN_DOT, start, 1, startColumn);
+              case '|': {
+                  if (match(lexer,'|')) return makeToken(lexer, CLIKE_TOKEN_OR_OR, start, 2, startColumn);
+                  return makeToken(lexer, CLIKE_TOKEN_BIT_OR, start, 1, startColumn);
+              }
+              case '?': return makeToken(lexer, CLIKE_TOKEN_QUESTION, start, 1, startColumn);
+              case ':': return makeToken(lexer, CLIKE_TOKEN_COLON, start, 1, startColumn);
+              case '.': return makeToken(lexer, CLIKE_TOKEN_DOT, start, 1, startColumn);
         }
         return makeToken(lexer, CLIKE_TOKEN_UNKNOWN, start, 1, startColumn);
     }
@@ -211,10 +215,13 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
 const char* clikeTokenTypeToString(ClikeTokenType type) {
     switch(type) {
         case CLIKE_TOKEN_INT: return "TOKEN_INT";
+        case CLIKE_TOKEN_LONG: return "TOKEN_LONG";
         case CLIKE_TOKEN_VOID: return "TOKEN_VOID";
         case CLIKE_TOKEN_FLOAT: return "TOKEN_FLOAT";
+        case CLIKE_TOKEN_DOUBLE: return "TOKEN_DOUBLE";
         case CLIKE_TOKEN_STR: return "TOKEN_STR";
         case CLIKE_TOKEN_TEXT: return "TOKEN_TEXT";
+        case CLIKE_TOKEN_MSTREAM: return "TOKEN_MSTREAM";
         case CLIKE_TOKEN_IF: return "TOKEN_IF";
         case CLIKE_TOKEN_ELSE: return "TOKEN_ELSE";
         case CLIKE_TOKEN_WHILE: return "TOKEN_WHILE";
@@ -255,6 +262,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_GREATER_EQUAL: return ">=";
         case CLIKE_TOKEN_AND_AND: return "&&";
         case CLIKE_TOKEN_OR_OR: return "||";
+        case CLIKE_TOKEN_QUESTION: return "?";
         case CLIKE_TOKEN_COLON: return ":";
         case CLIKE_TOKEN_DOT: return ".";
         case CLIKE_TOKEN_ARROW: return "->";

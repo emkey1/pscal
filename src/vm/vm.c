@@ -12,8 +12,8 @@
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "globals.h"
 #include "backend_ast/audio.h"
-#include "frontend/parser.h"
-#include "frontend/ast.h"
+#include "Pascal/parser.h"
+#include "Pascal/ast.h"
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>

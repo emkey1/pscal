@@ -1,8 +1,6 @@
 int main() {
     float f;
     scanf(f);
-    printf("read: ");
-    printf(f);
-    printf("\n");
+    printf("read: %f\n", f);
     return 0;
 }

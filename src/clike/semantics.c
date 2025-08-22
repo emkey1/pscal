@@ -2,6 +2,7 @@
 #include "core/utils.h"
 #include "clike/errors.h"
 #include "clike/builtins.h"
+#include "clike/parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -79,6 +80,25 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("scanf");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
+    // `exit` behaves like C's exit, terminating the program with an optional code.
+    functions[functionCount].name = strdup("exit");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
+    functions[functionCount].name = strdup("mstreamcreate");
+    functions[functionCount].type = TYPE_MEMORYSTREAM;
+    functionCount++;
+    functions[functionCount].name = strdup("mstreamloadfromfile");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
+    functions[functionCount].name = strdup("mstreamsavetofile");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
+    functions[functionCount].name = strdup("mstreamfree");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
+    functions[functionCount].name = strdup("mstreambuffer");
+    functions[functionCount].type = TYPE_STRING;
+    functionCount++;
 }
 
 static VarType getFunctionType(const char *name) {
@@ -134,6 +154,15 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_UNOP:
             node->var_type = analyzeExpr(node->left, scopes);
             return node->var_type;
+        case TCAST_TERNARY: {
+            analyzeExpr(node->left, scopes);
+            VarType rt = analyzeExpr(node->right, scopes);
+            VarType ft = analyzeExpr(node->third, scopes);
+            if (rt == TYPE_REAL || ft == TYPE_REAL) node->var_type = TYPE_REAL;
+            else if (rt == TYPE_STRING || ft == TYPE_STRING) node->var_type = TYPE_STRING;
+            else node->var_type = rt != TYPE_UNKNOWN ? rt : ft;
+            return node->var_type;
+        }
         case TCAST_ADDR:
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_POINTER;
@@ -159,6 +188,30 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         }
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
+            // `exit` behaves like C's exit: allow 0 or 1 integer argument.
+            if (strcmp(name, "exit") == 0) {
+                if (node->child_count > 1) {
+                    fprintf(stderr,
+                            "Type error: exit expects at most 1 argument at line %d, column %d\n",
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                }
+                if (node->child_count == 1) {
+                    VarType at = analyzeExpr(node->children[0], scopes);
+                    if (at != TYPE_INTEGER) {
+                        fprintf(stderr,
+                                "Type error: exit argument must be an integer at line %d, column %d\n",
+                                node->token.line,
+                                node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                free(name);
+                node->var_type = TYPE_VOID;
+                return TYPE_VOID;
+            }
+
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
                 if (clike_get_builtin_id(name) != -1) {
@@ -172,10 +225,62 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     clike_error_count++;
                 }
             }
-            free(name);
             for (int i = 0; i < node->child_count; ++i) {
                 analyzeExpr(node->children[i], scopes);
             }
+            if (strcmp(name, "mstreamcreate") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr,
+                            "Type error: mstreamcreate expects no arguments at line %d, column %d\n",
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                }
+            } else if (strcmp(name, "mstreamloadfromfile") == 0 ||
+                       strcmp(name, "mstreamsavetofile") == 0) {
+                if (node->child_count != 2) {
+                    fprintf(stderr,
+                            "Type error: %s expects 2 arguments at line %d, column %d\n",
+                            name,
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                } else {
+                    if (node->children[0]->var_type != TYPE_POINTER) {
+                        fprintf(stderr,
+                                "Type error: first argument to %s must be a pointer at line %d, column %d\n",
+                                name,
+                                node->token.line,
+                                node->token.column);
+                        clike_error_count++;
+                    }
+                    if (node->children[1]->var_type != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: second argument to %s must be a string at line %d, column %d\n",
+                                name,
+                                node->token.line,
+                                node->token.column);
+                        clike_error_count++;
+                    }
+                }
+            } else if (strcmp(name, "mstreamfree") == 0) {
+                if (node->child_count != 1 || node->children[0]->var_type != TYPE_POINTER) {
+                    fprintf(stderr,
+                            "Type error: mstreamfree expects a pointer argument at line %d, column %d\n",
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                }
+            } else if (strcmp(name, "mstreambuffer") == 0) {
+                if (node->child_count != 1 || node->children[0]->var_type != TYPE_MEMORYSTREAM) {
+                    fprintf(stderr,
+                            "Type error: mstreambuffer expects an mstream argument at line %d, column %d\n",
+                            node->token.line,
+                            node->token.column);
+                    clike_error_count++;
+                }
+            }
+            free(name);
             node->var_type = t;
             return t;
         }
@@ -229,6 +334,10 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             if (node->left) {
                 if (node->left->type == TCAST_VAR_DECL) {
                     analyzeStmt(node->left, scopes, retType);
+                } else if (node->left->type == TCAST_COMPOUND) {
+                    for (int i = 0; i < node->left->child_count; ++i) {
+                        analyzeStmt(node->left->children[i], scopes, retType);
+                    }
                 } else {
                     analyzeExpr(node->left, scopes);
                 }
@@ -305,6 +414,77 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
     if (!program) return;
     functionCount = 0;
     registerBuiltinFunctions();
+
+    typedef struct {
+        ASTNodeClike *prog;
+        char *source;
+        char *allocated_path;
+    } ImportModule;
+
+    ImportModule *modules = NULL;
+    if (clike_import_count > 0) {
+        modules = (ImportModule *)malloc(sizeof(ImportModule) * clike_import_count);
+    }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        const char *orig_path = clike_imports[i];
+        const char *path = orig_path;
+        char *allocated_path = NULL;
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            const char *lib_dir = getenv("CLIKE_LIB_DIR");
+            if (lib_dir && *lib_dir) {
+                size_t len = strlen(lib_dir) + 1 + strlen(orig_path) + 1;
+                allocated_path = (char *)malloc(len);
+                snprintf(allocated_path, len, "%s/%s", lib_dir, orig_path);
+                f = fopen(allocated_path, "rb");
+                if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+            }
+        }
+        if (!f) {
+            const char *default_dir = "/usr/local/pscal/clike/lib";
+            size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
+            allocated_path = (char *)malloc(len);
+            snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);
+            f = fopen(allocated_path, "rb");
+            if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+        }
+        if (!f) {
+            fprintf(stderr, "Could not open import '%s'\n", orig_path);
+            modules[i].prog = NULL;
+            modules[i].source = NULL;
+            modules[i].allocated_path = NULL;
+            continue;
+        }
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        rewind(f);
+        char *src = (char *)malloc(len + 1);
+        fread(src, 1, len, f);
+        src[len] = '\0';
+        fclose(f);
+
+        ParserClike p; initParserClike(&p, src);
+        ASTNodeClike *modProg = parseProgramClike(&p);
+
+        modules[i].prog = modProg;
+        modules[i].source = src;
+        modules[i].allocated_path = allocated_path;
+    }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
+            if (decl->type == TCAST_FUN_DECL) {
+                char *name = tokenToCString(decl->token);
+                functions[functionCount].name = name;
+                functions[functionCount].type = decl->var_type;
+                functionCount++;
+            }
+        }
+    }
+
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_FUN_DECL) {
@@ -314,9 +494,26 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
             functionCount++;
         }
     }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
+            if (decl->type == TCAST_FUN_DECL) analyzeFunction(decl);
+        }
+    }
+
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_FUN_DECL) analyzeFunction(decl);
     }
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (modules[i].prog) freeASTClike(modules[i].prog);
+        if (modules[i].source) free(modules[i].source);
+        if (modules[i].allocated_path) free(modules[i].allocated_path);
+    }
+    free(modules);
+
     for (int i = 0; i < functionCount; ++i) free(functions[i].name);
 }

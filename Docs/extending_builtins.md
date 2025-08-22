@@ -110,7 +110,7 @@ end.
 Running the program prints the current process ID:
 
 ```sh
-$ build/bin/pscal Examples/Pascal/show_builtins.p
+$ build/bin/pascal Examples/Pascal/show_builtins.p
 PID = 12345
 After Swap: a=2 b=1
 ```

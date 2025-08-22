@@ -7,5 +7,5 @@ end;
 var
   arr: array[1..5] of real;
 begin
-  Proc(arr);
+  Proc(arr); { wrong base type }
 end.

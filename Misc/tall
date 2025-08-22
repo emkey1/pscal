@@ -1,21 +1,21 @@
 #!/bin/bash
-# Set PSCAL to use a different interpreter, e.g.,
-#   PSCAL=/path/to/pscal ./tall
+# Set PASCAL to use a different interpreter, e.g.,
+#   PASCAL=/path/to/pascal ./tall
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TESTS="${TESTS:-$ROOT/Tests/Pascal}"  # all your .p / .pas files live here
 
-PSCAL="${PSCAL:-$ROOT/build/bin/pscal}"       # plain interpreter
+PASCAL="${PASCAL:-$ROOT/build/bin/pascal}"       # plain interpreter
 
 for f in "$TESTS/TestSuite7.p" \
          "$TESTS/MathSuite01.p" \
-         "$TESTS/TestIncDecWithVerify.p" "$TESTS/tcs" "$TESTS/tb"
+         "$TESTS/TestIncDecWithVerify.p" "$TESTS/CaseStatementSuite.p" "$TESTS/BreakLoopTest.p"
 do
   [ -r "$f" ] || echo "Missing test file: $f"
 done
 
-if [[ ! -x "$PSCAL" ]]; then
-  echo "pscal binary not found or not executable: $PSCAL" >&2
+if [[ ! -x "$PASCAL" ]]; then
+  echo "pascal binary not found or not executable: $PASCAL" >&2
   exit 1
 fi
 
@@ -28,17 +28,16 @@ run () {
 }
 
 # ---------- individual suites ----------
-run "MDArray"        "$PSCAL" "$TESTS/MultiDimArrayTest.p"
-run "TestSuite"      "$PSCAL" "$TESTS/TestSuite7.p"
-run "MathSuite"      "$PSCAL" "$TESTS/MathSuite01.p"
-run "BitwiseAndExprSuite"      "$PSCAL" "$TESTS/BitwiseAndExprSuite.p"
-run "TypeTestSuite"      "$PSCAL" "$TESTS/TypeTestSuite.p"
-run "FormattingTestSuite"      "$PSCAL" "$TESTS/FormattingTestSuite.p"
-run "TestFileOperations"      "$PSCAL" "$TESTS/TestFileOperations.p"
-run "PointerTortureTest"      "$PSCAL" "$TESTS/PointerTortureTest.p"
+run "MDArray"        "$PASCAL" "$TESTS/MultiDimArrayTest.p"
+run "TestSuite"      "$PASCAL" "$TESTS/TestSuite7.p"
+run "MathSuite"      "$PASCAL" "$TESTS/MathSuite01.p"
+run "BitwiseAndExprSuite"      "$PASCAL" "$TESTS/BitwiseAndExprSuite.p"
+run "TypeTestSuite"      "$PASCAL" "$TESTS/TypeTestSuite.p"
+run "FormattingTestSuite"      "$PASCAL" "$TESTS/FormattingTestSuite.p"
+run "TestFileOperations"      "$PASCAL" "$TESTS/TestFileOperations.p"
+run "PointerTortureTest"      "$PASCAL" "$TESTS/PointerTortureTest.p"
 
-# assorted one‑offs
-run "Assorted (tid)" "$PSCAL" "$TESTS/TestIncDecWithVerify.p"
-run "Assorted (tcs)" "$PSCAL" "$TESTS/tcs"
-run "Assorted (tb)"  "$PSCAL" "$TESTS/tb"
+run "TestIncDecWithVerify.p" "$PASCAL" "$TESTS/TestIncDecWithVerify.p"
+run "aseStatementSuite.p" "$PASCAL" "$TESTS/CaseStatementSuite.p"
+run "BreakLoopTest.p"  "$PASCAL" "$TESTS/BreakLoopTest.p"
 

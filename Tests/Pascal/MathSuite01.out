@@ -1,0 +1,80 @@
+Running pscal Math Torture Test
+
+--- Testing Integer Arithmetic ---
+START: Int Add (10 + 3): PASS
+START: Int Subtract (10 - 3): PASS
+START: Int Multiply (10 * 3): PASS
+START: Int Div (10 div 3): PASS
+START: Int Mod (10 mod 3): PASS
+START: Int Add Negative (10 + -5): PASS
+START: Int Subtract Negative (10 - -5): PASS
+START: Int Multiply Negative (10 * -5): PASS
+START: Int Div Negative (10 div -5): PASS
+START: Int Mod Negative (10 mod -5): PASS
+START: Int Neg Subtract Pos (-5 - 3): PASS
+START: Int Neg Multiply Pos (-5 * 3): PASS
+START: Int Neg Div Pos (-5 div 3): PASS
+START: Int Neg Mod Pos (-5 mod 3): PASS
+
+--- Testing Real Arithmetic ---
+START: Real Add (10.5 + 2.0): PASS
+START: Real Subtract (10.5 - 2.0): PASS
+START: Real Multiply (10.5 * 2.0): PASS
+START: Real Divide (10.5 / 2.0): PASS
+START: Real Add Negative (10.5 + -4.25): PASS
+START: Real Subtract Negative (10.5 - -4.25): PASS
+START: Real Multiply Negative (10.5 * -4.25): PASS
+START: Real Divide Negative (10.5 / -4.25): PASS
+START: Real Neg Subtract Pos (-4.25 - 2.0): PASS
+START: Real Neg Multiply Pos (-4.25 * 2.0): PASS
+START: Real Neg Divide Pos (-4.25 / 2.0): PASS
+
+--- Testing Mixed Integer/Real Arithmetic ---
+START: Mixed Add (int + real): PASS
+START: Mixed Add (real + int): PASS
+START: Mixed Subtract (int - real): PASS
+START: Mixed Subtract (real - int): PASS
+START: Mixed Multiply (int * real): PASS
+START: Mixed Multiply (real * int): PASS
+START: Mixed Divide / (int / real): PASS
+START: Mixed Divide / (real / int): PASS
+
+--- Testing Operator Precedence ---
+START: Precedence (2 + 3 * 4): PASS
+START: Precedence ((2 + 3) * 4): PASS
+START: Precedence (4*2 + 3 - 2): PASS
+START: Precedence (10.0 / 2.0 * 5.0): PASS
+START: Precedence (10.0 / (2.0 * 5.0)): PASS
+START: Precedence (10+5 - 2*1.5): PASS
+
+--- Testing Built-in Math Functions ---
+START: Abs (int -5): PASS
+START: Abs (int 5): PASS
+START: Abs (real -3.14): PASS
+START: Abs (real 3.14): PASS
+START: Abs (real 0.0): PASS
+START: Sqrt (int 4): PASS
+START: Sqrt (real 2.0): PASS
+START: Sqrt (real 0.0): PASS
+START: Trunc (3.7): PASS
+START: Trunc (-3.7): PASS
+START: Trunc (5.0): PASS
+START: Trunc (0.1): PASS
+START: Trunc (-0.1): PASS
+START: Exp (0.0): PASS
+START: Exp (1.0): PASS
+START: Exp (-1.0): PASS
+START: Exp (int 2): PASS
+START: Ln (1.0): PASS
+START: Ln (exp(1.0)): PASS
+START: Ln (10.0): PASS
+START: Cos (0.0): PASS
+START: Cos (pi): PASS
+START: Cos (pi/2): PASS
+START: Sin (0.0): PASS
+START: Sin (pi): PASS
+START: Sin (pi/2): PASS
+START: Tan (0.0): PASS
+START: Tan (pi/4): PASS
+
+Math Torture Test Completed.

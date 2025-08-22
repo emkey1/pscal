@@ -2,8 +2,8 @@
 #include "core/utils.h" // for Value constructors
 #include "globals.h"
 #include "symbol/symbol.h"
-#include "frontend/parser.h"
-#include "frontend/ast.h"
+#include "Pascal/parser.h"
+#include "Pascal/ast.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdlib.h>

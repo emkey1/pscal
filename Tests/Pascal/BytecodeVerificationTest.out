@@ -1,0 +1,38 @@
+--- Initialization ---
+globalInt: 10
+globalReal: 1.230000
+globalBool: TRUE
+globalChar: A
+globalString: Initial String
+globalEnum (ord): 1
+globalPtr^: (11,22)
+globalPtr is nil after dispose.
+
+--- Operators ---
+10 + 5 = 15
+10 - 5 = 5
+10 * 5 = 50
+10 / 4 = 2.50
+10 div 4 = 2
+10 mod 4 = 2
+5 > 10 is FALSE
+5 < 10 is TRUE
+5 = 5 is TRUE
+5 <> 5 is FALSE
+
+--- Control Flow ---
+IF: 10 > 5
+IF-ELSE: 5 is not > 10
+CASE: 2
+FOR loop: 1 2 3 
+WHILE loop: 5 4 3 2 1 
+REPEAT loop: 1 2 3 4 5 
+
+--- Procedures and Functions ---
+  [TestParameters] a (VAR): 10, b: 10, c_ord: 2
+globalInt after TestParameters: 10
+Result of TestFunction(5): 25
+
+--- Data Structures ---
+globalArray[0]: 10
+globalRecord.x: 5
