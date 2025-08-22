@@ -37,7 +37,8 @@ variables and subroutines appear before the main `begin ... end.` block.
 - **Comments** may be written using `{ ... }`, `(* ... *)` or `//` to the
   end of the line.
 - **String literals** are enclosed in single quotes; use two single quotes
-  to represent an embedded quote: `'don''t'`.
+  to represent an embedded quote: `'don''t'`. C-style escapes such as
+  `\n`, `\t`, `\\`, `\e` and `\a` are recognised inside strings.
 - **Character literals** are strings of length one or the `#nn` escape for
   code points.
 
