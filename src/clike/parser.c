@@ -432,16 +432,31 @@ static ASTNodeClike* params(ParserClike *p) {
 }
 
 static ASTNodeClike* param(ParserClike *p) {
-    ClikeToken type_tok = p->current; advanceParser(p);
-    int isPtr = 0;
-    if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
-    ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "param name");
-    ASTNodeClike *node = newASTNodeClike(TCAST_PARAM, ident);
-    node->var_type = isPtr ? TYPE_POINTER : tokenTypeToVarType(type_tok.type);
-    node->element_type = isPtr ? tokenTypeToVarType(type_tok.type) : TYPE_UNKNOWN;
-    setLeftClike(node, newASTNodeClike(TCAST_IDENTIFIER, type_tok));
-    node->left->var_type = node->var_type;
-    return node;
+    if (p->current.type == CLIKE_TOKEN_STRUCT) {
+        advanceParser(p);
+        ClikeToken nameTok = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "struct name");
+        int isPtr = 0;
+        if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
+        ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "param name");
+        ASTNodeClike *node = newASTNodeClike(TCAST_PARAM, ident);
+        node->var_type = isPtr ? TYPE_POINTER : TYPE_RECORD;
+        node->element_type = isPtr ? TYPE_RECORD : TYPE_UNKNOWN;
+        ASTNodeClike *typeNode = newASTNodeClike(TCAST_IDENTIFIER, nameTok);
+        typeNode->var_type = node->var_type;
+        setLeftClike(node, typeNode);
+        return node;
+    } else {
+        ClikeToken type_tok = p->current; advanceParser(p);
+        int isPtr = 0;
+        if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
+        ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "param name");
+        ASTNodeClike *node = newASTNodeClike(TCAST_PARAM, ident);
+        node->var_type = isPtr ? TYPE_POINTER : tokenTypeToVarType(type_tok.type);
+        node->element_type = isPtr ? tokenTypeToVarType(type_tok.type) : TYPE_UNKNOWN;
+        setLeftClike(node, newASTNodeClike(TCAST_IDENTIFIER, type_tok));
+        node->left->var_type = node->var_type;
+        return node;
+    }
 }
 
 static ASTNodeClike* compoundStmt(ParserClike *p) {
