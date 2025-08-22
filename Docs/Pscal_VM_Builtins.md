@@ -55,6 +55,7 @@ CLike ones.
 - `mstreamloadfromfile` – Load file into memory stream.
 - `mstreamsavetofile` – Save memory stream to file.
 - `mstreamfree` – Release memory stream.
+- `mstreambuffer` – Return contents of memory stream as a string.
 
 ## Math
 - `abs` – Absolute value.

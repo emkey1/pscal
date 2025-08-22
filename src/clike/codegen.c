@@ -100,6 +100,7 @@ static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
         case CLIKE_TOKEN_DOUBLE:name = "real";    vt = TYPE_REAL;    break;
         case CLIKE_TOKEN_STR:   name = "string";  vt = TYPE_STRING;  break;
         case CLIKE_TOKEN_TEXT:  name = "text";    vt = TYPE_FILE;    break;
+        case CLIKE_TOKEN_MSTREAM: name = "mstream"; vt = TYPE_MEMORYSTREAM; break;
         case CLIKE_TOKEN_CHAR:  name = "char";    vt = TYPE_CHAR;    break;
         default: return NULL;
     }
@@ -493,6 +494,9 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                             break;
                         case TYPE_FILE:
                             init = makeValueForType(TYPE_FILE, NULL, NULL);
+                            break;
+                        case TYPE_MEMORYSTREAM:
+                            init = makeValueForType(TYPE_MEMORYSTREAM, NULL, NULL);
                             break;
                         default:
                             init = makeInt(0);
