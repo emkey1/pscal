@@ -330,14 +330,135 @@ begin
   until (userAction = 'R') or (userAction = 'S');
 end;
 
-// All scoring functions are unchanged...
-procedure CountDice(var counts: array[1..6] of integer); var i: integer; begin for i := 1 to 6 do counts[i] := 0; for i := 1 to NUM_DICE do counts[dice[i]] := counts[dice[i]] + 1; end;
-function ScoreUpper(valueToScore: integer): integer; var score: integer; counts: array[1..6] of integer; begin CountDice(counts); ScoreUpper := counts[valueToScore] * valueToScore; end;
-function ScoreNOfAKind(n: integer): integer; var i, score: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do begin if counts[i] >= n then found := true; end; if found then begin score := 0; for i := 1 to NUM_DICE do score := score + dice[i]; ScoreNOfAKind := score; end else ScoreNOfAKind := 0; end;
-function ScoreFullHouse: integer; var i: integer; counts: array[1..6] of integer; has2, has3: boolean; begin CountDice(counts); has2 := false; has3 := false; for i := 1 to 6 do begin if counts[i] = 2 then has2 := true; if counts[i] = 3 then has3 := true; end; if has2 and has3 then ScoreFullHouse := 25 else ScoreFullHouse := 0; end;
-function ScoreStraight(minLength: integer): integer; var i, currentRun: integer; counts: array[1..6] of integer; score: integer; begin CountDice(counts); score := 0; currentRun := 0; for i := 1 to 6 do begin if counts[i] > 0 then currentRun := currentRun + 1 else currentRun := 0; if currentRun >= minLength then begin if minLength = 4 then score := 30; if minLength = 5 then score := 40; Break; end; end; ScoreStraight := score; end;
-function ScoreShipzee: integer; var i: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do if counts[i] >= 5 then found := true; if found then ScoreShipzee := 50 else ScoreShipzee := 0; end;
-function ScoreChance: integer; var i, score: integer; begin score := 0; for i := 1 to NUM_DICE do score := score + dice[i]; ScoreChance := score; end;
+// Scoring and such
+procedure CountDice(var counts: array[1..6] of integer);
+var
+    i: integer;
+begin
+    for i := 1 to 6 do
+        counts[i] := 0;
+
+    for i := 1 to NUM_DICE do
+        counts[dice[i]] := counts[dice[i]] + 1;
+end;
+
+function ScoreUpper(valueToScore: integer): integer;
+var
+    score: integer;
+    counts: array[1..6] of integer;
+begin
+    CountDice(counts);
+    ScoreUpper := counts[valueToScore] * valueToScore;
+end;
+
+function ScoreNOfAKind(n: integer): integer;
+var
+    i, score: integer;
+    counts: array[1..6] of integer;
+    found: boolean;
+begin
+    CountDice(counts);
+    found := false;
+
+    for i := 1 to 6 do
+    begin
+        if counts[i] >= n then
+            found := true;
+    end;
+
+    if found then
+    begin
+        score := 0;
+        for i := 1 to NUM_DICE do
+            score := score + dice[i];
+        ScoreNOfAKind := score;
+    end
+    else
+        ScoreNOfAKind := 0;
+end;
+
+function ScoreFullHouse: integer;
+var
+    i: integer;
+    counts: array[1..6] of integer;
+    has2, has3: boolean;
+begin
+    CountDice(counts);
+    has2 := false;
+    has3 := false;
+
+    for i := 1 to 6 do
+    begin
+        if counts[i] = 2 then
+            has2 := true;
+        if counts[i] = 3 then
+            has3 := true;
+    end;
+
+    if has2 and has3 then
+        ScoreFullHouse := 25
+    else
+        ScoreFullHouse := 0;
+end;
+
+function ScoreStraight(minLength: integer): integer;
+var
+    i, currentRun: integer;
+    counts: array[1..6] of integer;
+    score: integer;
+begin
+    CountDice(counts);
+    score := 0;
+    currentRun := 0;
+
+    for i := 1 to 6 do
+    begin
+        if counts[i] > 0 then
+            currentRun := currentRun + 1
+        else
+            currentRun := 0;
+
+        if currentRun >= minLength then
+        begin
+            if minLength = 4 then
+                score := 30;
+            if minLength = 5 then
+                score := 40;
+            Break; // Exit the loop once the straight is found
+        end;
+    end;
+
+    ScoreStraight := score;
+end;
+
+function ScoreShipzee: integer;
+var
+    i: integer;
+    counts: array[1..6] of integer;
+    found: boolean;
+begin
+    CountDice(counts);
+    found := false;
+
+    for i := 1 to 6 do
+        if counts[i] >= 5 then
+            found := true;
+
+    if found then
+        ScoreShipzee := 50
+    else
+        ScoreShipzee := 0;
+end;
+
+function ScoreChance: integer;
+var
+    i, score: integer;
+begin
+    score := 0;
+    for i := 1 to NUM_DICE do
+        score := score + dice[i];
+    ScoreChance := score;
+end;
 
 procedure ChooseCategory;
 var
