@@ -66,21 +66,25 @@ var
   { *** END ADDED *** }
 
 {---------------------------------------------------------------------
-  Assertion Procedures (Same as before)
----------------------------------------------------------------------}
-// ... (AssertTrue, AssertFalse, AssertEqualInt - unchanged) ...
-procedure AssertTrue(condition: boolean; testName: string); begin write('START: ', testName, ': '); if condition then writeln('PASS') else writeln('FAIL (condition was false)'); end;
-procedure AssertFalse(condition: boolean; testName: string); begin write('START: ', testName, ': '); if not condition then writeln('PASS') else writeln('FAIL (condition was true)'); end;
-procedure AssertEqualInt(expected, actual: integer; testName: string); begin write('START: ', testName, ': '); if expected = actual then writeln('PASS') else writeln('FAIL (expected: ', expected, ', got: ', actual, ')'); end;
-procedure AssertEqualStr(expected, actual: string; testName: string); begin write('START: ', testName, ': '); if expected = actual then writeln('PASS') else writeln('FAIL (expected: "', expected, '", got: "', actual, '")'); end;
-procedure AssertEqualReal(expected, actual: real; testName: string); begin write('START: ', testName, ': '); if abs(expected - actual) < 0.0001 then writeln('PASS') else writeln('FAIL (expected: ', expected:0:4, ', got: ', actual:0:4, ')'); end;
-
-{---------------------------------------------------------------------
   Helper Functions (UpperCaseStr, SortString - unchanged)
 ---------------------------------------------------------------------}
-// ... (UpperCaseStr, SortString - unchanged from previous version) ...
-function UpperCaseStr(s: string): string; var i: integer; begin for i := 1 to length(s) do s[i] := UpCase(s[i]); UpperCaseStr := s; end;
-procedure SortString(var s: string); var i, j: integer; temp: char; begin for i := 1 to length(s) - 1 do for j := i + 1 to length(s) do if s[i] > s[j] then begin temp := s[i]; s[i] := s[j]; s[j] := temp; end; end;
+function UpperCaseStr(s: string): 
+  string; var i: integer; 
+
+begin 
+  for i := 1 to length(s) do s[i] := UpCase(s[i]); 
+  UpperCaseStr := s; 
+end;
+
+procedure SortString(var s: string); 
+  var i, j: integer; 
+  temp: char; 
+
+begin 
+  for i := 1 to length(s) - 1 do for j := i + 1 to length(s) do if s[i] > s[j] 
+    then begin temp := s[i]; s[i] := s[j]; s[j] := temp; 
+  end; 
+end;
 
 {---------------------------------------------------------------------
   Word List Handling (NEW / MODIFIED)
@@ -196,14 +200,291 @@ end;
 {---------------------------------------------------------------------
   Drawing Procedures (Unchanged logic, rely on calculated positions)
 ---------------------------------------------------------------------}
-// ... (DrawBorder, DrawHangman, ShowGuessesBar, ShowHint - unchanged logic) ...
-procedure DrawBorder(Top, Bottom, Left, Right: Integer); var i: integer; isValid: Boolean; begin TextColor(Blue); isValid := (Top >= 1) and (Bottom <= ScreenRows) and (Left >= 1) and (Right <= ScreenCols) and (Top < Bottom) and (Left < Right); if isValid then begin GotoXY(Left, Top); Write(CornerTL); GotoXY(Right, Top); Write(CornerTR); GotoXY(Left, Bottom); Write(CornerBL); GotoXY(Right, Bottom); Write(CornerBR); for i := Left + 1 to Right - 1 do begin GotoXY(i, Top); Write(LineH); GotoXY(i, Bottom); Write(LineH); end; for i := Top + 1 to Bottom - 1 do begin GotoXY(Left, i); Write(LineV); GotoXY(Right, i); Write(LineV); end; end; end;
-procedure DrawHangman(wrong: integer; startCol: integer); var lineOffset: integer; begin StartCol := StartCol + 2; lineOffset := 0; GotoXY(startCol, vHangmanRow + lineOffset); write(' +---+  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write(' |   |  '); lineOffset := lineOffset + 1; case wrong of 0: begin GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 1: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 2: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write(' |   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 3: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/|   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 4: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/|\  |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 5: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/|\  |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/    |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 6: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/|\  |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/ \  |  '); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |  '); lineOffset := lineOffset + 1; end; 7: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |'); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/|\  |'); lineOffset := lineOffset + 1; GotoXY(startCol - 1, vHangmanRow + lineOffset); write('_/ \  |'); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |'); lineOffset := lineOffset + 1; end; 8: begin GotoXY(startCol, vHangmanRow + lineOffset); write(' O   |'); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('/|\  |'); lineOffset := lineOffset + 1; GotoXY(startCol - 1, vHangmanRow + lineOffset); write('_/ \_ |'); lineOffset := lineOffset + 1; GotoXY(startCol, vHangmanRow + lineOffset); write('     |'); lineOffset := lineOffset + 1; end; end; GotoXY(startCol, vHangmanRow + lineOffset); write('========='); writeln; end;
-procedure ShowGuessesBar(wrong: integer; startCol: integer; width: integer); var i: integer; remaining: integer; barContent: string; padding: integer; barWidth: integer; remStr, maxStr : string; begin remaining := MAX_WRONG - wrong; remStr := IntToStr(remaining); maxStr := IntToStr(MAX_WRONG); barContent := 'Guesses Left: '; for i := 1 to remaining do barContent := barContent + '#'; for i := 1 to wrong do barContent := barContent + '#'; barContent := barContent + ' [' + remStr + '/' + maxStr + ']'; barWidth := length(barContent); padding := (width - barWidth) div 2; if padding < 0 then padding := 0; GotoXY(startCol, vGuessBarRow); for i := 1 to padding do write(' '); write('Guesses Left: '); TextColor(LightGreen); for i := 1 to remaining do write('#'); TextColor(LightRed); for i := 1 to wrong do write('#'); TextColor(LightGray); write(' [' + remStr + '/' + maxStr + ']'); writeln; end;
-procedure ShowHint(word: string; display: string; var hintUsed: boolean; startCol: integer; width: integer); var i, attempts: integer; hintIndex: integer; pause: string; msg: string; padding: integer; hintIndexStr : string; begin GotoXY(startCol, vMsgRow); if hintUsed then msg := 'Hint Used Already.' else begin hintIndex := -1; attempts := 0; repeat i := Random(length(word)) + 1; if display[i] = '_' then hintIndex := i; inc(attempts); until (hintIndex <> -1) or (attempts > length(word) * 2) or (display = word); if hintIndex <> -1 then begin hintIndexStr := IntToStr(hintIndex); msg := 'Hint: Letter at position ' + hintIndexStr + ' is ''' + word[hintIndex] + ''''; TextColor(Cyan); hintUsed := true; end else begin msg := 'No more hints available.'; TextColor(LightGray); end; end; padding := (width - length(msg)) div 2; if padding < 0 then padding := 0; for i := 1 to padding do write(' '); write(msg); TextColor(LightGray); GotoXY(startCol, vMsgRow + 1); msg := 'Press Enter to Continue:'; padding := (width - length(msg)) div 2; if padding < 0 then padding := 0; for i := 1 to padding do write(' '); write(msg); readln(pause); GotoXY(startCol, vMsgRow); GotoXY(startCol, vMsgRow + 1); GotoXY(startCol, vPromptRow); end;
+procedure DrawBorder(Top, Bottom, Left, Right: Integer);
+var
+  i: integer;
+  isValid: Boolean;
+begin
+  TextColor(Blue);
+  isValid := (Top >= 1) and (Bottom <= ScreenRows) and (Left >= 1) and (Right <= ScreenCols) and (Top < Bottom) and (Left < Right);
+  if isValid then
+  begin
+    GotoXY(Left, Top);
+    Write(CornerTL);
+    GotoXY(Right, Top);
+    Write(CornerTR);
+    GotoXY(Left, Bottom);
+    Write(CornerBL);
+    GotoXY(Right, Bottom);
+    Write(CornerBR);
+
+    for i := Left + 1 to Right - 1 do
+    begin
+      GotoXY(i, Top);
+      Write(LineH);
+      GotoXY(i, Bottom);
+      Write(LineH);
+    end;
+
+    for i := Top + 1 to Bottom - 1 do
+    begin
+      GotoXY(Left, i);
+      Write(LineV);
+      GotoXY(Right, i);
+      Write(LineV);
+    end;
+  end;
+end;
+
+procedure DrawHangman(wrong: integer; startCol: integer);
+var
+  lineOffset: integer;
+begin
+  StartCol := StartCol + 2;
+  lineOffset := 0;
+  GotoXY(startCol, vHangmanRow + lineOffset);
+  write(' +---+  ');
+  lineOffset := lineOffset + 1;
+  GotoXY(startCol, vHangmanRow + lineOffset);
+  write(' |   |  ');
+  lineOffset := lineOffset + 1;
+  case wrong of
+    0:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    1:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    2:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' |   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    3:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    4:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    5:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/    |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    6:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/ \  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    7:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol - 1, vHangmanRow + lineOffset);
+      write('_/ \  |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |');
+      lineOffset := lineOffset + 1;
+    end;
+    8:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol - 1, vHangmanRow + lineOffset);
+      write('_/ \_ |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |');
+      lineOffset := lineOffset + 1;
+    end;
+  end;
+  GotoXY(startCol, vHangmanRow + lineOffset);
+  write('=========');
+  writeln;
+end;
+
+procedure ShowGuessesBar(wrong: integer; startCol: integer; width: integer);
+var
+  i: integer;
+  remaining: integer;
+  barContent: string;
+  padding: integer;
+  barWidth: integer;
+  remStr, maxStr: string;
+begin
+  remaining := MAX_WRONG - wrong;
+  remStr := IntToStr(remaining);
+  maxStr := IntToStr(MAX_WRONG);
+  barContent := 'Guesses Left: ';
+  for i := 1 to remaining do
+    barContent := barContent + '#';
+  for i := 1 to wrong do
+    barContent := barContent + '#';
+  barContent := barContent + ' [' + remStr + '/' + maxStr + ']';
+  barWidth := length(barContent);
+  padding := (width - barWidth) div 2;
+  if padding < 0 then
+    padding := 0;
+  GotoXY(startCol, vGuessBarRow);
+  for i := 1 to padding do
+    write(' ');
+  write('Guesses Left: ');
+  TextColor(LightGreen);
+  for i := 1 to remaining do
+    write('#');
+  TextColor(LightRed);
+  for i := 1 to wrong do
+    write('#');
+  TextColor(LightGray);
+  write(' [' + remStr + '/' + maxStr + ']');
+  writeln;
+end;
+
+procedure ShowHint(word: string; display: string; var hintUsed: boolean; startCol: integer; width: integer);
+var
+  i, attempts: integer;
+  hintIndex: integer;
+  pause: string;
+  msg: string;
+  padding: integer;
+  hintIndexStr: string;
+begin
+  GotoXY(startCol, vMsgRow);
+  if hintUsed then
+    msg := 'Hint Used Already.'
+  else
+  begin
+    hintIndex := -1;
+    attempts := 0;
+    repeat
+      i := Random(length(word)) + 1;
+      if display[i] = '_' then
+        hintIndex := i;
+      inc(attempts);
+    until (hintIndex <> -1) or (attempts > length(word) * 2) or (display = word);
+    if hintIndex <> -1 then
+    begin
+      hintIndexStr := IntToStr(hintIndex);
+      msg := 'Hint: Letter at position ' + hintIndexStr + ' is ''' + word[hintIndex] + '''';
+      TextColor(Cyan);
+      hintUsed := true;
+    end
+    else
+    begin
+      msg := 'No more hints available.';
+      TextColor(LightGray);
+    end;
+  end;
+  padding := (width - length(msg)) div 2;
+  if padding < 0 then
+    padding := 0;
+  for i := 1 to padding do
+    write(' ');
+  write(msg);
+  TextColor(LightGray);
+  GotoXY(startCol, vMsgRow + 1);
+  msg := 'Press Enter to Continue:';
+  padding := (width - length(msg)) div 2;
+  if padding < 0 then
+    padding := 0;
+  for i := 1 to padding do
+    write(' ');
+  write(msg);
+  readln(pause);
+  GotoXY(startCol, vMsgRow);
+  GotoXY(startCol, vMsgRow + 1);
+  GotoXY(startCol, vPromptRow);
+end;
 
 {---------------------------------------------------------------------
-  Main Program Block (MODIFIED)
+  Main Program Block
 ---------------------------------------------------------------------}
 begin
   ClrScr;
