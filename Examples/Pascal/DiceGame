@@ -74,7 +74,7 @@ begin
 //  end;
 //  GotoXY(1, 1); // Move cursor to top-left after clearing
   ClrScr;
-  writeln('\e]11;#200000\a');
+  writeln('\e]11;#000000\a');
 end;
 
 // --- CRT Helper Procedures (Now with Centering) ---
@@ -116,7 +116,7 @@ begin
   scorecard[9].name := 'Full House';
   scorecard[10].name := 'Sm Straight';
   scorecard[11].name := 'Lg Straight';
-  scorecard[12].name := 'Yahtzee';
+  scorecard[12].name := 'Shipzee';
   scorecard[13].name := 'Chance';
 
   for i := 1 to NUM_CATEGORIES do
