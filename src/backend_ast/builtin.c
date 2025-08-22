@@ -12,6 +12,7 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
 #include <errno.h>   // For errno
@@ -488,10 +489,10 @@ static int vm_restore_registered = 0;
 static int vm_alt_screen = 0; // Track if alternate screen buffer is active
 
 static void vmRestoreTerminal(void) {
-    if (vm_termios_saved) {
+    if (vm_termios_saved && vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
+        vm_raw_mode = 0;
     }
-    vm_raw_mode = 0;
 }
 
 // atexit handler: restore terminal settings and leave alternate screen
@@ -500,9 +501,17 @@ static void vmAtExitCleanup(void) {
     if (vm_alt_screen) {
         const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
         write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
-        fflush(stdout);
         vm_alt_screen = 0;
     }
+    const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+}
+
+// Signal handler to ensure terminal state is restored on interrupts.
+static void vmSignalHandler(int signum) {
+    if (vm_raw_mode || vm_alt_screen)
+        vmAtExitCleanup();
+    _exit(128 + signum);
 }
 
 void vmInitTerminalState(void) {
@@ -513,6 +522,12 @@ void vmInitTerminalState(void) {
     }
     if (!vm_restore_registered) {
         atexit(vmAtExitCleanup);
+        struct sigaction sa;
+        sa.sa_handler = vmSignalHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
         vm_restore_registered = 1;
     }
     if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
@@ -526,6 +541,8 @@ void vmInitTerminalState(void) {
 static void vmEnableRawMode(void) {
     if (!vm_termios_saved) {
         vmInitTerminalState();
+        if (!vm_termios_saved)
+            return; // Failed to save state; avoid messing with terminal
     }
     if (vm_raw_mode)
         return;
