@@ -40,6 +40,10 @@ bool gCurrentColorIsExt    = false;   // Flag for extended 256-color foreground 
 bool gCurrentBgIsExt       = false;   // Flag for extended 256-color background mode.
 bool gCurrentTextUnderline = false;   // Default underline state.
 bool gCurrentTextBlink     = false;   // Default blink state.
+int gWindowLeft            = 1;
+int gWindowTop             = 1;
+int gWindowRight           = 80;
+int gWindowBottom          = 24;
 // --- End CRT State Variables ---
 
 // Flag used by builtins like GraphLoop to signal a quit request from the user.

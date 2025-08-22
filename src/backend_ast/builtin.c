@@ -40,6 +40,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"api_receive", vmBuiltinApiReceive},
     {"api_send", vmBuiltinApiSend},
     {"assign", vmBuiltinAssign},
+    {"beep", vmBuiltinBeep},
     {"biblinktext", vmBuiltinBlinktext},
     {"biboldtext", vmBuiltinBoldtext},
     {"biclrscr", vmBuiltinClrscr},
@@ -54,6 +55,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
 #endif
+    {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
 #ifdef SDL
@@ -61,12 +63,15 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
+    {"cursoroff", vmBuiltinCursoroff},
+    {"cursoron", vmBuiltinCursoron},
 #ifdef SDL
     {"createtargettexture", vmBuiltinCreatetargettexture}, // Moved
     {"createtexture", vmBuiltinCreatetexture}, // Moved
 #endif
     {"dec", vmBuiltinDec},
     {"delay", vmBuiltinDelay},
+    {"deline", vmBuiltinDeline},
 #ifdef SDL
     {"destroytexture", vmBuiltinDestroytexture},
 #endif
@@ -94,6 +99,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"fillrect", vmBuiltinFillrect},
 #endif
     {"getenv", vmBuiltinGetenv},
+    {"getenvint", vmBuiltinGetenvint},
 #ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
@@ -107,7 +113,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
+    {"hidecursor", vmBuiltinHidecursor},
     {"high", vmBuiltinHigh},
+    {"highvideo", vmBuiltinHighvideo},
     {"inc", vmBuiltinInc},
 #ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
@@ -116,7 +124,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"initsoundsystem", vmBuiltinInitsoundsystem},
     {"inittextsystem", vmBuiltinInittextsystem},
 #endif
+    {"insline", vmBuiltinInsline},
     {"inttostr", vmBuiltinInttostr},
+    {"invertcolors", vmBuiltinInvertcolors},
     {"ioresult", vmBuiltinIoresult},
 #ifdef SDL
     {"issoundplaying", vmBuiltinIssoundplaying}, // Moved
@@ -136,6 +146,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"mstreambuffer", vmBuiltinMstreambuffer},
     {"new", vmBuiltinNew},
+    {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
 #ifdef SDL
@@ -170,8 +181,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"rendertexttotexture", vmBuiltinRendertexttotexture},
 #endif
     {"reset", vmBuiltinReset},
+    {"restorecursor", vmBuiltinRestorecursor},
     {"rewrite", vmBuiltinRewrite},
     {"round", vmBuiltinRound},
+    {"savecursor", vmBuiltinSavecursor},
     {"screencols", vmBuiltinScreencols},
     {"screenrows", vmBuiltinScreenrows},
     {"setlength", vmBuiltinSetlength},
@@ -183,6 +196,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"setrgbcolor", vmBuiltinSetrgbcolor},
 #endif
+    {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
@@ -200,9 +214,11 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
     {"val", vmBuiltinVal},
+    {"valreal", vmBuiltinValreal},
 #ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
+    {"window", vmBuiltinWindow},
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
 };
@@ -464,7 +480,7 @@ Value vmBuiltinWherex(VM* vm, int arg_count, Value* args) {
     }
     int r, c;
     if (getCursorPosition(&r, &c) == 0) {
-        return makeInt(c);
+        return makeInt(c - gWindowLeft + 1);
     }
     return makeInt(1); // Default on error
 }
@@ -476,7 +492,7 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
     }
     int r, c;
     if (getCursorPosition(&r, &c) == 0) {
-        return makeInt(r);
+        return makeInt(r - gWindowTop + 1);
     }
     return makeInt(1); // Default on error
 }
@@ -841,7 +857,9 @@ Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {
     }
     long long x = AS_INTEGER(args[0]);
     long long y = AS_INTEGER(args[1]);
-    printf("\x1B[%lld;%lldH", y, x);
+    long long absX = gWindowLeft + x - 1;
+    long long absY = gWindowTop + y - 1;
+    printf("\x1B[%lld;%lldH", absY, absX);
     fflush(stdout);
     return makeVoid();
 }
@@ -959,6 +977,157 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
     if (color_was_applied) {
         resetTextAttributes(stdout);
     }
+    printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinClreol(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "ClrEol expects no arguments.");
+        return makeVoid();
+    }
+    bool color_was_applied = applyCurrentTextAttributes(stdout);
+    printf("\x1B[K");
+    if (color_was_applied) {
+        resetTextAttributes(stdout);
+    }
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinHidecursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "HideCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[?25l");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinShowcursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "ShowCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[?25h");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinCursoroff(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinHidecursor(vm, arg_count, args);
+}
+
+Value vmBuiltinCursoron(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinShowcursor(vm, arg_count, args);
+}
+
+Value vmBuiltinDeline(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "DelLine expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[M");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinInsline(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "InsLine expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[L");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinInvertcolors(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "InvertColors expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[7m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinNormalcolors(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "NormalColors expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextColor = 7;
+    gCurrentTextBackground = 0;
+    gCurrentTextBold = false;
+    gCurrentColorIsExt = false;
+    gCurrentBgIsExt = false;
+    gCurrentTextUnderline = false;
+    gCurrentTextBlink = false;
+    printf("\x1B[0m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinBeep(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "Beep expects no arguments.");
+        return makeVoid();
+    }
+    fputc('\a', stdout);
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinSavecursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "SaveCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[s");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinRestorecursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "RestoreCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[u");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinHighvideo(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinBoldtext(vm, arg_count, args);
+}
+
+Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4 ||
+        args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER ||
+        args[2].type != TYPE_INTEGER || args[3].type != TYPE_INTEGER) {
+        runtimeError(vm, "Window expects 4 integer arguments.");
+        return makeVoid();
+    }
+    gWindowLeft = (int)AS_INTEGER(args[0]);
+    gWindowTop = (int)AS_INTEGER(args[1]);
+    gWindowRight = (int)AS_INTEGER(args[2]);
+    gWindowBottom = (int)AS_INTEGER(args[3]);
+    printf("\x1B[%d;%dr", gWindowTop, gWindowBottom);
+    printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
     fflush(stdout);
     return makeVoid();
 }
@@ -1811,6 +1980,22 @@ Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
     return makeString(val);
 }
 
+Value vmBuiltinGetenvint(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING ||
+        (args[1].type != TYPE_INTEGER && args[1].type != TYPE_BYTE && args[1].type != TYPE_WORD)) {
+        runtimeError(vm, "GetEnvInt expects (string, integer).");
+        return makeInt(0);
+    }
+    const char* name = AS_STRING(args[0]);
+    long long defVal = AS_INTEGER(args[1]);
+    const char* val = getenv(name);
+    if (!val || *val == '\0') return makeInt(defVal);
+    char* endptr;
+    long long parsed = strtoll(val, &endptr, 10);
+    if (endptr == val || *endptr != '\0') return makeInt(defVal);
+    return makeInt(parsed);
+}
+
 // Parse string to numeric value similar to Turbo Pascal's Val procedure
 Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) {
@@ -1850,6 +2035,10 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         }
     }
     return makeVoid();
+}
+
+Value vmBuiltinValreal(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinVal(vm, arg_count, args);
 }
 
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
@@ -2372,12 +2561,17 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Beep", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ClrEol", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Copy", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Cos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("CursorOff", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("CursorOn", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dec", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("DelLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("dos_exec", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("dos_findfirst", AST_FUNCTION_DECL, NULL);
@@ -2392,10 +2586,15 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetEnvInt", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HighVideo", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Inc", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("InsLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IntToStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("InvertColors", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IOResult", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
@@ -2407,6 +2606,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamBuffer", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("New", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("NormalColors", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Ord", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamCount", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamStr", AST_FUNCTION_DECL, NULL);
@@ -2418,10 +2618,13 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SaveCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ScreenRows", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ShowCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Sin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
@@ -2447,6 +2650,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
