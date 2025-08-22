@@ -118,7 +118,8 @@ void play_round(struct WordNode* words, int word_count, int max_wrong) {
         printf("Word: %s\n", so_far);
         printf("Used: %s\n", used);
         printf("Guess: ");
-        if (scanf(guess) != 1 || strlen(guess) == 0) continue;
+        if (scanf(guess) != 1) continue;
+        if (strlen(guess) == 0) continue;
         ch = upcase(guess[1]);
 
         found = 0;
@@ -198,7 +199,11 @@ int main() {
     while (playing) {
         play_round(words, word_count, 8);
         printf("Play again (Y/N)? ");
-        if (scanf(guess) != 1 || strlen(guess) == 0 || upcase(guess[1]) != 'Y') {
+        if (scanf(guess) != 1) {
+            playing = 0;
+        } else if (strlen(guess) == 0) {
+            playing = 0;
+        } else if (upcase(guess[1]) != 'Y') {
             playing = 0;
         }
     }
