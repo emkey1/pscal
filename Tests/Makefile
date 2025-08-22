@@ -1,11 +1,13 @@
-.PHONY: all test
+# SDL-specific tests
+SDL_TESTS := Pascal/SDLFeaturesTest.p # Pascal/SDLRenderCopyTest.p
 
 # pascal binary is assumed to be one directory up
 PASCAL = ../build/bin/pascal
 
-# List of test files
-TESTS := \
-  $(wildcard Pascal/*.p)
+# List of test files (excluding SDL tests)
+TESTS := $(filter-out $(SDL_TESTS), $(wildcard Pascal/*.p))
+
+.PHONY: all test
 
 
 # Tests that are expected to fail compilation
@@ -13,9 +15,6 @@ TESTS := \
 #             Pascal/ArgumentTypeMismatch.p \
 #             Pascal/ArrayArgumentMismatch.p \
 #             Pascal/OpenArrayBaseTypeMismatch.p
-
-# SDL-specific tests
-SDL_TESTS = Pascal/SDLFeaturesTest.p # Pascal/SDLRenderCopyTest.p
 
 # Detect if SDL was enabled in the build (via CMakeCache)
 SDL_ENABLED := $(shell grep -q '^SDL:BOOL=ON$$' ../build/CMakeCache.txt 2>/dev/null && echo 1 || echo 0)
