@@ -131,3 +131,101 @@ Running it with the `clike` compiler yields the same output:
 $ build/bin/clike Examples/CLike/show_pid.cl
 PID = 12345
 ```
+
+## Performance implications
+Lets take the fibonacci examples in the Examples/Clike directory.
+
+First we'll time fibonacci_native.cl on my M1 MacBook Pro...
+```sh
+time ../../build/bin/clike fibonacci_ext.cl
+Please enter an integer value for fibonacci: 92
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+55
+89
+144
+233
+377
+610
+987
+1597
+2584
+4181
+6765
+10946
+17711
+28657
+46368
+75025
+121393
+196418
+317811
+514229
+832040
+1346269
+2178309
+3524578
+5702887
+...
+fibonacci_ext.cl  0.01s user 0.01s system 0% cpu 3.058 total
+
+```
+
+Now we'll time fibonacci_ext.cl
+
+```sh
+time ../../build/bin/clike fibonacci_native.cl
+Please enter an integer value for fibonacci: 92
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+55
+89
+144
+233
+377
+610
+987
+1597
+2584
+4181
+6765
+10946
+17711
+28657
+46368
+75025
+121393
+196418
+317811
+514229
+832040
+1346269
+2178309
+3524578
+5702887
+...
+fibonacci_native.cl  0.02s user 0.01s system 0% cpu 3.157 total
+```
+
+The performance improvement is small using the extended builtin C fibonacci function from 
+the src/ext_builtins directory, but it is there.  Other tasks might see a more substantial
+improvement.
+
+I'm favorably impressed by how fast the byte code compiled version is frankly.
+
