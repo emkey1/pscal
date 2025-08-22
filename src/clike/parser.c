@@ -825,7 +825,19 @@ static ASTNodeClike* factor(ParserClike *p) {
     if (matchToken(p, CLIKE_TOKEN_LPAREN)) {
         ASTNodeClike *expr = expression(p);
         expectToken(p, CLIKE_TOKEN_RPAREN, ")");
-        return expr;
+        ASTNodeClike *node = expr;
+        while (p->current.type == CLIKE_TOKEN_LBRACKET) {
+            ASTNodeClike *access = newASTNodeClike(TCAST_ARRAY_ACCESS, node->token);
+            setLeftClike(access, node);
+            do {
+                advanceParser(p);
+                ASTNodeClike *index = expression(p);
+                expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
+                addChildClike(access, index);
+            } while (p->current.type == CLIKE_TOKEN_LBRACKET);
+            node = access;
+        }
+        return node;
     }
     if (p->current.type == CLIKE_TOKEN_NUMBER || p->current.type == CLIKE_TOKEN_FLOAT_LITERAL || p->current.type == CLIKE_TOKEN_CHAR_LITERAL) {
         ClikeToken num = p->current; advanceParser(p);
