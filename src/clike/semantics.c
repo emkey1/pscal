@@ -267,6 +267,10 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             if (node->left) {
                 if (node->left->type == TCAST_VAR_DECL) {
                     analyzeStmt(node->left, scopes, retType);
+                } else if (node->left->type == TCAST_COMPOUND) {
+                    for (int i = 0; i < node->left->child_count; ++i) {
+                        analyzeStmt(node->left->children[i], scopes, retType);
+                    }
                 } else {
                     analyzeExpr(node->left, scopes);
                 }
