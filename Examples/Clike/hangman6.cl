@@ -53,6 +53,8 @@ struct WordNode* load_words(int* word_count, int min_length, int max_length, int
     reset(f);
     while (!eof(f) && *word_count < word_limit) {
         readln(f, line);
+        // Finalise the read and stop if we hit EOF or encountered an error.
+        if (ioresult() != 0 || eof(f)) break;
         len = strlen(line);
         if (len >= min_length && len <= max_length) {
             valid = 1;
