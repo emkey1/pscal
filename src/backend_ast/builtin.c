@@ -805,59 +805,12 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ClrScr expects no arguments.");
         return makeVoid();
     }
-    /*
-     * ClrScr should clear the screen using the current text/background
-     * attributes. The VM only emits color escape codes when writing output,
-     * so if the user changes TextBackground and then calls ClrScr without
-     * writing anything, the terminal would still use the previous colors.
-     * Emit the appropriate escape sequence here before clearing so the
-     * cleared area uses the active background color.
-     */
 
-    bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
-                             !gCurrentTextBold && !gCurrentTextUnderline &&
-                             !gCurrentTextBlink && !gCurrentColorIsExt &&
-                             !gCurrentBgIsExt);
-
-    if (!is_default_state) {
-        char escape_sequence[64] = "\x1B[";
-        char code_str[64];
-        bool first_attr = true;
-
-        if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-        if (gCurrentTextUnderline) {
-            if (!first_attr) strcat(escape_sequence, ";");
-            strcat(escape_sequence, "4");
-            first_attr = false;
-        }
-        if (gCurrentTextBlink) {
-            if (!first_attr) strcat(escape_sequence, ";");
-            strcat(escape_sequence, "5");
-            first_attr = false;
-        }
-        if (gCurrentColorIsExt) {
-            if (!first_attr) strcat(escape_sequence, ";");
-            snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-        } else {
-            if (!first_attr) strcat(escape_sequence, ";");
-            snprintf(code_str, sizeof(code_str), "%d",
-                     map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
-        }
-        strcat(escape_sequence, code_str);
-        first_attr = false;
-        strcat(escape_sequence, ";");
-        if (gCurrentBgIsExt) {
-            snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-        } else {
-            snprintf(code_str, sizeof(code_str), "%d",
-                     map16BgColorToAnsi(gCurrentTextBackground));
-        }
-        strcat(escape_sequence, code_str);
-        strcat(escape_sequence, "m");
-        printf("%s", escape_sequence);
+    bool color_was_applied = applyCurrentTextAttributes(stdout);
+    printf("\x1B[2J\x1B[H");
+    if (color_was_applied) {
+        resetTextAttributes(stdout);
     }
-
-    printf("\x1B[2J");
     fflush(stdout);
     return makeVoid();
 }

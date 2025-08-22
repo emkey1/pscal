@@ -152,6 +152,8 @@ bool isUnitDocumented(const char *unit_name);
 int map16FgColorToAnsi(int pscalColorCode, bool isBold);
 // Helper function to map 0-7 to ANSI BG codes
 int map16BgColorToAnsi(int pscalColorCode);
+bool applyCurrentTextAttributes(FILE* stream);
+void resetTextAttributes(FILE* stream);
 
 // Arrays
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def);

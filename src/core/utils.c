@@ -1981,3 +1981,53 @@ int map16BgColorToAnsi(int pscalColorCode) {
     int basePscalColor = pscalColorCode % 8;
     return 40 + pscalToAnsiBase[basePscalColor];
 }
+
+bool applyCurrentTextAttributes(FILE* stream) {
+    bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
+                             !gCurrentTextBold && !gCurrentTextUnderline &&
+                             !gCurrentTextBlink && !gCurrentColorIsExt &&
+                             !gCurrentBgIsExt);
+
+    if (is_default_state) return false;
+
+    char escape_sequence[64] = "\x1B[";
+    char code_str[64];
+    bool first_attr = true;
+
+    if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
+    if (gCurrentTextUnderline) {
+        if (!first_attr) strcat(escape_sequence, ";");
+        strcat(escape_sequence, "4");
+        first_attr = false;
+    }
+    if (gCurrentTextBlink) {
+        if (!first_attr) strcat(escape_sequence, ";");
+        strcat(escape_sequence, "5");
+        first_attr = false;
+    }
+    if (gCurrentColorIsExt) {
+        if (!first_attr) strcat(escape_sequence, ";");
+        snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
+    } else {
+        if (!first_attr) strcat(escape_sequence, ";");
+        snprintf(code_str, sizeof(code_str), "%d",
+                 map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
+    }
+    strcat(escape_sequence, code_str);
+    first_attr = false;
+    strcat(escape_sequence, ";");
+    if (gCurrentBgIsExt) {
+        snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
+    } else {
+        snprintf(code_str, sizeof(code_str), "%d",
+                 map16BgColorToAnsi(gCurrentTextBackground));
+    }
+    strcat(escape_sequence, code_str);
+    strcat(escape_sequence, "m");
+    fprintf(stream, "%s", escape_sequence);
+    return true;
+}
+
+void resetTextAttributes(FILE* stream) {
+    fprintf(stream, "\x1B[0m");
+}
