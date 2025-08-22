@@ -173,7 +173,7 @@ make_number:
         fprintf(stderr, "Memory allocation error in number().\n");
         EXIT_FAILURE_HANDLER();
     }
-    strncpy(num_str, lexer->text + start, len);
+    memcpy(num_str, lexer->text + start, len);
     num_str[len] = '\0';
 
     if (is_hex) {
@@ -212,7 +212,7 @@ Token *identifier(Lexer *lexer) {
         advance(lexer);
     size_t len = lexer->pos - start;
     char *id_str = malloc(len + 1);
-    strncpy(id_str, lexer->text + start, len);
+    memcpy(id_str, lexer->text + start, len);
     id_str[len] = '\0';
 
     // ADD DEBUG PRINT 1: See the raw lexeme before lowercasing
@@ -394,7 +394,7 @@ Token *getNextToken(Lexer *lexer) {
             }
             char *num_str = malloc(len + 1);
             if (!num_str) { fprintf(stderr, "malloc failed in getNextToken for char code\n"); EXIT_FAILURE_HANDLER(); }
-            strncpy(num_str, lexer->text + start, len);
+            memcpy(num_str, lexer->text + start, len);
             num_str[len] = '\0';
             long val = atol(num_str);
             free(num_str);
@@ -425,7 +425,7 @@ Token *getNextToken(Lexer *lexer) {
             }
             char *hex_str = malloc(len + 1);
             if (!hex_str) { fprintf(stderr, "malloc failed in getNextToken for hex const\n"); EXIT_FAILURE_HANDLER(); }
-            strncpy(hex_str, lexer->text + start, len);
+            memcpy(hex_str, lexer->text + start, len);
             hex_str[len] = '\0';
             Token* token = newToken(TOKEN_HEX_CONST, hex_str, start_line, start_column);
             free(hex_str);
