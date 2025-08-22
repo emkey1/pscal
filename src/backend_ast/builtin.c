@@ -487,15 +487,101 @@ static int vm_raw_mode = 0;
 static int vm_termios_saved = 0;
 static int vm_restore_registered = 0;
 static int vm_alt_screen = 0; // Track if alternate screen buffer is active
+static char vm_saved_fg[32] = "";   // Saved foreground color
+static char vm_saved_bg[32] = "";   // Saved background color
+static int vm_color_saved = 0;       // Flag indicating colors were saved
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
+static void vmSaveColorState(void);
+static void vmRestoreColorState(void);
+static int vmQueryColor(const char *query, char *dest, size_t dest_size);
 
 static void vmRestoreTerminal(void) {
     if (vm_termios_saved && vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
         vm_raw_mode = 0;
     }
+}
+
+// Query terminal for current color (OSC 10/11) and store result in dest
+static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
+    struct termios oldt, raw;
+    char buf[64];
+    size_t i = 0;
+    char ch;
+
+    if (!isatty(STDIN_FILENO))
+        return -1;
+
+    if (tcgetattr(STDIN_FILENO, &oldt) < 0)
+        return -1;
+
+    raw = oldt;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 5; // 0.5s timeout
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        return -1;
+    }
+
+    if (write(STDOUT_FILENO, query, strlen(query)) == -1) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        return -1;
+    }
+
+    while (i < sizeof(buf) - 1) {
+        ssize_t n = read(STDIN_FILENO, &ch, 1);
+        if (n <= 0)
+            break;
+        if (ch == '\a')
+            break; // BEL terminator
+        if (ch == '\x1B') {
+            ssize_t n2 = read(STDIN_FILENO, &ch, 1);
+            if (n2 <= 0)
+                break;
+            if (ch == '\\')
+                break; // ESC \ terminator
+            buf[i++] = '\x1B';
+        }
+        buf[i++] = ch;
+    }
+    buf[i] = '\0';
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+
+    char *p = strchr(buf, ';');
+    if (!p)
+        return -1;
+    p++;
+    strncpy(dest, p, dest_size - 1);
+    dest[dest_size - 1] = '\0';
+    return 0;
+}
+
+// Save current terminal foreground and background colors
+static void vmSaveColorState(void) {
+    if (vm_color_saved)
+        return;
+    if (vmQueryColor("\x1B]10;?\x07", vm_saved_fg, sizeof(vm_saved_fg)) == 0 &&
+        vmQueryColor("\x1B]11;?\x07", vm_saved_bg, sizeof(vm_saved_bg)) == 0) {
+        vm_color_saved = 1;
+    }
+}
+
+// Restore previously saved terminal colors
+static void vmRestoreColorState(void) {
+    if (!vm_color_saved)
+        return;
+    char seq[64];
+    int len = snprintf(seq, sizeof(seq), "\x1B]10;%s\x07", vm_saved_fg);
+    if (len > 0)
+        write(STDOUT_FILENO, seq, len);
+    len = snprintf(seq, sizeof(seq), "\x1B]11;%s\x07", vm_saved_bg);
+    if (len > 0)
+        write(STDOUT_FILENO, seq, len);
 }
 
 // atexit handler: restore terminal settings and leave alternate screen
@@ -513,6 +599,7 @@ static void vmAtExitCleanup(void) {
     }
     const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
     write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+    vmRestoreColorState(); // Restore original colors last
 }
 
 // Signal handler to ensure terminal state is restored on interrupts.
@@ -545,6 +632,7 @@ static void vmSetupTermHandlers(void) {
 
 void vmInitTerminalState(void) {
     vmSetupTermHandlers();
+    vmSaveColorState();
     if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
         const char enter_alt[] = "\x1B[?1049h"; // Switch to alternate screen buffer
         write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
