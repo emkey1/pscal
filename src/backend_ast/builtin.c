@@ -12,6 +12,7 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
 #include <errno.h>   // For errno
@@ -500,9 +501,16 @@ static void vmAtExitCleanup(void) {
     if (vm_alt_screen) {
         const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
         write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
-        fflush(stdout);
         vm_alt_screen = 0;
     }
+    const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+}
+
+// Signal handler to ensure terminal state is restored on interrupts.
+static void vmSignalHandler(int signum) {
+    vmAtExitCleanup();
+    _exit(128 + signum);
 }
 
 void vmInitTerminalState(void) {
@@ -513,6 +521,12 @@ void vmInitTerminalState(void) {
     }
     if (!vm_restore_registered) {
         atexit(vmAtExitCleanup);
+        struct sigaction sa;
+        sa.sa_handler = vmSignalHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
         vm_restore_registered = 1;
     }
     if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
