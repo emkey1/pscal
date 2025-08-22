@@ -1,36 +1,32 @@
 #!/usr/bin/env pascal
 program DiceGame;
 
-uses CRT; // Use the provided CRT unit
+uses CRT;
 
 const
   NUM_DICE = 5;
   MAX_ROLLS = 3;
   NUM_CATEGORIES = 13;
-  // Color constants (assuming CRT unit makes these available or maps them)
+  // Game layout dimensions for centering
+  GAME_WIDTH = 60;
+  GAME_HEIGHT = 25;
+
+  // Color constants
   Black        = 0;
   Blue         = 1;
   Green        = 2;
   Cyan         = 3;
   Red          = 4;
-  Magenta      = 5;
-  Brown        = 6;
   LightGray    = 7;
-  DarkGray     = 8;
-  LightBlue    = 9;
   LightGreen   = 10;
-  LightCyan    = 11;
   LightRed     = 12;
-  LightMagenta = 13;
   Yellow       = 14;
   White        = 15;
-
 
 type
   TDiceArray = array[1..NUM_DICE] of integer;
   TKeepArray = array[1..NUM_DICE] of boolean;
 
-  // Scorecard structure
   TScoreCategory = record
     name: string[20];
     score: integer;
@@ -46,43 +42,66 @@ var
   scorecard: TScorecard;
   i, j, upperScore, lowerScore, bonusScore, totalScore: integer;
   gameOver: boolean;
-  inputChar: char;       // Used for general key presses
+  inputChar: char;
   categoryChoice: integer;
-  userChoice: char;        // Used specifically for Roll/Score choice from ToggleKeep
-  turnStr: string[4];      // For converting turn number
-  totalStr: string[4];     // For converting total categories number
-  scoreStr: string[4];     // For converting scores for display
-  k: integer;              // Loop variable for scorecard display
+  userChoice: char;
+  turnStr: string[4];
+  totalStr: string[4];
+  scoreStr: string[4];
+  k: integer;
+  hOffset, vOffset: integer; // Offsets for centering the game
 
+// --- Custom Screen Clearing Procedure ---
+// This is a more reliable way to clear the screen with a specific background color.
+procedure ClearScreenWithColor(bgColor: byte);
+var
+  y, x: integer;
+  blankLine: string;
+begin
+//  TextBackground(bgColor);
+//  blankLine := '';
+  // Create a string of spaces that matches the screen width
+//  for x := 1 to ScreenCols do
+//  begin
+//    blankLine := blankLine + ' ';
+//  end;
 
-// --- CRT Helper Procedures ---
+  // Print the blank line on every row
+//  for y := 1 to ScreenRows do
+//  begin
+//    GotoXY(1, y);
+//    Write(blankLine);
+//  end;
+//  GotoXY(1, 1); // Move cursor to top-left after clearing
+  ClrScr;
+  writeln('\e]11;#200000\a');
+end;
+
+// --- CRT Helper Procedures (Now with Centering) ---
 
 procedure ClearLine(y: integer);
-// Clears a specific line using GotoXY and ClrEol
 begin
-  GotoXY(1, y);
+  GotoXY(1 + hOffset, y + vOffset);
   ClrEol;
 end;
 
 procedure Print(x, y: integer; s: string);
-// Combines GotoXY and Write
 begin
-  GotoXY(x, y);
+  GotoXY(x + hOffset, y + vOffset);
   Write(s);
 end;
 
 procedure PrintColor(x, y: integer; s: string; fg, bg: byte);
-// Prints text with specified colors
 begin
   TextColor(fg);
   TextBackground(bg);
-  GotoXY(x, y);
+  GotoXY(x + hOffset, y + vOffset);
   Write(s);
-  NormVideo; // Reset colors to default
+  NormVideo;
+  TextBackground(Black); // Re-apply black background after NormVideo
 end;
 
-
-// --- Game Logic Procedures ---
+// --- Game Logic Procedures (Modified for Centering) ---
 
 procedure InitializeScorecard;
 begin
@@ -115,12 +134,10 @@ procedure RollDice;
 var
   i: integer;
 begin
-  // Only roll dice that are not kept
   for i := 1 to NUM_DICE do
   begin
     if not keep[i] then
     begin
-      // Assuming Random(N) returns 0..N-1, so +1 for 1..6
       dice[i] := Random(6) + 1;
     end;
   end;
@@ -130,29 +147,37 @@ end;
 procedure DrawDie(x, y, value: integer; kept: boolean);
 var
   bg: byte;
-  pip: array[1..3,1..3] of char;
+  pip: array[1..3, 1..3] of char;
   r, c: integer;
 begin
   bg := LightGray;
-  if kept then bg := LightGreen;
+  if kept then
+    bg := LightGreen;
   for r := 1 to 3 do
-    for c := 1 to 3 do pip[r,c] := ' ';
+    for c := 1 to 3 do
+      pip[r, c] := ' ';
   case value of
-    1: pip[2,2] := 'o';
-    2: begin pip[1,1] := 'o'; pip[3,3] := 'o'; end;
-    3: begin pip[1,1] := 'o'; pip[2,2] := 'o'; pip[3,3] := 'o'; end;
-    4: begin pip[1,1] := 'o'; pip[1,3] := 'o'; pip[3,1] := 'o'; pip[3,3] := 'o'; end;
-    5: begin pip[1,1] := 'o'; pip[1,3] := 'o'; pip[2,2] := 'o'; pip[3,1] := 'o'; pip[3,3] := 'o'; end;
-    6: begin pip[1,1] := 'o'; pip[1,3] := 'o'; pip[2,1] := 'o'; pip[2,3] := 'o'; pip[3,1] := 'o'; pip[3,3] := 'o'; end;
+    1: pip[2, 2] := 'o';
+    2: begin pip[1, 1] := 'o'; pip[3, 3] := 'o'; end;
+    3: begin pip[1, 1] := 'o'; pip[2, 2] := 'o'; pip[3, 3] := 'o'; end;
+    4: begin pip[1, 1] := 'o'; pip[1, 3] := 'o'; pip[3, 1] := 'o'; pip[3, 3] := 'o'; end;
+    5: begin pip[1, 1] := 'o'; pip[1, 3] := 'o'; pip[2, 2] := 'o'; pip[3, 1] := 'o'; pip[3, 3] := 'o'; end;
+    6: begin pip[1, 1] := 'o'; pip[1, 3] := 'o'; pip[2, 1] := 'o'; pip[2, 3] := 'o'; pip[3, 1] := 'o'; pip[3, 3] := 'o'; end;
   end;
   TextColor(Black);
   TextBackground(bg);
-  GotoXY(x, y);     Write('+---+');
-  GotoXY(x, y+1);   Write('|', pip[1,1], pip[1,2], pip[1,3], '|');
-  GotoXY(x, y+2);   Write('|', pip[2,1], pip[2,2], pip[2,3], '|');
-  GotoXY(x, y+3);   Write('|', pip[3,1], pip[3,2], pip[3,3], '|');
-  GotoXY(x, y+4);   Write('+---+');
+  GotoXY(x + hOffset, y + vOffset);
+  Write('+---+');
+  GotoXY(x + hOffset, y + 1 + vOffset);
+  Write('|', pip[1, 1], pip[1, 2], pip[1, 3], '|');
+  GotoXY(x + hOffset, y + 2 + vOffset);
+  Write('|', pip[2, 1], pip[2, 2], pip[2, 3], '|');
+  GotoXY(x + hOffset, y + 3 + vOffset);
+  Write('|', pip[3, 1], pip[3, 2], pip[3, 3], '|');
+  GotoXY(x + hOffset, y + 4 + vOffset);
+  Write('+---+');
   NormVideo;
+  TextBackground(Black);
 end;
 
 procedure DisplayDice;
@@ -160,61 +185,71 @@ var
   i: integer;
 begin
   for i := 1 to NUM_DICE do
-    DrawDie(5 + (i-1)*6, 5, dice[i], keep[i]);
-  TextColor(White); TextBackground(Black);
-  GotoXY(5, 11);
+    DrawDie(5 + (i - 1) * 6, 5, dice[i], keep[i]);
+  TextColor(White);
+  TextBackground(Black);
+  GotoXY(5 + hOffset, 11 + vOffset);
   Write('Rolls Left: ', rollsLeft:1);
   ClrEol;
 end;
 
 procedure DisplayScorecard;
-// Uses global k, scoreStr
 var
   labelStr: string[2];
 begin
-  TextColor(Yellow);// HighVideo;
-  GotoXY(40, 2); Write('Upper Section');
+  TextColor(Yellow);
+  GotoXY(40 + hOffset, 2 + vOffset);
+  Write('Upper Section');
+  ClrEol;  // <-- ADDED: Clears rest of the line
+
   NormVideo;
+  TextBackground(Black);
   for k := 1 to 6 do
   begin
     if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
-    GotoXY(40, 2 + k);
+    GotoXY(40 + hOffset, 2 + k + vOffset);
     labelStr := IntToStr(k);
     if Length(labelStr) < 2 then labelStr := ' ' + labelStr;
     Write(labelStr, '. ', scorecard[k].name:12);
     if scorecard[k].used then
     begin
-       scoreStr := IntToStr(scorecard[k].score);
-       Write(scoreStr:4);
+      scoreStr := IntToStr(scorecard[k].score);
+      Write(scoreStr:4);
     end
     else
-       Write(' (-)');
+      Write(' (-)');
+    ClrEol; // <-- ADDED: Clears rest of scorecard lines
   end;
 
   TextColor(White);
-  GotoXY(40, 10); Write('Upper Bonus:');
+  GotoXY(40 + hOffset, 10 + vOffset); Write('Upper Bonus:');
   if bonusScore > 0 then
   begin
-     scoreStr := IntToStr(bonusScore);
-     Write(scoreStr:4)
+    scoreStr := IntToStr(bonusScore);
+    Write(scoreStr:4)
   end
   else Write('   -');
+  ClrEol; // <-- ADDED
 
-  GotoXY(40, 11); Write('Upper Total:');
+  GotoXY(40 + hOffset, 11 + vOffset); Write('Upper Total:');
   if upperScore > 0 then
   begin
     scoreStr := IntToStr(upperScore);
     Write(scoreStr:4)
   end
   else Write('   -');
+  ClrEol; // <-- ADDED
 
-  TextColor(Yellow); HighVideo;
-  GotoXY(40, 14); Write('Lower Section');
+  TextColor(Yellow);
+  GotoXY(40 + hOffset, 14 + vOffset); Write('Lower Section');
+  ClrEol; // <-- ADDED
+
   NormVideo;
+  TextBackground(Black);
   for k := 7 to NUM_CATEGORIES do
   begin
     if scorecard[k].used then TextColor(LightGreen) else TextColor(White);
-    GotoXY(40, 14 + (k-6));
+    GotoXY(40 + hOffset, 14 + (k-6) + vOffset);
     if k <= 9 then
       labelStr := IntToStr(k)
     else
@@ -223,204 +258,119 @@ begin
     Write(labelStr, '. ', scorecard[k].name:12);
     if scorecard[k].used then
     begin
-       scoreStr := IntToStr(scorecard[k].score);
-       Write(scoreStr:4);
+      scoreStr := IntToStr(scorecard[k].score);
+      Write(scoreStr:4);
     end
     else
-       Write(' (-)');
+      Write(' (-)');
+    ClrEol; // <-- ADDED
   end;
 
   TextColor(White);
-  GotoXY(40, 22); Write('Lower Total:');
+  GotoXY(40 + hOffset, 22 + vOffset); Write('Lower Total:');
   if lowerScore > 0 then
   begin
-      scoreStr := IntToStr(lowerScore);
-      Write(scoreStr:4)
+    scoreStr := IntToStr(lowerScore);
+    Write(scoreStr:4)
   end
   else Write('   -');
+  ClrEol; // <-- ADDED
 
-  GotoXY(40, 24); HighVideo;// BlinkText;
+  GotoXY(40 + hOffset, 24 + vOffset);
+  TextColor(Yellow);
   Write('GRAND TOTAL:');
-  NormVideo; Write(' ');
+  NormVideo;
+  TextBackground(Black);
+  Write(' ');
   if totalScore > 0 then
   begin
-     scoreStr := IntToStr(totalScore);
-     TextColor(Yellow); Write(scoreStr:4); TextColor(White);
+    scoreStr := IntToStr(totalScore);
+    TextColor(Yellow); Write(scoreStr:4); TextColor(White);
   end
   else Write('   -');
+  ClrEol; // <-- ADDED
   NormVideo;
+  TextBackground(Black);
 end;
 
-// Modified to avoid Exit, takes var parameter to signal action
 procedure ToggleKeep(var userAction: char);
 var
   dieNum: integer;
-  validDieInput: boolean; // Only tracks if a valid die number was entered this iteration
-  // inputStr: string[10]; // Not needed with ReadKey
-  // inputChar is now global
 begin
-  userAction := ' '; // Default action (continue loop)
-  TextColor(Yellow); HighVideo;
-  Print(5, 12, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: '); ClrEol;
-  NormVideo; TextColor(White);
+  userAction := ' ';
+  TextColor(Yellow);
+  Print(5, 12, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: ');
+  ClrEol;
+  NormVideo;
+  TextBackground(Black);
+  TextColor(White);
 
-  // Need to clear space where input will be echoed or error shown
-  GotoXY(60, 8); ClrEol;
-  GotoXY(60, 8); // Position for input
+  GotoXY(60 + hOffset, 8 + vOffset); ClrEol;
+  GotoXY(60 + hOffset, 8 + vOffset);
 
-  validDieInput := false;
   repeat
-    inputChar := ReadKey; // Get single character input
+    inputChar := ReadKey;
 
     if (UpCase(inputChar) = 'R') or (UpCase(inputChar) = 'S') then
     begin
-       userAction := UpCase(inputChar); // Signal Roll or Score
-       // Loop condition 'until (userAction = 'R') or (userAction = 'S')' will handle exit
+      userAction := UpCase(inputChar);
     end
     else if (inputChar >= '1') and (inputChar <= '5') then
     begin
-       dieNum := Ord(inputChar) - Ord('0');
-       // No need to check range again, already done by (inputChar >= '1') etc.
-       // if (dieNum >= 1) and (dieNum <= NUM_DICE) then
-       // begin
-         keep[dieNum] := not keep[dieNum];
-         validDieInput := true; // Mark that a valid die toggle happened
-         DisplayDice; // Update dice display immediately
-         // Reprint prompt and reposition cursor for next input
-         TextColor(Yellow); HighVideo;
-         Print(5, 12, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: '); ClrEol;
-         NormVideo; TextColor(White);
-         GotoXY(60, 8); // Reposition for next input
-       // end; // End inner if dieNum in range - removed as redundant
-       // No 'else' needed here for dieNum range check
+      dieNum := Ord(inputChar) - Ord('0');
+      keep[dieNum] := not keep[dieNum];
+      DisplayDice;
+      TextColor(Yellow);
+      Print(5, 12, 'Enter dice number (1-5) to toggle keep, or (R)oll, (S)core: ');
+      ClrEol;
+      NormVideo;
+      TextBackground(Black);
+      TextColor(White);
+      GotoXY(60 + hOffset, 8 + vOffset);
     end
     else
     begin
-       // Neither R, S, nor 1-5 was pressed
-       Beep; // Indicate invalid input
-       GotoXY(60, 8); // Ensure cursor is back for next input attempt
+      Beep;
+      GotoXY(60 + hOffset, 8 + vOffset);
     end;
-
-  until (userAction = 'R') or (userAction = 'S'); // Loop until R or S is pressed
-  ClearLine(8); // Clear the prompt line after exiting
-
-end; // End of revised ToggleKeep
-
-// --- Scoring Functions ---
-
-// Helper to count occurrences of each die value
-procedure CountDice(var counts: array[1..6] of integer);
-var i: integer;
-begin
-  for i := 1 to 6 do counts[i] := 0;
-  for i := 1 to NUM_DICE do counts[dice[i]] := counts[dice[i]] + 1;
+  until (userAction = 'R') or (userAction = 'S');
+  ClearLine(8);
 end;
 
-function ScoreUpper(valueToScore: integer): integer;
-var score: integer; counts: array[1..6] of integer; // removed i
-begin
-  CountDice(counts);
-  ScoreUpper := counts[valueToScore] * valueToScore;
-end;
+// All scoring functions are unchanged...
+procedure CountDice(var counts: array[1..6] of integer); var i: integer; begin for i := 1 to 6 do counts[i] := 0; for i := 1 to NUM_DICE do counts[dice[i]] := counts[dice[i]] + 1; end;
+function ScoreUpper(valueToScore: integer): integer; var score: integer; counts: array[1..6] of integer; begin CountDice(counts); ScoreUpper := counts[valueToScore] * valueToScore; end;
+function ScoreNOfAKind(n: integer): integer; var i, score: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do begin if counts[i] >= n then found := true; end; if found then begin score := 0; for i := 1 to NUM_DICE do score := score + dice[i]; ScoreNOfAKind := score; end else ScoreNOfAKind := 0; end;
+function ScoreFullHouse: integer; var i: integer; counts: array[1..6] of integer; has2, has3: boolean; begin CountDice(counts); has2 := false; has3 := false; for i := 1 to 6 do begin if counts[i] = 2 then has2 := true; if counts[i] = 3 then has3 := true; end; if has2 and has3 then ScoreFullHouse := 25 else ScoreFullHouse := 0; end;
+function ScoreStraight(minLength: integer): integer; var i, currentRun: integer; counts: array[1..6] of integer; score: integer; begin CountDice(counts); score := 0; currentRun := 0; for i := 1 to 6 do begin if counts[i] > 0 then currentRun := currentRun + 1 else currentRun := 0; if currentRun >= minLength then begin if minLength = 4 then score := 30; if minLength = 5 then score := 40; Break; end; end; ScoreStraight := score; end;
+function ScoreYahtzee: integer; var i: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do if counts[i] >= 5 then found := true; if found then ScoreYahtzee := 50 else ScoreYahtzee := 0; end;
+function ScoreChance: integer; var i, score: integer; begin score := 0; for i := 1 to NUM_DICE do score := score + dice[i]; ScoreChance := score; end;
 
-function ScoreNOfAKind(n: integer): integer;
-var i, score: integer; counts: array[1..6] of integer; found: boolean;
-begin
-  CountDice(counts);
-  found := false;
-  for i := 1 to 6 do
-  begin
-    if counts[i] >= n then found := true;
-  end;
-
-  if found then
-  begin // Score is sum of all dice
-    score := 0;
-    for i := 1 to NUM_DICE do score := score + dice[i];
-    ScoreNOfAKind := score;
-  end
-  else
-    ScoreNOfAKind := 0;
-end;
-
-function ScoreFullHouse: integer;
-var i: integer; counts: array[1..6] of integer; has2, has3: boolean;
-begin
-  CountDice(counts);
-  has2 := false; has3 := false;
-  for i := 1 to 6 do
-  begin
-    if counts[i] = 2 then has2 := true;
-    if counts[i] = 3 then has3 := true;
-  end;
-  if has2 and has3 then ScoreFullHouse := 25 else ScoreFullHouse := 0;
-end;
-
-// Uses Break statement, assuming pscal now supports it correctly
-function ScoreStraight(minLength: integer): integer;
-var i, currentRun: integer; counts: array[1..6] of integer; score: integer;
-begin
-  CountDice(counts);
-  score := 0;
-  currentRun := 0;
-  for i := 1 to 6 do
-  begin
-    if counts[i] > 0 then
-      currentRun := currentRun + 1
-    else
-      currentRun := 0;
-
-    if currentRun >= minLength then
-    begin
-       if minLength = 4 then score := 30; // Small Straight
-       if minLength = 5 then score := 40; // Large Straight
-       Break; // Found the required straight length
-    end;
-  end;
-  ScoreStraight := score;
-end;
-
-function ScoreYahtzee: integer;
-var i: integer; counts: array[1..6] of integer; found: boolean;
-begin
-  CountDice(counts);
-  found := false;
-  for i := 1 to 6 do if counts[i] >= 5 then found := true;
-  if found then ScoreYahtzee := 50 else ScoreYahtzee := 0;
-end;
-
-function ScoreChance: integer;
-var i, score: integer;
-begin
-  score := 0;
-  for i := 1 to NUM_DICE do score := score + dice[i];
-  ScoreChance := score;
-end;
-
-// Modified to use ReadKey for simplified input (1-9, A-D)
 procedure ChooseCategory;
 var
   validChoice: boolean;
   choiceChar: char;
   tempChoice: integer;
 begin
-  TextColor(Yellow); HighVideo;
-  Print(5, 10, 'Choose category (1-9, A-D): '); ClrEol;
-  NormVideo; TextColor(White);
+  TextColor(Yellow);
+  Print(5, 10, 'Choose category (1-9, A-D): ');
+  ClrEol;
+  NormVideo;
+  TextBackground(Black);
+  TextColor(White);
   repeat
     validChoice := false;
-    GotoXY(35, 10); ClrEol; // Clear previous input/error space
-    GotoXY(35, 10); // Position for input echo
+    GotoXY(35 + hOffset, 10 + vOffset); ClrEol;
+    GotoXY(35 + hOffset, 10 + vOffset);
 
-    choiceChar := ReadKey; // Read a single character
+    choiceChar := ReadKey;
 
-    // Check if it's a digit '1' through '9' or letter 'A'..'D'
     if (choiceChar >= '1') and (choiceChar <= '9') then
-       tempChoice := Ord(choiceChar) - Ord('0')
+      tempChoice := Ord(choiceChar) - Ord('0')
     else if (UpCase(choiceChar) >= 'A') and (UpCase(choiceChar) <= 'D') then
-       tempChoice := 10 + (Ord(UpCase(choiceChar)) - Ord('A'))
+      tempChoice := 10 + (Ord(UpCase(choiceChar)) - Ord('A'))
     else
-       tempChoice := -1; // Invalid
+      tempChoice := -1;
 
     if (tempChoice >= 1) and (tempChoice <= NUM_CATEGORIES) then
     begin
@@ -429,14 +379,14 @@ begin
         TextColor(LightRed);
         Print(5, 11, 'Category already used. Choose another.'); ClrEol; Beep;
         TextColor(White);
-        GotoXY(35, 10); // Position for next ReadKey attempt
+        GotoXY(35 + hOffset, 10 + vOffset);
       end
       else
       begin
-        categoryChoice := tempChoice; // Store the valid choice
+        categoryChoice := tempChoice;
         validChoice := true;
-        ClearLine(11); // Clear error message line
-        Write(UpCase(choiceChar)); // Echo the chosen character
+        ClearLine(11);
+        Write(UpCase(choiceChar));
       end;
     end
     else
@@ -444,12 +394,9 @@ begin
       TextColor(LightRed);
       Print(5, 11, 'Invalid choice. Enter 1-9 or A-D.'); ClrEol; Beep;
       TextColor(White);
-      GotoXY(35, 10); // Position for next ReadKey attempt
+      GotoXY(35 + hOffset, 10 + vOffset);
     end;
-
   until validChoice;
-  // ClearLine(10); // Clear prompt line after valid choice is made
-  // ClearLine(11); // Clear potential error message from previous loop
 end;
 
 procedure ScoreTurn;
@@ -458,130 +405,105 @@ var
 begin
   score := 0;
   case categoryChoice of
-    1: score := ScoreUpper(1);
-    2: score := ScoreUpper(2);
-    3: score := ScoreUpper(3);
-    4: score := ScoreUpper(4);
-    5: score := ScoreUpper(5);
-    6: score := ScoreUpper(6);
-    7: score := ScoreNOfAKind(3);
-    8: score := ScoreNOfAKind(4);
-    9: score := ScoreFullHouse;
-    10: score := ScoreStraight(4);
-    11: score := ScoreStraight(5);
-    12: score := ScoreYahtzee;
+    1: score := ScoreUpper(1); 2: score := ScoreUpper(2); 3: score := ScoreUpper(3);
+    4: score := ScoreUpper(4); 5: score := ScoreUpper(5); 6: score := ScoreUpper(6);
+    7: score := ScoreNOfAKind(3); 8: score := ScoreNOfAKind(4); 9: score := ScoreFullHouse;
+    10: score := ScoreStraight(4); 11: score := ScoreStraight(5); 12: score := ScoreYahtzee;
     13: score := ScoreChance;
   end;
-
   scorecard[categoryChoice].score := score;
   scorecard[categoryChoice].used := true;
-
-  // Update totals
-  if categoryChoice <= 6 then
-    upperScore := upperScore + score
-  else
-    lowerScore := lowerScore + score;
-
-  if (upperScore >= 63) and (bonusScore = 0) then // Award bonus only once
-     bonusScore := 35;
-
+  if categoryChoice <= 6 then upperScore := upperScore + score else lowerScore := lowerScore + score;
+  if (upperScore >= 63) and (bonusScore = 0) then bonusScore := 35;
   totalScore := upperScore + bonusScore + lowerScore;
-
-  DisplayScorecard; // Update display
+  DisplayScorecard;
 end;
 
 // --- Main Game ---
 
-begin // Main program execution start
-  ClrScr;
+begin
+  // <-- MODIFIED: Set background, calculate offsets, and clear screen first
+  Randomize;
+  hOffset := (ScreenCols - GAME_WIDTH) div 2;
+  vOffset := (ScreenRows - GAME_HEIGHT) div 2;
+  if hOffset < 0 then hOffset := 0;
+  if vOffset < 0 then vOffset := 0;
+  ClearScreenWithColor(Black);
   HideCursor;
-  Randomize; // Seed the random number generator
 
   InitializeScorecard;
   turn := 0;
   gameOver := false;
-  userChoice := ' '; // Initialize userChoice outside the loop
+  userChoice := ' ';
 
-  repeat // Main game loop (one iteration per turn)
-    turn := turn + 1;
-    ClrScr; // Clear screen at start of turn
+  repeat
+    ClearScreenWithColor(Black); // Clear screen at start of each turn
 
-    // Display turn info using multiple writes
-    GotoXY(5, 2);
-    TextColor(Cyan); // HighVideo;
+    GotoXY(5 + hOffset, 2 + vOffset);
+    TextColor(Cyan);
     Write('--- Turn ');
-    turnStr := IntToStr(turn);
+    turnStr := IntToStr(turn + 1);
     Write(turnStr);
     Write(' of ');
     totalStr := IntToStr(NUM_CATEGORIES);
     Write(totalStr);
     Write(' ---');
-    NormVideo; TextColor(White);
-    ClrEol; // Clear rest of line 2
+    NormVideo;
+    TextBackground(Black);
+    TextColor(White);
+    ClrEol;
 
-    // Display Scorecard
     DisplayScorecard;
 
-    // Reset keep array for the new turn
     for i := 1 to NUM_DICE do keep[i] := false;
     rollsLeft := MAX_ROLLS;
-    userChoice := ' '; // Reset userChoice for the new turn's rolling phase
+    userChoice := ' ';
 
-    // --- Rolling Phase ---
     repeat
-       RollDice;
-       DisplayDice; // Writes to lines 5, 6
-
-       if rollsLeft > 0 then
-       begin
-          ToggleKeep(userChoice); // Writes prompt to line 8; call has ()
-       end
-       else
-       begin
-          userChoice := 'S'; // Force scoring if out of rolls
-       end;
-
-    // Loop continues as long as the user chose 'R' AND there are rolls left
+      RollDice;
+      DisplayDice;
+      if rollsLeft > 0 then
+      begin
+        ToggleKeep(userChoice);
+      end
+      else
+      begin
+        userChoice := 'S';
+      end;
     until (userChoice = 'S') or (rollsLeft <= 0);
 
-    // --- Scoring Phase ---
-    ClearLine(8); // Clear toggle prompt line just in case
-    DisplayDice; // Show final dice state
-    ChooseCategory; // Gets input 1-9 or A-D, prompts on line 10, errors on 11
-    ScoreTurn;      // Scores the turn using categoryChoice, updates display
-
-    // Check for game end
+    ClearLine(8);
+    DisplayDice;
+    ChooseCategory;
+    ScoreTurn;
+    
+    turn := turn + 1;
     if turn >= NUM_CATEGORIES then gameOver := true;
 
-    // --- Wait for user before next turn ---
     if not gameOver then
     begin
       Print(5, 24, 'Press any key for next turn...'); ClrEol;
-      inputChar := ReadKey; // Read the key press to continue
-
-      // Clear Input Buffer
-      while KeyPressed do // While there are still keys in the buffer...
+      inputChar := ReadKey;
+      while KeyPressed do
       begin
-        inputChar := ReadKey; // ...read and discard them
+        inputChar := ReadKey;
       end;
-
-      // Clear message line before next turn
       ClearLine(24);
     end;
-
   until gameOver;
 
-  // --- Game Over Display ---
-  ClrScr; // Clear before final display
-  DisplayScorecard; // Show final scores
-  TextColor(Yellow); HighVideo; BlinkText;
-  GotoXY(1, 12); Write('>>> GAME OVER <<<');
-  NormVideo; TextColor(White);
-  GotoXY(15, 14);
+  ClearScreenWithColor(Black);
+  DisplayScorecard;
+  TextColor(Yellow);
+  GotoXY(1 + hOffset, 12 + vOffset); Write('>>> GAME OVER <<<');
+  NormVideo;
+  TextBackground(Black);
+  TextColor(White);
+  GotoXY(15 + hOffset, 14 + vOffset);
   Write('Final Score: ');
   scoreStr := IntToStr(totalScore);
   Write(scoreStr);
 
-  GotoXY(1, 24); // Move cursor to bottom
-  ShowCursor; // Make cursor visible again
+  GotoXY(1, ScreenRows);
+  ShowCursor;
 end.

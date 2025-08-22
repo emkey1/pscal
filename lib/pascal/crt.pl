@@ -27,7 +27,7 @@ type
   TOSType = (osUnknown, osLinux, osMac);
 
 // --- Standard CRT Procedures/Functions ---
-procedure ClrScr;
+//procedure ClrScr;
 procedure GotoXY(x, y: integer);
 procedure ClrEol;
 //procedure TextColor(color: byte); // Now built in
@@ -79,21 +79,21 @@ const
 
 
 { Clears the screen (or current window) and positions the cursor at the top-left of the window }
-procedure ClrScr;
-begin
-  case OSKind of
-    osLinux, osMac:
-      begin
-        BIClrScr;
-        GotoXY(WinLeft, WinTop);
-      end;
-  else
-      begin
-        Write(#12);
-        GotoXY(1, 1);
-      end;
-  end;
-end;
+//procedure ClrScr;
+//begin
+//  case OSKind of
+//    osLinux, osMac:
+//      begin
+//        BIClrScr;
+//        GotoXY(WinLeft, WinTop);
+//      end;
+//  else
+//      begin
+//        Write(#12);
+//        GotoXY(1, 1);
+//      end;
+//  end;
+//end;
 
 { Positions the cursor at column x, row y relative to the current window }
 procedure GotoXY(x, y: integer);
