@@ -84,6 +84,7 @@ int mstreamcreate();
 int mstreamfree();
 int mstreamloadfromfile();
 int mstreamsavetofile();
+int mstreambuffer();
 int new();
 int normvideo();
 int ord();
