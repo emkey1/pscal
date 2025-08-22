@@ -200,7 +200,7 @@ begin
   TextColor(Yellow);
   GotoXY(40 + hOffset, 2 + vOffset);
   Write('Upper Section');
-  ClrEol;  // <-- ADDED: Clears rest of the line
+  ClrEol;  
 
   NormVideo;
   TextBackground(Black);
@@ -218,7 +218,7 @@ begin
     end
     else
       Write(' (-)');
-    ClrEol; // <-- ADDED: Clears rest of scorecard lines
+    ClrEol; 
   end;
 
   TextColor(White);
@@ -229,7 +229,7 @@ begin
     Write(scoreStr:4)
   end
   else Write('   -');
-  ClrEol; // <-- ADDED
+  ClrEol; 
 
   GotoXY(40 + hOffset, 11 + vOffset); Write('Upper Total:');
   if upperScore > 0 then
@@ -238,11 +238,11 @@ begin
     Write(scoreStr:4)
   end
   else Write('   -');
-  ClrEol; // <-- ADDED
+  ClrEol;
 
   TextColor(Yellow);
   GotoXY(40 + hOffset, 14 + vOffset); Write('Lower Section');
-  ClrEol; // <-- ADDED
+  ClrEol;
 
   NormVideo;
   TextBackground(Black);
@@ -263,7 +263,7 @@ begin
     end
     else
       Write(' (-)');
-    ClrEol; // <-- ADDED
+    ClrEol;
   end;
 
   TextColor(White);
@@ -274,7 +274,7 @@ begin
     Write(scoreStr:4)
   end
   else Write('   -');
-  ClrEol; // <-- ADDED
+  ClrEol;
 
   GotoXY(40 + hOffset, 24 + vOffset);
   TextColor(Yellow);
@@ -288,7 +288,7 @@ begin
     TextColor(Yellow); Write(scoreStr:4); TextColor(White);
   end
   else Write('   -');
-  ClrEol; // <-- ADDED
+  ClrEol;
   NormVideo;
   TextBackground(Black);
 end;
@@ -343,7 +343,7 @@ function ScoreUpper(valueToScore: integer): integer; var score: integer; counts:
 function ScoreNOfAKind(n: integer): integer; var i, score: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do begin if counts[i] >= n then found := true; end; if found then begin score := 0; for i := 1 to NUM_DICE do score := score + dice[i]; ScoreNOfAKind := score; end else ScoreNOfAKind := 0; end;
 function ScoreFullHouse: integer; var i: integer; counts: array[1..6] of integer; has2, has3: boolean; begin CountDice(counts); has2 := false; has3 := false; for i := 1 to 6 do begin if counts[i] = 2 then has2 := true; if counts[i] = 3 then has3 := true; end; if has2 and has3 then ScoreFullHouse := 25 else ScoreFullHouse := 0; end;
 function ScoreStraight(minLength: integer): integer; var i, currentRun: integer; counts: array[1..6] of integer; score: integer; begin CountDice(counts); score := 0; currentRun := 0; for i := 1 to 6 do begin if counts[i] > 0 then currentRun := currentRun + 1 else currentRun := 0; if currentRun >= minLength then begin if minLength = 4 then score := 30; if minLength = 5 then score := 40; Break; end; end; ScoreStraight := score; end;
-function ScoreYahtzee: integer; var i: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do if counts[i] >= 5 then found := true; if found then ScoreYahtzee := 50 else ScoreYahtzee := 0; end;
+function ScoreShipzee: integer; var i: integer; counts: array[1..6] of integer; found: boolean; begin CountDice(counts); found := false; for i := 1 to 6 do if counts[i] >= 5 then found := true; if found then ScoreShipzee := 50 else ScoreShipzee := 0; end;
 function ScoreChance: integer; var i, score: integer; begin score := 0; for i := 1 to NUM_DICE do score := score + dice[i]; ScoreChance := score; end;
 
 procedure ChooseCategory;
@@ -408,7 +408,7 @@ begin
     1: score := ScoreUpper(1); 2: score := ScoreUpper(2); 3: score := ScoreUpper(3);
     4: score := ScoreUpper(4); 5: score := ScoreUpper(5); 6: score := ScoreUpper(6);
     7: score := ScoreNOfAKind(3); 8: score := ScoreNOfAKind(4); 9: score := ScoreFullHouse;
-    10: score := ScoreStraight(4); 11: score := ScoreStraight(5); 12: score := ScoreYahtzee;
+    10: score := ScoreStraight(4); 11: score := ScoreStraight(5); 12: score := ScoreShipzee;
     13: score := ScoreChance;
   end;
   scorecard[categoryChoice].score := score;
