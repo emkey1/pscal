@@ -13,6 +13,7 @@
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "globals.h"
+#include "backend_ast/builtin.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -33,6 +34,7 @@ static const char *CLIKE_USAGE =
     "     --dump-bytecode             Dump compiled bytecode before execution.\n";
 
 int main(int argc, char **argv) {
+    vmInitTerminalState();
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     const char *path = NULL;

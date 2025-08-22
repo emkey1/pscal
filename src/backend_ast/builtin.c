@@ -483,19 +483,33 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
 // --- Terminal helper for VM input routines ---
 static struct termios vm_orig_termios;
 static int vm_raw_mode = 0;
+static int vm_termios_saved = 0;
+static int vm_restore_registered = 0;
 
 static void vmRestoreTerminal(void) {
-    if (vm_raw_mode) {
+    if (vm_termios_saved) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
-        vm_raw_mode = 0;
+    }
+    vm_raw_mode = 0;
+}
+
+void vmInitTerminalState(void) {
+    if (!vm_termios_saved) {
+        if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
+            vm_termios_saved = 1;
+        }
+    }
+    if (!vm_restore_registered) {
+        atexit(vmRestoreTerminal);
+        vm_restore_registered = 1;
     }
 }
 
 static void vmEnableRawMode(void) {
+    if (!vm_termios_saved) {
+        vmInitTerminalState();
+    }
     if (vm_raw_mode)
-        return;
-
-    if (tcgetattr(STDIN_FILENO, &vm_orig_termios) < 0)
         return;
 
     struct termios raw = vm_orig_termios;
@@ -505,7 +519,6 @@ static void vmEnableRawMode(void) {
 
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
-        atexit(vmRestoreTerminal);
     }
 }
 

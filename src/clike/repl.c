@@ -12,6 +12,7 @@
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "globals.h"
+#include "backend_ast/builtin.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -25,6 +26,7 @@ static void initSymbolSystemClike(void) {
 }
 
 int main(void) {
+    vmInitTerminalState();
     char line[1024];
     while (1) {
         printf("clike> ");

@@ -124,4 +124,7 @@ BuiltinRoutineType getBuiltinType(const char *name);
 /* Register all built-in routines with the compiler/VM registry. */
 void registerAllBuiltins(void);
 
+/* Save and restore terminal state for the VM. */
+void vmInitTerminalState(void);
+
 #endif // BUILTIN_H
