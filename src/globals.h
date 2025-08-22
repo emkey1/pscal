@@ -52,6 +52,10 @@ extern bool gCurrentColorIsExt;
 extern bool gCurrentBgIsExt;
 extern bool gCurrentTextUnderline;
 extern bool gCurrentTextBlink;
+extern int gWindowLeft;
+extern int gWindowTop;
+extern int gWindowRight;
+extern int gWindowBottom;
 
 // --- Other Globals ---
 #define MAX_RECURSION_DEPTH 10
