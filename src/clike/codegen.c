@@ -299,6 +299,16 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                              node->left->element_type);
                     free(name);
                     compileStatement(node->left, chunk, ctx);
+                } else if (node->left->type == TCAST_COMPOUND) {
+                    for (int i = 0; i < node->left->child_count; ++i) {
+                        ASTNodeClike *child = node->left->children[i];
+                        char* name = tokenToCString(child->token);
+                        addLocal(ctx, name, child->var_type, child->is_array,
+                                 child->dim_count, child->array_dims,
+                                 child->element_type);
+                        free(name);
+                        compileStatement(child, chunk, ctx);
+                    }
                 } else {
                     compileExpression(node->left, chunk, ctx);
                     writeBytecodeChunk(chunk, OP_POP, node->token.line);
