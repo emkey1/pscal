@@ -88,8 +88,9 @@ struct WordNode* load_words(int* word_count, int min_length, int max_length, int
 // Plays a single round of Hangman
 void play_round(struct WordNode* words, int word_count, int max_wrong) {
     str secret, so_far, used, guess;
-    int wrong, done, ch, len, i, j, found, index;
+    int wrong, done, len, i, j, found, index;
     struct WordNode* current;
+    char ch;
 
     // Select a random word
     index = random(word_count);

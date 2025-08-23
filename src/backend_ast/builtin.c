@@ -693,7 +693,7 @@ void vmPauseBeforeExit(void) {
 }
 
 int vmExitWithCleanup(int status) {
-    vmPauseBeforeExit();
+    //vmPauseBeforeExit();
     vmAtExitCleanup();
     return status;
 }
