@@ -621,14 +621,9 @@ static void vmRestoreColorState(void) {
         write(STDOUT_FILENO, seq, len);
 }
 
-// atexit handler: restore terminal settings and leave alternate screen if active
+// atexit handler: restore terminal settings and ensure cursor visibility
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
-    if (vm_alt_screen_depth > 0 && isatty(STDOUT_FILENO)) {
-        const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
-        write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
-        vm_alt_screen_depth = 0;
-    }
     if (isatty(STDOUT_FILENO)) {
         const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
         write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
