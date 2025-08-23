@@ -82,7 +82,7 @@ struct WordNode* load_words(int* word_count, int min_length, int max_length, int
     words = NULL;
     *word_count = 0;
     ms = mstreamcreate();
-    mstreamloadfromfile(&ms, "etc/words");
+    mstreamloadfromfile(&ms, "/usr/local/pscal/etc/words");
     buffer = mstreambuffer(ms) + "\n";
     len = strlen(buffer);
     start = 1;
