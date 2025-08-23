@@ -30,6 +30,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "ioresult")  == 0 ||
         strcasecmp(name, "paramcount")== 0 ||
         strcasecmp(name, "length")    == 0 ||
+        strcasecmp(name, "strlen")    == 0 ||
         strcasecmp(name, "pos")       == 0 ||
         strcasecmp(name, "screencols")== 0 ||
         strcasecmp(name, "screenrows")== 0 ||
@@ -126,6 +127,9 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
     functions[functionCount].name = strdup("scanf");
+    functions[functionCount].type = TYPE_INTEGER;
+    functionCount++;
+    functions[functionCount].name = strdup("strlen");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
     // `exit` behaves like C's exit, terminating the program with an optional code.
