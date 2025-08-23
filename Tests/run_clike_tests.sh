@@ -33,10 +33,10 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   run_status=$?
   set -e
 
-  # Strip ANSI escape sequences that may be emitted by the VM
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' "$actual_out" > "$actual_out.clean"
+  # Strip ANSI escape sequences (including OSC) that may be emitted by the VM
+  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$actual_out" > "$actual_out.clean"
   mv "$actual_out.clean" "$actual_out"
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' "$actual_err" > "$actual_err.clean"
+  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$actual_err" > "$actual_err.clean"
   mv "$actual_err.clean" "$actual_err"
 
   # Keep only the first two lines of stderr for deterministic comparisons
