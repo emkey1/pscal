@@ -6,6 +6,55 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+
+static VarType builtinReturnType(const char* name) {
+    if (!name) return TYPE_VOID;
+
+    if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+
+    if (strcasecmp(name, "cos")  == 0 ||
+        strcasecmp(name, "sin")  == 0 ||
+        strcasecmp(name, "tan")  == 0 ||
+        strcasecmp(name, "sqrt") == 0 ||
+        strcasecmp(name, "ln")   == 0 ||
+        strcasecmp(name, "exp")  == 0 ||
+        strcasecmp(name, "real") == 0) {
+        return TYPE_REAL;
+    }
+
+    if (strcasecmp(name, "round")     == 0 ||
+        strcasecmp(name, "trunc")     == 0 ||
+        strcasecmp(name, "random")    == 0 ||
+        strcasecmp(name, "ioresult")  == 0 ||
+        strcasecmp(name, "paramcount")== 0 ||
+        strcasecmp(name, "length")    == 0 ||
+        strcasecmp(name, "strlen")    == 0 ||
+        strcasecmp(name, "pos")       == 0 ||
+        strcasecmp(name, "screencols")== 0 ||
+        strcasecmp(name, "screenrows")== 0 ||
+        strcasecmp(name, "wherex")    == 0 ||
+        strcasecmp(name, "wherey")    == 0 ||
+        strcasecmp(name, "getmaxx")   == 0 ||
+        strcasecmp(name, "getmaxy")   == 0) {
+        return TYPE_INTEGER;
+    }
+
+    if (strcasecmp(name, "inttostr")  == 0 ||
+        strcasecmp(name, "realtostr") == 0 ||
+        strcasecmp(name, "paramstr")  == 0 ||
+        strcasecmp(name, "copy")      == 0) {
+        return TYPE_STRING;
+    }
+
+    if (strcasecmp(name, "readkey") == 0 ||
+        strcasecmp(name, "upcase")  == 0) {
+        return TYPE_CHAR;
+    }
+
+    return TYPE_VOID;
+}
 
 typedef struct {
     char *name;
@@ -78,6 +127,9 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
     functions[functionCount].name = strdup("scanf");
+    functions[functionCount].type = TYPE_INTEGER;
+    functionCount++;
+    functions[functionCount].name = strdup("strlen");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
     // `exit` behaves like C's exit, terminating the program with an optional code.
@@ -214,8 +266,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
 
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
-                if (clike_get_builtin_id(name) != -1) {
-                    t = TYPE_INTEGER;
+                int bid = clike_get_builtin_id(name);
+                if (bid != -1) {
+                    t = builtinReturnType(name);
                 } else {
                     fprintf(stderr,
                             "Type error: call to undefined function '%s' at line %d, column %d\n",
@@ -466,6 +519,7 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
 
         ParserClike p; initParserClike(&p, src);
         ASTNodeClike *modProg = parseProgramClike(&p);
+        freeParserClike(&p);
 
         modules[i].prog = modProg;
         modules[i].source = src;

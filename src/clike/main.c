@@ -79,10 +79,12 @@ int main(int argc, char **argv) {
 
     ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
     ASTNodeClike *prog = parseProgramClike(&parser);
+    freeParserClike(&parser);
 
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after parsing.\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         return 1;
     }
@@ -92,6 +94,7 @@ int main(int argc, char **argv) {
         dumpASTClikeJSON(prog, stdout);
         fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         return 0;
     }
@@ -108,6 +111,7 @@ int main(int argc, char **argv) {
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after semantic analysis.\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
@@ -120,6 +124,7 @@ int main(int argc, char **argv) {
     if (clike_error_count > 0) {
         fprintf(stderr, "Compilation halted with %d error(s).\n", clike_error_count);
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
@@ -130,6 +135,7 @@ int main(int argc, char **argv) {
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after optimization.\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
@@ -148,6 +154,7 @@ int main(int argc, char **argv) {
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);
+    clike_free_structs();
     free(src);
     if (pre_src) free(pre_src);
     if (globalSymbols) freeHashTable(globalSymbols);
