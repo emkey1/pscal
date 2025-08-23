@@ -92,7 +92,7 @@ Provides geometry helpers【F:lib/pascal/calculatearea.pl†L1-L31】.
 ANSI terminal control compatible with Turbo Pascal’s CRT unit【F:lib/pascal/crt.pl†L26-L57】.
 
 * Screen and cursor routines: `ClrScr`, `GotoXY`, `ClrEol`, `Window`, `WhereX`, `WhereY`.
-* Text attributes: `TextColor`, `TextBackground`, `NormVideo`, `HighVideo`, `LowVideo`, `InvertColors`, `BoldText`, `BlinkText`.
+* Text attributes: `TextColor`, `TextBackground`, `TermBackground`, `NormVideo`, `HighVideo`, `LowVideo`, `InvertColors`, `BoldText`, `BlinkText`.
 * Miscellaneous: `Delay`, `Beep`, `KeyPressed`, `SaveCursor`, `RestoreCursor`.
 
 ### Dos

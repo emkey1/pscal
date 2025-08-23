@@ -202,6 +202,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sqrt", vmBuiltinSqrt},
     {"succ", vmBuiltinSucc},
     {"tan", vmBuiltinTan},
+    {"termbackground", vmBuiltinTermbackground},
     {"textbackground", vmBuiltinTextbackground},
     {"textbackgrounde", vmBuiltinTextbackgrounde},
     {"textcolor", vmBuiltinTextcolor},
@@ -883,6 +884,18 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
     gCurrentBgIsExt = false;
+    return makeVoid();
+}
+
+Value vmBuiltinTermbackground(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "TermBackground expects 1 integer argument.");
+        return makeVoid();
+    }
+    gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
+    gCurrentBgIsExt = false;
+    applyCurrentTextAttributes(stdout);
+    fflush(stdout);
     return makeVoid();
 }
 
@@ -2643,6 +2656,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("BINormVideo", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ClrScr", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("BIClrScr", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("TermBackground", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackground", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextColor", AST_PROCEDURE_DECL, NULL);

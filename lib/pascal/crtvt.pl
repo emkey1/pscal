@@ -2,6 +2,26 @@ unit CRTMac;
 
 interface
 
+const
+  ESC = Chr(27);
+  Black        = 0;
+  Blue         = 1;
+  Green        = 2;
+  Cyan         = 3;
+  Red          = 4;
+  Magenta      = 5;
+  Brown        = 6;
+  LightGray    = 7;
+  DarkGray     = 8;
+  LightBlue    = 9;
+  LightGreen   = 10;
+  LightCyan    = 11;
+  LightRed     = 12;
+  LightMagenta = 13;
+  Yellow       = 14;
+  White        = 15;
+  Blink        = 128;
+
 procedure ClrScr;
 procedure GotoXY(x, y: integer);
 procedure ClrEol;
@@ -23,9 +43,6 @@ procedure UnderlineText;
 procedure BlinkText;
 
 implementation
-
-const
-  ESC = Chr(27);
 
 { Clears the screen and positions the cursor at the home position }
 procedure ClrScr;
@@ -109,14 +126,11 @@ end;
 //end;
 
 { Delay uses a busy-wait loop for a crude delay.
-  Adjust the inner loop if needed. }
+  In the minimal runtime we provide a no-op stub to
+  avoid parser issues with empty loop bodies. }
 procedure Delay(ms: word);
-var
-  i, j: integer;
 begin
-  for i := 1 to ms do
-    for j := 1 to 10000 do
-      ; { Busy wait }
+  { Intentionally left blank }
 end;
 
 procedure HideCursor;
