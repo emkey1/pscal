@@ -49,18 +49,18 @@ void show_guesses_bar(int wrong, int max_wrong) {
     printf(" [%d/%d]\n", remaining, max_wrong);
 }
 
-void sort_string(str *s) {
+void sort_string(str s) {
     int i, j, len;
     char tmp;
-    len = strlen(*s);
+    len = strlen(s);
     i = 1;
     while (i <= len) {
         j = i + 1;
         while (j <= len) {
-            if ((*s)[i] > (*s)[j]) {
-                tmp = (*s)[i];
-                (*s)[i] = (*s)[j];
-                (*s)[j] = tmp;
+            if (s[i] > s[j]) {
+                tmp = s[i];
+                s[i] = s[j];
+                s[j] = tmp;
             }
             j++;
         }
@@ -186,7 +186,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
         GotoXY(1, 8);
         show_guesses_bar(wrong, max_wrong);
         GotoXY(1, 10);
-        sort_string(&guessed);
+        sort_string(guessed);
         if (strlen(guessed) > 0) printf("Letters chosen so far: %s", guessed);
         GotoXY(1, 11);
         printf("Enter a letter (A-Z, or ? for hint): ");
@@ -239,7 +239,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
     GotoXY(1, 9);
     show_guesses_bar(wrong, max_wrong);
     GotoXY(1, 11);
-    sort_string(&guessed);
+    sort_string(guessed);
     if (strlen(guessed) > 0) printf("Letters chosen: %s", guessed);
     GotoXY(1, 13);
     if (wrong >= max_wrong) {
