@@ -3,3 +3,6 @@ Examples/Clike/typescript
 Pscal.xcodeproj/
 test_pscal_lib/
 typescript
+links
+Misc/old
+.gitignore
