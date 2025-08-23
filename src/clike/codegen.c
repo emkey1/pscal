@@ -91,19 +91,9 @@ static Token* makeIdentTokenLocal(const char* s) {
 
 // Create a core AST node representing a builtin type token
 static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
-    const char* name = NULL;
-    VarType vt = TYPE_UNKNOWN;
-    switch (t.type) {
-        case CLIKE_TOKEN_INT:   name = "integer"; vt = TYPE_INTEGER; break;
-        case CLIKE_TOKEN_LONG:  name = "integer"; vt = TYPE_INTEGER; break;
-        case CLIKE_TOKEN_FLOAT: name = "real";    vt = TYPE_REAL;    break;
-        case CLIKE_TOKEN_DOUBLE:name = "real";    vt = TYPE_REAL;    break;
-        case CLIKE_TOKEN_STR:   name = "string";  vt = TYPE_STRING;  break;
-        case CLIKE_TOKEN_TEXT:  name = "text";    vt = TYPE_FILE;    break;
-        case CLIKE_TOKEN_MSTREAM: name = "mstream"; vt = TYPE_MEMORYSTREAM; break;
-        case CLIKE_TOKEN_CHAR:  name = "char";    vt = TYPE_CHAR;    break;
-        default: return NULL;
-    }
+    const char* name = clike_tokenTypeToTypeName(t.type);
+    VarType vt = clike_tokenTypeToVarType(t.type);
+    if (!name) return NULL;
     Token* tok = makeIdentTokenLocal(name);
     AST* node = newASTNode(AST_VARIABLE, tok);
     setTypeAST(node, vt);
@@ -984,6 +974,7 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
         ParserClike p; initParserClike(&p, src);
         ASTNodeClike *modProg = parseProgramClike(&p);
+        freeParserClike(&p);
 
         if (!verifyASTClikeLinks(modProg, NULL)) {
             fprintf(stderr, "AST verification failed for module '%s' after parsing.\n", path);
@@ -1035,5 +1026,6 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
     free(clike_imports);
     clike_imports = NULL;
     clike_import_count = 0;
+    clike_free_structs();
 }
 
