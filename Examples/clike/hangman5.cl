@@ -43,9 +43,9 @@ void show_guesses_bar(int wrong, int max_wrong) {
     remaining = max_wrong - wrong;
     printf("Guesses Left: ");
     i = 0;
-    while (i < remaining) { printf("#"); i++; }
-    i = 0;
     while (i < wrong) { printf("#"); i++; }
+    i = 0;
+    while (i < remaining) { printf("-"); i++; }
     printf(" [%d/%d]\n", remaining, max_wrong);
 }
 
@@ -73,7 +73,7 @@ struct WordNode {
     struct WordNode* next;
 };
 
-struct WordNode* load_words(int* word_count, int min_length, int max_length, int word_limit) {
+struct WordNode* load_words(str path, int* word_count, int min_length, int max_length, int word_limit) {
     struct WordNode* words;
     mstream ms;
     str buffer;
@@ -82,7 +82,11 @@ struct WordNode* load_words(int* word_count, int min_length, int max_length, int
     words = NULL;
     *word_count = 0;
     ms = mstreamcreate();
-    mstreamloadfromfile(&ms, "/usr/local/pscal/etc/words");
+    if (!mstreamloadfromfile(&ms, path)) {
+        printf("Failed to load word list: %s\n", path);
+        mstreamfree(&ms);
+        return NULL;
+    }
     buffer = mstreambuffer(ms) + "\n";
     len = strlen(buffer);
     start = 1;
@@ -104,6 +108,10 @@ struct WordNode* load_words(int* word_count, int min_length, int max_length, int
                 if (valid) {
                     struct WordNode* node;
                     new(&node);
+                    if (node == NULL) {
+                        printf("Out of memory loading words.\n");
+                        break;
+                    }
                     node->word = copy(buffer, start, word_len);
                     node->next = words;
                     words = node;
@@ -123,8 +131,8 @@ void cleanup_words(struct WordNode* words) {
     while (tmp != NULL) {
         struct WordNode* next;
         next = tmp->next;
-        dispose(&tmp->word);
-        dispose(&tmp);
+        tmp->next = NULL;  // prevent dispose from traversing the rest of the list
+        dispose(&tmp);     // also releases tmp->word
         tmp = next;
     }
 }
@@ -255,9 +263,15 @@ int main() {
     struct WordNode* words;
     int word_count;
     int wins, losses, playing, result;
-    str input;
+    str input, word_file;
 
-    words = load_words(&word_count, 6, 9, 2048);
+    if (paramcount() >= 1) {
+        word_file = paramstr(1);
+    } else {
+        word_file = "etc/words";
+    }
+
+    words = load_words(word_file, &word_count, 6, 9, 2048);
     if (word_count == 0) {
         printf("No words loaded.\n");
         return 0;
