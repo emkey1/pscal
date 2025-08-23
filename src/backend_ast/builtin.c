@@ -680,6 +680,15 @@ void vmPauseBeforeExit(void) {
     vmAtExitCleanup();
 }
 
+int vmExitWithCleanup(int status) {
+    if (status == EXIT_SUCCESS) {
+        vmAtExitCleanup();
+    } else {
+        vmPauseBeforeExit();
+    }
+    return status;
+}
+
 static void vmEnableRawMode(void) {
     vmSetupTermHandlers();
     if (vm_raw_mode)
@@ -2470,7 +2479,7 @@ Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     } else {
         runtimeError(vm, "Halt expects 0 or 1 integer argument.");
     }
-    exit((int)code);
+    exit(vmExitWithCleanup((int)code));
     return makeVoid(); // Unreachable
 }
 

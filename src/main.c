@@ -185,7 +185,7 @@ int main(int argc, char *argv[]) {
     if (argc == 1) {
         printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
         printf("%s\n", PASCAL_USAGE);
-        return EXIT_SUCCESS;
+        return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
     // Parse options first
@@ -193,7 +193,7 @@ int main(int argc, char *argv[]) {
     for (; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
             printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
-            return EXIT_SUCCESS;
+            return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
@@ -201,7 +201,7 @@ int main(int argc, char *argv[]) {
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "%s\n", PASCAL_USAGE);
-            return EXIT_FAILURE;
+            return vmExitWithCleanup(EXIT_FAILURE);
         } else {
             // First non-option argument is the source file
             sourceFile = argv[i];
@@ -220,7 +220,7 @@ int main(int argc, char *argv[]) {
             i++; // Consume this argument
         } else {
             fprintf(stderr, "Error: --dump-ast-json requires a <source_file> argument.\n");
-            return EXIT_FAILURE;
+            return vmExitWithCleanup(EXIT_FAILURE);
         }
     }
 
@@ -228,7 +228,7 @@ int main(int argc, char *argv[]) {
     if (!sourceFile) {
         fprintf(stderr, "Error: No source file specified.\n");
         fprintf(stderr, "%s\n", PASCAL_USAGE);
-        return EXIT_FAILURE;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     // Initialize core systems
@@ -241,7 +241,7 @@ int main(int argc, char *argv[]) {
         // Minimal cleanup if initSymbolSystem did very little before this point
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return EXIT_FAILURE;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
     fseek(file, 0, SEEK_END);
     long fsize = ftell(file);
@@ -252,7 +252,7 @@ int main(int argc, char *argv[]) {
         fclose(file);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return EXIT_FAILURE;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
     fread(source_buffer, 1, fsize, file);
     source_buffer[fsize] = '\0';
@@ -270,8 +270,5 @@ int main(int argc, char *argv[]) {
     // Call runProgram
     int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag);
     free(source_buffer); // Free the source code buffer
-    if (result != EXIT_SUCCESS) {
-        vmPauseBeforeExit();
-    }
-    return result;
+    return vmExitWithCleanup(result);
 }

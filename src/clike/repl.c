@@ -57,7 +57,7 @@ int main(void) {
             free(src);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            exit(1);
+            return vmExitWithCleanup(EXIT_FAILURE);
         }
         initSymbolSystemClike();
         clike_register_builtins();
@@ -72,7 +72,7 @@ int main(void) {
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            exit(1);
+            return vmExitWithCleanup(EXIT_FAILURE);
         }
         prog = optimizeClikeAST(prog);
 
@@ -85,7 +85,7 @@ int main(void) {
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            exit(1);
+            return vmExitWithCleanup(EXIT_FAILURE);
         }
         if (clike_error_count == 0) {
             BytecodeChunk chunk; clike_compile(prog, &chunk);
@@ -105,5 +105,5 @@ int main(void) {
         clike_error_count = 0;
         clike_warning_count = 0;
     }
-    return 0;
+    return vmExitWithCleanup(EXIT_SUCCESS);
 }
