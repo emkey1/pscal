@@ -233,7 +233,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
     char ch;
     int wrong, done, len, i, j, found, index;
     struct WordNode* current;
-    int hint_used;
+    int hint_used = 0;
     int cols, rows, topMargin, padding;
 
     index = random(word_count);
