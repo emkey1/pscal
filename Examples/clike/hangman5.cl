@@ -276,7 +276,6 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
         gotoxy(borderLeft + 1 + padding, vWordRow); printf("%s", so_far);
         draw_hangman(wrong);
         show_guesses_bar(wrong, max_wrong);
-        sort_string(guessed);
         if (strlen(guessed) > 0) {
             msg = "Letters chosen so far: " + guessed;
             padding = center_padding(msg);
@@ -308,6 +307,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
             continue;
         }
         guessed = guessed + ch;
+        sort_string(guessed);
         found = 0; len = strlen(secret); i = 1;
         while (i <= len) { if (secret[i] == ch) { so_far[i] = ch; found = 1; } i++; }
         if (!found) { wrong++; }
@@ -326,7 +326,6 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
     gotoxy(borderLeft + 1 + padding, vWordRow); printf("%s", so_far);
     draw_hangman(wrong);
     show_guesses_bar(wrong, max_wrong);
-    sort_string(guessed);
     if (strlen(guessed) > 0) {
         msg = "Letters chosen: " + guessed;
         padding = center_padding(msg);
