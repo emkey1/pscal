@@ -202,7 +202,6 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sqrt", vmBuiltinSqrt},
     {"succ", vmBuiltinSucc},
     {"tan", vmBuiltinTan},
-    {"termbackground", vmBuiltinTermbackground},
     {"textbackground", vmBuiltinTextbackground},
     {"textbackgrounde", vmBuiltinTextbackgrounde},
     {"textcolor", vmBuiltinTextcolor},
@@ -886,19 +885,6 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     gCurrentBgIsExt = false;
     return makeVoid();
 }
-
-Value vmBuiltinTermbackground(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
-        runtimeError(vm, "TermBackground expects 1 integer argument.");
-        return makeVoid();
-    }
-    gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
-    gCurrentBgIsExt = false;
-    applyCurrentTextAttributes(stdout);
-    fflush(stdout);
-    return makeVoid();
-}
-
 Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_BYTE && args[0].type != TYPE_WORD)) { // <<< MODIFIED LINE
         runtimeError(vm, "TextColorE expects an integer-compatible argument (Integer, Word, Byte)."); // Changed error message
