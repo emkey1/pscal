@@ -152,7 +152,8 @@ void show_hint(str secret, str so_far, int *hint_used) {
 }
 
 int play_round(struct WordNode* words, int word_count, int max_wrong) {
-    str secret, so_far, guessed, guess, ch;
+    str secret, so_far, guessed, guess;
+    char ch;
     int wrong, done, len, i, j, found, index;
     struct WordNode* current;
     int hint_used;
@@ -200,20 +201,20 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
         len = strlen(guessed);
         i = 1;
         while (i <= len) {
-            if (guessed[i] == ch[1]) found = 1;
+            if (guessed[i] == ch) found = 1;
             i++;
         }
         if (found) {
-            printf("You already guessed '%c'. Try again.\n", ch[1]);
+            printf("You already guessed '%c'. Try again.\n", ch);
             continue;
         }
-        guessed = guessed + ch[1];
+        guessed = guessed + ch;
         found = 0;
         len = strlen(secret);
         i = 1;
         while (i <= len) {
-            if (secret[i] == ch[1]) {
-                so_far[i] = ch[1];
+            if (secret[i] == ch) {
+                so_far[i] = ch;
                 found = 1;
             }
             i++;
