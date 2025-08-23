@@ -158,7 +158,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"playsound", vmBuiltinPlaysound},
     {"pollkey", vmBuiltinPollkey},
 #endif
+    {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
+    {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
 #endif
@@ -502,14 +504,22 @@ static struct termios vm_orig_termios;
 static int vm_raw_mode = 0;
 static int vm_termios_saved = 0;
 static int vm_restore_registered = 0;
-static int vm_alt_screen = 0; // Track if alternate screen buffer is active
-static char vm_saved_fg[32] = "";   // Saved foreground color
-static char vm_saved_bg[32] = "";   // Saved background color
-static int vm_color_saved = 0;       // Flag indicating colors were saved
+static int vm_alt_screen_depth = 0; // Track nested alternate screen buffers
+
+typedef struct {
+    char fg[32];
+    char bg[32];
+    int valid;
+} VmColorState;
+
+#define VM_COLOR_STACK_MAX 16
+static VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
+static int vm_color_stack_depth = 0;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
-static void vmSaveColorState(void);
+static void vmPushColorState(void);
+static void vmPopColorState(void);
 static void vmRestoreColorState(void);
 static int vmQueryColor(const char *query, char *dest, size_t dest_size);
 
@@ -578,44 +588,59 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
 }
 
 // Save current terminal foreground and background colors
-static void vmSaveColorState(void) {
-    if (vm_color_saved)
+static void vmPushColorState(void) {
+    if (vm_color_stack_depth >= VM_COLOR_STACK_MAX)
         return;
-    if (vmQueryColor("\x1B]10;?\x07", vm_saved_fg, sizeof(vm_saved_fg)) == 0 &&
-        vmQueryColor("\x1B]11;?\x07", vm_saved_bg, sizeof(vm_saved_bg)) == 0) {
-        vm_color_saved = 1;
+    VmColorState *cs = &vm_color_stack[vm_color_stack_depth];
+    cs->valid = 0;
+    if (vmQueryColor("\x1B]10;?\x07", cs->fg, sizeof(cs->fg)) == 0 &&
+        vmQueryColor("\x1B]11;?\x07", cs->bg, sizeof(cs->bg)) == 0) {
+        cs->valid = 1;
     }
+    vm_color_stack_depth++;
 }
 
-// Restore previously saved terminal colors
+static void vmPopColorState(void) {
+    if (vm_color_stack_depth > 1)
+        vm_color_stack_depth--;
+}
+
+// Restore terminal colors from the top of the stack
 static void vmRestoreColorState(void) {
-    if (!vm_color_saved)
+    if (vm_color_stack_depth == 0)
+        return;
+    VmColorState *cs = &vm_color_stack[vm_color_stack_depth - 1];
+    if (!cs->valid)
         return;
     char seq[64];
-    int len = snprintf(seq, sizeof(seq), "\x1B]10;%s\x07", vm_saved_fg);
+    int len = snprintf(seq, sizeof(seq), "\x1B]10;%s\x07", cs->fg);
     if (len > 0)
         write(STDOUT_FILENO, seq, len);
-    len = snprintf(seq, sizeof(seq), "\x1B]11;%s\x07", vm_saved_bg);
+    len = snprintf(seq, sizeof(seq), "\x1B]11;%s\x07", cs->bg);
     if (len > 0)
         write(STDOUT_FILENO, seq, len);
 }
 
-// atexit handler: restore terminal settings and leave alternate screen
+// atexit handler: restore terminal settings and leave alternate screen if active
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
-    if (vm_alt_screen) {
-        const char exit_alt[]   = "\x1B[?1049l"; // Leave alternate screen buffer
-        write(STDOUT_FILENO, exit_alt,   sizeof(exit_alt) - 1);
-        vm_alt_screen = 0;
+    if (vm_alt_screen_depth > 0 && isatty(STDOUT_FILENO)) {
+        const char exit_alt[] = "\x1B[?1049l"; // Leave alternate screen buffer
+        write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
+        vm_alt_screen_depth = 0;
     }
-    const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
-    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
-    vmRestoreColorState(); // Restore original colors last
+    if (isatty(STDOUT_FILENO)) {
+        const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
+        write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+        if (vm_color_stack_depth > 0)
+            vm_color_stack_depth = 1; // Restore base screen colors
+        vmRestoreColorState();
+    }
 }
 
 // Signal handler to ensure terminal state is restored on interrupts.
 static void vmSignalHandler(int signum) {
-    if (vm_raw_mode || vm_alt_screen)
+    if (vm_raw_mode || vm_alt_screen_depth > 0)
         vmAtExitCleanup();
     _exit(128 + signum);
 }
@@ -643,13 +668,7 @@ static void vmSetupTermHandlers(void) {
 
 void vmInitTerminalState(void) {
     vmSetupTermHandlers();
-    vmSaveColorState();
-    if (!vm_alt_screen && isatty(STDOUT_FILENO)) {
-        const char enter_alt[] = "\x1B[?1049h"; // Switch to alternate screen buffer
-        write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
-        fflush(stdout);
-        vm_alt_screen = 1;
-    }
+    vmPushColorState();
     vmEnableRawMode();
 }
 
@@ -1133,6 +1152,46 @@ Value vmBuiltinRestorecursor(VM* vm, int arg_count, Value* args) {
     }
     printf("\x1B[u");
     fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinPushscreen(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "PushScreen expects no arguments.");
+        return makeVoid();
+    }
+    if (isatty(STDOUT_FILENO)) {
+        vmPushColorState();
+        if (vm_alt_screen_depth == 0) {
+            const char enter_alt[] = "\x1B[?1049h";
+            write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
+        }
+        vm_alt_screen_depth++;
+        vmRestoreColorState();
+        fflush(stdout);
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinPopscreen(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "PopScreen expects no arguments.");
+        return makeVoid();
+    }
+    if (vm_alt_screen_depth > 0) {
+        vm_alt_screen_depth--;
+        vmPopColorState();
+        if (isatty(STDOUT_FILENO)) {
+            if (vm_alt_screen_depth == 0) {
+                const char exit_alt[] = "\x1B[?1049l";
+                write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
+            }
+            vmRestoreColorState();
+            fflush(stdout);
+        }
+    }
     return makeVoid();
 }
 
@@ -2635,7 +2694,9 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Ord", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamCount", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("PopScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Pos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("PushScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitRequested", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Random", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Randomize", AST_PROCEDURE_DECL, NULL);
