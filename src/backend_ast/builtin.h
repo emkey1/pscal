@@ -75,6 +75,8 @@ Value vmBuiltinNormalcolors(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBeep(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSavecursor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRestorecursor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPushscreen(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPopscreen(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHighvideo(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGetenvint(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinValreal(struct VM_s* vm, int arg_count, Value* args);
