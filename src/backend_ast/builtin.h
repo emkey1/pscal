@@ -142,6 +142,12 @@ void registerAllBuiltins(void);
 
 /* Save and restore terminal state for the VM. */
 void vmInitTerminalState(void);
+
+/* Pause for ten seconds and require a key press before exit when running
+ * interactively. */
 void vmPauseBeforeExit(void);
+
+/* Exit the VM after pausing and then restoring the terminal state. */
+int vmExitWithCleanup(int status);
 
 #endif // BUILTIN_H

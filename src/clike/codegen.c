@@ -980,7 +980,8 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
             fprintf(stderr, "AST verification failed for module '%s' after parsing.\n", path);
             freeASTClike(modProg);
             free(src);
-            exit(1);
+            EXIT_FAILURE_HANDLER();
+            return;
         }
 
         analyzeSemanticsClike(modProg);
@@ -989,7 +990,8 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
             fprintf(stderr, "AST verification failed for module '%s' after semantic analysis.\n", path);
             freeASTClike(modProg);
             free(src);
-            exit(1);
+            EXIT_FAILURE_HANDLER();
+            return;
         }
         for (int j = 0; j < modProg->child_count; ++j) {
             ASTNodeClike *decl = modProg->children[j];

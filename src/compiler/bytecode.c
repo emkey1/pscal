@@ -8,6 +8,7 @@
 #include "core/utils.h"    // For freeValue, varTypeToString
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in OP_CALL_HOST cast)
+#include "globals.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
 // addConstantToChunk, emitShort, patchShort from your provided file.
@@ -42,7 +43,8 @@ static void* reallocate(void* pointer, size_t oldSize, size_t newSize) { // From
     void* result = realloc(pointer, newSize);
     if (result == NULL) {
         fprintf(stderr, "Memory allocation error (realloc failed)\n");
-        exit(1);
+        EXIT_FAILURE_HANDLER();
+        return NULL;
     }
     return result;
 }

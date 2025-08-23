@@ -285,7 +285,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
     if (!register_host_function(vm, HOST_FN_QUIT_REQUESTED, vmHostQuitRequested)) { // from all.txt
         fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
-        exit(EXIT_FAILURE);
+        EXIT_FAILURE_HANDLER();
     }
 }
 
