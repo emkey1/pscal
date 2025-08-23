@@ -151,6 +151,9 @@ int main(int argc, char **argv) {
 
     VM vm; initVM(&vm);
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+    if (result != INTERPRET_OK) {
+        vmPauseBeforeExit();
+    }
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);

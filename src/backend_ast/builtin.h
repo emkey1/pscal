@@ -142,5 +142,6 @@ void registerAllBuiltins(void);
 
 /* Save and restore terminal state for the VM. */
 void vmInitTerminalState(void);
+void vmPauseBeforeExit(void);
 
 #endif // BUILTIN_H
