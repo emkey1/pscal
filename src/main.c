@@ -270,6 +270,8 @@ int main(int argc, char *argv[]) {
     // Call runProgram
     int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag);
     free(source_buffer); // Free the source code buffer
-
+    if (result != EXIT_SUCCESS) {
+        vmPauseBeforeExit();
+    }
     return result;
 }

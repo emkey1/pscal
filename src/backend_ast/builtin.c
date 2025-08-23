@@ -658,6 +658,22 @@ void vmInitTerminalState(void) {
     vmEnableRawMode();
 }
 
+// Pause to allow the user to read error messages before the VM exits.
+void vmPauseBeforeExit(void) {
+    // Return the terminal to a sane state so input works as expected.
+    vmRestoreTerminal();
+    const char show_cursor[] = "\x1B[?25h";
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+
+    fprintf(stderr, "Press Enter to exit...");
+    fflush(stderr);
+
+    int ch;
+    while ((ch = getchar()) != '\n' && ch != EOF) {
+        // Discard until newline or EOF.
+    }
+}
+
 static void vmEnableRawMode(void) {
     vmSetupTermHandlers();
     if (vm_raw_mode)
