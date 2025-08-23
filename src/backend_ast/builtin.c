@@ -2289,36 +2289,36 @@ Value vmBuiltinMstreamcreate(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
         runtimeError(vm, "MStreamLoadFromFile expects 2 arguments (MStreamVar, Filename).");
-        return makeVoid();
+        return makeBoolean(0);
     }
 
     // Argument 0 is pointer to the Value holding the MStream*
     if (args[0].type != TYPE_POINTER) {
         runtimeError(vm, "MStreamLoadFromFile: First argument must be a VAR MStream.");
-        return makeVoid();
+        return makeBoolean(0);
     }
     Value* ms_value_ptr = (Value*)args[0].ptr_val;
     if (!ms_value_ptr || ms_value_ptr->type != TYPE_MEMORYSTREAM) {
         runtimeError(vm, "MStreamLoadFromFile: First argument is not a valid MStream variable.");
-        return makeVoid();
+        return makeBoolean(0);
     }
     MStream* ms = ms_value_ptr->mstream;
     if (!ms) {
         runtimeError(vm, "MStreamLoadFromFile: MStream variable not initialized.");
-        return makeVoid();
+        return makeBoolean(0);
     }
 
     // Argument 1 is the filename string
     if (args[1].type != TYPE_STRING || args[1].s_val == NULL) {
         runtimeError(vm, "MStreamLoadFromFile: Second argument must be a string filename.");
-        return makeVoid(); // No need to free args[1] here, vm stack manages
+        return makeBoolean(0); // No need to free args[1] here, vm stack manages
     }
     const char* filename = args[1].s_val;
 
     FILE* f = fopen(filename, "rb");
     if (!f) {
         runtimeError(vm, "MStreamLoadFromFile: Cannot open file '%s' for reading.", filename);
-        return makeVoid();
+        return makeBoolean(0);
     }
 
     fseek(f, 0, SEEK_END);
@@ -2329,7 +2329,7 @@ Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
     if (!buffer) {
         fclose(f);
         runtimeError(vm, "MStreamLoadFromFile: Memory allocation error for file buffer.");
-        return makeVoid();
+        return makeBoolean(0);
     }
     fread(buffer, 1, size, f);
     buffer[size] = '\0'; // Null-terminate the buffer
@@ -2342,7 +2342,7 @@ Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
     ms->size = size;
     ms->capacity = size + 1; // Capacity is now exactly what's needed + null
 
-    return makeVoid();
+    return makeBoolean(1);
 }
 
 Value vmBuiltinMstreamsavetofile(VM* vm, int arg_count, Value* args) {
@@ -2567,6 +2567,13 @@ static int builtin_registry_count = 0;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
+    for (int i = 0; i < builtin_registry_count; ++i) {
+        if (strcasecmp(name, builtin_registry[i].name) == 0) {
+            builtin_registry[i].type = (declType == AST_FUNCTION_DECL) ?
+                BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
+            return;
+        }
+    }
     if (builtin_registry_count >= 256) return;
     builtin_registry[builtin_registry_count].name = strdup(name);
     builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?

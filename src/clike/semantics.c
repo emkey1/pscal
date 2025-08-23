@@ -53,6 +53,10 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_CHAR;
     }
 
+    if (strcasecmp(name, "mstreamloadfromfile") == 0) {
+        return TYPE_BOOLEAN;
+    }
+
     return TYPE_VOID;
 }
 
@@ -140,7 +144,7 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].type = TYPE_MEMORYSTREAM;
     functionCount++;
     functions[functionCount].name = strdup("mstreamloadfromfile");
-    functions[functionCount].type = TYPE_VOID;
+    functions[functionCount].type = TYPE_BOOLEAN;
     functionCount++;
     functions[functionCount].name = strdup("mstreamsavetofile");
     functions[functionCount].type = TYPE_VOID;
