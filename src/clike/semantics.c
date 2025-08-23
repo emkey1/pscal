@@ -75,6 +75,9 @@ typedef struct {
     int depth;
 } ScopeStack;
 
+// Holds global variable declarations so that functions can reference them.
+static VarTable globalVars = {0};
+
 static void vt_add(VarTable *t, const char *name, VarType type) {
     t->entries[t->count].name = strdup(name);
     t->entries[t->count].type = type;
@@ -456,7 +459,15 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
 
 static void analyzeFunction(ASTNodeClike *func) {
     ScopeStack scopes = {0};
-    ss_push(&scopes); // function scope for parameters
+
+    // Global scope available to all functions
+    ss_push(&scopes);
+    for (int i = 0; i < globalVars.count; ++i) {
+        ss_add(&scopes, globalVars.entries[i].name, globalVars.entries[i].type);
+    }
+
+    // Function scope for parameters/local variables
+    ss_push(&scopes);
     if (func->left) {
         for (int i = 0; i < func->left->child_count; ++i) {
             ASTNodeClike *p = func->left->children[i];
@@ -554,6 +565,22 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
             functionCount++;
         }
     }
+
+    // Process global variable declarations so functions can reference them.
+    globalVars.count = 0;
+    ScopeStack globalsScope = {0};
+    ss_push(&globalsScope);
+    for (int i = 0; i < program->child_count; ++i) {
+        ASTNodeClike *decl = program->children[i];
+        if (decl->type == TCAST_VAR_DECL) {
+            char *name = tokenToCString(decl->token);
+            ss_add(&globalsScope, name, decl->var_type);
+            vt_add(&globalVars, name, decl->var_type);
+            if (decl->left) analyzeExpr(decl->left, &globalsScope);
+            free(name);
+        }
+    }
+    ss_pop(&globalsScope);
 
     for (int i = 0; i < clike_import_count; ++i) {
         if (!modules[i].prog) continue;

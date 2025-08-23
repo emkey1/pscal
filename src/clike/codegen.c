@@ -14,6 +14,15 @@
 
 typedef struct {
     char *name;
+    int name_idx;   // constant pool index for the variable name
+    VarType type;
+} GlobalVar;
+
+static GlobalVar globalVars[256];
+static int globalVarCount = 0;
+
+typedef struct {
+    char *name;
     int index;
     VarType type;
     int depth;
@@ -130,6 +139,20 @@ static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArra
     return ctx->localCount - 1;
 }
 
+static void registerGlobal(const char* name, VarType type, int name_idx) {
+    globalVars[globalVarCount].name = strdup(name);
+    globalVars[globalVarCount].type = type;
+    globalVars[globalVarCount].name_idx = name_idx;
+    globalVarCount++;
+}
+
+static int resolveGlobal(const char* name) {
+    for (int i = 0; i < globalVarCount; i++) {
+        if (strcmp(globalVars[i].name, name) == 0) return globalVars[i].name_idx;
+    }
+    return -1;
+}
+
 static int resolveLocal(FuncContext* ctx, const char* name) {
     for (int i = ctx->localCount - 1; i >= 0; i--) {
         if (strcmp(ctx->locals[i].name, name) == 0) return ctx->locals[i].index;
@@ -141,6 +164,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
 static int countLocalDecls(ASTNodeClike *node);
+static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk);
 
 // Helper to compile an l-value (currently only local identifiers) and push its
 // address onto the stack.
@@ -149,9 +173,20 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
     if (node->type == TCAST_IDENTIFIER) {
         char* name = tokenToCString(node->token);
         int idx = resolveLocal(ctx, name);
+        if (idx >= 0) {
+            writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+        } else {
+            int gidx = resolveGlobal(name);
+            if (gidx < 256) {
+                writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)gidx, node->token.line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS16, node->token.line);
+                emitShort(chunk, (uint16_t)gidx, node->token.line);
+            }
+        }
         free(name);
-        writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
-        writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
     } else if (node->type == TCAST_ARRAY_ACCESS) {
         for (int i = 0; i < node->child_count; ++i) {
             compileExpression(node->children[i], chunk, ctx);
@@ -159,9 +194,20 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
         if (node->left && node->left->type == TCAST_IDENTIFIER) {
             char* name = tokenToCString(node->left->token);
             int idx = resolveLocal(ctx, name);
+            if (idx >= 0) {
+                writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->left->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
+            } else {
+                int gidx = resolveGlobal(name);
+                if (gidx < 256) {
+                    writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, node->left->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)gidx, node->left->token.line);
+                } else {
+                    writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS16, node->left->token.line);
+                    emitShort(chunk, (uint16_t)gidx, node->left->token.line);
+                }
+            }
             free(name);
-            writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->left->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
         } else {
             compileExpression(node->left, chunk, ctx);
         }
@@ -515,6 +561,41 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
     }
 }
 
+static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
+    if (!node) return;
+    char* name = tokenToCString(node->token);
+    int name_idx = addStringConstant(chunk, name);
+    registerGlobal(name, node->var_type, name_idx);
+    if (name_idx < 256) {
+        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL, node->token.line);
+        writeBytecodeChunk(chunk, (uint8_t)name_idx, node->token.line);
+    } else {
+        writeBytecodeChunk(chunk, OP_DEFINE_GLOBAL16, node->token.line);
+        emitShort(chunk, (uint16_t)name_idx, node->token.line);
+    }
+    writeBytecodeChunk(chunk, (uint8_t)node->var_type, node->token.line);
+    const char* type_name = varTypeToString(node->var_type);
+    int type_idx = addStringConstant(chunk, type_name);
+    emitShort(chunk, (uint16_t)type_idx, node->token.line);
+    if (node->var_type == TYPE_STRING) {
+        Value zero = makeInt(0);
+        int len_idx = addConstantToChunk(chunk, &zero);
+        freeValue(&zero);
+        emitShort(chunk, (uint16_t)len_idx, node->token.line);
+    }
+    if (node->left) {
+        FuncContext dummy = {0};
+        compileExpression(node->left, chunk, &dummy);
+        if (name_idx < 256) {
+            writeBytecodeChunk(chunk, OP_SET_GLOBAL, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)name_idx, node->token.line);
+        } else {
+            writeBytecodeChunk(chunk, OP_SET_GLOBAL16, node->token.line);
+            emitShort(chunk, (uint16_t)name_idx, node->token.line);
+        }
+    }
+    free(name);
+}
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx) {
     if (!node) return;
     switch (node->type) {
@@ -623,11 +704,23 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 if (node->left->type == TCAST_IDENTIFIER) {
                     char* name = tokenToCString(node->left->token);
                     int idx = resolveLocal(ctx, name);
-                    free(name);
+                    int gidx = -1;
+                    if (idx < 0) gidx = resolveGlobal(name);
                     compileExpression(node->right, chunk, ctx);
                     writeBytecodeChunk(chunk, OP_DUP, node->token.line);
-                    writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                    if (idx >= 0) {
+                        writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                    } else if (gidx >= 0) {
+                        if (gidx < 256) {
+                            writeBytecodeChunk(chunk, OP_SET_GLOBAL, node->token.line);
+                            writeBytecodeChunk(chunk, (uint8_t)gidx, node->token.line);
+                        } else {
+                            writeBytecodeChunk(chunk, OP_SET_GLOBAL16, node->token.line);
+                            emitShort(chunk, (uint16_t)gidx, node->token.line);
+                        }
+                    }
+                    free(name);
                 } else if (node->left->type == TCAST_ARRAY_ACCESS) {
                     /*
                      * In C, an assignment expression evaluates to the value
@@ -681,9 +774,20 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 break;
             }
             int idx = resolveLocal(ctx, name);
+            if (idx >= 0) {
+                writeBytecodeChunk(chunk, OP_GET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            } else {
+                int gidx = resolveGlobal(name);
+                if (gidx < 256) {
+                    writeBytecodeChunk(chunk, OP_GET_GLOBAL, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)gidx, node->token.line);
+                } else {
+                    writeBytecodeChunk(chunk, OP_GET_GLOBAL16, node->token.line);
+                    emitShort(chunk, (uint16_t)gidx, node->token.line);
+                }
+            }
             free(name);
-            writeBytecodeChunk(chunk, OP_GET_LOCAL, node->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
         case TCAST_ARRAY_ACCESS:
@@ -915,22 +1019,25 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
     initBytecodeChunk(chunk);
     if (!program) return;
 
-    // Emit a call to main at the start of the program. This ensures a call
-    // frame is created so that local variables in main have storage on the
-    // stack.  Previously a simple jump was used, which executed `main`
-    // without a frame, leading to crashes when builtins expected VAR
-    // parameters (e.g. `scanf`).
+    globalVarCount = 0;
+
+    // Compile global variable declarations first so they are initialized
+    // before main is invoked.
+    for (int i = 0; i < program->child_count; ++i) {
+        ASTNodeClike *decl = program->children[i];
+        if (decl->type == TCAST_VAR_DECL) {
+            compileGlobalVar(decl, chunk);
+        }
+    }
+
+    // Emit a call to main after globals have been defined.
     writeBytecodeChunk(chunk, OP_CALL, 0);
     int mainNameIdx = addStringConstant(chunk, "main");
     emitShort(chunk, (uint16_t)mainNameIdx, 0);
-    // Placeholder for the target address of main; patch later once functions
-    // are compiled and we know its bytecode location.
     int mainAddrPatch = chunk->count;
     emitShort(chunk, 0, 0);
-    // Placeholder for main's arity (argument count).
     int mainArityPatch = chunk->count;
     writeBytecodeChunk(chunk, 0, 0);
-    // After main returns halt the VM.
     writeBytecodeChunk(chunk, OP_HALT, 0);
 
     int mainAddress = -1;
