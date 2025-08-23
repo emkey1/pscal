@@ -291,9 +291,10 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
         printf("%s", msg);
         scanf(guess);
         if (strlen(guess) == 0) continue;
-        if (guess == '?') { 
-          show_hint(secret, so_far, &hint_used); 
-          continue; 
+        if (strlen(guess) == 1 && guess[1] == '?') {
+            show_hint(secret, so_far, &hint_used);
+            readkey();
+            continue;
         }
         ch = upcase(guess[1]);
         found = 0; len = strlen(guessed); i = 1;
