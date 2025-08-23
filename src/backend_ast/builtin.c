@@ -653,21 +653,22 @@ void vmInitTerminalState(void) {
     vmEnableRawMode();
 }
 
-// Pause to allow the user to read error messages before the VM exits.
+// Pause to allow the user to read messages before the VM exits.  The pause
+// occurs before any terminal cleanup is performed.
 void vmPauseBeforeExit(void) {
     // Only pause when running interactively.
     if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
         return;
 
-    tcflush(STDIN_FILENO, TCIFLUSH); // Discard any pending input
-    vmEnableRawMode();               // Ensure we can read single key presses
-    const char show_cursor[] = "\x1B[?25h";
-    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
-
     sleep(10);
 
     fprintf(stderr, "Press any key to exit");
     fflush(stderr);
+
+    tcflush(STDIN_FILENO, TCIFLUSH); // Discard any pending input
+    vmEnableRawMode();               // Ensure we can read single key presses
+    const char show_cursor[] = "\x1B[?25h";
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
 
     char ch;
     while (read(STDIN_FILENO, &ch, 1) < 0) {
@@ -675,17 +676,11 @@ void vmPauseBeforeExit(void) {
             break; // Ignore other read errors and continue with cleanup
         }
     }
-
-    // Now restore the terminal and leave the alternate screen.
-    vmAtExitCleanup();
 }
 
 int vmExitWithCleanup(int status) {
-    if (status == EXIT_SUCCESS) {
-        vmAtExitCleanup();
-    } else {
-        vmPauseBeforeExit();
-    }
+    vmPauseBeforeExit();
+    vmAtExitCleanup();
     return status;
 }
 
