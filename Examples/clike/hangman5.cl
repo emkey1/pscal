@@ -49,6 +49,8 @@ void draw_hangman(int wrong) {
     gotoxy(c, r);     printf(" +---+  ");
     gotoxy(c, r+1);   printf(" |   |  ");
     gotoxy(c, r+2);   printf(" %s   |  ", wrong > 0 ? "O" : " ");
+    gotoxy(c, r+3);   printf("     |  ");
+    gotoxy(c, r+5);   printf("     |  ");
     switch (wrong) {
         case 0:
         case 1:
@@ -262,11 +264,12 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
     borderRight = centerCol + (MAX_ELEMENT_WIDTH / 2) + BORDER_PADDING;
     effectiveWidth = borderRight - borderLeft - 1;
 
+    draw_border(borderTop, borderBottom, borderLeft, borderRight); // Need to draw before background will change on ClrScr
     while (!done) {
         ClrScr();
         draw_border(borderTop, borderBottom, borderLeft, borderRight);
-        padding = center_padding("Hangman Game With Pointers");
-        gotoxy(borderLeft + 1 + padding, vHeaderRow); textcolor(10); printf("Hangman Game With Pointers"); textcolor(15);
+        padding = center_padding("Hangman Game");
+        gotoxy(borderLeft + 1 + padding, vHeaderRow); textcolor(10); printf("Hangman Game"); textcolor(15);
         padding = center_padding("Guess the word");
         gotoxy(borderLeft + 1 + padding, vSubtitleRow); printf("Guess the word");
         padding = center_padding(so_far);
@@ -281,13 +284,17 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
             printf("%s", msg);
         }
         gotoxy(borderLeft + 1, vMsgRow); clreol();
+        draw_border(borderTop, borderBottom, borderLeft, borderRight);
         msg = "Enter a letter (A-Z, or ? for hint): ";
         padding = center_padding(msg);
         gotoxy(borderLeft + 1 + padding, vPromptRow);
         printf("%s", msg);
         scanf(guess);
         if (strlen(guess) == 0) continue;
-        if (guess[1] == '?') { show_hint(secret, so_far, &hint_used); continue; }
+        if (guess == '?') { 
+          show_hint(secret, so_far, &hint_used); 
+          continue; 
+        }
         ch = upcase(guess[1]);
         found = 0; len = strlen(guessed); i = 1;
         while (i <= len) { if (guessed[i] == ch) found = 1; i++; }
@@ -327,12 +334,12 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
     if (wrong >= max_wrong) {
         msg = "Sorry, you lost. The word was: " + secret;
         padding = center_padding(msg);
-        gotoxy(borderLeft + 1 + padding, vMsgRow); textcolor(12); printf("%s", msg); textcolor(15);
+        gotoxy(borderLeft + 1 + padding, vMsgRow - 4 ); textcolor(12); printf("%s", msg); textcolor(15);
         return 0;
     } else {
-        msg = "Congratulations, you guessed the word: " + secret;
+        msg = "Congrats, you guessed the word: " + secret;
         padding = center_padding(msg);
-        gotoxy(borderLeft + 1 + padding, vMsgRow); textcolor(2); printf("%s", msg); textcolor(15);
+        gotoxy(borderLeft + 1 + padding, vMsgRow - 3 ); textcolor(2); printf("%s", msg); textcolor(15);
         return 1;
     }
 }
@@ -354,11 +361,11 @@ int main() {
         if (result) wins++; else losses++;
         scoreMsg = "Score: " + inttostr(wins) + " wins / " + inttostr(losses) + " losses";
         padding = center_padding(scoreMsg);
-        gotoxy(borderLeft + 1 + padding, vMsgRow + 1);
+        gotoxy(borderLeft + 1 + padding, vMsgRow - 2);
         printf("%s", scoreMsg);
         promptMsg = "Play again? (Y/Enter=Yes, N=No): ";
         padding = center_padding(promptMsg);
-        gotoxy(borderLeft + 1 + padding, vMsgRow + 3);
+        gotoxy(borderLeft + 1 + padding, vMsgRow);
         printf("%s", promptMsg);
         scanf(input);
         if (strlen(input) == 0) continue;
