@@ -55,7 +55,6 @@ Value vmBuiltinKeypressed(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReadkey(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextbackground(struct VM_s* vm, int arg_count, Value* args);
-Value vmBuiltinTermbackground(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextcolore(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextbackgrounde(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBoldtext(struct VM_s* vm, int arg_count, Value* args);
