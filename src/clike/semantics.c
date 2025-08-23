@@ -227,7 +227,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
-                if (!(lt == TYPE_REAL && rt == TYPE_INTEGER) && lt != rt) {
+                if (!((lt == TYPE_REAL && rt == TYPE_INTEGER) ||
+                      (lt == TYPE_STRING && rt == TYPE_CHAR)) &&
+                    lt != rt) {
                     fprintf(stderr,
                             "Type error: cannot assign %s to %s at line %d, column %d\n",
                             varTypeToString(rt), varTypeToString(lt),
