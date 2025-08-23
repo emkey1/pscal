@@ -604,14 +604,9 @@ static void vmRestoreColorState(void) {
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
     if (vm_alt_screen) {
-        const char reset_attr[] = "\x1B[0m";    // Reset colors/styles in alt screen
         const char exit_alt[]   = "\x1B[?1049l"; // Leave alternate screen buffer
-        write(STDOUT_FILENO, reset_attr, sizeof(reset_attr) - 1);
         write(STDOUT_FILENO, exit_alt,   sizeof(exit_alt) - 1);
         vm_alt_screen = 0;
-    } else {
-        const char reset_attr[] = "\x1B[0m";    // Reset colors/styles when no alt screen
-        write(STDOUT_FILENO, reset_attr, sizeof(reset_attr) - 1);
     }
     const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
     write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
@@ -664,17 +659,21 @@ void vmPauseBeforeExit(void) {
     if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
         return;
 
-    vmEnableRawMode();               // Ensure we can read single key presses
     tcflush(STDIN_FILENO, TCIFLUSH); // Discard any pending input
+    vmEnableRawMode();               // Ensure we can read single key presses
     const char show_cursor[] = "\x1B[?25h";
     write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+
+    sleep(10);
 
     fprintf(stderr, "Press any key to exit");
     fflush(stderr);
 
     char ch;
-    if (read(STDIN_FILENO, &ch, 1) < 0) {
-        // Ignore read errors; continue with cleanup
+    while (read(STDIN_FILENO, &ch, 1) < 0) {
+        if (errno != EINTR) {
+            break; // Ignore other read errors and continue with cleanup
+        }
     }
 
     // Now restore the terminal and leave the alternate screen.
