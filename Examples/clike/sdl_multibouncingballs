@@ -1,3 +1,4 @@
+#!/usr/bin/env clike
 /*
  * SDL Multi Bouncing Balls demo ported to the clike front end.
  * Requires Pscal built with SDL support.

@@ -1,3 +1,4 @@
+#!/usr/bin/env clike
 import "math_utils.cl";
 
 int main() {

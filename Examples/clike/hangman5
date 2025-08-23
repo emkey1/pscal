@@ -1,3 +1,4 @@
+#!/usr/bin/env clike
 // Hangman game rewritten from Pascal hangman5 to CLike language.
 // Uses MStreams to manage the word list and CRT formatting routines.
 
