@@ -1,0 +1,18 @@
+Testing Typed Array Constants:
+------------------------------
+Simple Const TestStr: Simple
+
+Testing CardValues (String Array):
+CardValues[1] = A(A)
+CardValues[10] = 10(10)
+CardValues[13] = K(K)
+Assigned CardValues[11] to s: J
+
+Testing IntSequence (Integer Array):
+IntSequence[0] = 10(10)
+IntSequence[1] = -5(-5)
+IntSequence[4] = 42(42)
+Looping through IntSequence:
+10 -5 100 0 42 
+
+Test complete.

@@ -1,0 +1,31 @@
+Running pscal Formatting Test Suite
+===================================
+(Check output visually against comments in source code)
+
+--- Testing Integer Formatting (:width) ---
+Positive Integer Tests:
+Val=123< :5 >  123< :3 >123< :1 >123<
+Negative Integer Tests:
+Val=-45< :5 >  -45< :3 >-45< :1 >-45<
+Zero Integer Tests:
+Val=0< :5 >    0< :1 >0<
+
+--- Testing Real Formatting (:width, :width:decimals) ---
+Positive Real Tests:
+Val=123.4567< :10:2 >    123.46< :7:1 >  123.5< :5:0 >  123< :10 >1.234567E+02<
+Negative Real Tests:
+Val=-98.76< :8:1 >   -98.8< :5:0 >  -99< :12 >-9.876000E+01<
+Zero Real Tests:
+Val=0.0< :8:2 >    0.00< :5 >0.000000E+00<
+
+--- Testing String Formatting (:width) ---
+Short String Tests:
+Val=Hi< :5 >   Hi< :2 >Hi< :1 >H<
+Longer String Tests:
+Val=Pascal< :10 >    Pascal< :6 >Pascal< :4 >Pasc<
+
+--- Testing Other Types (Behavior May Vary) ---
+Char=X< :5 >    X<
+Bool=TRUE< :8 >    TRUE< :8 >   FALSE<
+
+Formatting Test Suite Completed.
