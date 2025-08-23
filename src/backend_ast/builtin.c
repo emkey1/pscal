@@ -667,6 +667,7 @@ void vmInitTerminalState(void) {
     vmEnableRawMode();
 }
 
+/*
 // Pause to allow the user to read messages before the VM exits.  The pause
 // occurs before any terminal cleanup is performed.
 void vmPauseBeforeExit(void) {
@@ -691,6 +692,7 @@ void vmPauseBeforeExit(void) {
         }
     }
 }
+ */
 
 int vmExitWithCleanup(int status) {
     // vmPauseBeforeExit();
