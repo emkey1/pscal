@@ -33,7 +33,7 @@ int main() {
     int MandelBytesPerPixel;
     int textureID;
     int bufferBaseIdx;
-    int pixelData[1024 * 768 * 4];
+    byte pixelData[1024 * 768 * 4];
 
     WindowWidth = 1024;
     WindowHeight = 768;

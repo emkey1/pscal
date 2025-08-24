@@ -17,7 +17,7 @@ int main() {
 
     int bytesPerPixel = 4;
     int row[width];
-    int pixelData[width * height * bytesPerPixel];
+    byte pixelData[width * height * bytesPerPixel];
     int textureID;
     int screenUpdateInterval = 1;
     int bufferBaseIdx;

@@ -24,6 +24,8 @@ VarType clike_tokenTypeToVarType(ClikeTokenType t) {
             return TYPE_VOID;
         case CLIKE_TOKEN_CHAR:
             return TYPE_CHAR;
+        case CLIKE_TOKEN_BYTE:
+            return TYPE_BYTE;
         default:
             return TYPE_UNKNOWN;
     }
@@ -39,6 +41,7 @@ const char *clike_tokenTypeToTypeName(ClikeTokenType t) {
         case CLIKE_TOKEN_TEXT:   return "text";
         case CLIKE_TOKEN_MSTREAM:return "mstream";
         case CLIKE_TOKEN_CHAR:   return "char";
+        case CLIKE_TOKEN_BYTE:   return "byte";
         case CLIKE_TOKEN_VOID:   return "void";
         default: return NULL;
     }
@@ -378,7 +381,8 @@ static int isTypeToken(ClikeTokenType t) {
     return t == CLIKE_TOKEN_INT || t == CLIKE_TOKEN_LONG ||
            t == CLIKE_TOKEN_VOID || t == CLIKE_TOKEN_FLOAT ||
            t == CLIKE_TOKEN_DOUBLE || t == CLIKE_TOKEN_STR ||
-           t == CLIKE_TOKEN_TEXT || t == CLIKE_TOKEN_MSTREAM || t == CLIKE_TOKEN_CHAR;
+           t == CLIKE_TOKEN_TEXT || t == CLIKE_TOKEN_MSTREAM ||
+           t == CLIKE_TOKEN_CHAR || t == CLIKE_TOKEN_BYTE;
 }
 
 
