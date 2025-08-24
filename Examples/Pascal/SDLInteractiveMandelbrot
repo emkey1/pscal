@@ -135,6 +135,7 @@ BEGIN // Main Program
   GotoXY(1, ControlsStartY + 2); Write('- RClick: Reset View');
   GotoXY(1, ControlsStartY + 3); Write('- Q Key (in terminal): Quit');
   GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
+  Writeln('Does not currently work');
 
   InitGraph(MandelWindowWidth, MandelWindowHeight, MandelWindowTitle);
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);
