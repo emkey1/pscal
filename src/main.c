@@ -111,15 +111,18 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 if (compilation_ok_for_vm) {
                     finalizeBytecode(&chunk);
                     saveBytecodeToCache(programName, &chunk);
-                    fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                         fprintf(stderr, "\n--- Executing Program with VM ---\n");
                     }
                 }
-            } else if (dump_bytecode_flag) {
-                disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
+            } else {
+                fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                if (dump_bytecode_flag) {
+                    disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
+                    fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
+                }
             }
 
             if (compilation_ok_for_vm) {
