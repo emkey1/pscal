@@ -197,6 +197,10 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderPresent(gSdlRenderer);
     SDL_PumpEvents(); // Process any pending events so the window becomes visible
+    SDL_RaiseWindow(gSdlWindow); // Ensure the window appears in the foreground
+#if SDL_VERSION_ATLEAST(2,0,5)
+    SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
+#endif
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
     
