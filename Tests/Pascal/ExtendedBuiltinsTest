@@ -22,7 +22,7 @@ begin
     halt(1);
   end;
 
-  if not FileExists('Pascal/ExtendedBuiltinsTest.p') then
+  if not FileExists('Pascal/ExtendedBuiltinsTest') then
   begin
     writeln('FileExists failed to detect existing file');
     halt(1);

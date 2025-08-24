@@ -34,8 +34,12 @@ fi
 
 EXIT_CODE=0
 
-for src in "$SCRIPT_DIR"/Pascal/*.p; do
-  test_name=$(basename "$src" .p)
+# Iterate over Pascal test sources (files without extensions)
+for src in "$SCRIPT_DIR"/Pascal/*; do
+  test_name=$(basename "$src")
+  if [[ "$test_name" == *.* ]]; then
+    continue
+  fi
   if [ "$SDL_ENABLED" -eq 0 ] && [ "$test_name" = "SDLFeaturesTest" ]; then
     echo "Skipping $test_name (SDL disabled)"
     echo
@@ -52,9 +56,9 @@ for src in "$SCRIPT_DIR"/Pascal/*.p; do
 
   set +e
   if [ -f "$in_file" ]; then
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name.p" < "$in_file" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
   else
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name.p" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
   fi
   run_status=$?
   set -e
@@ -109,7 +113,7 @@ done
 # source file shares the same timestamp as the cache entry.
 echo "---- CacheStalenessTest ----"
 tmp_home=$(mktemp -d)
-src_file="$SCRIPT_DIR/Pascal/CacheStalenessTest.p"
+src_file="$SCRIPT_DIR/Pascal/CacheStalenessTest"
 cat > "$src_file" <<'EOF'
 program CacheStalenessTest;
 begin
@@ -119,7 +123,7 @@ EOF
 
 # First run to populate the cache
 set +e
-(cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest.p" > "$tmp_home/out1" 2> "$tmp_home/err1")
+(cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest" > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 
@@ -136,7 +140,7 @@ EOF
   touch -d "@$cache_time" "$src_file"
 
   set +e
-  (cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest.p" > "$tmp_home/out2" 2> "$tmp_home/err2")
+  (cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest" > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
   set -e
 

@@ -1,6 +1,6 @@
 program TestFileOperations;
 {---------------------------------------------------------------------
-  TestFileOperations.pas
+  TestFileOperations
 
   A focused test suite for pscal file I/O operations, extracted
   from the larger TestSuite.pas. Tests assign, rewrite, writeln to file,
