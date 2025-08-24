@@ -32,14 +32,13 @@ int main() {
     cleardevice();
     updatescreen();
 
+    int n,R,G,B;
+
     for (int y = 0; y < height; y++) {
         double c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
         for (int x = 0; x < width; x++) {
-            int n = row[x];
-            int R;
-            int G;
-            int B;
+            n = row[x];
             if (n == maxIterations) {
                 R = 0;
                 G = 0;
