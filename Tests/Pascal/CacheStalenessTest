@@ -1,0 +1,4 @@
+program CacheStalenessTest;
+begin
+  writeln('first');
+end.
