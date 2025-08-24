@@ -129,7 +129,6 @@ set -e
 
 if [ $status1 -eq 0 ]; then
   cache_file=$(find "$tmp_home/.pscal_cache" -name '*.bc' | head -n 1)
-  cache_time=$(stat -c %Y "$cache_file")
 
   cat > "$src_file" <<'EOF'
 program CacheStalenessTest;
@@ -137,7 +136,10 @@ begin
   writeln('second');
 end.
 EOF
-  touch -d "@$cache_time" "$src_file"
+  # Copy the cache file's timestamp to the source file so their mtimes match.
+  # Using "touch -r" avoids reliance on GNU-specific options like
+  # "stat -c" or "touch -d", improving portability (e.g., macOS).
+  touch -r "$cache_file" "$src_file"
 
   set +e
   (cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest" > "$tmp_home/out2" 2> "$tmp_home/err2")
