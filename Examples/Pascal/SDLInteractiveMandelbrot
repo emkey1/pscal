@@ -40,6 +40,7 @@ VAR
   QuitProgram     : Boolean;
   RedrawNeeded    : Boolean;
   MouseX, MouseY, MouseButtons : Integer;
+  PrevMouseButtons : Integer; // Track previous mouse button state to detect fresh clicks
 
   NewCenterX, NewCenterY          : Real;
   CurrentViewWidthRe, CurrentViewHeightIm : Real;
@@ -132,6 +133,7 @@ BEGIN // Main Program
   ResetViewToInitial; // Sets MinRe,MaxRe,MinIm to defaults AND calculates scales/MaxIm
   RedrawNeeded := True;
   QuitProgram  := False;
+  PrevMouseButtons := 0;
 
   WHILE NOT QuitProgram DO BEGIN
     IF RedrawNeeded THEN BEGIN
@@ -145,7 +147,8 @@ BEGIN // Main Program
     IF KeyPressed THEN BEGIN IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True; END;
     GetMouseState(MouseX, MouseY, MouseButtons);
 
-    IF (MouseButtons AND ButtonLeft) <> 0 THEN BEGIN
+    // Respond only to new button presses (transition from up to down)
+    IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
       IF NOT RedrawNeeded THEN BEGIN
         NewCenterX := MinRe + (MouseX * ScaleRe); NewCenterY := MaxIm - (MouseY * ScaleIm);
         CurrentViewWidthRe  := MaxRe - MinRe; CurrentViewHeightIm := MaxIm - MinIm;
@@ -157,13 +160,14 @@ BEGIN // Main Program
         GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', MouseX, ',', MouseY, ')');
       END;
     END
-    ELSE IF (MouseButtons AND ButtonRight) <> 0 THEN BEGIN
+    ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
       IF NOT RedrawNeeded THEN BEGIN
         ResetViewToInitial; // <<<< CALL THE CORRECT PROCEDURE HERE
         RedrawNeeded := True;
         GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
       END;
     END;
+    PrevMouseButtons := MouseButtons;
   END; // WHILE
 
   DestroyTexture(MandelTextureID); CloseGraph;
