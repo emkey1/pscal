@@ -46,6 +46,7 @@ typedef struct ASTNodeClike {
     int *array_dims;        // Sizes for each dimension in multi-dimensional arrays
     int dim_count;          // Number of dimensions if this node represents an array
     VarType element_type;   // Element type if this node represents an array
+    int is_const;           // Non-zero if this declaration is const-qualified
     struct ASTNodeClike *left;
     struct ASTNodeClike *right;
     struct ASTNodeClike *third; // else branch or additional pointer
