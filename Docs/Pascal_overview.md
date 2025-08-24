@@ -84,7 +84,7 @@ Implements Base64 encoding and decoding【F:lib/pascal/base64.pl†L1-L155】.
 ### CalculateArea
 Provides geometry helpers【F:lib/pascal/calculatearea.pl†L1-L31】.
 
-* `RectangleArea(length, width: real): real`
+* `RectangleArea(len, width: real): real`
 * `CircleArea(radius: real): real`
 * `TriangleArea(side1, side2, side3: real): real` – uses Heron’s formula.
 
