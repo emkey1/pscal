@@ -6,7 +6,7 @@ double chudnovsky_native(long n) {
     double K = 6.0;
     double S = L;
     for (long i = 1; i < n; i++) {
-        double i3 = (double)(i * i * i);
+        double i3 = (double)i * (double)i * (double)i;
         M = (K * K * K - 16.0 * K) * M / i3;
         L = L + 545140134.0;
         X = X * -262537412640768000.0;
