@@ -97,6 +97,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"fillcircle", vmBuiltinFillcircle},
     {"fillrect", vmBuiltinFillrect},
+    {"freesound", vmBuiltinFreesound},
 #endif
     {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
@@ -2620,6 +2621,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("DrawPolygon", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("DrawRect", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("FillRect", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("FreeSound", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetMouseState", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
