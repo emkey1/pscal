@@ -61,7 +61,7 @@ for src in "$SCRIPT_DIR"/Pascal/*.p; do
 
   perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
   perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
-  perl -0 -pe 's/^Compilation successful.*\n//m' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
+  perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
   head -n 2 "$actual_err" > "$actual_err.trim" && mv "$actual_err.trim" "$actual_err"
   perl -pe 's/pid=[0-9]+/pid=<PID>/g' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
   perl -ne 'print unless /^[0-9]{4}/' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
