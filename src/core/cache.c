@@ -49,7 +49,17 @@ static bool is_cache_fresh(const char* cache_path, const char* source_path) {
     struct stat src_stat, cache_stat;
     if (stat(source_path, &src_stat) != 0) return false;
     if (stat(cache_path, &cache_stat) != 0) return false;
-    return difftime(cache_stat.st_mtime, src_stat.st_mtime) >= 0;
+    /*
+     * Some filesystems (e.g. HFS+ on macOS) store timestamps with a
+     * resolution of one second.  When a source file is edited and executed
+     * again within the same second, the modification time of the source and
+     * the cached bytecode can end up identical.  The previous implementation
+     * considered the cache "fresh" when the times were equal, leading to
+     * stale bytecode being reused.  Use a strict comparison so that any
+     * equality is treated as stale and forces a recompilation.
+     */
+    if (cache_stat.st_mtime <= src_stat.st_mtime) return false;
+    return true;
 }
 
 // ----- AST serialization helpers -----
