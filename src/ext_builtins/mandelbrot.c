@@ -18,7 +18,37 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
     double c_im = args[2].r_val;
     int maxIterations = (int)args[3].i_val;
     int maxX = (int)args[4].i_val;
-    Value* outArr = args[5].type == TYPE_POINTER ? (Value*)args[5].ptr_val : args[5].array_val;
+
+    // Resolve the output array and validate its size and bounds.
+    Value* arrVal = NULL;
+    if (args[5].type == TYPE_POINTER) {
+        arrVal = (Value*)args[5].ptr_val;
+    } else {
+        arrVal = &args[5];
+    }
+    if (!arrVal || arrVal->type != TYPE_ARRAY) {
+        runtimeError(vm, "MandelbrotRow expected VAR array parameter.");
+        return makeVoid();
+    }
+    if (arrVal->dimensions > 1) {
+        runtimeError(vm, "MandelbrotRow output array must be single dimensional.");
+        return makeVoid();
+    }
+    int lower = (arrVal->dimensions > 0 && arrVal->lower_bounds)
+                    ? arrVal->lower_bounds[0]
+                    : arrVal->lower_bound;
+    int upper = (arrVal->dimensions > 0 && arrVal->upper_bounds)
+                    ? arrVal->upper_bounds[0]
+                    : arrVal->upper_bound;
+    if (lower != 0) {
+        runtimeError(vm, "MandelbrotRow output array must start at index 0.");
+        return makeVoid();
+    }
+    if (upper < maxX) {
+        runtimeError(vm, "MandelbrotRow output array too small for max X of %d.", maxX);
+        return makeVoid();
+    }
+    Value* outArr = arrVal->array_val;
     if (!outArr) {
         runtimeError(vm, "MandelbrotRow received a NIL pointer for output array.");
         return makeVoid();
