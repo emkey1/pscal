@@ -50,8 +50,9 @@ BEGIN
         //    Write the number, padded to 3 spaces, with spaces around it
         Write(' ', colorIndex:3, ' ');
 
-        // Move to the next color index
-        colorIndex := colorIndex + 1;
+        // Move to the next color index without exceeding 255
+        IF colorIndex < 255 THEN
+          colorIndex := colorIndex + 1;
       END;
     END; // End FOR col
     WriteLn; // Move to the next line in the console after each row of colors
