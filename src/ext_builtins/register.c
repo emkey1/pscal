@@ -6,6 +6,7 @@ void registerFactorialBuiltin(void);
 void registerFibonacciBuiltin(void);
 void registerFileExistsBuiltin(void);
 void registerMandelbrotRowBuiltin(void);
+void registerChudnovskyBuiltin(void);
 
 void registerExtendedBuiltins(void) {
     registerGetPidBuiltin();
@@ -14,4 +15,5 @@ void registerExtendedBuiltins(void) {
     registerFibonacciBuiltin();
     registerFileExistsBuiltin();
     registerMandelbrotRowBuiltin();
+    registerChudnovskyBuiltin();
 }

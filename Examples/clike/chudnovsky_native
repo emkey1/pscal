@@ -1,0 +1,25 @@
+#!/usr/bin/env clike
+double chudnovsky_native(long n) {
+    double M = 1.0;
+    double L = 13591409.0;
+    double X = 1.0;
+    double K = 6.0;
+    double S = L;
+    for (long i = 1; i < n; i++) {
+        double i3 = (double)i * i * i;
+        M = (K * K * K - 16.0 * K) * M / i3;
+        L = L + 545140134.0;
+        X = X * -262537412640768000.0;
+        S = S + M * L / X;
+        K = K + 12.0;
+    }
+    return 426880.0 * sqrt(10005.0) / S;
+}
+
+int main() {
+    long n;
+    printf("Please enter an integer value for iterations: ");
+    scanf(n);
+    printf("pi: %.15f\n", chudnovsky_native(n));
+    return 0;
+}
