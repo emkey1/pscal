@@ -10,6 +10,7 @@ CONST
 //  MaxIterations = 255;
   MaxIterations = 128;
   StatusUpdateInterval = 20; // Print status every 20 rows
+  ScreenUpdateInterval = 1;  // Refresh SDL window every row
 
 VAR
   Px, Py        : Integer; // Pixel coordinates
@@ -28,9 +29,7 @@ VAR
   ScaleRe, ScaleIm : Real;
   CurrentMaxX, CurrentMaxY : Integer;
 
-  StartTime, EndTime : Real; // For basic timing (optional)
-  TotalPixels, PixelsDone: Integer;
-  PercentDone, LastPercentDone: Integer;
+  PercentDone : Integer;
 
 BEGIN
   MinRe := -2.0;
@@ -39,15 +38,14 @@ BEGIN
 
   // Initial message to the terminal
   WriteLn('Calculating Mandelbrot set for a ', WindowWidth, 'x', WindowHeight, ' window.');
-  WriteLn('The graphics window will not appear until the calculation is complete');
-  WriteLn('and UpdateScreen is called.');
+  WriteLn('The graphics window will update as the calculation progresses.');
   WriteLn;
   WriteLn('Progress updates will be shown here in the terminal.');
   WriteLn('-----------------------------------------------------');
   // You could add a Delay(1000) here if you want users to definitely see the message
 
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
-  ClearDevice;
+  ClearDevice;  UpdateScreen;  // show blank window immediately
 
   CurrentMaxX := GetMaxX;
   CurrentMaxY := GetMaxY;
@@ -59,9 +57,8 @@ BEGIN
   IF CurrentMaxX > 0 THEN ScaleRe := ReRange / CurrentMaxX ELSE ScaleRe := 0;
   IF CurrentMaxY > 0 THEN ScaleIm := ImRange / CurrentMaxY ELSE ScaleIm := 0;
 
-  TotalPixels := (CurrentMaxX + 1) * (CurrentMaxY + 1);
-  PixelsDone := 0;
-  LastPercentDone := -1; // To ensure the first 0% update prints
+  // Initialize progress tracking
+  PercentDone := 0;
 
   // Main loop through each pixel
   FOR Py := 0 TO CurrentMaxY DO
@@ -97,7 +94,6 @@ BEGIN
       SetRGBColor(R, G, B);
       PutPixel(Px, Py);
 
-      PixelsDone := PixelsDone + 1;
       x0 := x0 + ScaleRe;
     END; // END FOR Px
 
@@ -113,13 +109,12 @@ BEGIN
         WriteLn('Processing row ', Py + 1, ' of ', CurrentMaxY + 1, '. Approximately 100% complete...');
     END;
 
-    // Optional: More frequent percentage update (can be spammy)
-    // PercentDone := Trunc(PixelsDone * 100.0 / TotalPixels);
-    // IF PercentDone > LastPercentDone THEN // Only print if percentage changed
-    // BEGIN
-    //   WriteLn('Progress: ', PercentDone, '%');
-    //   LastPercentDone := PercentDone;
-    // END;
+    // Periodic screen update so the window displays while calculating
+    IF (Py + 1) MOD ScreenUpdateInterval = 0 THEN
+    BEGIN
+      UpdateScreen;
+      GraphLoop(0);
+    END;
 
   END; // END FOR Py
 
