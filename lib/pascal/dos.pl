@@ -19,7 +19,6 @@ procedure GetTime(var Hour, Minute, Second, Sec100: word);
 function Exec(Path, Cmd: string): integer;
 
 implementation
-
 function FindFirst(Path: string): string;
 begin
   FindFirst := dos_findfirst(Path);
@@ -48,16 +47,6 @@ end;
 function GetEnv(VarName: string): string;
 begin
   GetEnv := dos_getenv(VarName);
-end;
-
-procedure GetDate(var Year, Month, Day, Dow: word);
-begin
-  dos_getdate(Year, Month, Day, Dow);
-end;
-
-procedure GetTime(var Hour, Minute, Second, Sec100: word);
-begin
-  dos_gettime(Hour, Minute, Second, Sec100);
 end;
 
 function Exec(Path, Cmd: string): integer;

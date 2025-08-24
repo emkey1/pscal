@@ -98,6 +98,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"fillcircle", vmBuiltinFillcircle},
     {"fillrect", vmBuiltinFillrect},
 #endif
+    {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
     {"getenvint", vmBuiltinGetenvint},
 #ifdef SDL
@@ -108,6 +109,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
 #endif
+    {"gettime", vmBuiltinDosGettime},
 #ifdef SDL
     {"graphloop", vmBuiltinGraphloop},
 #endif
@@ -2673,8 +2675,10 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetDate", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetEnvInt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetTime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
