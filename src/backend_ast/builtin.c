@@ -39,6 +39,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"api_receive", vmBuiltinApiReceive},
     {"api_send", vmBuiltinApiSend},
+    {"arccos", vmBuiltinArccos},
+    {"arcsin", vmBuiltinArcsin},
+    {"arctan", vmBuiltinArctan},
     {"assign", vmBuiltinAssign},
     {"beep", vmBuiltinBeep},
     {"biblinktext", vmBuiltinBlinktext},
@@ -51,6 +54,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"biwherey", vmBuiltinWherey},
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
+    {"ceil", vmBuiltinCeil},
     {"chr", vmBuiltinChr},
 #ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
@@ -63,6 +67,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
+    {"cosh", vmBuiltinCosh},
+    {"cotan", vmBuiltinCotan},
     {"cursoroff", vmBuiltinCursoroff},
     {"cursoron", vmBuiltinCursoron},
 #ifdef SDL
@@ -92,16 +98,23 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"drawrect", vmBuiltinDrawrect}, // Moved
 #endif
     {"eof", vmBuiltinEof},
+    {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
 #ifdef SDL
     {"fillcircle", vmBuiltinFillcircle},
     {"fillrect", vmBuiltinFillrect},
+#endif
+    {"findfirst", vmBuiltinDosFindfirst},
+    {"findnext", vmBuiltinDosFindnext},
+    {"floor", vmBuiltinFloor},
+#ifdef SDL
     {"freesound", vmBuiltinFreesound},
 #endif
     {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
     {"getenvint", vmBuiltinGetenvint},
+    {"getfattr", vmBuiltinDosGetfattr},
 #ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
@@ -137,12 +150,16 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"keypressed", vmBuiltinKeypressed},
     {"length", vmBuiltinLength},
     {"ln", vmBuiltinLn},
+    {"log10", vmBuiltinLog10},
 #ifdef SDL
     {"loadimagetotexture", vmBuiltinLoadimagetotexture}, // Moved
     {"loadsound", vmBuiltinLoadsound},
 #endif
     {"low", vmBuiltinLow},
     {"lowvideo", vmBuiltinLowvideo},
+    {"max", vmBuiltinMax},
+    {"min", vmBuiltinMin},
+    {"mkdir", vmBuiltinDosMkdir},
     {"mstreamcreate", vmBuiltinMstreamcreate},
     {"mstreamfree", vmBuiltinMstreamfree},
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
@@ -163,6 +180,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
+    {"power", vmBuiltinPower},
     {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
@@ -188,6 +206,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"reset", vmBuiltinReset},
     {"restorecursor", vmBuiltinRestorecursor},
     {"rewrite", vmBuiltinRewrite},
+    {"rmdir", vmBuiltinDosRmdir},
     {"round", vmBuiltinRound},
     {"savecursor", vmBuiltinSavecursor},
     {"screencols", vmBuiltinScreencols},
@@ -203,10 +222,12 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
+    {"sinh", vmBuiltinSinh},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
     {"succ", vmBuiltinSucc},
     {"tan", vmBuiltinTan},
+    {"tanh", vmBuiltinTanh},
     {"textbackground", vmBuiltinTextbackground},
     {"textbackgrounde", vmBuiltinTextbackgrounde},
     {"textcolor", vmBuiltinTextcolor},
@@ -1281,6 +1302,92 @@ Value vmBuiltinTan(VM* vm, int arg_count, Value* args) {
     Value arg = args[0];
     double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
     return makeReal(tan(x));
+}
+
+Value vmBuiltinArctan(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "arctan expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(atan(x));
+}
+
+Value vmBuiltinArcsin(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "arcsin expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(asin(x));
+}
+
+Value vmBuiltinArccos(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "arccos expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    return makeReal(acos(x));
+}
+
+Value vmBuiltinCotan(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "cotan expects 1 argument."); return makeReal(0.0); }
+    Value arg = args[0];
+    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double t = tan(x);
+    return makeReal(1.0 / t);
+}
+
+Value vmBuiltinPower(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "power expects 2 arguments."); return makeReal(0.0); }
+    double base = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double exponent = (args[1].type == TYPE_INTEGER) ? (double)args[1].i_val : args[1].r_val;
+    return makeReal(pow(base, exponent));
+}
+
+Value vmBuiltinLog10(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "log10 expects 1 argument."); return makeReal(0.0); }
+    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    return makeReal(log10(x));
+}
+
+Value vmBuiltinSinh(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "sinh expects 1 argument."); return makeReal(0.0); }
+    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    return makeReal(sinh(x));
+}
+
+Value vmBuiltinCosh(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "cosh expects 1 argument."); return makeReal(0.0); }
+    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    return makeReal(cosh(x));
+}
+
+Value vmBuiltinTanh(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "tanh expects 1 argument."); return makeReal(0.0); }
+    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    return makeReal(tanh(x));
+}
+
+Value vmBuiltinMax(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "max expects 2 arguments."); return makeReal(0.0); }
+    double a = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double b = (args[1].type == TYPE_INTEGER) ? (double)args[1].i_val : args[1].r_val;
+    return makeReal((a > b) ? a : b);
+}
+
+Value vmBuiltinMin(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "min expects 2 arguments."); return makeReal(0.0); }
+    double a = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double b = (args[1].type == TYPE_INTEGER) ? (double)args[1].i_val : args[1].r_val;
+    return makeReal((a < b) ? a : b);
+}
+
+Value vmBuiltinFloor(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "floor expects 1 argument."); return makeInt(0); }
+    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    return makeInt((long long)floor(x));
+}
+
+Value vmBuiltinCeil(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "ceil expects 1 argument."); return makeInt(0); }
+    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    return makeInt((long long)ceil(x));
 }
 
 Value vmBuiltinTrunc(VM* vm, int arg_count, Value* args) {
@@ -2652,13 +2759,19 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ArcTan", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Beep", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Ceil", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ClrEol", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Copy", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Cos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Cosh", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Cotan", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("CursorOff", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CursorOn", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dec", AST_PROCEDURE_DECL, NULL);
@@ -2675,11 +2788,16 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("dos_getdate", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("dos_gettime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Exec", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("FindFirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("FindNext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Floor", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetDate", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetEnvInt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetFAttr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetTime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
@@ -2693,7 +2811,11 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Ln", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Log10", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Max", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Min", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("MkDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("MStreamFree", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
@@ -2706,6 +2828,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ParamStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PopScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Pos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Power", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PushScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitRequested", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Random", AST_FUNCTION_DECL, NULL);
@@ -2716,16 +2839,19 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("RmDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SaveCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ScreenRows", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ShowCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Sin", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Sinh", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Succ", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Tan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Tanh", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GotoXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("BoldText", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("BIBoldText", AST_PROCEDURE_DECL, NULL);
