@@ -76,8 +76,7 @@ BEGIN
   UpdateScreen;
 
   // Wait for key press
-  // You might want a message on the console if your interpreter supports it
-  // WriteLn('RGB Plasma complete. Press any key to exit.');
+  WriteLn('RGB Plasma complete. Press any key to exit.');
   GraphLoop(100); // Process events
   ReadKey;
 

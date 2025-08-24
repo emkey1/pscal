@@ -14,9 +14,11 @@ build/bin/clike Examples/Clike/<program>
 
 ## Programs
 - `factorial_native` – Calculates factorials using a native function
-- `factorial_ext` – Calculates factorials using an extended builtin function 
+- `factorial_ext` – Calculates factorials using an extended builtin function
 - `fibonacci_native` – Calculates fibonacci numbers using a native function
 - `fibonacci_ext` – Calculates fibonacci numbers using an extended builtin function
+- `chudnovsky_native` – Approximates π using a native Chudnovsky implementation
+- `chudnovsky_ext` – Approximates π using an extended builtin implementation
 
 - `hangman5` – text-based hangman game ported from Pascal.
 - `hello` – Hello World!

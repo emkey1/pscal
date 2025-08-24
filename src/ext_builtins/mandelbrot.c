@@ -58,8 +58,8 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
     double c_re = minRe;
     Value *outPtr = outArr;
     for (int x = 0; x <= maxX; ++x, c_re += reFactor, ++outPtr) {
-        double Z_re = c_re;
-        double Z_im = c_im;
+        double Z_re = 0.0;
+        double Z_im = 0.0;
         int n = 0;
         while (n < maxIterations) {
             double Z_re2 = Z_re * Z_re;

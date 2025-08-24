@@ -1,7 +1,8 @@
 unit CalculateArea;
 interface
 
-function RectangleArea( length, width: real): real;
+{ Use 'len' here to avoid clashing with the builtin Length() function }
+function RectangleArea(len, width: real): real;
 function CircleArea(radius: real) : real;
 function TriangleArea( side1, side2, side3: real): real;
 
@@ -10,9 +11,9 @@ implementation
 const
    PI = 3.14159;
 
-function RectangleArea( length, width: real): real;
+function RectangleArea(len, width: real): real;
 begin
-   RectangleArea := length * width;
+   RectangleArea := len * width;
 end;
 
 function CircleArea(radius: real) : real;

@@ -108,6 +108,19 @@ Value vmBuiltinLn(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCos(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTan(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinArctan(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinArcsin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinArccos(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCotan(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPower(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinLog10(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSinh(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCosh(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinTanh(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinMax(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinMin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFloor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCeil(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTrunc(struct VM_s* vm, int arg_count, Value* args);
 
 /* VM-native random functions */

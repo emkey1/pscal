@@ -1,7 +1,6 @@
 #!/usr/bin/env pascal
 PROGRAM SDLTextureMandelbrotZoomFixed;
 
-{ Demonstrates Mandelbrot rendering using the MandelbrotRow builtin }
 USES CRT;
 
 CONST
@@ -27,6 +26,10 @@ TYPE
   FlatPixelBuffer = ARRAY[0..(MandelWindowWidth * MandelWindowHeight * MandelBytesPerPixel) - 1] OF Byte;
 
 VAR
+  x0, y0, zx, zy, zxTemp : Real;
+  Iteration           : Integer;
+  R_calc, G_calc, B_calc : Byte;
+
   MinRe, MaxRe, MinIm, MaxIm : Real;
   ViewPixelWidth, ViewPixelHeight : Integer;
   ReRange, ImRange           : Real;
@@ -90,39 +93,26 @@ BEGIN
 END;
 
 PROCEDURE FillPixelDataAndDisplayProgressively;
-VAR
-  LocalPy, LocalPx, BufferBaseIdx : Integer;
-  RowIterations : ARRAY[0..MandelWindowWidth - 1] OF Integer;
-  c_im : Real;
-  Iteration : Integer;
-  R_calc, G_calc, B_calc : Byte;
+VAR LocalPy, LocalPx, BufferBaseIdx : Integer;
 BEGIN
   GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
   FOR LocalPy := 0 TO ViewPixelHeight - 1 DO BEGIN
-    c_im := MaxIm - (LocalPy * ScaleIm);
-    MandelbrotRow(MinRe, ScaleRe, c_im, MandelMaxIterations, ViewPixelWidth - 1, RowIterations);
-    BufferBaseIdx := LocalPy * ViewPixelWidth * MandelBytesPerPixel;
     FOR LocalPx := 0 TO ViewPixelWidth - 1 DO BEGIN
-      Iteration := RowIterations[LocalPx];
-      IF Iteration = MandelMaxIterations THEN BEGIN
-        R_calc := 0;
-        G_calc := 0;
-        B_calc := 0;
-      END ELSE BEGIN
-        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256;
-        G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256;
-        B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
+      x0 := MinRe + (LocalPx * ScaleRe); y0 := MaxIm - (LocalPy * ScaleIm);
+      zx := 0.0; zy := 0.0; Iteration := 0;
+      WHILE (zx*zx + zy*zy <= 4.0) AND (Iteration < MandelMaxIterations) DO
+      BEGIN zxTemp := zx*zx - zy*zy + x0; zy := 2*zx*zy + y0; zx := zxTemp; Iteration := Iteration + 1; END;
+      IF Iteration = MandelMaxIterations THEN BEGIN R_calc := 0; G_calc := 0; B_calc := 0; END
+      ELSE BEGIN
+        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256; G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256; B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
       END;
-      PixelData[BufferBaseIdx + 0] := R_calc;
-      PixelData[BufferBaseIdx + 1] := G_calc;
-      PixelData[BufferBaseIdx + 2] := B_calc;
-      PixelData[BufferBaseIdx + 3] := 255;
-      BufferBaseIdx := BufferBaseIdx + MandelBytesPerPixel;
+      BufferBaseIdx := (LocalPy * ViewPixelWidth + LocalPx) * MandelBytesPerPixel;
+      PixelData[BufferBaseIdx + 0] := R_calc; PixelData[BufferBaseIdx + 1] := G_calc; PixelData[BufferBaseIdx + 2] := B_calc; PixelData[BufferBaseIdx + 3] := 255;
     END; // Px
     PercentDone := Trunc( (LocalPy + 1) * 100.0 / ViewPixelHeight );
     GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', LocalPy + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
     IF (((LocalPy + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (LocalPy = ViewPixelHeight - 1)) THEN
-      UpdateAndDisplayTextureInProgress;
+    BEGIN UpdateAndDisplayTextureInProgress; END;
   END; // Py
   GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
 END;
@@ -135,7 +125,6 @@ BEGIN // Main Program
   GotoXY(1, ControlsStartY + 2); Write('- RClick: Reset View');
   GotoXY(1, ControlsStartY + 3); Write('- Q Key (in terminal): Quit');
   GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
-  Writeln('Does not currently work');
 
   InitGraph(MandelWindowWidth, MandelWindowHeight, MandelWindowTitle);
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);

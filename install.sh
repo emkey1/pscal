@@ -17,6 +17,10 @@ else
     echo "Warning: build/bin directory not found; skipping binary installation" >&2
 fi
 
+# Copy sound files
+mkdir -p /usr/local/pscal/lib/sounds
+cp -r lib/sounds/* /usr/local/pscal/lib/sounds
+
 # Install Pascal library
 mkdir -p /usr/local/pscal/pascal/lib
 cp -r lib/pascal/* /usr/local/pscal/pascal/lib/

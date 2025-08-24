@@ -1046,6 +1046,38 @@ static ASTNodeClike* unary(ParserClike *p) {
 
 static ASTNodeClike* factor(ParserClike *p) {
     if (matchToken(p, CLIKE_TOKEN_LPAREN)) {
+        if (isTypeToken(p->current.type)) {
+            ClikeToken type_tok = p->current;
+            advanceParser(p);
+            expectToken(p, CLIKE_TOKEN_RPAREN, ")");
+            ASTNodeClike *expr = unary(p);
+            const char *fname = NULL;
+            switch (type_tok.type) {
+                case CLIKE_TOKEN_DOUBLE:
+                case CLIKE_TOKEN_FLOAT:
+                    fname = "real";
+                    break;
+                case CLIKE_TOKEN_INT:
+                case CLIKE_TOKEN_LONG:
+                    fname = "trunc";
+                    break;
+                case CLIKE_TOKEN_CHAR:
+                    fname = "chr";
+                    break;
+                default:
+                    break;
+            }
+            if (fname) {
+                ClikeToken callTok = type_tok;
+                callTok.type = CLIKE_TOKEN_IDENTIFIER;
+                callTok.lexeme = fname;
+                callTok.length = (int)strlen(fname);
+                ASTNodeClike *callNode = newASTNodeClike(TCAST_CALL, callTok);
+                addChildClike(callNode, expr);
+                return postfix(p, callNode);
+            }
+            return postfix(p, expr);
+        }
         ASTNodeClike *expr = expression(p);
         expectToken(p, CLIKE_TOKEN_RPAREN, ")");
         return postfix(p, expr);
