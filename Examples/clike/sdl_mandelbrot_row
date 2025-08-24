@@ -15,9 +15,9 @@ int main() {
     double reFactor = (maxRe - minRe) / (width - 1);
     double imFactor = (maxIm - minIm) / (height - 1);
 
-    int row[1024];
-    int pixelData[1024 * 768 * 4];
     int bytesPerPixel = 4;
+    int row[width];
+    int pixelData[width * height * bytesPerPixel];
     int textureID;
     int screenUpdateInterval = 1;
     int bufferBaseIdx;
