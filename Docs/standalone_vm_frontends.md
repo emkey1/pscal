@@ -15,7 +15,7 @@ reuse its runtime without touching the C sources.
 4. **Run with `pscalvm`.** Execute the resulting file just like bytecode
    produced by the main Pascal compiler.
 
-## Step-by-step: the clike compiler (Python)
+## Step-by-step: the tiny compiler (Python)
 
 `tools/tiny` is a compact Python compiler for an educational language. It
 illustrates the entire pipeline for targeting the VM.
@@ -142,19 +142,6 @@ writeBytecodeChunk(&chunk, 1, line); /* argument count */
 
 Other statements translate into sequences of opcodes in the same fashion, as
 demonstrated in `src/clike/codegen.c`.
-
-### Writing `.pbc` bytecode
-
-```c
-#include "core/cache.h"
-saveBytecodeToCache("out.pbc", &chunk);
-```
-
-The helper writes the bytecode and constant table to disk. Run the result with:
-
-```sh
-./build/bin/pscalvm out.pbc
-```
 
 ## Calling VM builtins
 
