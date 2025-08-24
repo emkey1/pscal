@@ -590,11 +590,14 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             if (unit_source_buffer) free(unit_source_buffer);
 
             if (parsed_nested_unit_ast) {
-                linkUnit(parsed_nested_unit_ast, recursion_depth + 1);
-                // Annotate the unit AST so variables have proper types before compilation
+                // Annotate first so the compiler has accurate type info
                 annotateTypes(parsed_nested_unit_ast, NULL, parsed_nested_unit_ast);
-                // --- MODIFICATION: Compile implementation ---
+                // Compile the unit's implementation before linking so routines
+                // receive bytecode addresses that aliases can reference.
                 compileUnitImplementation(parsed_nested_unit_ast, chunk);
+                // Now link the unit which will insert globals and create
+                // unqualified aliases to the compiled routines.
+                linkUnit(parsed_nested_unit_ast, recursion_depth + 1);
                 freeAST(parsed_nested_unit_ast);
             }
         }
@@ -967,12 +970,14 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 if (unit_source_buffer) free(unit_source_buffer);
 
                 if (parsed_unit_ast) {
-                    linkUnit(parsed_unit_ast, 1);
-                    // Annotate types within the unit before compiling its implementation
+                    // Perform type annotation so the compiler knows symbol types
                     annotateTypes(parsed_unit_ast, NULL, parsed_unit_ast);
-                    // --- MODIFICATION: Compile the implementation part ---
+                    // Compile the unit's implementation to assign bytecode addresses
+                    // to its routines before we create aliases via linkUnit.
                     compileUnitImplementation(parsed_unit_ast, chunk);
-                    // The temporary AST for the unit is no longer needed after linking and compiling
+                    // Link afterwards to pull in globals and set up aliases.
+                    linkUnit(parsed_unit_ast, 1);
+                    // The temporary AST is no longer needed once linked.
                     freeAST(parsed_unit_ast);
                 }
             }
