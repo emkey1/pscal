@@ -652,6 +652,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                         writeBytecodeChunk(chunk, OP_DIVIDE, node->token.line);
                     }
                     break;
+                case CLIKE_TOKEN_PERCENT: writeBytecodeChunk(chunk, OP_MOD, node->token.line); break;
                 case CLIKE_TOKEN_GREATER: writeBytecodeChunk(chunk, OP_GREATER, node->token.line); break;
                 case CLIKE_TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, node->token.line); break;
                 case CLIKE_TOKEN_LESS: writeBytecodeChunk(chunk, OP_LESS, node->token.line); break;

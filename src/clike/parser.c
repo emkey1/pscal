@@ -875,7 +875,7 @@ static ASTNodeClike* additive(ParserClike *p) {
 
 static ASTNodeClike* term(ParserClike *p) {
     ASTNodeClike *node = unary(p);
-    while (p->current.type == CLIKE_TOKEN_STAR || p->current.type == CLIKE_TOKEN_SLASH) {
+    while (p->current.type == CLIKE_TOKEN_STAR || p->current.type == CLIKE_TOKEN_SLASH || p->current.type == CLIKE_TOKEN_PERCENT) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *rhs = unary(p);
         ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, op);
