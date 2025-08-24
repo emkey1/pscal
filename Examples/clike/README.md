@@ -1,4 +1,4 @@
-# Clike language examples
+# CLike language examples
 
 This folder contains sample programs for the Pscal CLike front end.
 
