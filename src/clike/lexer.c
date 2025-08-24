@@ -169,6 +169,7 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
             }
             case '*': return makeToken(lexer, CLIKE_TOKEN_STAR, start, 1, startColumn);
             case '/': return makeToken(lexer, CLIKE_TOKEN_SLASH, start, 1, startColumn);
+            case '%': return makeToken(lexer, CLIKE_TOKEN_PERCENT, start, 1, startColumn);
             case '~': return makeToken(lexer, CLIKE_TOKEN_TILDE, start, 1, startColumn);
             case ';': return makeToken(lexer, CLIKE_TOKEN_SEMICOLON, start, 1, startColumn);
             case ',': return makeToken(lexer, CLIKE_TOKEN_COMMA, start, 1, startColumn);
@@ -247,6 +248,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_MINUS_MINUS: return "--";
         case CLIKE_TOKEN_STAR: return "*";
         case CLIKE_TOKEN_SLASH: return "/";
+        case CLIKE_TOKEN_PERCENT: return "%";
         case CLIKE_TOKEN_TILDE: return "~";
         case CLIKE_TOKEN_BIT_AND: return "&";
         case CLIKE_TOKEN_BIT_OR: return "|";
