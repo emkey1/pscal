@@ -125,6 +125,7 @@ The following built-ins are available when Pscal is compiled with SDL support.
 - `initsoundsystem` – Initialize audio.
 - `quitsoundsystem` – Shut down audio.
 - `loadsound` – Load sound file.
+- `freesound` – Free a loaded sound.
 - `playsound` – Play sound.
 - `issoundplaying` – Query if sound playing.
 - `inittextsystem` – Initialize text subsystem.

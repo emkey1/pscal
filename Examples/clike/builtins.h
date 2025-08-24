@@ -60,6 +60,7 @@ int exit();
 int exp();
 int fillcircle();
 int fillrect();
+int freesound();
 int getenv();
 int getmaxx();
 int getmaxy();
