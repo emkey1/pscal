@@ -1,0 +1,96 @@
+#!/usr/bin/env clike
+/*
+ * SDL Mandelbrot set renderer in clike.
+ * Press Q in the console to quit after rendering.
+ */
+
+int main() {
+    int WindowWidth;
+    int WindowHeight;
+    int MaxIterations;
+    float MinRe;
+    float MaxRe;
+    float MinIm;
+    float MaxIm;
+    float ReFactor;
+    float ImFactor;
+    int MaxX;
+    int MaxY;
+    int x;
+    int y;
+    float c_re;
+    float c_im;
+    float Z_re;
+    float Z_im;
+    float Z_re2;
+    float Z_im2;
+    int n;
+    int R;
+    int G;
+    int B;
+    int quit;
+
+    WindowWidth = 1024;
+    WindowHeight = 768;
+    MaxIterations = 128;
+    MinRe = -2.0;
+    MaxRe = 1.0;
+    MinIm = -1.2;
+
+    initgraph(WindowWidth, WindowHeight, "Mandelbrot in CLike");
+    MaxX = getmaxx();
+    MaxY = getmaxy();
+
+    MaxIm = MinIm + (MaxRe - MinRe) * MaxY / MaxX;
+    ReFactor = (MaxRe - MinRe) / (MaxX - 1);
+    ImFactor = (MaxIm - MinIm) / (MaxY - 1);
+
+    y = 0;
+    while (y <= MaxY) {
+        c_im = MaxIm - y * ImFactor;
+        x = 0;
+        while (x <= MaxX) {
+            c_re = MinRe + x * ReFactor;
+            Z_re = c_re;
+            Z_im = c_im;
+            n = 0;
+            while (n < MaxIterations) {
+                Z_re2 = Z_re * Z_re;
+                Z_im2 = Z_im * Z_im;
+                if (Z_re2 + Z_im2 > 4.0) {
+                    break;
+                }
+                Z_im = 2.0 * Z_re * Z_im + c_im;
+                Z_re = Z_re2 - Z_im2 + c_re;
+                n = n + 1;
+            }
+            if (n == MaxIterations) {
+                setrgbcolor(0, 0, 0);
+            } else {
+                R = (n * 5) % 256;
+                G = (n * 7 + 85) % 256;
+                B = (n * 11 + 170) % 256;
+                setrgbcolor(R, G, B);
+            }
+            putpixel(x, y);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+
+    updatescreen();
+    printf("Mandelbrot rendered. Press Q in the console to quit.\n");
+    quit = 0;
+    while (!quit) {
+        if (keypressed()) {
+            char c;
+            c = readkey();
+            if (upcase(c) == 'Q') {
+                quit = 1;
+            }
+        }
+        graphloop(16);
+    }
+    closegraph();
+    return 0;
+}

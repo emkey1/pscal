@@ -9,7 +9,7 @@ C-like examples (`.cl`) can be executed with the native clike compiler built in
 `build/bin`:
 
 ```
-build/bin/clike Examples/Clike/<program>.cl
+build/bin/clike Examples/Clike/<program>
 ```
 
 ## Programs
