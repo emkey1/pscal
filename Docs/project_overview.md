@@ -28,7 +28,7 @@ The project follows a classic compiler and virtual machine design:
 * **Networking**: A networking API using `libcurl` allows for making HTTP requests and handling responses.
 * **Rich Built-in Library**: A comprehensive set of built-in functions is provided for:
     * File I/O (`readln`, `writeln`, `fileexists`).
-    * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`).
+    * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).
     * String manipulation (`copy`, `pos`, `length`).
     * System interaction (`getpid`, `dos_exec`).
 * **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified.
