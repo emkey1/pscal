@@ -49,17 +49,27 @@ static bool is_cache_fresh(const char* cache_path, const char* source_path) {
     struct stat src_stat, cache_stat;
     if (stat(source_path, &src_stat) != 0) return false;
     if (stat(cache_path, &cache_stat) != 0) return false;
+#if defined(__APPLE__)
+#define PSCAL_STAT_SEC(st)  ((st).st_mtimespec.tv_sec)
+#define PSCAL_STAT_NSEC(st) ((st).st_mtimespec.tv_nsec)
+#else
+#define PSCAL_STAT_SEC(st)  ((st).st_mtim.tv_sec)
+#define PSCAL_STAT_NSEC(st) ((st).st_mtim.tv_nsec)
+#endif
     /*
-     * Some filesystems (e.g. HFS+ on macOS) store timestamps with a
-     * resolution of one second.  When a source file is edited and executed
-     * again within the same second, the modification time of the source and
-     * the cached bytecode can end up identical.  The previous implementation
-     * considered the cache "fresh" when the times were equal, leading to
-     * stale bytecode being reused.  Use a strict comparison so that any
-     * equality is treated as stale and forces a recompilation.
+     * Some filesystems only provide one-second timestamp resolution.  When a
+     * source file and its cached bytecode share identical modification times,
+     * the cache must be considered stale.  Compare both seconds and
+     * nanoseconds when available and treat equality as stale.
      */
-    if (cache_stat.st_mtime <= src_stat.st_mtime) return false;
+    if (PSCAL_STAT_SEC(cache_stat) < PSCAL_STAT_SEC(src_stat) ||
+        (PSCAL_STAT_SEC(cache_stat) == PSCAL_STAT_SEC(src_stat) &&
+         PSCAL_STAT_NSEC(cache_stat) <= PSCAL_STAT_NSEC(src_stat))) {
+        return false;
+    }
     return true;
+#undef PSCAL_STAT_SEC
+#undef PSCAL_STAT_NSEC
 }
 
 // ----- AST serialization helpers -----
