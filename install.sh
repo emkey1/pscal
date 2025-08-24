@@ -32,3 +32,10 @@ cp -r fonts/* /usr/local/pscal/fonts
 # Install etc
 mkdir -p /usr/local/pscal/etc
 cp -r etc/* /usr/local/pscal/etc
+
+# Set group to executable
+chmod go+x /usr/local/bin/clike
+chmod go+x /usr/local/bin/clike-repl
+chmod go+x /usr/local/bin/dascal
+chmod go+x /usr/local/bin/pascal
+chmod go+x /usr/local/bin/pscalvm
