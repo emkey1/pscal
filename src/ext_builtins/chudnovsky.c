@@ -17,22 +17,18 @@ static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
         return makeReal(0.0);
     }
 
-    long double M = 1.0L;
-    long double L = 13591409.0L;
-    long double X = 1.0L;
-    long double K = 6.0L;
-    long double S = L;
+    const long double C3 = 262537412640768000.0L; // 640320^3
+    long double sum = 13591409.0L;
+    long double term = sum;
 
     for (long k = 1; k < n; ++k) {
-        long double k3 = (long double)k * k * k;
-        M = (K * K * K - 16.0L * K) * M / k3;
-        L += 545140134.0L;
-        X *= -262537412640768000.0L;
-        S += M * L / X;
-        K += 12.0L;
+        long double k_d = (long double)k;
+        term *= -(6.0L * k_d - 5.0L) * (2.0L * k_d - 1.0L) * (6.0L * k_d - 1.0L);
+        term /= k_d * k_d * k_d * C3;
+        sum += term * (13591409.0L + 545140134.0L * k_d);
     }
 
-    long double pi = 426880.0L * sqrtl(10005.0L) / S;
+    long double pi = 426880.0L * sqrtl(10005.0L) / sum;
     return makeReal((double)pi);
 }
 
