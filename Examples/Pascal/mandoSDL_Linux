@@ -9,6 +9,7 @@ CONST
   WindowTitle   = 'Mandelbrot Set Explorer (SDL)';
   MaxIterations = 150;
   ScreenUpdateInterval = 1;
+  MandelBytesPerPixel = 4;
 
   // Console layout for status messages
   InitialMsgLineCount = 5; // Number of lines used for initial messages
@@ -17,6 +18,9 @@ CONST
   DefaultMinRe  = -2.0;
   DefaultMaxRe  =  1.0;
   DefaultMinIm  = -1.2;
+
+TYPE
+  PixelBuffer = ARRAY[0..(WindowWidth * WindowHeight * MandelBytesPerPixel) - 1] OF Byte;
 
 VAR
   Px, Py        : Integer;
@@ -27,6 +31,11 @@ VAR
   MinRe, MaxRe, MinIm, MaxIm : Real;
   ReRange, ImRange, ScaleRe, ScaleIm : Real;
   CurrentMaxX, CurrentMaxY : Integer;
+  ViewPixelWidth, ViewPixelHeight : Integer;
+
+  MandelTextureID : Integer;
+  PixelData : PixelBuffer;
+  BufferBaseIdx : Integer;
 
   PercentDone   : Integer;
   StatusLineY   : Integer; // <<<< MOVED TO VAR SECTION
@@ -56,35 +65,43 @@ BEGIN
 
   // --- Initialize SDL Graphics ---
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  MandelTextureID := CreateTexture(WindowWidth, WindowHeight);
+  IF MandelTextureID < 0 THEN
+  BEGIN
+    GotoXY(1, StatusLineY); ClrEol;
+    WriteLn('Error: unable to create texture.');
+    Halt;
+  END;
   ClearDevice;  // SDL clear
   UpdateScreen; // Show the cleared SDL screen immediately
 
   CurrentMaxX := GetMaxX;
   CurrentMaxY := GetMaxY;
+  ViewPixelWidth  := CurrentMaxX + 1;
+  ViewPixelHeight := CurrentMaxY + 1;
 
   // --- Calculate Full Viewport & Scaling ---
   ReRange := MaxRe - MinRe;
-  IF (CurrentMaxX + 1) > 0 THEN
-      MaxIm := MinIm + (ReRange * (CurrentMaxY + 1)) / (CurrentMaxX + 1)
-  ELSE
-      MaxIm := MinIm;
+  MaxIm := MinIm + (ReRange * ViewPixelHeight) / ViewPixelWidth;
   ImRange := MaxIm - MinIm;
 
   // --- Update Console with Precise MaxIm ---
   GotoXY(1, 2); ClrEol; // Clear the old "approx" line in the console
   Write('View Region: Re[', MinRe:0:1, '..', MaxRe:0:1, '], Im[', MinIm:0:1, '..', MaxIm:0:1, ']');
 
-  IF CurrentMaxX > 0 THEN ScaleRe := ReRange / CurrentMaxX ELSE ScaleRe := 0;
-  IF CurrentMaxY > 0 THEN ScaleIm := ImRange / CurrentMaxY ELSE ScaleIm := 0;
+  IF ViewPixelWidth > 1 THEN ScaleRe := ReRange / (ViewPixelWidth - 1)
+  ELSE IF ViewPixelWidth = 1 THEN ScaleRe := ReRange ELSE ScaleRe := 0;
+  IF ViewPixelHeight > 1 THEN ScaleIm := ImRange / (ViewPixelHeight - 1)
+  ELSE IF ViewPixelHeight = 1 THEN ScaleIm := ImRange ELSE ScaleIm := 0;
 
   GotoXY(1, StatusLineY); // Position for the first progress message
   Write('Rendering... Please wait.'); // Initial message on the status line
   ClrEol; // Clear rest of this line
 
   // --- Main Rendering Loop ---
-  FOR Py := 0 TO CurrentMaxY DO
+  FOR Py := 0 TO ViewPixelHeight - 1 DO
   BEGIN
-    FOR Px := 0 TO CurrentMaxX DO
+    FOR Px := 0 TO ViewPixelWidth - 1 DO
     BEGIN
       x0 := MinRe + (Px * ScaleRe);
       y0 := MaxIm - (Py * ScaleIm);
@@ -107,13 +124,19 @@ BEGIN
         B := (Iteration * 5 + 160) MOD 256;
       END;
 
-      SetRGBColor(R, G, B);
-      PutPixel(Px, Py);
+      BufferBaseIdx := (Py * ViewPixelWidth + Px) * MandelBytesPerPixel;
+      PixelData[BufferBaseIdx + 0] := R;
+      PixelData[BufferBaseIdx + 1] := G;
+      PixelData[BufferBaseIdx + 2] := B;
+      PixelData[BufferBaseIdx + 3] := 255;
     END; // END FOR Px
 
-    // --- Periodic SDL Event Processing and Screen Update ---
-    IF (Py + 1) MOD ScreenUpdateInterval = 0 THEN
+    // --- Periodic SDL Event Processing and Texture Update ---
+    IF ((Py + 1) MOD ScreenUpdateInterval = 0) OR (Py = ViewPixelHeight - 1) THEN
     BEGIN
+      UpdateTexture(MandelTextureID, PixelData);
+      ClearDevice;
+      RenderCopy(MandelTextureID);
       UpdateScreen;
       GraphLoop(0);
     END;
@@ -128,7 +151,8 @@ BEGIN
   END; // END FOR Py
 
   // --- Finalize ---
-  UpdateScreen; // Final SDL screen update
+  UpdateTexture(MandelTextureID, PixelData);
+  ClearDevice; RenderCopy(MandelTextureID); UpdateScreen;
 
   GotoXY(1, StatusLineY); ClrEol; // Clear the last progress message
   Write('Calculation complete! Displaying Mandelbrot set.');
@@ -141,6 +165,7 @@ BEGIN
   GraphLoop(100);
   ReadKey;
 
+  DestroyTexture(MandelTextureID);
   CloseGraph;
 
   // --- Restore Console ---
