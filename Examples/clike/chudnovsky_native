@@ -1,19 +1,15 @@
 #!/usr/bin/env clike
 double chudnovsky_native(long n) {
-    double M = 1.0;
-    double L = 13591409.0;
-    double X = 1.0;
-    double K = 6.0;
-    double S = L;
-    for (long i = 1; i < n; i++) {
-        double i3 = (double)i * (double)i * (double)i;
-        M = (K * K * K - 16.0 * K) * M / i3;
-        L = L + 545140134.0;
-        X = X * -262537412640768000.0;
-        S = S + M * L / X;
-        K = K + 12.0;
+    double C3 = 262537412640768000.0; // 640320^3
+    double sum = 13591409.0;
+    double term = sum;
+    for (long k = 1; k < n; k++) {
+        double k_d = (double)k;
+        term = term * -(6.0 * k_d - 5.0) * (2.0 * k_d - 1.0) * (6.0 * k_d - 1.0);
+        term = term / (k_d * k_d * k_d * C3);
+        sum = sum + term * (13591409.0 + 545140134.0 * k_d);
     }
-    return 426880.0 * sqrt(10005.0) / S;
+    return 426880.0 * sqrt(10005.0) / sum;
 }
 
 int main() {
