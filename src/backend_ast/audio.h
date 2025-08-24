@@ -34,6 +34,7 @@ void audioQuitSystem(void);
 Value vmBuiltinInitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinLoadsound(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPlaysound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFreesound(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinQuitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinIssoundplaying(struct VM_s* vm, int arg_count, Value* args);
 

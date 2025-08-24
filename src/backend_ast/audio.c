@@ -267,6 +267,15 @@ Value vmBuiltinPlaysound(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinFreesound(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+        runtimeError(vm, "FreeSound expects 1 integer argument.");
+    } else {
+        audioFreeSound((int)args[0].i_val);
+    }
+    return makeVoid();
+}
+
 Value vmBuiltinQuitsoundsystem(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "QuitSoundSystem expects 0 arguments.");
     else audioQuitSystem();
