@@ -1,4 +1,5 @@
-program PscalDemo;
+#!/usr/bin/env pascal
+program PascalDemo;
 
 uses
   CRT, Dos, StringUtil, MathLib, Base64;

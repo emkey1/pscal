@@ -6,7 +6,7 @@ var
    l, w, r, a, b, c, area: real;
 
 begin
-//   clrscr;
+   clrscr;
    l := 5.4;
    w := 4.7;
    area := RectangleArea(l, w);
