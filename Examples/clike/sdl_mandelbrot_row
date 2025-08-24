@@ -1,0 +1,60 @@
+#!/usr/bin/env clike
+/*
+ * SDL Mandelbrot renderer using the MandelbrotRow builtin.
+ * Press Q in the console to quit after rendering.
+ */
+
+int main() {
+    int width = 1024;
+    int height = 768;
+    int maxIterations = 128;
+    double minRe = -2.0;
+    double maxRe = 1.0;
+    double minIm = -1.2;
+    double maxIm = minIm + (maxRe - minRe) * height / width;
+    double reFactor = (maxRe - minRe) / (width - 1);
+    double imFactor = (maxIm - minIm) / (height - 1);
+
+    int row[1024];
+
+    printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
+    initgraph(width, height, "Mandelbrot in CLike (builtin)");
+    cleardevice();
+    updatescreen();
+
+    for (int y = 0; y < height; y++) {
+        double c_im = maxIm - y * imFactor;
+        mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
+        for (int x = 0; x < width; x++) {
+            int n = row[x];
+            if (n == maxIterations) {
+                setrgbcolor(0, 0, 0);
+            } else {
+                int R = (n * 5) % 256;
+                int G = (n * 7 + 85) % 256;
+                int B = (n * 11 + 170) % 256;
+                setrgbcolor(R, G, B);
+            }
+            putpixel(x, y);
+        }
+        if ((y & 7) == 0) {
+            updatescreen();
+            graphloop(0);
+        }
+    }
+
+    updatescreen();
+    printf("Mandelbrot rendered. Press Q in the console to quit.\n");
+    int quit = 0;
+    while (!quit) {
+        if (keypressed()) {
+            char c = readkey();
+            if (upcase(c) == 'Q') {
+                quit = 1;
+            }
+        }
+        graphloop(16);
+    }
+    closegraph();
+    return 0;
+}
