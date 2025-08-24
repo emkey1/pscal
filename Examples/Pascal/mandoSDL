@@ -11,6 +11,10 @@ CONST
   MaxIterations = 128;
   StatusUpdateInterval = 20; // Print status every 20 rows
   ScreenUpdateInterval = 1;  // Refresh SDL window every row
+  MandelBytesPerPixel = 4;
+
+TYPE
+  PixelBuffer = ARRAY[0..(WindowWidth * WindowHeight * MandelBytesPerPixel) - 1] OF Byte;
 
 VAR
   Px, Py        : Integer; // Pixel coordinates
@@ -28,6 +32,11 @@ VAR
   ReRange, ImRange : Real;
   ScaleRe, ScaleIm : Real;
   CurrentMaxX, CurrentMaxY : Integer;
+  ViewPixelWidth, ViewPixelHeight : Integer;
+
+  MandelTextureID : Integer;
+  PixelData : PixelBuffer;
+  BufferBaseIdx : Integer;
 
   PercentDone : Integer;
 
@@ -45,28 +54,38 @@ BEGIN
   // You could add a Delay(1000) here if you want users to definitely see the message
 
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  MandelTextureID := CreateTexture(WindowWidth, WindowHeight);
+  IF MandelTextureID < 0 THEN
+  BEGIN
+    WriteLn('Error: unable to create texture.');
+    Halt;
+  END;
   ClearDevice;  UpdateScreen;  // show blank window immediately
 
   CurrentMaxX := GetMaxX;
   CurrentMaxY := GetMaxY;
+  ViewPixelWidth  := CurrentMaxX + 1;
+  ViewPixelHeight := CurrentMaxY + 1;
 
   ReRange := MaxRe - MinRe;
-  MaxIm := MinIm + (ReRange * (CurrentMaxY + 1)) / (CurrentMaxX + 1);
+  MaxIm := MinIm + (ReRange * ViewPixelHeight) / ViewPixelWidth;
   ImRange := MaxIm - MinIm;
 
-  IF CurrentMaxX > 0 THEN ScaleRe := ReRange / CurrentMaxX ELSE ScaleRe := 0;
-  IF CurrentMaxY > 0 THEN ScaleIm := ImRange / CurrentMaxY ELSE ScaleIm := 0;
+  IF ViewPixelWidth > 1 THEN ScaleRe := ReRange / (ViewPixelWidth - 1)
+  ELSE IF ViewPixelWidth = 1 THEN ScaleRe := ReRange ELSE ScaleRe := 0;
+  IF ViewPixelHeight > 1 THEN ScaleIm := ImRange / (ViewPixelHeight - 1)
+  ELSE IF ViewPixelHeight = 1 THEN ScaleIm := ImRange ELSE ScaleIm := 0;
 
   // Initialize progress tracking
   PercentDone := 0;
 
-  // Main loop through each pixel
-  FOR Py := 0 TO CurrentMaxY DO
+  // Main loop through each pixel, updating texture progressively
+  FOR Py := 0 TO ViewPixelHeight - 1 DO
   BEGIN
     y0 := MaxIm - (Py * ScaleIm);
-    x0 := MinRe;
-    FOR Px := 0 TO CurrentMaxX DO
+    FOR Px := 0 TO ViewPixelWidth - 1 DO
     BEGIN
+      x0 := MinRe + (Px * ScaleRe);
 
       x := 0.0;
       y := 0.0;
@@ -91,10 +110,11 @@ BEGIN
         B := (Iteration * 11 + 170) MOD 256;
       END;
 
-      SetRGBColor(R, G, B);
-      PutPixel(Px, Py);
-
-      x0 := x0 + ScaleRe;
+      BufferBaseIdx := (Py * ViewPixelWidth + Px) * MandelBytesPerPixel;
+      PixelData[BufferBaseIdx + 0] := R;
+      PixelData[BufferBaseIdx + 1] := G;
+      PixelData[BufferBaseIdx + 2] := B;
+      PixelData[BufferBaseIdx + 3] := 255;
     END; // END FOR Px
 
     // Status Update Logic
@@ -109,9 +129,12 @@ BEGIN
         WriteLn('Processing row ', Py + 1, ' of ', CurrentMaxY + 1, '. Approximately 100% complete...');
     END;
 
-    // Periodic screen update so the window displays while calculating
-    IF (Py + 1) MOD ScreenUpdateInterval = 0 THEN
+    // Periodic texture and screen update so the window displays while calculating
+    IF ((Py + 1) MOD ScreenUpdateInterval = 0) OR (Py = ViewPixelHeight - 1) THEN
     BEGIN
+      UpdateTexture(MandelTextureID, PixelData);
+      ClearDevice;
+      RenderCopy(MandelTextureID);
       UpdateScreen;
       GraphLoop(0);
     END;
@@ -121,11 +144,14 @@ BEGIN
   WriteLn('-----------------------------------------------------');
   WriteLn('Calculation complete! Displaying Mandelbrot set.');
 
+  UpdateTexture(MandelTextureID, PixelData);
+  ClearDevice;
+  RenderCopy(MandelTextureID);
   UpdateScreen;
 
-  // WriteLn('Mandelbrot set displayed. Press any key to exit.'); // Console message
   GraphLoop(100);
   ReadKey;
 
+  DestroyTexture(MandelTextureID);
   CloseGraph;
 END.
