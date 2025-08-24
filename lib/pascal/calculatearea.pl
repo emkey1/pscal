@@ -1,6 +1,7 @@
 unit CalculateArea;
 interface
 
+{ Use 'len' here to avoid clashing with the builtin Length() function }
 function RectangleArea(len, width: real): real;
 function CircleArea(radius: real) : real;
 function TriangleArea( side1, side2, side3: real): real;
