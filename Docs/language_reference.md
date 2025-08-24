@@ -1,6 +1,7 @@
 # Pscal Language Reference
 
-Pscal is a VM backend with multiple front ends.  Pascal, tiny (a very minimal language implemented in Python) and CLike, which is a C like language.
+Pscal is a VM backend with multiple front ends.  Pascal, tiny (a very minimal language implemented in 
+Python) and CLike, which is a C like language.
 
 The Pascal front end is the default.  It implements a substantial subset of classic Pascal with a few
 extensions for modern convenience.  It aims to be largely compatible with
