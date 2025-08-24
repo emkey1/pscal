@@ -346,7 +346,15 @@ ASTNodeClike* parseProgramClike(ParserClike *p) {
                     expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
                 }
             }
-        } else if (isTypeToken(p->current.type)) {
+        } else if (p->current.type == CLIKE_TOKEN_CONST || isTypeToken(p->current.type)) {
+            int isConst = 0;
+            if (p->current.type == CLIKE_TOKEN_CONST) { advanceParser(p); isConst = 1; }
+            if (!isTypeToken(p->current.type)) {
+                fprintf(stderr, "Parse error at line %d, column %d: expected type after const\n",
+                        p->current.line, p->current.column);
+                clike_error_count++;
+                break;
+            }
             ClikeToken type_tok = p->current; advanceParser(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
@@ -356,12 +364,14 @@ ASTNodeClike* parseProgramClike(ParserClike *p) {
                 addChildClike(prog, decl);
             } else {
                 ASTNodeClike *decl = varDeclarationNoSemi(p, type_tok, ident, isPtr);
+                decl->is_const = isConst;
                 addChildClike(prog, decl);
                 while (matchToken(p, CLIKE_TOKEN_COMMA)) {
                     int ptr = 0;
                     if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); ptr = 1; }
                     ClikeToken id = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
                     ASTNodeClike *d = varDeclarationNoSemi(p, type_tok, id, ptr);
+                    d->is_const = isConst;
                     addChildClike(prog, d);
                 }
                 expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
@@ -584,6 +594,8 @@ static ASTNodeClike* params(ParserClike *p) {
 }
 
 static ASTNodeClike* param(ParserClike *p) {
+    int isConst = 0;
+    if (p->current.type == CLIKE_TOKEN_CONST) { advanceParser(p); isConst = 1; }
     if (p->current.type == CLIKE_TOKEN_STRUCT) {
         advanceParser(p);
         ClikeToken nameTok = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "struct name");
@@ -596,6 +608,7 @@ static ASTNodeClike* param(ParserClike *p) {
         ASTNodeClike *typeNode = newASTNodeClike(TCAST_IDENTIFIER, nameTok);
         typeNode->var_type = node->var_type;
         setLeftClike(node, typeNode);
+        node->is_const = isConst;
         return node;
     } else {
         ClikeToken type_tok = p->current; advanceParser(p);
@@ -607,6 +620,7 @@ static ASTNodeClike* param(ParserClike *p) {
         node->element_type = isPtr ? clike_tokenTypeToVarType(type_tok.type) : TYPE_UNKNOWN;
         setLeftClike(node, newASTNodeClike(TCAST_IDENTIFIER, type_tok));
         node->left->var_type = node->var_type;
+        node->is_const = isConst;
         return node;
     }
 }
@@ -636,18 +650,28 @@ static ASTNodeClike* compoundStmt(ParserClike *p) {
                 }
                 expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
             }
-        } else if (isTypeToken(p->current.type)) {
+        } else if (p->current.type == CLIKE_TOKEN_CONST || isTypeToken(p->current.type)) {
+            int isConst = 0;
+            if (p->current.type == CLIKE_TOKEN_CONST) { advanceParser(p); isConst = 1; }
+            if (!isTypeToken(p->current.type)) {
+                fprintf(stderr, "Parse error at line %d, column %d: expected type after const\n",
+                        p->current.line, p->current.column);
+                clike_error_count++;
+                break;
+            }
             ClikeToken type_tok = p->current; advanceParser(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
             ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
             ASTNodeClike *decl = varDeclarationNoSemi(p, type_tok, ident, isPtr);
+            decl->is_const = isConst;
             addChildClike(node, decl);
             while (matchToken(p, CLIKE_TOKEN_COMMA)) {
                 int ptr = 0;
                 if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); ptr = 1; }
                 ClikeToken id = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
                 ASTNodeClike *d = varDeclarationNoSemi(p, type_tok, id, ptr);
+                d->is_const = isConst;
                 addChildClike(node, d);
             }
             expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
@@ -728,12 +752,20 @@ static ASTNodeClike* forStatement(ParserClike *p) {
                 } while (matchToken(p, CLIKE_TOKEN_COMMA));
                 init = comp;
             }
-        } else if (isTypeToken(p->current.type)) {
+        } else if (p->current.type == CLIKE_TOKEN_CONST || isTypeToken(p->current.type)) {
+            int isConst = 0;
+            if (p->current.type == CLIKE_TOKEN_CONST) { advanceParser(p); isConst = 1; }
+            if (!isTypeToken(p->current.type)) {
+                fprintf(stderr, "Parse error at line %d, column %d: expected type after const\n",
+                        p->current.line, p->current.column);
+                clike_error_count++;
+            }
             ClikeToken type_tok = p->current; advanceParser(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
             ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
             init = varDeclarationNoSemi(p, type_tok, ident, isPtr);
+            init->is_const = isConst;
             if (matchToken(p, CLIKE_TOKEN_COMMA)) {
                 ASTNodeClike *comp = newASTNodeClike(TCAST_COMPOUND, ident);
                 addChildClike(comp, init);
@@ -742,6 +774,7 @@ static ASTNodeClike* forStatement(ParserClike *p) {
                     if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); ptr = 1; }
                     ClikeToken id = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
                     ASTNodeClike *d = varDeclarationNoSemi(p, type_tok, id, ptr);
+                    d->is_const = isConst;
                     addChildClike(comp, d);
                 } while (matchToken(p, CLIKE_TOKEN_COMMA));
                 init = comp;
