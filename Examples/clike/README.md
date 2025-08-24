@@ -21,6 +21,7 @@ build/bin/clike Examples/Clike/<program>.cl
 - `max.tiny` – read two integers and print the larger value.
 - `sum.tiny` – compute the sum of 1..n.
 - `sdl_multibouncingballs.cl` – SDL multi bouncing balls demo ported from Pascal.
+- `sdl_mandelbrot.cl` – render the Mandelbrot set using SDL graphics.
 - `hangman5.cl` – text-based hangman game ported from Pascal.
 - `module_demo.cl` – demonstrates importing `math_utils.cl` from the clike
   library search path.
