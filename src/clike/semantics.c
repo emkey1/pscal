@@ -57,6 +57,20 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_BOOLEAN;
     }
 
+    if (strcasecmp(name, "createtexture") == 0 ||
+        strcasecmp(name, "createtargettexture") == 0 ||
+        strcasecmp(name, "loadimagetotexture") == 0 ||
+        strcasecmp(name, "loadsound") == 0 ||
+        strcasecmp(name, "getticks") == 0 ||
+        strcasecmp(name, "pollkey") == 0) {
+        return TYPE_INTEGER;
+    }
+
+    if (strcasecmp(name, "keypressed") == 0 ||
+        strcasecmp(name, "issoundplaying") == 0) {
+        return TYPE_BOOLEAN;
+    }
+
     return TYPE_VOID;
 }
 
