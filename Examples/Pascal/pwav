@@ -6,8 +6,8 @@ program PlayWaveFile;
   The filename must be provided as the first command-line argument
   when running the program with the pascal interpreter.
 
-  Example usage (assuming the program is compiled to 'playwav'):
-  pascal playwav my_sound.wav
+  Example usage (assuming the program is compiled to 'pwav'):
+  pascal pwav my_sound.wav
 
   It assumes sound built-ins and command-line built-ins (ParamCount, ParamStr)
   and Delay are globally available.
@@ -28,7 +28,7 @@ begin
   begin
     writeln('Error: No WAV filename provided on the command line.');
     writeln('Usage: pascal <program_name> <wave_file.wav>');
-    writeln('Example: pascal playwav ding.wav');
+    writeln('Example: pascal pwav ding.wav');
     Halt(1); // Halt the program with an error code
   end;
 
