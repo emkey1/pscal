@@ -58,6 +58,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 4 && strncmp(start, "text", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_TEXT, start, length, column);
     if (length == 7 && strncmp(start, "mstream", 7) == 0) return makeToken(lexer, CLIKE_TOKEN_MSTREAM, start, length, column);
     if (length == 4 && strncmp(start, "char", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_CHAR, start, length, column);
+    if (length == 4 && strncmp(start, "byte", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_BYTE, start, length, column);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length, column);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length, column);
     if (length == 5 && strncmp(start, "while", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_WHILE, start, length, column);
@@ -241,6 +242,8 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
         case CLIKE_TOKEN_FLOAT_LITERAL: return "TOKEN_FLOAT_LITERAL";
         case CLIKE_TOKEN_CHAR_LITERAL: return "TOKEN_CHAR";
+        case CLIKE_TOKEN_CHAR: return "TOKEN_CHAR_TYPE";
+        case CLIKE_TOKEN_BYTE: return "TOKEN_BYTE";
         case CLIKE_TOKEN_STRING: return "TOKEN_STRING";
         case CLIKE_TOKEN_PLUS: return "+";
         case CLIKE_TOKEN_MINUS: return "-";
