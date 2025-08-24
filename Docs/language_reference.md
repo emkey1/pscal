@@ -1,8 +1,17 @@
 # Pscal Language Reference
 
-Pscal is a VM backend with multiple front ends.  Pascal, tiny (a very minimal language implemented in Python) and CLike, which is a C like language.
+Pscal is a VM backend with multiple front ends:
 
-The Pascal front end is the default.  It implements a substantial subset of classic Pascal with a few
+This reference first details the Pascal front end and then outlines the CLike and
+Tiny front ends:
+
+- **Pascal** – the default front end described below.
+- **Clike** – a compact C-like language; see [CLike_overview.md](CLike_overview.md) for
+  additional information.
+- **Tiny** – an educational toy language implemented in Python located in
+  `tools/tiny`.
+
+The Pascal front end implements a substantial subset of classic Pascal with a few
 extensions for modern convenience.  It aims to be largely compatible with
 traditional Pascal while retaining a small and understandable core.
 
@@ -171,4 +180,106 @@ the implementation section is private to the unit.
 The runtime provides many useful routines for text I/O, mathematics and
 system interaction.  See [Pscal_Builtins](Pscal_Builtins.md) for the
 complete list of available built‑ins.
+
+## CLike Front End
+
+The CLike front end provides a compact C-style language that targets the Pscal
+virtual machine.
+
+### Program Structure
+
+Programs consist of functions; execution begins at `int main()`. Blocks are
+delimited by braces `{}` and statements end with semicolons.
+
+### Lexical Elements
+
+- Identifiers are case-sensitive and may contain letters, digits and
+  underscores.
+- `//` introduces a single-line comment and `/* ... */` delimits block
+  comments.
+- String literals use double quotes and recognise standard C escape sequences.
+
+### Types
+
+CLike offers `int` for 64-bit integers, `double` for floating point values and
+`str` for mutable strings. Arrays are zero-based while string indexing starts at
+1 (`s[1]` is the first character). A `str` variable already evaluates to a
+pointer to its buffer.
+
+### Expressions and Operators
+
+Operators follow C conventions with arithmetic (`+`, `-`, `*`, `/`), comparison
+(`==`, `!=`, `<`, `<=`, `>`, `>=`), logical (`&&`, `||`, `!`) and assignment
+(`=`) forms. `+` concatenates strings. Pointers use the `->` operator and
+`new(&node);` allocates structures on the heap.
+
+### Control Flow
+
+The usual C statements are available: `if`, `while`, `for`, `do...while` and
+`break` to exit a loop.
+
+### Example
+
+```clike
+void sort_string(str s) {
+    int i, j, len;
+    char tmp;
+    len = strlen(s);
+    i = 1;
+    while (i <= len) {
+        j = i + 1;
+        while (j <= len) {
+            if (s[i] > s[j]) {
+                tmp = s[i];
+                s[i] = s[j];
+                s[j] = tmp;
+            }
+            j++;
+        }
+        i++;
+    }
+}
+```
+
+Built-in routines such as `strlen`, `copy` and `upcase` operate on `str` values
+and `new(&node);` performs dynamic allocation.
+
+## Tiny Front End
+
+Tiny is a minimal educational language implemented in Python. It compiles to
+Pscal bytecode and supports only integer variables and arithmetic.
+
+### Program Structure
+
+Programs are simple sequences of statements. Variables are implicitly created on
+first use and hold 64-bit integers.
+
+### Lexical Elements
+
+- Comments are enclosed in `{` and `}`.
+- Statements are terminated by `;` and assignments use `:=`.
+
+### Control Flow
+
+- `if <expr> then <stmt> else <stmt> end;`
+- `repeat <stmts> until <expr>;`
+
+### Input and Output
+
+`read` retrieves an integer from standard input and `write` outputs a value or
+blank line.
+
+### Example
+
+```tiny
+{ Sum numbers from 1 to n }
+read n;
+sum := 0;
+repeat
+    sum := sum + n;
+    n := n - 1
+until n = 0;
+write sum
+```
+
 
