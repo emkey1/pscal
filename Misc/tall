@@ -3,13 +3,13 @@
 #   PASCAL=/path/to/pascal ./tall
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TESTS="${TESTS:-$ROOT/Tests/Pascal}"  # all your .p / .pas files live here
+TESTS="${TESTS:-$ROOT/Tests/Pascal}"  # all your Pascal test files live here
 
 PASCAL="${PASCAL:-$ROOT/build/bin/pascal}"       # plain interpreter
 
-for f in "$TESTS/TestSuite7.p" \
-         "$TESTS/MathSuite01.p" \
-         "$TESTS/TestIncDecWithVerify.p" "$TESTS/CaseStatementSuite.p" "$TESTS/BreakLoopTest.p"
+for f in "$TESTS/TestSuite7" \
+         "$TESTS/MathSuite01" \
+         "$TESTS/TestIncDecWithVerify" "$TESTS/CaseStatementSuite" "$TESTS/BreakLoopTest"
 do
   [ -r "$f" ] || echo "Missing test file: $f"
 done
@@ -28,16 +28,16 @@ run () {
 }
 
 # ---------- individual suites ----------
-run "MDArray"        "$PASCAL" "$TESTS/MultiDimArrayTest.p"
-run "TestSuite"      "$PASCAL" "$TESTS/TestSuite7.p"
-run "MathSuite"      "$PASCAL" "$TESTS/MathSuite01.p"
-run "BitwiseAndExprSuite"      "$PASCAL" "$TESTS/BitwiseAndExprSuite.p"
-run "TypeTestSuite"      "$PASCAL" "$TESTS/TypeTestSuite.p"
-run "FormattingTestSuite"      "$PASCAL" "$TESTS/FormattingTestSuite.p"
-run "TestFileOperations"      "$PASCAL" "$TESTS/TestFileOperations.p"
-run "PointerTortureTest"      "$PASCAL" "$TESTS/PointerTortureTest.p"
+run "MDArray"        "$PASCAL" "$TESTS/MultiDimArrayTest"
+run "TestSuite"      "$PASCAL" "$TESTS/TestSuite7"
+run "MathSuite"      "$PASCAL" "$TESTS/MathSuite01"
+run "BitwiseAndExprSuite"      "$PASCAL" "$TESTS/BitwiseAndExprSuite"
+run "TypeTestSuite"      "$PASCAL" "$TESTS/TypeTestSuite"
+run "FormattingTestSuite"      "$PASCAL" "$TESTS/FormattingTestSuite"
+run "TestFileOperations"      "$PASCAL" "$TESTS/TestFileOperations"
+run "PointerTortureTest"      "$PASCAL" "$TESTS/PointerTortureTest"
 
-run "TestIncDecWithVerify.p" "$PASCAL" "$TESTS/TestIncDecWithVerify.p"
-run "aseStatementSuite.p" "$PASCAL" "$TESTS/CaseStatementSuite.p"
-run "BreakLoopTest.p"  "$PASCAL" "$TESTS/BreakLoopTest.p"
+run "TestIncDecWithVerify" "$PASCAL" "$TESTS/TestIncDecWithVerify"
+run "CaseStatementSuite" "$PASCAL" "$TESTS/CaseStatementSuite"
+run "BreakLoopTest"  "$PASCAL" "$TESTS/BreakLoopTest"
 
