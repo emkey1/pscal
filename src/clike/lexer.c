@@ -69,6 +69,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 7 && strncmp(start, "default", 7) == 0) return makeToken(lexer, CLIKE_TOKEN_DEFAULT, start, length, column);
     if (length == 6 && strncmp(start, "struct", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_STRUCT, start, length, column);
     if (length == 4 && strncmp(start, "enum", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ENUM, start, length, column);
+    if (length == 5 && strncmp(start, "const", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_CONST, start, length, column);
     if (length == 5 && strncmp(start, "break", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_BREAK, start, length, column);
     if (length == 8 && strncmp(start, "continue", 8) == 0) return makeToken(lexer, CLIKE_TOKEN_CONTINUE, start, length, column);
     if (length == 6 && strncmp(start, "return", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_RETURN, start, length, column);
@@ -235,6 +236,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_DEFAULT: return "TOKEN_DEFAULT";
         case CLIKE_TOKEN_STRUCT: return "TOKEN_STRUCT";
         case CLIKE_TOKEN_ENUM: return "TOKEN_ENUM";
+        case CLIKE_TOKEN_CONST: return "TOKEN_CONST";
         case CLIKE_TOKEN_BREAK: return "TOKEN_BREAK";
         case CLIKE_TOKEN_CONTINUE: return "TOKEN_CONTINUE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
