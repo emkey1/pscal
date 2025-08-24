@@ -1,0 +1,29 @@
+#!/usr/bin/env clike
+// Mandelbrot set demo using the MandelbrotRow extended builtin.
+// Renders an ASCII Mandelbrot to the console.
+
+int main() {
+    int width = 80;
+    int height = 24;
+    int maxIterations = 1000;
+    double minRe = -2.0;
+    double maxRe = 1.0;
+    double minIm = -1.2;
+    double maxIm = minIm + (maxRe - minRe) * height / width;
+    double reFactor = (maxRe - minRe) / (width - 1);
+    double imFactor = (maxIm - minIm) / (height - 1);
+    int row[80];
+    for (int y = 0; y < height; y++) {
+        double c_im = maxIm - y * imFactor;
+        mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, row);
+        for (int x = 0; x < width; x++) {
+            if (row[x] < maxIterations) {
+                printf("*");
+            } else {
+                printf(" ");
+            }
+        }
+        printf("\n");
+    }
+    return 0;
+}
