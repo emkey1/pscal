@@ -51,25 +51,19 @@ static bool is_cache_fresh(const char* cache_path, const char* source_path) {
     if (stat(cache_path, &cache_stat) != 0) return false;
 #if defined(__APPLE__)
 #define PSCAL_STAT_SEC(st)  ((st).st_mtimespec.tv_sec)
-#define PSCAL_STAT_NSEC(st) ((st).st_mtimespec.tv_nsec)
 #else
 #define PSCAL_STAT_SEC(st)  ((st).st_mtim.tv_sec)
-#define PSCAL_STAT_NSEC(st) ((st).st_mtim.tv_nsec)
 #endif
     /*
-     * Some filesystems only provide one-second timestamp resolution.  When a
-     * source file and its cached bytecode share identical modification times,
-     * the cache must be considered stale.  Compare both seconds and
-     * nanoseconds when available and treat equality as stale.
+     * Some filesystems only provide one-second timestamp resolution. To avoid
+     * using stale bytecode, require the cache entry to be strictly newer than
+     * the source file in whole seconds.
      */
-    if (PSCAL_STAT_SEC(cache_stat) < PSCAL_STAT_SEC(src_stat) ||
-        (PSCAL_STAT_SEC(cache_stat) == PSCAL_STAT_SEC(src_stat) &&
-         PSCAL_STAT_NSEC(cache_stat) <= PSCAL_STAT_NSEC(src_stat))) {
+    if (PSCAL_STAT_SEC(cache_stat) <= PSCAL_STAT_SEC(src_stat)) {
         return false;
     }
     return true;
 #undef PSCAL_STAT_SEC
-#undef PSCAL_STAT_NSEC
 }
 
 // ----- AST serialization helpers -----
@@ -266,9 +260,6 @@ static bool read_value(FILE* f, Value* out) {
 }
 
 bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
-    (void)source_path;
-    (void)chunk;
-    return false;
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return false;
     bool ok = false;
