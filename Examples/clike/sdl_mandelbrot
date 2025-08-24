@@ -29,6 +29,7 @@ int main() {
     int G;
     int B;
     int quit;
+    int ScreenUpdateInterval;
 
     WindowWidth = 1024;
     WindowHeight = 768;
@@ -37,7 +38,12 @@ int main() {
     MaxRe = 1.0;
     MinIm = -1.2;
 
+    ScreenUpdateInterval = 1;
+
+    printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Mandelbrot in CLike");
+    cleardevice();
+    updatescreen();
     MaxX = getmaxx();
     MaxY = getmaxy();
 
@@ -74,6 +80,10 @@ int main() {
             }
             putpixel(x, y);
             x = x + 1;
+        }
+        if ((y + 1) % ScreenUpdateInterval == 0) {
+            updatescreen();
+            graphloop(0);
         }
         y = y + 1;
     }
