@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program QuickSortDemo;
 
 uses crt;          { optional – for input / output }
