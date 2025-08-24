@@ -1,5 +1,6 @@
 #include "clike/parser.h"
 #include "clike/errors.h"
+#include "clike/opt.h"
 #include "Pascal/ast.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,6 +125,77 @@ static ClikeStructDef *clike_structs = NULL;
 static int clike_struct_count = 0;
 static int clike_struct_capacity = 0;
 
+typedef struct { char *name; long long value; } ConstEntry;
+static ConstEntry const_table[256];
+static int const_count = 0;
+
+static char* copyName(const char *s, size_t len) {
+    char *out = (char*)malloc(len + 1);
+    memcpy(out, s, len);
+    out[len] = '\0';
+    return out;
+}
+
+static void addConst(const char *name, size_t len, long long value) {
+    if (const_count >= 256) return;
+    const_table[const_count].name = copyName(name, len);
+    const_table[const_count].value = value;
+    const_count++;
+}
+
+static int getConst(const char *name, size_t len, long long *out) {
+    for (int i = 0; i < const_count; ++i) {
+        if (strncmp(const_table[i].name, name, len) == 0 && const_table[i].name[len] == '\0') {
+            if (out) *out = const_table[i].value;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void freeConstTable(void) {
+    for (int i = 0; i < const_count; ++i) free(const_table[i].name);
+    const_count = 0;
+}
+
+static long long evalConstExpr(ASTNodeClike* node, int *ok) {
+    if (!node) { *ok = 0; return 0; }
+    switch (node->type) {
+        case TCAST_NUMBER:
+            if (node->var_type == TYPE_INTEGER) { *ok = 1; return node->token.int_val; }
+            *ok = 0; return 0;
+        case TCAST_IDENTIFIER: {
+            long long val;
+            if (getConst(node->token.lexeme, node->token.length, &val)) { *ok = 1; return val; }
+            *ok = 0; return 0;
+        }
+        case TCAST_BINOP: {
+            long long lv = evalConstExpr(node->left, ok);
+            if (!*ok) return 0;
+            long long rv = evalConstExpr(node->right, ok);
+            if (!*ok) return 0;
+            switch (node->token.type) {
+                case CLIKE_TOKEN_PLUS:  return lv + rv;
+                case CLIKE_TOKEN_MINUS: return lv - rv;
+                case CLIKE_TOKEN_STAR:  return lv * rv;
+                case CLIKE_TOKEN_SLASH: if (rv != 0) return lv / rv; else { *ok = 0; return 0; }
+                default: *ok = 0; return 0;
+            }
+        }
+        case TCAST_UNOP: {
+            long long v = evalConstExpr(node->left, ok);
+            if (!*ok) return 0;
+            switch (node->token.type) {
+                case CLIKE_TOKEN_MINUS: return -v;
+                case CLIKE_TOKEN_PLUS:  return v;
+                default: *ok = 0; return 0;
+            }
+        }
+        default:
+            *ok = 0; return 0;
+    }
+}
+
 AST* clike_lookup_struct(const char *name) {
     for (int i = 0; i < clike_struct_count; ++i) {
         if (strcmp(clike_structs[i].name, name) == 0) return clike_structs[i].ast;
@@ -223,6 +295,7 @@ void initParserClike(ParserClike *parser, const char *source) {
     parser->imports = NULL;
     parser->import_count = 0;
     parser->import_capacity = 0;
+    const_count = 0;
 }
 
 void freeParserClike(ParserClike *parser) {
@@ -231,6 +304,7 @@ void freeParserClike(ParserClike *parser) {
     parser->imports = NULL;
     parser->import_count = 0;
     parser->import_capacity = 0;
+    freeConstTable();
 }
 
 ASTNodeClike* parseProgramClike(ParserClike *p) {
@@ -322,6 +396,25 @@ static ASTNodeClike* structFunDeclaration(ParserClike *p, ClikeToken nameTok, Cl
     return node;
 }
 
+static int parseConstArrayDim(ParserClike *p) {
+    ASTNodeClike *expr = expression(p);
+    expr = optimizeClikeAST(expr);
+    int ok;
+    long long val = evalConstExpr(expr, &ok);
+    if (!ok) {
+        int line = expr ? expr->token.line : p->current.line;
+        int col = expr ? expr->token.column : p->current.column;
+        fprintf(stderr,
+                "Parse error at line %d, column %d: array size must be an integer constant expression\n",
+                line, col);
+        clike_error_count++;
+        if (expr) freeASTClike(expr);
+        return 0;
+    }
+    freeASTClike(expr);
+    return (int)val;
+}
+
 static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token, ClikeToken ident, int isPointer) {
     ASTNodeClike *node = newASTNodeClike(TCAST_VAR_DECL, ident);
     node->var_type = isPointer ? TYPE_POINTER : clike_tokenTypeToVarType(type_token.type);
@@ -333,12 +426,12 @@ static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token,
         int count = 0;
         int *dims = (int*)malloc(sizeof(int) * capacity);
         do {
-            ClikeToken num = p->current; expectToken(p, CLIKE_TOKEN_NUMBER, "array size");
+            int dim = parseConstArrayDim(p);
             if (count >= capacity) {
                 capacity *= 2;
                 dims = (int*)realloc(dims, sizeof(int) * capacity);
             }
-            dims[count++] = (int)num.int_val;
+            dims[count++] = dim;
             expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
         } while (matchToken(p, CLIKE_TOKEN_LBRACKET));
 
@@ -351,6 +444,15 @@ static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token,
     }
     if (matchToken(p, CLIKE_TOKEN_EQUAL)) {
         setLeftClike(node, expression(p));
+    }
+
+    if (node->left) {
+        node->left = optimizeClikeAST(node->left);
+        int ok;
+        long long val = evalConstExpr(node->left, &ok);
+        if (ok) {
+            addConst(ident.lexeme, ident.length, val);
+        }
     }
     return node;
 }
