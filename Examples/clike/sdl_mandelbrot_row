@@ -88,7 +88,7 @@ int main() {
         }
 
         getmousestate(&mouseX, &mouseY, &mouseButtons);
-        if ((mouseButtons & ButtonLeft) && !(prevButtons & ButtonLeft)) {
+        if (((mouseButtons & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0)) {
             double centerRe = minRe + mouseX * reFactor;
             double centerIm = maxIm - mouseY * imFactor;
             double newWidth = (maxRe - minRe) / zoomFactor;
@@ -97,7 +97,7 @@ int main() {
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
             redraw = 1;
-        } else if ((mouseButtons & ButtonRight) && !(prevButtons & ButtonRight)) {
+        } else if (((mouseButtons & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0)) {
             double centerRe = minRe + mouseX * reFactor;
             double centerIm = maxIm - mouseY * imFactor;
             double newWidth = (maxRe - minRe) * zoomFactor;
