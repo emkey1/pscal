@@ -4,8 +4,7 @@ program QuickSortDemo;
 uses crt;          { optional – for input / output }
 
 var
-  a : array[1..20] of integer = (34, 12, 77, 5, 23, 18, 9, 42, 1, 88,
-                                3, 56, 7, 90, 2, 11, 19, 6, 99, 30);
+  a : array[1..100] of integer;
 
 { ------------------------------------------------------------------ }
 procedure quicksort(var arr: array of integer; lo, hi: integer);
@@ -39,6 +38,10 @@ end;
 var
   i: integer;
 begin
+  Randomize;
+  for i := 1 to Length(a) do
+    a[i] := Random(100) + 1;
+
   quicksort(a, 1, Length(a));
   writeln('Sorted array:');
   for i := 1 to Length(a) do write(a[i]:4, ' ');
