@@ -33,7 +33,7 @@ int main() {
     int MandelBytesPerPixel;
     int textureID;
     int bufferBaseIdx;
-    int pixelData[1024 * 768 * 4];
+    char pixelData[1024 * 768 * 4];
 
     WindowWidth = 1024;
     WindowHeight = 768;
@@ -90,10 +90,10 @@ int main() {
                 B = (n * 11 + 170) % 256;
             }
             bufferBaseIdx = (y * (MaxX + 1) + x) * MandelBytesPerPixel;
-            pixelData[bufferBaseIdx + 0] = R;
-            pixelData[bufferBaseIdx + 1] = G;
-            pixelData[bufferBaseIdx + 2] = B;
-            pixelData[bufferBaseIdx + 3] = 255;
+            pixelData[bufferBaseIdx + 0] = chr(R);
+            pixelData[bufferBaseIdx + 1] = chr(G);
+            pixelData[bufferBaseIdx + 2] = chr(B);
+            pixelData[bufferBaseIdx + 3] = chr(255);
             x = x + 1;
         }
         if (((y + 1) % ScreenUpdateInterval) == 0 || y == MaxY) {
