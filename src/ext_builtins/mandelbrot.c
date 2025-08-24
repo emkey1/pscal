@@ -1,5 +1,6 @@
 #include "core/utils.h"
 #include "backend_ast/builtin.h"
+#include <string.h>
 
 static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args) {
     if (arg_count != 6) {
@@ -54,8 +55,9 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
         return makeVoid();
     }
 
-    for (int x = 0; x <= maxX; ++x) {
-        double c_re = minRe + x * reFactor;
+    double c_re = minRe;
+    Value *outPtr = outArr;
+    for (int x = 0; x <= maxX; ++x, c_re += reFactor, ++outPtr) {
         double Z_re = c_re;
         double Z_im = c_im;
         int n = 0;
@@ -70,8 +72,12 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
             Z_im = tmp;
             n++;
         }
-        freeValue(&outArr[x]);
-        outArr[x] = makeInt(n);
+        if (outPtr->type != TYPE_INTEGER) {
+            freeValue(outPtr);
+            memset(outPtr, 0, sizeof(Value));
+            outPtr->type = TYPE_INTEGER;
+        }
+        outPtr->i_val = n;
     }
 
     return makeVoid();
