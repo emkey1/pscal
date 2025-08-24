@@ -447,7 +447,7 @@ static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token,
     }
 
     if (node->left) {
-        node->left = optimizeClikeAST(node->left);
+        setLeftClike(node, optimizeClikeAST(node->left));
         int ok;
         long long val = evalConstExpr(node->left, &ok);
         if (ok) {
