@@ -160,7 +160,7 @@ BEGIN
   GotoXY(1, StatusLineY + 1); ClrEol;
   Write('----------------------------------------------------------');
   GotoXY(1, StatusLineY + 2); ClrEol;
-  Write('Press any key in the graphics window to exit.');
+  Write('Press any key in the terminal window to exit.');
 
   GraphLoop(100);
   ReadKey;
