@@ -867,6 +867,18 @@ static ASTNodeClike* assignment(ParserClike *p) {
         setLeftClike(assign, node);
         setRightClike(assign, right);
         return assign;
+    } else if (p->current.type == CLIKE_TOKEN_PLUS_EQUAL) {
+        ClikeToken op = p->current; advanceParser(p);
+        ASTNodeClike *right = assignment(p);
+        ClikeToken plusTok = op; plusTok.type = CLIKE_TOKEN_PLUS; plusTok.lexeme = "+"; plusTok.length = 1;
+        ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, plusTok);
+        setLeftClike(bin, cloneASTClike(node));
+        setRightClike(bin, right);
+        ClikeToken eqTok = op; eqTok.type = CLIKE_TOKEN_EQUAL; eqTok.lexeme = "="; eqTok.length = 1;
+        ASTNodeClike *assign = newASTNodeClike(TCAST_ASSIGN, eqTok);
+        setLeftClike(assign, node);
+        setRightClike(assign, bin);
+        return assign;
     }
     return node;
 }
