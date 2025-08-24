@@ -35,9 +35,10 @@ static void initSymbolSystem(void) {
 }
 
 int main(int argc, char* argv[]) {
+    vmInitTerminalState();
     if (argc < 2) {
         fprintf(stderr, "Usage: pscalvm <bytecode_file> [program_parameters...]\n");
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     const char* bytecode_path = argv[1];
@@ -51,7 +52,7 @@ int main(int argc, char* argv[]) {
     initBytecodeChunk(&chunk);
     if (!loadBytecodeFromFile(bytecode_path, &chunk)) {
         fprintf(stderr, "Failed to load bytecode from %s\n", bytecode_path);
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     VM vm;
@@ -62,6 +63,6 @@ int main(int argc, char* argv[]) {
     if (globalSymbols) freeHashTable(globalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
 
-    return (result == INTERPRET_OK) ? 0 : 1;
+    return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 

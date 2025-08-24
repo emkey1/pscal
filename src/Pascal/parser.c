@@ -811,9 +811,9 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
 
 void insertType(const char *name, AST *typeAST) {
     TypeEntry *entry = malloc(sizeof(TypeEntry));
-    if (!entry) { /* Handle malloc failure */ exit(EXIT_FAILURE); }
+    if (!entry) { /* Handle malloc failure */ EXIT_FAILURE_HANDLER(); return; }
     entry->name = strdup(name);
-    if (!entry->name) { /* Handle malloc failure */ free(entry); exit(EXIT_FAILURE); }
+    if (!entry->name) { /* Handle malloc failure */ free(entry); EXIT_FAILURE_HANDLER(); return; }
 
     entry->typeAST = copyAST(typeAST);
 

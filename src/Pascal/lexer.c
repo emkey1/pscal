@@ -284,6 +284,50 @@ Token *stringLiteral(Lexer *lexer) {
                 // End of string
                 break;
             }
+        } else if (lexer->current_char == '\\') {
+            // Handle C-style escape sequences
+            char next_char = (lexer->pos + 1 < lexer->text_len) ? lexer->text[lexer->pos + 1] : '\0';
+            char escaped_char = '\\';
+            bool recognized = true;
+
+            switch (next_char) {
+                case 'n': escaped_char = '\n'; break;
+                case 't': escaped_char = '\t'; break;
+                case 'r': escaped_char = '\r'; break;
+                case 'a': escaped_char = '\a'; break;
+                case 'e': escaped_char = '\x1B'; break;
+                case '\\': escaped_char = '\\'; break;
+                case '\'': escaped_char = '\''; break;
+                default: recognized = false; break;
+            }
+
+            if (recognized) {
+                // Consume backslash and the escape character
+                advance(lexer); // skip '\\'
+                advance(lexer); // skip escape code
+                if (buffer_pos + 1 >= buffer_capacity) {
+                    buffer_capacity *= 2;
+                    buffer = realloc(buffer, buffer_capacity);
+                    if (!buffer) {
+                        fprintf(stderr, "Memory error in string literal\n");
+                        EXIT_FAILURE_HANDLER();
+                    }
+                }
+                buffer[buffer_pos++] = escaped_char;
+            } else {
+                // Treat the backslash as a literal character
+                advance(lexer); // consume '\\'
+                if (buffer_pos + 1 >= buffer_capacity) {
+                    buffer_capacity *= 2;
+                    buffer = realloc(buffer, buffer_capacity);
+                    if (!buffer) {
+                        fprintf(stderr, "Memory error in string literal\n");
+                        EXIT_FAILURE_HANDLER();
+                    }
+                }
+                buffer[buffer_pos++] = '\\';
+                // Do not consume next_char; process in next loop iteration
+            }
         } else if (lexer->current_char == '\0') {
             fprintf(stderr, "Unterminated string literal\n");
             EXIT_FAILURE_HANDLER();

@@ -1,3 +1,4 @@
+#!/usr/bin/env clike
 int main() {
     double i;
     double j;

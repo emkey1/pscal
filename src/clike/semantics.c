@@ -6,6 +6,73 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+
+static VarType builtinReturnType(const char* name) {
+    if (!name) return TYPE_VOID;
+
+    if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+
+    if (strcasecmp(name, "cos")  == 0 ||
+        strcasecmp(name, "sin")  == 0 ||
+        strcasecmp(name, "tan")  == 0 ||
+        strcasecmp(name, "sqrt") == 0 ||
+        strcasecmp(name, "ln")   == 0 ||
+        strcasecmp(name, "exp")  == 0 ||
+        strcasecmp(name, "real") == 0) {
+        return TYPE_REAL;
+    }
+
+    if (strcasecmp(name, "round")     == 0 ||
+        strcasecmp(name, "trunc")     == 0 ||
+        strcasecmp(name, "random")    == 0 ||
+        strcasecmp(name, "ioresult")  == 0 ||
+        strcasecmp(name, "paramcount")== 0 ||
+        strcasecmp(name, "length")    == 0 ||
+        strcasecmp(name, "strlen")    == 0 ||
+        strcasecmp(name, "pos")       == 0 ||
+        strcasecmp(name, "screencols")== 0 ||
+        strcasecmp(name, "screenrows")== 0 ||
+        strcasecmp(name, "wherex")    == 0 ||
+        strcasecmp(name, "wherey")    == 0 ||
+        strcasecmp(name, "getmaxx")   == 0 ||
+        strcasecmp(name, "getmaxy")   == 0) {
+        return TYPE_INTEGER;
+    }
+
+    if (strcasecmp(name, "inttostr")  == 0 ||
+        strcasecmp(name, "realtostr") == 0 ||
+        strcasecmp(name, "paramstr")  == 0 ||
+        strcasecmp(name, "copy")      == 0) {
+        return TYPE_STRING;
+    }
+
+    if (strcasecmp(name, "readkey") == 0 ||
+        strcasecmp(name, "upcase")  == 0) {
+        return TYPE_CHAR;
+    }
+
+    if (strcasecmp(name, "mstreamloadfromfile") == 0) {
+        return TYPE_BOOLEAN;
+    }
+
+    if (strcasecmp(name, "createtexture") == 0 ||
+        strcasecmp(name, "createtargettexture") == 0 ||
+        strcasecmp(name, "loadimagetotexture") == 0 ||
+        strcasecmp(name, "loadsound") == 0 ||
+        strcasecmp(name, "getticks") == 0 ||
+        strcasecmp(name, "pollkey") == 0) {
+        return TYPE_INTEGER;
+    }
+
+    if (strcasecmp(name, "keypressed") == 0 ||
+        strcasecmp(name, "issoundplaying") == 0) {
+        return TYPE_BOOLEAN;
+    }
+
+    return TYPE_VOID;
+}
 
 typedef struct {
     char *name;
@@ -21,6 +88,9 @@ typedef struct {
     VarTable scopes[256];
     int depth;
 } ScopeStack;
+
+// Holds global variable declarations so that functions can reference them.
+static VarTable globalVars = {0};
 
 static void vt_add(VarTable *t, const char *name, VarType type) {
     t->entries[t->count].name = strdup(name);
@@ -80,6 +150,9 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("scanf");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
+    functions[functionCount].name = strdup("strlen");
+    functions[functionCount].type = TYPE_INTEGER;
+    functionCount++;
     // `exit` behaves like C's exit, terminating the program with an optional code.
     functions[functionCount].name = strdup("exit");
     functions[functionCount].type = TYPE_VOID;
@@ -88,7 +161,7 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].type = TYPE_MEMORYSTREAM;
     functionCount++;
     functions[functionCount].name = strdup("mstreamloadfromfile");
-    functions[functionCount].type = TYPE_VOID;
+    functions[functionCount].type = TYPE_BOOLEAN;
     functionCount++;
     functions[functionCount].name = strdup("mstreamsavetofile");
     functions[functionCount].type = TYPE_VOID;
@@ -175,7 +248,10 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
-                if (!(lt == TYPE_REAL && rt == TYPE_INTEGER) && lt != rt) {
+                if (lt != rt &&
+                    !(lt == TYPE_REAL && is_intlike_type(rt)) &&
+                    !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
+                    !(is_intlike_type(lt) && is_intlike_type(rt))) {
                     fprintf(stderr,
                             "Type error: cannot assign %s to %s at line %d, column %d\n",
                             varTypeToString(rt), varTypeToString(lt),
@@ -214,8 +290,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
 
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
-                if (clike_get_builtin_id(name) != -1) {
-                    t = TYPE_INTEGER;
+                int bid = clike_get_builtin_id(name);
+                if (bid != -1) {
+                    t = builtinReturnType(name);
                 } else {
                     fprintf(stderr,
                             "Type error: call to undefined function '%s' at line %d, column %d\n",
@@ -397,7 +474,15 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
 
 static void analyzeFunction(ASTNodeClike *func) {
     ScopeStack scopes = {0};
-    ss_push(&scopes); // function scope for parameters
+
+    // Global scope available to all functions
+    ss_push(&scopes);
+    for (int i = 0; i < globalVars.count; ++i) {
+        ss_add(&scopes, globalVars.entries[i].name, globalVars.entries[i].type);
+    }
+
+    // Function scope for parameters/local variables
+    ss_push(&scopes);
     if (func->left) {
         for (int i = 0; i < func->left->child_count; ++i) {
             ASTNodeClike *p = func->left->children[i];
@@ -466,6 +551,7 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
 
         ParserClike p; initParserClike(&p, src);
         ASTNodeClike *modProg = parseProgramClike(&p);
+        freeParserClike(&p);
 
         modules[i].prog = modProg;
         modules[i].source = src;
@@ -494,6 +580,22 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
             functionCount++;
         }
     }
+
+    // Process global variable declarations so functions can reference them.
+    globalVars.count = 0;
+    ScopeStack globalsScope = {0};
+    ss_push(&globalsScope);
+    for (int i = 0; i < program->child_count; ++i) {
+        ASTNodeClike *decl = program->children[i];
+        if (decl->type == TCAST_VAR_DECL) {
+            char *name = tokenToCString(decl->token);
+            ss_add(&globalsScope, name, decl->var_type);
+            vt_add(&globalVars, name, decl->var_type);
+            if (decl->left) analyzeExpr(decl->left, &globalsScope);
+            free(name);
+        }
+    }
+    ss_pop(&globalsScope);
 
     for (int i = 0; i < clike_import_count; ++i) {
         if (!modules[i].prog) continue;

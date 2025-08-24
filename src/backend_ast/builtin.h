@@ -63,6 +63,24 @@ Value vmBuiltinBlinktext(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinNormvideo(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinLowvideo(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinClrscr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinClreol(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHidecursor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShowcursor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCursoroff(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinCursoron(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinDeline(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinInsline(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinInvertcolors(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinNormalcolors(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinBeep(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSavecursor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRestorecursor(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPushscreen(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPopscreen(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHighvideo(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGetenvint(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinValreal(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWindow(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args);
 
@@ -123,5 +141,15 @@ BuiltinRoutineType getBuiltinType(const char *name);
 
 /* Register all built-in routines with the compiler/VM registry. */
 void registerAllBuiltins(void);
+
+/* Save and restore terminal state for the VM. */
+void vmInitTerminalState(void);
+
+/* Pause for ten seconds and require a key press before exit when running
+ * interactively. */
+void vmPauseBeforeExit(void);
+
+/* Exit the VM after pausing and then restoring the terminal state. */
+int vmExitWithCleanup(int status);
 
 #endif // BUILTIN_H

@@ -23,7 +23,10 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
 
 void addChildClike(ASTNodeClike *parent, ASTNodeClike *child) {
     if (!parent || !child) return;
-    parent->children = (ASTNodeClike**)realloc(parent->children, sizeof(ASTNodeClike*) * (parent->child_count + 1));
+    ASTNodeClike **new_children = (ASTNodeClike**)realloc(
+        parent->children, sizeof(ASTNodeClike*) * (parent->child_count + 1));
+    if (!new_children) return; // allocation failed, leave structure unchanged
+    parent->children = new_children;
     parent->children[parent->child_count++] = child;
     child->parent = parent;
 }

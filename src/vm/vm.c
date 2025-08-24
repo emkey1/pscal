@@ -22,6 +22,11 @@
 
 #define MAX_WRITELN_ARGS_VM 32
 
+// Special sentinel values used in pointer.base_type_node to signal
+// non-standard dereference behavior in OP_GET_INDIRECT.
+#define STRING_CHAR_PTR_SENTINEL   ((AST*)0xDEADBEEF)
+#define STRING_LENGTH_SENTINEL     ((AST*)0xFEEDBEEF)
+
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
@@ -285,7 +290,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
     if (!register_host_function(vm, HOST_FN_QUIT_REQUESTED, vmHostQuitRequested)) { // from all.txt
         fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
-        exit(EXIT_FAILURE);
+        EXIT_FAILURE_HANDLER();
     }
 }
 
@@ -843,7 +848,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
                 // Push a new pointer directly to the character's memory location
                 // We use a special marker in base_type_node to identify this as a char pointer
-                push(vm, makePointer(&string_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
+                push(vm, makePointer(&string_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
                 break;
             }
             case OP_GET_GLOBAL_ADDRESS: {
@@ -1424,7 +1429,15 @@ comparison_error_label:
                         freeValue(&index_val);
 
                         size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
-                        if (pscal_index < 1 || (size_t)pscal_index > len) {
+
+                        if (pscal_index == 0) {
+                            // Special case: element 0 returns the string length.
+                            push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
+                            freeValue(&operand);
+                            break; // Exit the case
+                        }
+
+                        if (pscal_index < 0 || (size_t)pscal_index > len) {
                             runtimeError(vm,
                                          "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
                                          pscal_index, len);
@@ -1433,7 +1446,7 @@ comparison_error_label:
                         }
 
                         // Push a special pointer to the character's memory location
-                        push(vm, makePointer(&base_val->s_val[pscal_index - 1], (AST*)0xDEADBEEF));
+                        push(vm, makePointer(&base_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
                         freeValue(&operand);
                         break; // Exit the case
                     }
@@ -1540,7 +1553,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (pointer_to_lvalue.base_type_node == (AST*)0xDEADBEEF) { // Check for our special char pointer
+                if (pointer_to_lvalue.base_type_node == STRING_CHAR_PTR_SENTINEL) {
                     char* char_target_addr = (char*)pointer_to_lvalue.ptr_val;
                     if (char_target_addr == NULL) {
                         runtimeError(vm, "VM Error: Attempting to assign to a NULL character address.");
@@ -1566,6 +1579,11 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                } else if (pointer_to_lvalue.base_type_node == STRING_LENGTH_SENTINEL) {
+                    runtimeError(vm, "VM Error: Cannot assign to string length.");
+                    freeValue(&value_to_set);
+                    freeValue(&pointer_to_lvalue);
+                    return INTERPRET_RUNTIME_ERROR;
                 } else { // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
@@ -1720,15 +1738,20 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (pointer_val.base_type_node == (AST*)0xDEADBEEF) { // Check for our special char pointer
+                if (pointer_val.base_type_node == STRING_CHAR_PTR_SENTINEL) {
+                    // Special case: pointer into a string's character buffer.
                     char* char_target_addr = (char*)pointer_val.ptr_val;
                     if (char_target_addr == NULL) {
                         runtimeError(vm, "VM Error: Attempting to dereference a NULL character address.");
                         freeValue(&pointer_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    // It's a character pointer, so create and push a CHAR Value.
                     push(vm, makeChar(*char_target_addr));
+                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL) {
+                    // Special case: request for string length via element 0.
+                    Value* str_val = (Value*)pointer_val.ptr_val;
+                    size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
+                    push(vm, makeInt((long long)len));
                 } else {
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
                     if (target_lvalue_ptr == NULL) {
@@ -2227,48 +2250,9 @@ comparison_error_label:
 
                 bool color_was_applied = false; // Flag to track if we change the color
 
-                // Apply console colors only if writing to stdout and colors are not default.
+                // Apply console colors only if writing to stdout
                 if (output_stream == stdout) {
-                    // Check if the current color settings are the default ones.
-                    bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
-                                             !gCurrentTextBold && !gCurrentTextUnderline && !gCurrentTextBlink &&
-                                             !gCurrentColorIsExt && !gCurrentBgIsExt);
-
-                    if (!is_default_state) {
-                        color_was_applied = true; // Mark that we're applying custom colors.
-                        char escape_sequence[64] = "\x1B[";
-                        char code_str[64];
-                        bool first_attr = true;
-                        if (gCurrentTextBold) { strcat(escape_sequence, "1"); first_attr = false; }
-                        if (gCurrentTextUnderline) {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            strcat(escape_sequence, "4");
-                            first_attr = false;
-                        }
-                        if (gCurrentTextBlink) {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            strcat(escape_sequence, "5");
-                            first_attr = false;
-                        }
-                        if (gCurrentColorIsExt) {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            snprintf(code_str, sizeof(code_str), "38;5;%d", gCurrentTextColor);
-                        } else {
-                            if (!first_attr) strcat(escape_sequence, ";");
-                            snprintf(code_str, sizeof(code_str), "%d", map16FgColorToAnsi(gCurrentTextColor, gCurrentTextBold));
-                        }
-                        strcat(escape_sequence, code_str);
-                        first_attr = false;
-                        strcat(escape_sequence, ";");
-                        if (gCurrentBgIsExt) {
-                            snprintf(code_str, sizeof(code_str), "48;5;%d", gCurrentTextBackground);
-                        } else {
-                            snprintf(code_str, sizeof(code_str), "%d", map16BgColorToAnsi(gCurrentTextBackground));
-                        }
-                        strcat(escape_sequence, code_str);
-                        strcat(escape_sequence, "m");
-                        fprintf(output_stream, "%s", escape_sequence);
-                    }
+                    color_was_applied = applyCurrentTextAttributes(output_stream);
                 }
 
                 // Print the arguments (strings as full buffers; chars as a single byte)
@@ -2297,7 +2281,7 @@ comparison_error_label:
 
                 // Reset console colors only if they were applied in this call.
                 if (color_was_applied) {
-                    fprintf(output_stream, "\x1B[0m");
+                    resetTextAttributes(output_stream);
                 }
 
                 fflush(output_stream);

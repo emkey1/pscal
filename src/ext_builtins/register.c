@@ -5,6 +5,7 @@ void registerSwapBuiltin(void);
 void registerFactorialBuiltin(void);
 void registerFibonacciBuiltin(void);
 void registerFileExistsBuiltin(void);
+void registerMandelbrotRowBuiltin(void);
 
 void registerExtendedBuiltins(void) {
     registerGetPidBuiltin();
@@ -12,4 +13,5 @@ void registerExtendedBuiltins(void) {
     registerFactorialBuiltin();
     registerFibonacciBuiltin();
     registerFileExistsBuiltin();
+    registerMandelbrotRowBuiltin();
 }

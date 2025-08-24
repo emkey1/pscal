@@ -1,0 +1,16 @@
+Running pscal File I/O Test Suite...
+--- Testing Basic File Read/Write ---
+START: IOResult after successful rewrite: PASS
+START: IOResult after successful writeln: PASS
+START: IOResult after successful close: PASS
+--- Testing File Read ---
+START: IOResult after successful reset: PASS
+START: IOResult after successful readln 1: PASS
+START: File Read Test (Line 1): PASS
+START: IOResult after successful readln 2: PASS
+START: File Read Test (Line 2): PASS
+START: IOResult after successful close (read): PASS
+--- Testing IOResult on Error ---
+START: IOResult Error Test: PASS
+---
+File I/O Tests Completed.

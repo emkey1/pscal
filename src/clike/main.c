@@ -13,6 +13,7 @@
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "globals.h"
+#include "backend_ast/builtin.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -33,6 +34,7 @@ static const char *CLIKE_USAGE =
     "     --dump-bytecode             Dump compiled bytecode before execution.\n";
 
 int main(int argc, char **argv) {
+    vmInitTerminalState();
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     const char *path = NULL;
@@ -40,7 +42,7 @@ int main(int argc, char **argv) {
 
     if (argc == 1) {
         fprintf(stderr, "%s\n", CLIKE_USAGE);
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     for (int i = 1; i < argc; ++i) {
@@ -50,7 +52,7 @@ int main(int argc, char **argv) {
             dump_bytecode_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], CLIKE_USAGE);
-            return 1;
+            return vmExitWithCleanup(EXIT_FAILURE);
         } else {
             path = argv[i];
             clike_params_start = i + 1;
@@ -60,11 +62,11 @@ int main(int argc, char **argv) {
 
     if (!path) {
         fprintf(stderr, "Error: No source file specified.\n%s\n", CLIKE_USAGE);
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     FILE *f = fopen(path, "rb");
-    if (!f) { perror("open"); return 1; }
+    if (!f) { perror("open"); return vmExitWithCleanup(EXIT_FAILURE); }
     fseek(f, 0, SEEK_END); long len = ftell(f); rewind(f);
     char *src = (char*)malloc(len + 1); fread(src,1,len,f); src[len]='\0'; fclose(f);
 
@@ -77,12 +79,14 @@ int main(int argc, char **argv) {
 
     ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
     ASTNodeClike *prog = parseProgramClike(&parser);
+    freeParserClike(&parser);
 
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after parsing.\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     if (dump_ast_json_flag) {
@@ -90,8 +94,9 @@ int main(int argc, char **argv) {
         dumpASTClikeJSON(prog, stdout);
         fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
-        return 0;
+        return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
     if (clike_params_start < argc) {
@@ -106,10 +111,11 @@ int main(int argc, char **argv) {
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after semantic analysis.\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     if (clike_warning_count > 0) {
@@ -118,20 +124,22 @@ int main(int argc, char **argv) {
     if (clike_error_count > 0) {
         fprintf(stderr, "Compilation halted with %d error(s).\n", clike_error_count);
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return clike_error_count > 255 ? 255 : clike_error_count;
+        return vmExitWithCleanup(clike_error_count > 255 ? 255 : clike_error_count);
     }
     prog = optimizeClikeAST(prog);
 
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after optimization.\n");
         freeASTClike(prog);
+        clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return 1;
+        return vmExitWithCleanup(EXIT_FAILURE);
     }
 
     BytecodeChunk chunk; clike_compile(prog, &chunk);
@@ -146,10 +154,11 @@ int main(int argc, char **argv) {
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);
+    clike_free_structs();
     free(src);
     if (pre_src) free(pre_src);
     if (globalSymbols) freeHashTable(globalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
-    return result == INTERPRET_OK ? 0 : 1;
+    return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 

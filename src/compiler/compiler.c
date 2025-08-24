@@ -797,12 +797,13 @@ static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, in
         compilerGlobals[compilerGlobalCount].name = strdup(name);
         if (!compilerGlobals[compilerGlobalCount].name) {
             fprintf(stderr, "L%d: Compiler error: Memory allocation failed for global variable name '%s'.\n", line, name);
-            exit(1);
+            EXIT_FAILURE_HANDLER();
+            return -1;
         }
         return compilerGlobalCount++;
     }
     fprintf(stderr, "L%d: Compiler error: Too many global variables.\n", line);
-    exit(1);
+    EXIT_FAILURE_HANDLER();
     return -1;
 }
 

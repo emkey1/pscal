@@ -40,7 +40,7 @@ for src in "$SCRIPT_DIR"/tiny/*.tiny; do
   fi
   run_status=$?
 
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' "$actual_out" > "$actual_out.clean"
+  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\].*?\a//g' "$actual_out" > "$actual_out.clean"
   mv "$actual_out.clean" "$actual_out"
 
   if [ -f "$out_file" ]; then

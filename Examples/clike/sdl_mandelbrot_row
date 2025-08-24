@@ -1,0 +1,84 @@
+#!/usr/bin/env clike
+/*
+ * SDL Mandelbrot renderer using the MandelbrotRow builtin.
+ * Press Q in the console to quit after rendering.
+ */
+
+int main() {
+    int width = 1024;
+    int height = 768;
+    int maxIterations = 128;
+    double minRe = -2.0;
+    double maxRe = 1.0;
+    double minIm = -1.2;
+    double maxIm = minIm + (maxRe - minRe) * height / width;
+    double reFactor = (maxRe - minRe) / (width - 1);
+    double imFactor = (maxIm - minIm) / (height - 1);
+
+    int bytesPerPixel = 4;
+    int row[width];
+    byte pixelData[width * height * bytesPerPixel];
+    int textureID;
+    int screenUpdateInterval = 16; // update screen every 16 rows
+
+    printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
+    initgraph(width, height, "Mandelbrot in CLike (builtin)");
+    textureID = createtexture(width, height);
+    if (textureID < 0) {
+        printf("Error: unable to create texture.\n");
+        halt();
+    }
+    cleardevice();
+    updatescreen();
+
+    int n,R,G,B;
+
+    for (int y = 0; y < height; y++) {
+        double c_im = maxIm - y * imFactor;
+        mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
+        int idx = y * width * bytesPerPixel;
+        for (int x = 0; x < width; x++) {
+            n = row[x];
+            if (n == maxIterations) {
+                R = 0;
+                G = 0;
+                B = 0;
+            } else {
+                R = (n * 5) % 256;
+                G = (n * 7 + 85) % 256;
+                B = (n * 11 + 170) % 256;
+            }
+            pixelData[idx + 0] = R;
+            pixelData[idx + 1] = G;
+            pixelData[idx + 2] = B;
+            pixelData[idx + 3] = 255;
+            idx += bytesPerPixel;
+        }
+        if (((y + 1) % screenUpdateInterval) == 0 || y == height - 1) {
+            updatetexture(textureID, pixelData);
+            cleardevice();
+            rendercopy(textureID);
+            updatescreen();
+            graphloop(0);
+        }
+    }
+
+    updatetexture(textureID, pixelData);
+    cleardevice();
+    rendercopy(textureID);
+    updatescreen();
+    printf("Mandelbrot rendered. Press Q in the console to quit.\n");
+    int quit = 0;
+    while (!quit) {
+        if (keypressed()) {
+            char c = readkey();
+            if (upcase(c) == 'Q') {
+                quit = 1;
+            }
+        }
+        graphloop(16);
+    }
+    destroytexture(textureID);
+    closegraph();
+    return 0;
+}

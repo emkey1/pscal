@@ -12,6 +12,7 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
 #include <errno.h>   // For errno
@@ -39,6 +40,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"api_receive", vmBuiltinApiReceive},
     {"api_send", vmBuiltinApiSend},
     {"assign", vmBuiltinAssign},
+    {"beep", vmBuiltinBeep},
     {"biblinktext", vmBuiltinBlinktext},
     {"biboldtext", vmBuiltinBoldtext},
     {"biclrscr", vmBuiltinClrscr},
@@ -53,6 +55,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
 #endif
+    {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
 #ifdef SDL
@@ -60,12 +63,15 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
+    {"cursoroff", vmBuiltinCursoroff},
+    {"cursoron", vmBuiltinCursoron},
 #ifdef SDL
     {"createtargettexture", vmBuiltinCreatetargettexture}, // Moved
     {"createtexture", vmBuiltinCreatetexture}, // Moved
 #endif
     {"dec", vmBuiltinDec},
     {"delay", vmBuiltinDelay},
+    {"deline", vmBuiltinDeline},
 #ifdef SDL
     {"destroytexture", vmBuiltinDestroytexture},
 #endif
@@ -93,6 +99,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"fillrect", vmBuiltinFillrect},
 #endif
     {"getenv", vmBuiltinGetenv},
+    {"getenvint", vmBuiltinGetenvint},
 #ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
@@ -106,7 +113,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
+    {"hidecursor", vmBuiltinHidecursor},
     {"high", vmBuiltinHigh},
+    {"highvideo", vmBuiltinHighvideo},
     {"inc", vmBuiltinInc},
 #ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
@@ -115,7 +124,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"initsoundsystem", vmBuiltinInitsoundsystem},
     {"inittextsystem", vmBuiltinInittextsystem},
 #endif
+    {"insline", vmBuiltinInsline},
     {"inttostr", vmBuiltinInttostr},
+    {"invertcolors", vmBuiltinInvertcolors},
     {"ioresult", vmBuiltinIoresult},
 #ifdef SDL
     {"issoundplaying", vmBuiltinIssoundplaying}, // Moved
@@ -135,6 +146,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"mstreambuffer", vmBuiltinMstreambuffer},
     {"new", vmBuiltinNew},
+    {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
 #ifdef SDL
@@ -146,7 +158,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"playsound", vmBuiltinPlaysound},
     {"pollkey", vmBuiltinPollkey},
 #endif
+    {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
+    {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
 #endif
@@ -169,8 +183,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"rendertexttotexture", vmBuiltinRendertexttotexture},
 #endif
     {"reset", vmBuiltinReset},
+    {"restorecursor", vmBuiltinRestorecursor},
     {"rewrite", vmBuiltinRewrite},
     {"round", vmBuiltinRound},
+    {"savecursor", vmBuiltinSavecursor},
     {"screencols", vmBuiltinScreencols},
     {"screenrows", vmBuiltinScreenrows},
     {"setlength", vmBuiltinSetlength},
@@ -182,6 +198,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"setrgbcolor", vmBuiltinSetrgbcolor},
 #endif
+    {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
@@ -199,9 +216,11 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
     {"val", vmBuiltinVal},
+    {"valreal", vmBuiltinValreal},
 #ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
+    {"window", vmBuiltinWindow},
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
 };
@@ -463,7 +482,7 @@ Value vmBuiltinWherex(VM* vm, int arg_count, Value* args) {
     }
     int r, c;
     if (getCursorPosition(&r, &c) == 0) {
-        return makeInt(c);
+        return makeInt(c - gWindowLeft + 1);
     }
     return makeInt(1); // Default on error
 }
@@ -475,7 +494,7 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
     }
     int r, c;
     if (getCursorPosition(&r, &c) == 0) {
-        return makeInt(r);
+        return makeInt(r - gWindowTop + 1);
     }
     return makeInt(1); // Default on error
 }
@@ -483,19 +502,207 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
 // --- Terminal helper for VM input routines ---
 static struct termios vm_orig_termios;
 static int vm_raw_mode = 0;
+static int vm_termios_saved = 0;
+static int vm_restore_registered = 0;
+static int vm_alt_screen_depth = 0; // Track nested alternate screen buffers
+
+typedef struct {
+    char fg[32];
+    char bg[32];
+    int valid;
+} VmColorState;
+
+#define VM_COLOR_STACK_MAX 16
+static VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
+static int vm_color_stack_depth = 0;
+
+static void vmEnableRawMode(void); // Forward declaration
+static void vmSetupTermHandlers(void);
+static void vmPushColorState(void);
+static void vmPopColorState(void);
+static void vmRestoreColorState(void);
+static int vmQueryColor(const char *query, char *dest, size_t dest_size);
 
 static void vmRestoreTerminal(void) {
-    if (vm_raw_mode) {
+    if (vm_termios_saved && vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
         vm_raw_mode = 0;
     }
 }
 
-static void vmEnableRawMode(void) {
-    if (vm_raw_mode)
+// Query terminal for current color (OSC 10/11) and store result in dest
+static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
+    struct termios oldt, raw;
+    char buf[64];
+    size_t i = 0;
+    char ch;
+
+    if (!isatty(STDIN_FILENO))
+        return -1;
+
+    if (tcgetattr(STDIN_FILENO, &oldt) < 0)
+        return -1;
+
+    raw = oldt;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 5; // 0.5s timeout
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        return -1;
+    }
+
+    if (write(STDOUT_FILENO, query, strlen(query)) == -1) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        return -1;
+    }
+
+    while (i < sizeof(buf) - 1) {
+        ssize_t n = read(STDIN_FILENO, &ch, 1);
+        if (n <= 0)
+            break;
+        if (ch == '\a')
+            break; // BEL terminator
+        if (ch == '\x1B') {
+            ssize_t n2 = read(STDIN_FILENO, &ch, 1);
+            if (n2 <= 0)
+                break;
+            if (ch == '\\')
+                break; // ESC \ terminator
+            buf[i++] = '\x1B';
+        }
+        buf[i++] = ch;
+    }
+    buf[i] = '\0';
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+
+    char *p = strchr(buf, ';');
+    if (!p)
+        return -1;
+    p++;
+    strncpy(dest, p, dest_size - 1);
+    dest[dest_size - 1] = '\0';
+    return 0;
+}
+
+// Save current terminal foreground and background colors
+static void vmPushColorState(void) {
+    if (vm_color_stack_depth >= VM_COLOR_STACK_MAX)
+        return;
+    VmColorState *cs = &vm_color_stack[vm_color_stack_depth];
+    cs->valid = 0;
+    if (vmQueryColor("\x1B]10;?\x07", cs->fg, sizeof(cs->fg)) == 0 &&
+        vmQueryColor("\x1B]11;?\x07", cs->bg, sizeof(cs->bg)) == 0) {
+        cs->valid = 1;
+    }
+    vm_color_stack_depth++;
+}
+
+static void vmPopColorState(void) {
+    if (vm_color_stack_depth > 1)
+        vm_color_stack_depth--;
+}
+
+// Restore terminal colors from the top of the stack
+static void vmRestoreColorState(void) {
+    if (vm_color_stack_depth == 0)
+        return;
+    VmColorState *cs = &vm_color_stack[vm_color_stack_depth - 1];
+    if (!cs->valid)
+        return;
+    char seq[64];
+    int len = snprintf(seq, sizeof(seq), "\x1B]10;%s\x07", cs->fg);
+    if (len > 0)
+        write(STDOUT_FILENO, seq, len);
+    len = snprintf(seq, sizeof(seq), "\x1B]11;%s\x07", cs->bg);
+    if (len > 0)
+        write(STDOUT_FILENO, seq, len);
+}
+
+// atexit handler: restore terminal settings and ensure cursor visibility
+static void vmAtExitCleanup(void) {
+    vmRestoreTerminal();
+    if (isatty(STDOUT_FILENO)) {
+        const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
+        write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+        if (vm_color_stack_depth > 0)
+            vm_color_stack_depth = 1; // Restore base screen colors
+        vmRestoreColorState();
+    }
+}
+
+// Signal handler to ensure terminal state is restored on interrupts.
+static void vmSignalHandler(int signum) {
+    if (vm_raw_mode || vm_alt_screen_depth > 0)
+        vmAtExitCleanup();
+    _exit(128 + signum);
+}
+
+static void vmSetupTermHandlers(void) {
+    if (!vm_termios_saved) {
+        if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
+            vm_termios_saved = 1;
+        }
+    }
+    if (!vm_restore_registered) {
+        atexit(vmAtExitCleanup);
+        struct sigaction sa;
+        sa.sa_handler = vmSignalHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
+        sigaction(SIGQUIT, &sa, NULL);
+        sigaction(SIGABRT, &sa, NULL);
+        sigaction(SIGSEGV, &sa, NULL);
+        vm_restore_registered = 1;
+    }
+}
+
+void vmInitTerminalState(void) {
+    vmSetupTermHandlers();
+    vmPushColorState();
+    vmEnableRawMode();
+}
+
+/*
+// Pause to allow the user to read messages before the VM exits.  The pause
+// occurs before any terminal cleanup is performed.
+void vmPauseBeforeExit(void) {
+    // Only pause when running interactively.
+    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
         return;
 
-    if (tcgetattr(STDIN_FILENO, &vm_orig_termios) < 0)
+    sleep(10);
+
+    fprintf(stderr, "Press any key to exit");
+    fflush(stderr);
+
+    tcflush(STDIN_FILENO, TCIFLUSH); // Discard any pending input
+    vmEnableRawMode();               // Ensure we can read single key presses
+    const char show_cursor[] = "\x1B[?25h";
+    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+
+    char ch;
+    while (read(STDIN_FILENO, &ch, 1) < 0) {
+        if (errno != EINTR) {
+            break; // Ignore other read errors and continue with cleanup
+        }
+    }
+}
+ */
+
+int vmExitWithCleanup(int status) {
+    // vmPauseBeforeExit();
+    vmAtExitCleanup();
+    return status;
+}
+
+static void vmEnableRawMode(void) {
+    vmSetupTermHandlers();
+    if (vm_raw_mode)
         return;
 
     struct termios raw = vm_orig_termios;
@@ -505,7 +712,6 @@ static void vmEnableRawMode(void) {
 
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
-        atexit(vmRestoreTerminal);
     }
 }
 
@@ -693,7 +899,9 @@ Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {
     }
     long long x = AS_INTEGER(args[0]);
     long long y = AS_INTEGER(args[1]);
-    printf("\x1B[%lld;%lldH", y, x);
+    long long absX = gWindowLeft + x - 1;
+    long long absY = gWindowTop + y - 1;
+    printf("\x1B[%lld;%lldH", absY, absX);
     fflush(stdout);
     return makeVoid();
 }
@@ -719,7 +927,6 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     gCurrentBgIsExt = false;
     return makeVoid();
 }
-
 Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_BYTE && args[0].type != TYPE_WORD)) { // <<< MODIFIED LINE
         runtimeError(vm, "TextColorE expects an integer-compatible argument (Integer, Word, Byte)."); // Changed error message
@@ -805,7 +1012,203 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ClrScr expects no arguments.");
         return makeVoid();
     }
-    printf("\x1B[2J");
+
+    bool color_was_applied = applyCurrentTextAttributes(stdout);
+    printf("\x1B[2J\x1B[H");
+    if (color_was_applied) {
+        resetTextAttributes(stdout);
+    }
+    printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinClreol(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "ClrEol expects no arguments.");
+        return makeVoid();
+    }
+    bool color_was_applied = applyCurrentTextAttributes(stdout);
+    printf("\x1B[K");
+    if (color_was_applied) {
+        resetTextAttributes(stdout);
+    }
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinHidecursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "HideCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[?25l");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinShowcursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "ShowCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[?25h");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinCursoroff(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinHidecursor(vm, arg_count, args);
+}
+
+Value vmBuiltinCursoron(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinShowcursor(vm, arg_count, args);
+}
+
+Value vmBuiltinDeline(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "DelLine expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[M");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinInsline(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "InsLine expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[L");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinInvertcolors(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "InvertColors expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[7m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinNormalcolors(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "NormalColors expects no arguments.");
+        return makeVoid();
+    }
+    gCurrentTextColor = 7;
+    gCurrentTextBackground = 0;
+    gCurrentTextBold = false;
+    gCurrentColorIsExt = false;
+    gCurrentBgIsExt = false;
+    gCurrentTextUnderline = false;
+    gCurrentTextBlink = false;
+    printf("\x1B[0m");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinBeep(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "Beep expects no arguments.");
+        return makeVoid();
+    }
+    fputc('\a', stdout);
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinSavecursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "SaveCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[s");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinRestorecursor(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "RestoreCursor expects no arguments.");
+        return makeVoid();
+    }
+    printf("\x1B[u");
+    fflush(stdout);
+    return makeVoid();
+}
+
+Value vmBuiltinPushscreen(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "PushScreen expects no arguments.");
+        return makeVoid();
+    }
+    if (isatty(STDOUT_FILENO)) {
+        vmPushColorState();
+        if (vm_alt_screen_depth == 0) {
+            const char enter_alt[] = "\x1B[?1049h";
+            write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
+        }
+        vm_alt_screen_depth++;
+        vmRestoreColorState();
+        fflush(stdout);
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinPopscreen(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "PopScreen expects no arguments.");
+        return makeVoid();
+    }
+    if (vm_alt_screen_depth > 0) {
+        vm_alt_screen_depth--;
+        vmPopColorState();
+        if (isatty(STDOUT_FILENO)) {
+            if (vm_alt_screen_depth == 0) {
+                const char exit_alt[] = "\x1B[?1049l";
+                write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
+            }
+            vmRestoreColorState();
+            fflush(stdout);
+        }
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinHighvideo(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinBoldtext(vm, arg_count, args);
+}
+
+Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4 ||
+        args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER ||
+        args[2].type != TYPE_INTEGER || args[3].type != TYPE_INTEGER) {
+        runtimeError(vm, "Window expects 4 integer arguments.");
+        return makeVoid();
+    }
+    gWindowLeft = (int)AS_INTEGER(args[0]);
+    gWindowTop = (int)AS_INTEGER(args[1]);
+    gWindowRight = (int)AS_INTEGER(args[2]);
+    gWindowBottom = (int)AS_INTEGER(args[3]);
+    printf("\x1B[%d;%dr", gWindowTop, gWindowBottom);
+    printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
     fflush(stdout);
     return makeVoid();
 }
@@ -1481,6 +1884,10 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
 
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }
 
+    if (input_stream == stdin) {
+        vmEnableRawMode();
+    }
+
     return makeVoid();
 }
 
@@ -1517,6 +1924,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
         last_io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
+        if (input_stream == stdin) vmEnableRawMode();
         return makeVoid();
     }
     line_buffer[strcspn(line_buffer, "\r\n")] = '\0';
@@ -1594,6 +2002,10 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     // ***NEW***: neuter FILE-by-value arg so VM cleanup won’t fclose()
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
 
+    if (input_stream == stdin) {
+        vmEnableRawMode();
+    }
+
     return makeVoid();
 }
 
@@ -1649,6 +2061,22 @@ Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
     return makeString(val);
 }
 
+Value vmBuiltinGetenvint(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING ||
+        (args[1].type != TYPE_INTEGER && args[1].type != TYPE_BYTE && args[1].type != TYPE_WORD)) {
+        runtimeError(vm, "GetEnvInt expects (string, integer).");
+        return makeInt(0);
+    }
+    const char* name = AS_STRING(args[0]);
+    long long defVal = AS_INTEGER(args[1]);
+    const char* val = getenv(name);
+    if (!val || *val == '\0') return makeInt(defVal);
+    char* endptr;
+    long long parsed = strtoll(val, &endptr, 10);
+    if (endptr == val || *endptr != '\0') return makeInt(defVal);
+    return makeInt(parsed);
+}
+
 // Parse string to numeric value similar to Turbo Pascal's Val procedure
 Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) {
@@ -1688,6 +2116,10 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         }
     }
     return makeVoid();
+}
+
+Value vmBuiltinValreal(VM* vm, int arg_count, Value* args) {
+    return vmBuiltinVal(vm, arg_count, args);
 }
 
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
@@ -1859,36 +2291,36 @@ Value vmBuiltinMstreamcreate(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
         runtimeError(vm, "MStreamLoadFromFile expects 2 arguments (MStreamVar, Filename).");
-        return makeVoid();
+        return makeBoolean(0);
     }
 
     // Argument 0 is pointer to the Value holding the MStream*
     if (args[0].type != TYPE_POINTER) {
         runtimeError(vm, "MStreamLoadFromFile: First argument must be a VAR MStream.");
-        return makeVoid();
+        return makeBoolean(0);
     }
     Value* ms_value_ptr = (Value*)args[0].ptr_val;
     if (!ms_value_ptr || ms_value_ptr->type != TYPE_MEMORYSTREAM) {
         runtimeError(vm, "MStreamLoadFromFile: First argument is not a valid MStream variable.");
-        return makeVoid();
+        return makeBoolean(0);
     }
     MStream* ms = ms_value_ptr->mstream;
     if (!ms) {
         runtimeError(vm, "MStreamLoadFromFile: MStream variable not initialized.");
-        return makeVoid();
+        return makeBoolean(0);
     }
 
     // Argument 1 is the filename string
     if (args[1].type != TYPE_STRING || args[1].s_val == NULL) {
         runtimeError(vm, "MStreamLoadFromFile: Second argument must be a string filename.");
-        return makeVoid(); // No need to free args[1] here, vm stack manages
+        return makeBoolean(0); // No need to free args[1] here, vm stack manages
     }
     const char* filename = args[1].s_val;
 
     FILE* f = fopen(filename, "rb");
     if (!f) {
         runtimeError(vm, "MStreamLoadFromFile: Cannot open file '%s' for reading.", filename);
-        return makeVoid();
+        return makeBoolean(0);
     }
 
     fseek(f, 0, SEEK_END);
@@ -1899,7 +2331,7 @@ Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
     if (!buffer) {
         fclose(f);
         runtimeError(vm, "MStreamLoadFromFile: Memory allocation error for file buffer.");
-        return makeVoid();
+        return makeBoolean(0);
     }
     fread(buffer, 1, size, f);
     buffer[size] = '\0'; // Null-terminate the buffer
@@ -1912,7 +2344,7 @@ Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
     ms->size = size;
     ms->capacity = size + 1; // Capacity is now exactly what's needed + null
 
-    return makeVoid();
+    return makeBoolean(1);
 }
 
 Value vmBuiltinMstreamsavetofile(VM* vm, int arg_count, Value* args) {
@@ -2098,7 +2530,7 @@ Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     } else {
         runtimeError(vm, "Halt expects 0 or 1 integer argument.");
     }
-    exit((int)code);
+    exit(vmExitWithCleanup((int)code));
     return makeVoid(); // Unreachable
 }
 
@@ -2137,6 +2569,13 @@ static int builtin_registry_count = 0;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
+    for (int i = 0; i < builtin_registry_count; ++i) {
+        if (strcasecmp(name, builtin_registry[i].name) == 0) {
+            builtin_registry[i].type = (declType == AST_FUNCTION_DECL) ?
+                BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
+            return;
+        }
+    }
     if (builtin_registry_count >= 256) return;
     builtin_registry[builtin_registry_count].name = strdup(name);
     builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?
@@ -2210,12 +2649,17 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Beep", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ClrEol", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Copy", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Cos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("CursorOff", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("CursorOn", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dec", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("DelLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("dos_exec", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("dos_findfirst", AST_FUNCTION_DECL, NULL);
@@ -2230,10 +2674,15 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GetEnvInt", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HighVideo", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Inc", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("InsLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IntToStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("InvertColors", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IOResult", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
@@ -2245,10 +2694,13 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamBuffer", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("New", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("NormalColors", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Ord", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamCount", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ParamStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("PopScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Pos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("PushScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitRequested", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Random", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Randomize", AST_PROCEDURE_DECL, NULL);
@@ -2256,10 +2708,13 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SaveCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ScreenRows", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ShowCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Sin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
@@ -2278,6 +2733,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("BINormVideo", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ClrScr", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("BIClrScr", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("TermBackground", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackground", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("TextColor", AST_PROCEDURE_DECL, NULL);
@@ -2285,6 +2741,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);

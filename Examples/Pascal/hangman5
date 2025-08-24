@@ -28,13 +28,11 @@ const
   LineH = '═'; LineV = '║';
 
 type
-  { *** ADDED: Linked List for Word Storage *** }
   PWordNode = ^TWordNode;
   TWordNode = record
     data: string[MAX_LENGTH]; { Store word directly - adjust size if needed }
     next: PWordNode;
   end;
-  { *** END ADDED *** }
 
 var
   chosen: string;
@@ -402,6 +400,7 @@ begin
   remaining := MAX_WRONG - wrong;
   remStr := IntToStr(remaining);
   maxStr := IntToStr(MAX_WRONG);
+  TextColor(White);
   barContent := 'Guesses Left: ';
   for i := 1 to remaining do
     barContent := barContent + '#';
@@ -422,7 +421,7 @@ begin
   TextColor(LightRed);
   for i := 1 to wrong do
     write('#');
-  TextColor(LightGray);
+  TextColor(White);
   write(' [' + remStr + '/' + maxStr + ']');
   writeln;
 end;
@@ -459,7 +458,7 @@ begin
     else
     begin
       msg := 'No more hints available.';
-      TextColor(LightGray);
+      TextColor(White);
     end;
   end;
   padding := (width - length(msg)) div 2;
@@ -468,7 +467,7 @@ begin
   for i := 1 to padding do
     write(' ');
   write(msg);
-  TextColor(LightGray);
+  TextColor(White);
   GotoXY(startCol, vMsgRow + 1);
   msg := 'Press Enter to Continue:';
   padding := (width - length(msg)) div 2;
@@ -488,6 +487,8 @@ end;
 ---------------------------------------------------------------------}
 begin
   ClrScr;
+  NormVideo;
+  TextBackground(Black);
   writeln('Initializing Hangman...');
 
   // --- Load word list ONCE ---
@@ -558,6 +559,9 @@ begin
     // --- Main Game Loop (Guessing phase) ---
     while (wrong < MAX_WRONG) and (display <> chosen) do
     begin
+      // The following is a feature/bug.  There has to be something already drawn before 
+      // ClrScr will do the correct thing.  So we draw the border twice.
+      DrawBorder(borderTop, borderBottom, borderLeft, borderRight);
       ClrScr;
       DrawBorder(borderTop, borderBottom, borderLeft, borderRight);
 
@@ -565,7 +569,7 @@ begin
       title := 'Welcome to Hangman!';
       padding := (effectiveWidth - length(title)) div 2; if padding < 0 then padding := 0;
       GotoXY(borderLeft + 1 + padding, vHeaderRow);
-      TextColor(LightGreen); write(title); TextColor(LightGray);
+      TextColor(LightGreen); write(title); TextColor(White);
 
       // Display Subtitle
       subtitle := '(Guess a letter, or ? for a hint)';
@@ -599,6 +603,7 @@ begin
         GotoXY(borderLeft + 1, vPromptRow);
         GotoXY(borderLeft + 1 + padding, vPromptRow);
         write(promptMsg);
+        TextColor(White);
         readln(letter);
         letter := UpCase(letter);
       until (letter in ['A'..'Z']) or (letter = '?');
@@ -620,7 +625,7 @@ begin
             msg := 'You already guessed ''' + letter + '''. Try again.';
             padding := (effectiveWidth - length(msg)) div 2; if padding < 0 then padding := 0;
             GotoXY(borderLeft + 1 + padding, vMsgRow);
-            TextColor(Yellow); write(msg); TextColor(LightGray);
+            TextColor(Yellow); write(msg); TextColor(White);
             GotoXY(borderLeft + 1, vMsgRow + 1);
             msg := 'Press Enter...';
             padding := (effectiveWidth - length(msg)) div 2; if padding < 0 then padding := 0;
@@ -654,7 +659,7 @@ begin
 
     title := 'Hangman Game Over';
     padding := (effectiveWidth - length(title)) div 2; if padding < 0 then padding := 0;
-    GotoXY(borderLeft + 1 + padding, vHeaderRow); TextColor(LightGreen); write(title); TextColor(LightGray);
+    GotoXY(borderLeft + 1 + padding, vHeaderRow); TextColor(LightGreen); write(title); TextColor(White);
 
     padding := (effectiveWidth - length(display)) div 2; if padding < 0 then padding := 0;
     GotoXY(borderLeft + 1 + padding, vWordRow); write(display);
@@ -669,7 +674,7 @@ begin
     GotoXY(borderLeft + 1 + padding, vGuessedRow);
     if length(guessedMsg) > 0 then write(guessedMsg);
 
-    GotoXY(borderLeft + 1, vMsgRow);
+    GotoXY(borderLeft + 1, vMsgRow - 1);
     if display = chosen then
     begin
       TextColor(Green); msg := 'Congratulations, you guessed the word: ' + chosen; inc(wins);
@@ -680,7 +685,7 @@ begin
     end;
     padding := (effectiveWidth - length(msg)) div 2; if padding < 0 then padding := 0;
     GotoXY(borderLeft + 1 + padding, vMsgRow);
-    write(msg); TextColor(LightGray);
+    write(msg); TextColor(White);
 
     GotoXY(borderLeft + 1, vMsgRow + 1);
     winsStr := IntToStr(wins); lossesStr := IntToStr(losses);
