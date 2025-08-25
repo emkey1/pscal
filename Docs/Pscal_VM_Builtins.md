@@ -164,8 +164,8 @@ These built-ins are available when Pscal is built with SDL support.
 | setalphablend | (enable: Boolean) | void | Configure alpha blending. |
 | putpixel | (x: Integer, y: Integer) | void | Draw pixel. |
 | drawline | (x1: Integer, y1: Integer, x2: Integer, y2: Integer) | void | Draw line. |
-| drawrect | (x: Integer, y: Integer, w: Integer, h: Integer) | void | Draw rectangle. |
-| fillrect | (x: Integer, y: Integer, w: Integer, h: Integer) | void | Filled rectangle. |
+| drawrect | (x1: Integer, y1: Integer, x2: Integer, y2: Integer) | void | Draw rectangle. |
+| fillrect | (x1: Integer, y1: Integer, x2: Integer, y2: Integer) | void | Filled rectangle. |
 | drawcircle | (x: Integer, y: Integer, r: Integer) | void | Draw circle. |
 | fillcircle | (x: Integer, y: Integer, r: Integer) | void | Filled circle. |
 | drawpolygon | (points: Array) | void | Draw polygon. |
