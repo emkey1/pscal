@@ -68,7 +68,16 @@ int main(int argc, char **argv) {
     FILE *f = fopen(path, "rb");
     if (!f) { perror("open"); return vmExitWithCleanup(EXIT_FAILURE); }
     fseek(f, 0, SEEK_END); long len = ftell(f); rewind(f);
-    char *src = (char*)malloc(len + 1); fread(src,1,len,f); src[len]='\0'; fclose(f);
+    char *src = (char*)malloc(len + 1);
+    if (!src) { fclose(f); return vmExitWithCleanup(EXIT_FAILURE); }
+    size_t bytes_read = fread(src,1,len,f);
+    if (bytes_read != (size_t)len) {
+        fprintf(stderr, "Error reading source file '%s'\n", path);
+        free(src);
+        fclose(f);
+        return vmExitWithCleanup(EXIT_FAILURE);
+    }
+    src[len]='\0'; fclose(f);
 
     const char *defines[1];
     int define_count = 0;

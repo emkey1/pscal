@@ -197,17 +197,19 @@ FieldValue *copyRecord(FieldValue *orig) {
     FieldValue *new_head = NULL, **ptr = &new_head;
     for (FieldValue *curr = orig; curr != NULL; curr = curr->next) {
         FieldValue *new_field = malloc(sizeof(FieldValue));
-        if (!new_field) { // Added null check for malloc result
-             fprintf(stderr, "Memory allocation error in copyRecord for new_field\n");
-             // Consider freeing already allocated parts of new_head before exiting
-             EXIT_FAILURE_HANDLER();
+        if (!new_field) {
+            fprintf(stderr, "Memory allocation error in copyRecord for new_field\n");
+            freeFieldValue(new_head); // Free any previously allocated nodes
+            EXIT_FAILURE_HANDLER();
+            return NULL; // In case EXIT_FAILURE_HANDLER returns
         }
         new_field->name = strdup(curr->name);
-        if (!new_field->name) { // Added null check for strdup result
-             fprintf(stderr, "Memory allocation error in copyRecord for new_field->name\n");
-             free(new_field);
-             // Consider freeing already allocated parts of new_head before exiting
-             EXIT_FAILURE_HANDLER();
+        if (!new_field->name) {
+            fprintf(stderr, "Memory allocation error in copyRecord for new_field->name\n");
+            free(new_field);
+            freeFieldValue(new_head);
+            EXIT_FAILURE_HANDLER();
+            return NULL;
         }
 
         // --- Recursively copy the field's value ---
@@ -273,17 +275,18 @@ FieldValue *createEmptyRecord(AST *recordType) {
 
             // Allocate memory for the FieldValue struct (holds name + value)
             FieldValue *fv = malloc(sizeof(FieldValue));
-            if (!fv) { // Check malloc
+            if (!fv) {
                  fprintf(stderr, "FATAL: malloc failed for FieldValue in createEmptyRecord for field '%s'\n", varNode->token->value);
-                 // Hard to clean up partially built list, exiting is safest
+                 freeFieldValue(head); // Free any partially built list
                  EXIT_FAILURE_HANDLER();
             }
 
             // Duplicate the field name
             fv->name = strdup(varNode->token->value);
-            if (!fv->name) { // Check strdup
+            if (!fv->name) {
                  fprintf(stderr, "FATAL: strdup failed for FieldValue name in createEmptyRecord for field '%s'\n", varNode->token->value);
                  free(fv); // Free the FieldValue struct itself
+                 freeFieldValue(head);
                  EXIT_FAILURE_HANDLER();
             }
 
