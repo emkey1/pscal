@@ -31,6 +31,21 @@ if(SDL)
     add_compile_definitions(SDL)
 endif()
 
+# ---- Extended builtin categories ----
+option(ENABLE_EXT_BUILTIN_MATH "Enable extended math builtins" ON)
+option(ENABLE_EXT_BUILTIN_STRINGS "Enable extended string builtins" ON)
+option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
+
+if(ENABLE_EXT_BUILTIN_MATH)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
+endif()
+if(ENABLE_EXT_BUILTIN_STRINGS)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_STRINGS)
+endif()
+if(ENABLE_EXT_BUILTIN_SYSTEM)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_SYSTEM)
+endif()
+
 # ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
 if(APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
     execute_process(
@@ -143,12 +158,9 @@ if(SDL)
     )
 endif()
 
-# ---- User-supplied builtin sources ----
-# Any .c files placed in src/ext_builtins (including subdirectories)
-# will be automatically compiled and linked into the main binaries.
-file(GLOB PSCAL_EXT_BUILTIN_SOURCES CONFIGURE_DEPENDS
-     src/ext_builtins/*.c
-     src/ext_builtins/*/*.c)
+# ---- Extended builtins ----
+# Allow selectively enabling categories of extended builtins.
+add_subdirectory(src/ext_builtins)
 list(APPEND PSCAL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 
 
