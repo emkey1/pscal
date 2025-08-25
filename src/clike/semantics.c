@@ -153,6 +153,9 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("strlen");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
+    functions[functionCount].name = strdup("itoa");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
     // `exit` behaves like C's exit, terminating the program with an optional code.
     functions[functionCount].name = strdup("exit");
     functions[functionCount].type = TYPE_VOID;

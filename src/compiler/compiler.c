@@ -2112,6 +2112,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
                     (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR
+                    || (strcasecmp(calleeName, "str") == 0 && i == 1)
                 )) {
                     is_var_param = true;
                 }
