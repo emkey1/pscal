@@ -1,7 +1,8 @@
 # Pscal Built-in Functions
 
 This document lists the built-in procedures and functions provided by the Pscal
-VM.
+VM. For instructions on adding your own routines, see
+[`extending_builtins.md`](extending_builtins.md).
 
 ## General
 

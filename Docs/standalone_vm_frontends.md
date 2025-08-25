@@ -2,7 +2,8 @@
 
 The stand-alone `pscalvm` executes programs encoded as `.pbc` bytecode. By
 producing this format, any compiler or language front end can run on the VM and
-reuse its runtime without touching the C sources.
+reuse its runtime without touching the C sources. For an overview of the VM
+itself, see [`pscal_vm_overview.md`](pscal_vm_overview.md).
 
 ## End-to-end workflow
 
@@ -97,9 +98,25 @@ The builder encodes the bytecode and constant table and writes the final file.
 Run the result with:
 
 ```sh
-python tools/clike source.tiny out.pbc
+python tools/tiny source.tiny out.pbc
 ./build/bin/pscalvm out.pbc
 ```
+
+For example, the following program reads two numbers and prints their sum:
+
+```tiny
+read a;
+read b;
+write a + b;
+```
+
+```sh
+python tools/tiny add.tiny add.pbc
+printf "2\n3\n" | ./build/bin/pscalvm add.pbc
+# output: 5
+```
+
+Use `pscalvm -d add.pbc` to disassemble the bytecode for debugging.
 
 ## Step-by-step: the clike compiler (C)
 
@@ -147,7 +164,8 @@ demonstrated in `src/clike/codegen.c`.
 
 Opcodes `OP_CALL_BUILTIN` and `OP_CALL_BUILTIN_PROC` invoke the VM's built-in
 functions and procedures. The VM exposes a large catalog of routines described in
-`Docs/Pscal_Builtins.md`.
+`Docs/pscal_vm_builtins.md`. To add your own, see
+[`extending_builtins.md`](extending_builtins.md).
 
 To invoke a builtin from generated code:
 
@@ -201,4 +219,7 @@ Frontends can therefore expose console I/O, math utilities, graphics, networking
 and many other features simply by referencing the builtin name and emitting the
 proper call opcode. Builtins are resolved dynamically by name, so the VM does
 not need recompilation when new frontends are introduced.
+
+For a catalog of available routines, see
+[`pscal_vm_builtins.md`](pscal_vm_builtins.md).
 

@@ -1,4 +1,4 @@
-# CLike Front End Overview
+# C-Like Front End Overview
 
 The `clike` front end provides a small C-style language that targets the
 Pscal virtual machine.
@@ -20,6 +20,20 @@ Pscal virtual machine.
   `upcase` operate on `str` values.
 - **Dynamic allocation** – Use `new(&node);` to allocate structures;
   fields are accessed with the usual `->` syntax.
+
+## Language Features
+
+The language aims to resemble a tiny subset of C while remaining easy to map
+to the VM:
+
+- **Types** – `int`/`long`, `float`/`double`, `char`, `byte`, `str`, arrays
+  and `struct` declarations.
+- **Control flow** – `if`, `while`, `for`, `do … while` and `switch` with
+  `break` and `continue`.
+- **Functions** – Defined with a return type and parameter list. Pointer
+  parameters allow pass‑by‑reference semantics.
+- **Structs and pointers** – `struct` aggregates fields. `new(&node)` allocates
+  dynamic storage and `->` dereferences pointer fields.
 
 ## Example: Sorting a String
 
@@ -47,6 +61,39 @@ str guessed = "ST";
 sort_string(guessed);  // pass the string value, not its address
 ```
 
+## Example: Building a Linked List
+
+```clike
+struct Node {
+    int value;
+    struct Node* next;
+};
+
+void push(struct Node** head, int value) {
+    struct Node* n;
+    new(&n);
+    n->value = value;
+    n->next = *head;
+    *head = n;
+}
+
+void print(struct Node* head) {
+    while (head) {
+        write(head->value, " ");
+        head = head->next;
+    }
+    writeln();
+}
+
+struct Node* list = NULL;
+push(&list, 3);
+push(&list, 1);
+push(&list, 4);
+print(list);           // 4 1 3
+```
+
 For tutorials and additional details, see
 [`clike_tutorial.md`](clike_tutorial.md) and
-[`clike_repl_tutorial.md`](clike_repl_tutorial.md).
+[`clike_repl_tutorial.md`](clike_repl_tutorial.md). The complete
+specification is available in
+[`clike_language_reference.md`](clike_language_reference.md).

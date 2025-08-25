@@ -6,6 +6,9 @@ without modifying the core source tree.  Any `*.c` files placed in
 `src/ext_builtins` are automatically compiled and linked into the
 executables.
 
+For a catalog of existing VM routines, see
+[`pscal_vm_builtins.md`](pscal_vm_builtins.md).
+
 ## Creating a new builtin
 
 Drop a C file into `src/ext_builtins` that defines one or more builtin

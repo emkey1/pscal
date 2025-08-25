@@ -1,15 +1,15 @@
-# PSCAL Virtual Machine Documentation
+# Pscal Virtual Machine Documentation
 
-### **PSCAL VM Architecture**
+### **Pscal VM Architecture**
 
-The PSCAL VM is a **stack-based virtual machine**. This means that it uses a stack data structure to store and manipulate data during program execution. Instead of operating on registers like a physical CPU, most instructions (opcodes) operate on values at the top of the stack.
+The Pscal VM is a **stack-based virtual machine**. This means that it uses a stack data structure to store and manipulate data during program execution. Instead of operating on registers like a physical CPU, most instructions (opcodes) operate on values at the top of the stack.
 
 #### **Core Components**
 
 The VM's architecture is defined by the `VM` struct in `src/vm/vm.h` and consists of the following key components:
 
 * **Instruction Pointer (IP):** A pointer (`ip`) that always points to the *next* bytecode instruction to be executed.
-* **Operand Stack:** A fixed-size array (`stack`) that holds `Value` structs. `Value` is a versatile struct that can represent all of PSCAL's data types, including integers, reals, strings, pointers, and more.
+* **Operand Stack:** A fixed-size array (`stack`) that holds `Value` structs. `Value` is a versatile struct that can represent all of Pscal's data types, including integers, reals, strings, pointers, and more.
     * **`stackTop`:** A pointer to the next available slot on the stack. When a value is pushed, it's placed where `stackTop` points, and then `stackTop` is incremented.
 * **Call Stack (Frames):** An array of `CallFrame` structs (`frames`) that manages function and procedure calls. Each time a function is called, a new `CallFrame` is pushed onto this stack. A `CallFrame` contains:
     * **`return_address`**: The IP in the caller to return to when the function finishes.
@@ -34,7 +34,7 @@ The VM's execution is driven by the `interpretBytecode` function in `src/vm/vm.c
 
 ### **Opcode Reference**
 
-The following is a complete list of opcodes supported by the PSCAL VM, as defined in `src/compiler/bytecode.h`, with integrated examples of their usage.
+The following is a complete list of opcodes supported by the Pscal VM, as defined in `src/compiler/bytecode.h`, with integrated examples of their usage.
 
 #### **Stack Manipulation Opcodes**
 
@@ -133,6 +133,41 @@ If `a` had been greater than `b`, the `OP_JUMP_IF_FALSE` would not have jumped, 
 
 ---
 
+**Example: While Loop**
+
+```pascal
+i := 0;
+while i < 3 do
+begin
+  writeln(i);
+  i := i + 1;
+end;
+```
+
+1. `OP_CONSTANT <index_of_0>`
+   * Push integer `0`.
+2. `OP_SET_GLOBAL <index_of_i>`
+   * Store in variable `i`.
+3. loop_start:
+   * `OP_GET_GLOBAL <index_of_i>`
+   * `OP_CONSTANT <index_of_3>`
+   * `OP_LESS`
+   * `OP_JUMP_IF_FALSE <exit_offset>`
+4. loop_body:
+   * `OP_GET_GLOBAL <index_of_i>`
+   * `OP_WRITE_LN 1`
+   * `OP_GET_GLOBAL <index_of_i>`
+   * `OP_CONSTANT <index_of_1>`
+   * `OP_ADD`
+   * `OP_SET_GLOBAL <index_of_i>`
+   * `OP_JUMP <loop_start>`
+5. exit:
+   * (next instruction after loop)
+
+This sequence uses `OP_JUMP_IF_FALSE` to exit the loop and `OP_JUMP` to repeat.
+
+---
+
 #### **Variable and Data Structure Opcodes**
 
 * **`OP_DEFINE_GLOBAL`** / **`OP_DEFINE_GLOBAL16`**:
@@ -183,6 +218,32 @@ If `a` had been greater than `b`, the `OP_JUMP_IF_FALSE` would not have jumped, 
 * **`OP_GET_CHAR_FROM_STRING`**:
     * **Operands:** None.
     * **Action:** Pops an index and a string. Pushes the character at that index.
+
+---
+**Example: Record Field Assignment**
+
+Consider the Pascal snippet:
+
+```pascal
+var
+  p: TPoint;
+begin
+  p.x := 10;
+end.
+```
+
+Bytecode emitted:
+
+1. `OP_GET_GLOBAL_ADDRESS <index_of_p>`
+   * Push a pointer to the global variable `p`.
+2. `OP_GET_FIELD_ADDRESS <index_of_x>`
+   * Pop the record pointer, push a pointer to field `x`.
+3. `OP_CONSTANT <index_of_10>`
+   * Push the integer constant `10`.
+4. `OP_SET_INDIRECT`
+   * Pop value and pointer; store `10` in `p.x`.
+
+---
 
 #### **Function and Procedure Call Opcodes**
 
@@ -235,3 +296,8 @@ MyFunction(a, b);
 * **`OP_FORMAT_VALUE`**:
     * **Operands:** 1-byte width, 1-byte precision.
     * **Action:** Pops a value and formats it into a string with the specified width and precision. Pushes the formatted string back onto the stack.
+
+For a catalog of VM built-ins available to front ends, see
+[`pscal_vm_builtins.md`](pscal_vm_builtins.md). For guidance on creating
+new front ends, consult
+[`standalone_vm_frontends.md`](standalone_vm_frontends.md).
