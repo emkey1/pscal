@@ -668,32 +668,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } \
             } \
         } \
-\
-        /* Enum +/- intlike */ \
-        if (!op_is_handled) { \
-            if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
-                bool a_enum_b_int = (a_val_popped.type == TYPE_ENUM && IS_INTLIKE(b_val_popped)); \
-                bool a_int_b_enum = (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_ENUM); \
-                if (a_enum_b_int || a_int_b_enum) { \
-                    Value enum_val = a_enum_b_int ? a_val_popped : b_val_popped; \
-                    Value int_val  = a_enum_b_int ? b_val_popped : a_val_popped; \
-                    long long delta = as_i64(int_val); \
-                    int new_ord = enum_val.enum_val.ordinal + \
-                        ((current_instruction_code == OP_ADD) ? (int)delta : -(int)delta); \
-                    if (enum_val.enum_meta && \
-                        (new_ord < 0 || new_ord >= enum_val.enum_meta->member_count)) { \
-                        runtimeError(vm, "Runtime Error: Enum '%s' out of range.", \
-                                     enum_val.enum_val.enum_name ? enum_val.enum_val.enum_name : "<anon>"); \
-                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                        return INTERPRET_RUNTIME_ERROR; \
-                    } \
-                    result_val = makeEnum(enum_val.enum_val.enum_name, new_ord); \
-                    result_val.enum_meta = enum_val.enum_meta; \
-                    result_val.base_type_node = enum_val.base_type_node; \
-                    op_is_handled = true; \
-                } \
-            } \
-        } \
         \
         /* Set union/difference/intersection */ \
         if (!op_is_handled) { \
