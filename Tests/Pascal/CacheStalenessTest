@@ -1,4 +1,0 @@
-program CacheStalenessTest;
-begin
-  writeln('second');
-end.

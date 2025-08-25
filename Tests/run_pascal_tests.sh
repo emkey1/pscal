@@ -113,7 +113,8 @@ done
 # source file shares the same timestamp as the cache entry.
 echo "---- CacheStalenessTest ----"
 tmp_home=$(mktemp -d)
-src_file="$SCRIPT_DIR/Pascal/CacheStalenessTest"
+src_dir=$(mktemp -d)
+src_file="$src_dir/CacheStalenessTest"
 cat > "$src_file" <<'EOF'
 program CacheStalenessTest;
 begin
@@ -121,13 +122,28 @@ begin
 end.
 EOF
 
+# Ensure the cache entry's timestamp exceeds the source file's mtime.
+sleep 1
+
 # First run to populate the cache
 set +e
-(cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest" > "$tmp_home/out1" 2> "$tmp_home/err1")
+(cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 
-if [ $status1 -eq 0 ]; then
+if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
+  # Second run should use the cache
+  sleep 2
+  set +e
+  (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out_cache" 2> "$tmp_home/err_cache")
+  status_cache=$?
+  set -e
+
+  if [ $status_cache -ne 0 ] || ! grep -q 'Loaded cached byte code' "$tmp_home/err_cache" || ! grep -q 'first' "$tmp_home/out_cache"; then
+    echo "Cache reuse test failed: expected cached bytecode" >&2
+    EXIT_CODE=1
+  fi
+
   cache_file=$(find "$tmp_home/.pscal_cache" -name '*.bc' | head -n 1)
 
   cat > "$src_file" <<'EOF'
@@ -142,7 +158,7 @@ EOF
   touch -r "$cache_file" "$src_file"
 
   set +e
-  (cd "$SCRIPT_DIR" && HOME="$tmp_home" "$PASCAL_BIN" "Pascal/CacheStalenessTest" > "$tmp_home/out2" 2> "$tmp_home/err2")
+  (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
   set -e
 
@@ -155,7 +171,7 @@ else
   EXIT_CODE=1
 fi
 
-rm -rf "$tmp_home" "$src_file"
+rm -rf "$tmp_home" "$src_dir"
 echo
 
 exit $EXIT_CODE
