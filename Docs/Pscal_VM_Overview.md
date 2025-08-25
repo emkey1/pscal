@@ -130,6 +130,7 @@ if a > b then
     * **Stack:** `[]`
 
 If `a` had been greater than `b`, the `OP_JUMP_IF_FALSE` would not have jumped, and the code to assign `10` to `c` would have been executed.
+
 ---
 
 #### **Variable and Data Structure Opcodes**
