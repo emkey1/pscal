@@ -257,7 +257,15 @@ int main(int argc, char *argv[]) {
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
-    fread(source_buffer, 1, fsize, file);
+    size_t bytes_read = fread(source_buffer, 1, fsize, file);
+    if (bytes_read != (size_t)fsize) {
+        fprintf(stderr, "Error reading source file '%s'\n", sourceFile);
+        free(source_buffer);
+        fclose(file);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return vmExitWithCleanup(EXIT_FAILURE);
+    }
     source_buffer[fsize] = '\0';
     fclose(file);
 
