@@ -262,12 +262,21 @@ static bool read_value(FILE* f, Value* out) {
 bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     char* cache_path = build_cache_path(source_path);
     if (!cache_path) return false;
+    if (chunk && chunk->count > 0) {
+        free(cache_path);
+        return false;
+    }
     bool ok = false;
     int const_count = 0;
     int read_consts = 0;
-    if (is_cache_fresh(cache_path, source_path)) {
-        FILE* f = fopen(cache_path, "rb");
-        if (f) {
+
+    if (!is_cache_fresh(cache_path, source_path)) {
+        free(cache_path);
+        return false;
+    }
+
+    FILE* f = fopen(cache_path, "rb");
+    if (f) {
             uint32_t magic = 0, ver = 0;
             if (fread(&magic, sizeof(magic), 1, f) == 1 &&
                 fread(&ver, sizeof(ver), 1, f) == 1 &&
@@ -383,7 +392,6 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
             }
             fclose(f);
         }
-    }
     free(cache_path);
     if (!ok) {
         for (int i = 0; i < read_consts; ++i) {
