@@ -5,16 +5,16 @@
  */
 
 int main() {
-    int width = 1024;
-    int height = 768;
-    int maxIterations = 128;
+    int width = 1600;
+    int height = 900;
+    int maxIterations = 200;
     double minRe = -2.0;
     double maxRe = 1.0;
     double minIm = -1.2;
     double maxIm;
     double reFactor;
     double imFactor;
-    double zoomFactor = 2.0;
+    double zoomFactor = 4.0;
 
     int bytesPerPixel = 4;
     int row[width];

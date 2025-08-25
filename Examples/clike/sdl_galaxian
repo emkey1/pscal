@@ -39,13 +39,13 @@ int main() {
     int AlienY[AlienRows * AlienCols + 1];
     int AlienAlive[AlienRows * AlienCols + 1];
 
-    ScreenWidth = 640;
-    ScreenHeight = 480;
+    ScreenWidth = 800;
+    ScreenHeight = 600;
     initgraph(ScreenWidth, ScreenHeight, "Galaxian CLike");
 
     initsoundsystem();
-    ShotSound = loadsound("../lib/sounds/paddle_hit.wav");
-    ExplodeSound = loadsound("../lib/sounds/wall_hit.wav");
+    ShotSound = loadsound("/usr/local/pscal/lib/sounds/paddle_hit.wav");
+    ExplodeSound = loadsound("/usr/local/pscal/lib/sounds/wall_hit.wav");
 
     PlayerW = 40;
     PlayerH = 20;
