@@ -638,11 +638,17 @@ static void vmRestoreColorState(void) {
         return;
     char seq[64];
     int len = snprintf(seq, sizeof(seq), "\x1B]10;%s\x07", cs->fg);
-    if (len > 0)
-        write(STDOUT_FILENO, seq, len);
+    if (len > 0) {
+        if (write(STDOUT_FILENO, seq, len) != len) {
+            perror("vmRestoreColorState: write fg");
+        }
+    }
     len = snprintf(seq, sizeof(seq), "\x1B]11;%s\x07", cs->bg);
-    if (len > 0)
-        write(STDOUT_FILENO, seq, len);
+    if (len > 0) {
+        if (write(STDOUT_FILENO, seq, len) != len) {
+            perror("vmRestoreColorState: write bg");
+        }
+    }
 }
 
 // atexit handler: restore terminal settings and ensure cursor visibility
@@ -650,7 +656,9 @@ static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
     if (isatty(STDOUT_FILENO)) {
         const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
-        write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+        if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
+            perror("vmAtExitCleanup: write show_cursor");
+        }
         if (vm_color_stack_depth > 0)
             vm_color_stack_depth = 1; // Restore base screen colors
         vmRestoreColorState();
@@ -707,7 +715,9 @@ void vmPauseBeforeExit(void) {
     tcflush(STDIN_FILENO, TCIFLUSH); // Discard any pending input
     vmEnableRawMode();               // Ensure we can read single key presses
     const char show_cursor[] = "\x1B[?25h";
-    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+    if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
+        perror("vmPrepareCanonicalInput: write show_cursor");
+    }
 
     char ch;
     while (read(STDIN_FILENO, &ch, 1) < 0) {
@@ -746,7 +756,9 @@ static void vmPrepareCanonicalInput(void) {
     vmRestoreTerminal();
     tcflush(STDIN_FILENO, TCIFLUSH);
     const char show_cursor[] = "\x1B[?25h";
-    write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1);
+    if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
+        perror("vmPrepareCanonicalInput: write show_cursor");
+    }
     fflush(stdout);
 }
 
@@ -1186,7 +1198,9 @@ Value vmBuiltinPushscreen(VM* vm, int arg_count, Value* args) {
         vmPushColorState();
         if (vm_alt_screen_depth == 0) {
             const char enter_alt[] = "\x1B[?1049h";
-            write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
+            if (write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1) != (ssize_t)(sizeof(enter_alt) - 1)) {
+                perror("vmBuiltinPushscreen: write enter_alt");
+            }
         }
         vm_alt_screen_depth++;
         vmRestoreColorState();
@@ -1207,7 +1221,9 @@ Value vmBuiltinPopscreen(VM* vm, int arg_count, Value* args) {
         if (isatty(STDOUT_FILENO)) {
             if (vm_alt_screen_depth == 0) {
                 const char exit_alt[] = "\x1B[?1049l";
-                write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1);
+                if (write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1) != (ssize_t)(sizeof(exit_alt) - 1)) {
+                    perror("vmBuiltinPopscreen: write exit_alt");
+                }
             }
             vmRestoreColorState();
             fflush(stdout);
@@ -2443,7 +2459,13 @@ Value vmBuiltinMstreamloadfromfile(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "MStreamLoadFromFile: Memory allocation error for file buffer.");
         return makeBoolean(0);
     }
-    fread(buffer, 1, size, f);
+    size_t read_bytes = fread(buffer, 1, size, f);
+    if (read_bytes != size) {
+        fprintf(stderr, "MStreamLoadFromFile: short read or read error.\n");
+        free(buffer);
+        fclose(f);
+        return makeBoolean(0);
+    }
     buffer[size] = '\0'; // Null-terminate the buffer
     fclose(f);
 

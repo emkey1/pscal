@@ -1076,7 +1076,14 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         long len = ftell(f);
         rewind(f);
         char *src = (char*)malloc(len + 1);
-        fread(src, 1, len, f);
+        if (!src) { fclose(f); continue; }
+        size_t bytes_read = fread(src, 1, len, f);
+        if (bytes_read != (size_t)len) {
+            fprintf(stderr, "Error reading import '%s'\n", orig_path);
+            free(src);
+            fclose(f);
+            continue;
+        }
         src[len] = '\0';
         fclose(f);
 
