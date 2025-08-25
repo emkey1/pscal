@@ -7,3 +7,6 @@ links
 Misc/old
 .gitignore
 .bin
+
+Tests/edge_input.txt
+Tests/readln_test.txt
