@@ -225,6 +225,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sinh", vmBuiltinSinh},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
+    {"str", vmBuiltinStr},
     {"succ", vmBuiltinSucc},
     {"tan", vmBuiltinTan},
     {"tanh", vmBuiltinTanh},
@@ -2612,6 +2613,47 @@ Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
     return makeString(buffer);
 }
 
+Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[1].type != TYPE_POINTER) {
+        runtimeError(vm, "Str expects (numeric, var string).");
+        return makeVoid();
+    }
+    Value val = args[0];
+    Value* dest = (Value*)args[1].ptr_val;
+    if (!dest) {
+        runtimeError(vm, "Str received a nil pointer.");
+        return makeVoid();
+    }
+    char buffer[64];
+    switch (val.type) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+            snprintf(buffer, sizeof(buffer), "%lld", val.i_val);
+            break;
+        case TYPE_REAL:
+            snprintf(buffer, sizeof(buffer), "%f", val.r_val);
+            break;
+        case TYPE_CHAR:
+            snprintf(buffer, sizeof(buffer), "%c", val.c_val);
+            break;
+        default:
+            runtimeError(vm, "Str expects a numeric or char argument.");
+            return makeVoid();
+    }
+    char* new_buf = strdup(buffer);
+    if (!new_buf) {
+        runtimeError(vm, "Str: memory allocation failed.");
+        return makeVoid();
+    }
+    freeValue(dest);
+    dest->type = TYPE_STRING;
+    dest->s_val = new_buf;
+    dest->max_length = -1;
+    return makeVoid();
+}
+
 Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "Length expects 1 argument.");
@@ -2871,6 +2913,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Sinh", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Str", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Succ", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Tan", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Tanh", AST_FUNCTION_DECL, NULL);
