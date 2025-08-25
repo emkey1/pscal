@@ -1360,10 +1360,22 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                         alias_sym->name = strdup(unq_lower);
                         alias_sym->is_alias = true;
                         alias_sym->real_symbol = qualified_proc_symbol;
+                        /* Copy metadata so the alias behaves like the real symbol during compilation */
+                        alias_sym->type = qualified_proc_symbol->type;
+                        alias_sym->arity = qualified_proc_symbol->arity;
+                        alias_sym->locals_count = qualified_proc_symbol->locals_count;
+                        alias_sym->bytecode_address = qualified_proc_symbol->bytecode_address;
+                        alias_sym->is_defined = qualified_proc_symbol->is_defined;
                         hashTableInsert(procedure_table, alias_sym);
                     } else {
-                        DEBUG_PRINT("[DEBUG] linkUnit: Unqualified alias '%s' already exists, skipping.\n",
-                                    unq_lower);
+                        /* Update existing placeholder with real implementation details */
+                        existing_unq->is_alias = true;
+                        existing_unq->real_symbol = qualified_proc_symbol;
+                        existing_unq->type = qualified_proc_symbol->type;
+                        existing_unq->arity = qualified_proc_symbol->arity;
+                        existing_unq->locals_count = qualified_proc_symbol->locals_count;
+                        existing_unq->bytecode_address = qualified_proc_symbol->bytecode_address;
+                        existing_unq->is_defined = qualified_proc_symbol->is_defined;
                     }
                 } else {
                     DEBUG_PRINT("[WARN] linkUnit: No implementation for '%s'; cannot alias '%s'.\n",
