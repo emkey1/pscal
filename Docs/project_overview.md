@@ -94,7 +94,11 @@ cd Tests; ./run_all_tests
     * clike: The complete frontend for the C-like language. 
     * compiler: Contains core components of the compiler that are shared across the different language frontends such as bytecode definition and the portion that translates the AST into bytecode.
     * core: Houses fundamental utilities and data structures used throughout the project. This includes implementations for lists, bytecode caching, and common type definitions.
-    * ext_builtins: The source code for additional, "external" built-in functions. This modular design allows for new features to be added to the language easily. 
+* ext_builtins: Optional built-in functions organised by category (`math`,
+  `strings`, `system`, `user`). Each subdirectory exposes a `register.c` and can be
+  enabled or disabled via the CMake options
+  `ENABLE_EXT_BUILTIN_MATH`, `ENABLE_EXT_BUILTIN_STRINGS`, `ENABLE_EXT_BUILTIN_SYSTEM`, and
+  `ENABLE_EXT_BUILTIN_USER`.
     * pascal: The Pascal-like language frontend, containing its lexer, parser, and AST implementation.
     * symbol: The implementation of the symbol table, which is a critical component for the compiler to manage identifiers such as variables and functions.
     * vm: The source code for the stack-based virtual machine that executes the bytecode produced by the front ends.

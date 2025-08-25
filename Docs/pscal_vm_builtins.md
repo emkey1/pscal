@@ -29,6 +29,7 @@ VM. For instructions on adding your own routines, see
 | upcase | (ch: Char) | Char | Convert character to uppercase. |
 | pos | (sub: String or Char, s: String) | Integer | Position of substring. |
 | copy | (s: String or Char, index: Integer, count: Integer) | String | Copy substring. |
+| reversestring | (s: String) | String | Reverse characters in `s`. |
 | paramcount | () | Integer | Number of command line parameters. |
 | paramstr | (index: Integer) | String | Command line parameter by index. |
 | quitrequested | () | Boolean | True if window close requested. |

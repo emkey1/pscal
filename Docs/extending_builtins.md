@@ -1,234 +1,96 @@
 # Extending VM Built-ins
 
-Pscal allows additional built-in routines to be linked into the virtual
-machine at build time.  This makes it easy to expose host functionality
-without modifying the core source tree.  Any `*.c` files placed in
-`src/ext_builtins` are automatically compiled and linked into the
-executables.
+Pscal can link optional C helpers into the virtual machine at build time.  These
+extensions live under `src/ext_builtins/` and are organised by category to keep
+unrelated routines separate:
 
-For a catalog of existing VM routines, see
-[`pscal_vm_builtins.md`](pscal_vm_builtins.md).
+```
+src/ext_builtins/
+  math/
+  strings/
+  system/
+  user/
+```
 
-## Creating a new builtin
+The `user/` directory is reserved for project-specific extensions and is empty by default.
 
-Drop a C file into `src/ext_builtins` that defines one or more builtin
-handlers. Each file typically provides a small registration helper, and a
-separate `registerExtendedBuiltins` function ties them together. The
-repository includes `src/ext_builtins/getpid.c`, which exposes the process
-ID through a `GetPid` Pascal function:
+
+Each subdirectory contains its own `register.c` that exposes an init function
+(`pascal_ext_<category>_init`) and optional CMake toggle.  The top-level
+`src/ext_builtins/register.c` calls these init functions when the corresponding
+option is enabled.
+
+## Build options
+
+`src/ext_builtins/CMakeLists.txt` defines per-category switches which default to
+`ON`:
+
+```
+option(ENABLE_EXT_BUILTIN_MATH "Build math extended builtins" ON)
+option(ENABLE_EXT_BUILTIN_STRINGS "Build string extended builtins" ON)
+option(ENABLE_EXT_BUILTIN_SYSTEM "Build system extended builtins" ON)
+option(ENABLE_EXT_BUILTIN_USER "Build user extended builtins" ON)
+```
+
+Disable a category at configure time with e.g.:
+
+```sh
+cmake -DENABLE_EXT_BUILTIN_STRINGS=OFF ..
+```
+
+## Adding a builtin
+
+1. Choose the appropriate category directory or create a new one.
+2. Drop a `*.c` file that implements the VM handler and a small registration
+   helper.
+3. Include the helper in that directory's `register.c`.
+
+### Example – `ReverseString`
+
+`src/ext_builtins/strings/reversestring.c` exposes a function that returns the
+characters of a string in reverse order:
 
 ```c
-#include <unistd.h>
-#include "core/utils.h"
-#include "backend_ast/builtin.h"
-
-static Value vmBuiltinGetPid(struct VM_s* vm, int arg_count, Value* args) {
-    (void)vm; (void)args;
-    return arg_count == 0 ? makeInt(getpid()) : makeInt(-1);
+static Value vmReverseString(struct VM_s* vm, int argc, Value* args) {
+    if (argc != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "ReverseString expects a single string argument");
+        return makeNull();
+    }
+    const char* s = AS_CSTRING(args[0]);
+    size_t len = strlen(s);
+    char* out = GC_MALLOC_ATOMIC(len + 1);
+    for (size_t i = 0; i < len; ++i) out[i] = s[len - 1 - i];
+    out[len] = '\0';
+    return makeString(out, len);
 }
 
-void registerGetPidBuiltin(void) {
-    registerBuiltinFunction("GetPid", AST_FUNCTION_DECL, NULL);
-    registerVmBuiltin("getpid", vmBuiltinGetPid);
+void registerReverseString(void) {
+    registerBuiltinFunction("ReverseString", AST_FUNCTION_DECL, NULL);
+    registerVmBuiltin("reversestring", vmReverseString);
 }
 ```
 
-A second example shows how to accept VAR parameters.  `src/ext_builtins/swap.c`
-defines a simple procedure that swaps two variables and provides a helper
-`registerSwapBuiltin`:
+The `strings/register.c` file wires the category together:
 
 ```c
-#include "core/utils.h"
-#include "backend_ast/builtin.h"
+void registerReverseString(void);
 
-static Value vmBuiltinSwap(struct VM_s* vm, int arg_count, Value* args) {
-    if (arg_count != 2) {
-        runtimeError(vm, "Swap expects exactly 2 arguments.");
-        return makeVoid();
-    }
-    if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER) {
-        runtimeError(vm, "Arguments to Swap must be variables (VAR parameters).");
-        return makeVoid();
-    }
-    Value* varA = (Value*)args[0].ptr_val;
-    Value* varB = (Value*)args[1].ptr_val;
-    if (!varA || !varB) {
-        runtimeError(vm, "Swap received a NIL pointer for a VAR parameter.");
-        return makeVoid();
-    }
-    if (varA->type != varB->type) {
-        runtimeError(vm, "Cannot swap variables of different types (%s and %s).",
-                     varTypeToString(varA->type), varTypeToString(varB->type));
-        return makeVoid();
-    }
-    Value temp = *varA;
-    *varA = *varB;
-    *varB = temp;
-    return makeVoid();
-}
-
-void registerSwapBuiltin(void) {
-    registerBuiltinFunction("Swap", AST_PROCEDURE_DECL, NULL);
-    registerVmBuiltin("swap", vmBuiltinSwap);
+void pascal_ext_strings_init(void) {
+    registerReverseString();
 }
 ```
 
-A tiny `register.c` file wires the helpers together by defining
-`registerExtendedBuiltins`:
-
-```c
-void registerGetPidBuiltin(void);
-void registerSwapBuiltin(void);
-
-void registerExtendedBuiltins(void) {
-    registerGetPidBuiltin();
-    registerSwapBuiltin();
-}
-```
-
-Any additional files added to `src/ext_builtins` will be picked up the
-next time you run CMake and `make`, assuming you have also added it to the 
-src/ext_builtins/register.c file, as shown above.
-
-## Using the builtins
-
-After rebuilding, the new routines can be invoked from Pascal code:
+After rebuilding, the builtin is available from Pascal code via the `StringUtil`
+unit:
 
 ```pascal
-program ShowBuiltins;
-
-type PInt = ^integer;
-var
-  a, b: PInt;
+program Demo;
+uses StringUtil;
 begin
-  writeln('PID = ', GetPid());
-  New(a); New(b);
-  a^ := 1; b^ := 2;
-  Swap(a, b);
-  writeln('After Swap: a=', a^, ' b=', b^);
-  Dispose(a); Dispose(b);
+  writeln(ReverseString('pscal'));
 end.
 ```
 
-Running the program prints the current process ID:
-
-```sh
-$ build/bin/pascal Examples/Pascal/show_builtins.p
-PID = 12345
-After Swap: a=2 b=1
-```
-
-The same builtin is available to the C-like front end.  An equivalent
-program can be written as:
-
-```c
-int main() {
-  printf("PID = %d\n", getpid());
-  return 0;
-}
-```
-
-Running it with the `clike` compiler yields the same output:
-
-```sh
-$ build/bin/clike Examples/CLike/show_pid.cl
-PID = 12345
-```
-
-## Performance implications
-Lets take the fibonacci examples in the Examples/Clike directory.
-
-First we'll time fibonacci_native.cl on my M1 MacBook Pro...
-```sh
-time ../../build/bin/clike fibonacci_ext.cl
-Please enter an integer value for fibonacci: 92
-0
-1
-1
-2
-3
-5
-8
-13
-21
-34
-55
-89
-144
-233
-377
-610
-987
-1597
-2584
-4181
-6765
-10946
-17711
-28657
-46368
-75025
-121393
-196418
-317811
-514229
-832040
-1346269
-2178309
-3524578
-5702887
-...
-fibonacci_ext.cl  0.01s user 0.01s system 0% cpu 3.058 total
-
-```
-
-Now we'll time fibonacci_ext.cl
-
-```sh
-time ../../build/bin/clike fibonacci_native.cl
-Please enter an integer value for fibonacci: 92
-0
-1
-1
-2
-3
-5
-8
-13
-21
-34
-55
-89
-144
-233
-377
-610
-987
-1597
-2584
-4181
-6765
-10946
-17711
-28657
-46368
-75025
-121393
-196418
-317811
-514229
-832040
-1346269
-2178309
-3524578
-5702887
-...
-fibonacci_native.cl  0.02s user 0.01s system 0% cpu 3.157 total
-```
-
-The performance improvement is small using the extended builtin C fibonacci function from 
-the src/ext_builtins directory, but it is there.  Other tasks might see a more substantial
-improvement.
-
-I'm favorably impressed by how fast the byte code compiled version is frankly.
+For a catalogue of existing routines, see
+[`pscal_vm_builtins.md`](pscal_vm_builtins.md).
 

@@ -7,6 +7,7 @@ void registerFibonacciBuiltin(void);
 void registerFileExistsBuiltin(void);
 void registerMandelbrotRowBuiltin(void);
 void registerChudnovskyBuiltin(void);
+void registerReverseStringBuiltin(void);
 
 void registerExtendedBuiltins(void) {
     registerGetPidBuiltin();
@@ -16,4 +17,5 @@ void registerExtendedBuiltins(void) {
     registerFileExistsBuiltin();
     registerMandelbrotRowBuiltin();
     registerChudnovskyBuiltin();
+    registerReverseStringBuiltin();
 }

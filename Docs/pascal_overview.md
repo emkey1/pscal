@@ -86,7 +86,9 @@ end.
 ## Included Units
 
 ### StringUtil
-Provides simple string helpers such as reversing text【F:lib/pascal/StringUtil.pl†L1-L28】.
+Provides simple string helpers such as reversing text【F:lib/pascal/stringutil.pl†L1-L28】.
+`ReverseString` is implemented by an extended builtin in
+`src/ext_builtins/strings` for efficiency.
 
 * `ReverseString(s: string): string` – returns the characters of `s` in reverse order.
 
