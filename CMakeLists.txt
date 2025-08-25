@@ -144,9 +144,11 @@ if(SDL)
 endif()
 
 # ---- User-supplied builtin sources ----
-# Any .c files placed in src/ext_builtins will be automatically
-# compiled and linked into the main binaries.
-file(GLOB PSCAL_EXT_BUILTIN_SOURCES CONFIGURE_DEPENDS src/ext_builtins/*.c)
+# Any .c files placed in src/ext_builtins (including subdirectories)
+# will be automatically compiled and linked into the main binaries.
+file(GLOB PSCAL_EXT_BUILTIN_SOURCES CONFIGURE_DEPENDS
+     src/ext_builtins/*.c
+     src/ext_builtins/*/*.c)
 list(APPEND PSCAL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 
 

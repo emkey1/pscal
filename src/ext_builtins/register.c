@@ -1,19 +1,15 @@
 #include "backend_ast/builtin.h"
 
-void registerGetPidBuiltin(void);
-void registerSwapBuiltin(void);
-void registerFactorialBuiltin(void);
-void registerFibonacciBuiltin(void);
-void registerFileExistsBuiltin(void);
+void registerMathBuiltins(void);
+void registerStringBuiltins(void);
+void registerSystemBuiltins(void);
 void registerMandelbrotRowBuiltin(void);
 void registerChudnovskyBuiltin(void);
 
 void registerExtendedBuiltins(void) {
-    registerGetPidBuiltin();
-    registerSwapBuiltin();
-    registerFactorialBuiltin();
-    registerFibonacciBuiltin();
-    registerFileExistsBuiltin();
+    registerMathBuiltins();
+    registerStringBuiltins();
+    registerSystemBuiltins();
     registerMandelbrotRowBuiltin();
     registerChudnovskyBuiltin();
 }
