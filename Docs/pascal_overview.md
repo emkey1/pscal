@@ -1,4 +1,4 @@
-# Pscal Functionality Overview
+# Pascal Front End Overview
 
 ## Core Architecture
 
@@ -33,6 +33,29 @@ begin
   r := ArcSin(0.5);
   writeln('ArcSin(0.5)=', r:0:4);
   writeln(ReverseString('pscal'));
+end.
+```
+
+### Records and Sets Example
+
+```pascal
+type
+  Day = (Mon, Tue, Wed, Thu, Fri, Sat, Sun);
+  DaySet = set of Day;
+  Person = record
+    name: string;
+    busy: DaySet;
+  end;
+
+var
+  p: Person;
+  d: Day;
+begin
+  p.name := 'Alice';
+  p.busy := [Mon, Wed];
+  for d := Mon to Sun do
+    if d in p.busy then
+      writeln(p.name, ' is busy on ', d);
 end.
 ```
 
@@ -136,3 +159,6 @@ end.
 
 ## Summary
 Pscal offers a Pascal environment with a modular architecture, a rich set of builtins, and reusable units for console I/O, math, string handling and system access. These tools make it suitable both for educational purposes and for experimenting with Pascal‑like language design.
+
+For a complete language specification, see
+[`pascal_language_reference.md`](pascal_language_reference.md).

@@ -8,6 +8,10 @@ int clike_get_builtin_id(const char *name) {
     if (strcmp(name, "strlen") == 0) {
         name = "length";
     }
+    // Provide `itoa` as a wrapper around Pascal's `str` builtin.
+    if (strcmp(name, "itoa") == 0) {
+        name = "str";
+    }
     // Map C-like `exit` to Pascal's `halt` so an optional exit code may be supplied.
     if (strcmp(name, "exit") == 0) {
         name = "halt";
@@ -19,6 +23,7 @@ void clike_register_builtins(void) {
     registerAllBuiltins();
     registerBuiltinFunction("printf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("scanf", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("itoa", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("exit", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamloadfromfile", AST_FUNCTION_DECL, NULL);

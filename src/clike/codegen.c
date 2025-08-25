@@ -921,6 +921,21 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)rIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+            } else if (strcmp(name, "itoa") == 0) {
+                // Wrap Pascal's Str builtin: first argument is a value,
+                // second is a VAR string parameter.
+                if (node->child_count == 2) {
+                    compileExpression(node->children[0], chunk, ctx);
+                    compileLValue(node->children[1], chunk, ctx);
+                } else {
+                    for (int i = 0; i < node->child_count; ++i) {
+                        compileExpression(node->children[i], chunk, ctx);
+                    }
+                }
+                int strIndex = addStringConstant(chunk, "str");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)strIndex, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             } else if (strcmp(name, "strlen") == 0) {
                 // Map C's strlen to the Pascal-style length builtin.
                 for (int i = 0; i < node->child_count; ++i) {
@@ -1076,7 +1091,14 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         long len = ftell(f);
         rewind(f);
         char *src = (char*)malloc(len + 1);
-        fread(src, 1, len, f);
+        if (!src) { fclose(f); continue; }
+        size_t bytes_read = fread(src, 1, len, f);
+        if (bytes_read != (size_t)len) {
+            fprintf(stderr, "Error reading import '%s'\n", orig_path);
+            free(src);
+            fclose(f);
+            continue;
+        }
         src[len] = '\0';
         fclose(f);
 

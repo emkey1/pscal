@@ -153,6 +153,9 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("strlen");
     functions[functionCount].type = TYPE_INTEGER;
     functionCount++;
+    functions[functionCount].name = strdup("itoa");
+    functions[functionCount].type = TYPE_VOID;
+    functionCount++;
     // `exit` behaves like C's exit, terminating the program with an optional code.
     functions[functionCount].name = strdup("exit");
     functions[functionCount].type = TYPE_VOID;
@@ -545,7 +548,25 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
         long len = ftell(f);
         rewind(f);
         char *src = (char *)malloc(len + 1);
-        fread(src, 1, len, f);
+        if (!src) {
+            fclose(f);
+            free(allocated_path);
+            modules[i].prog = NULL;
+            modules[i].source = NULL;
+            modules[i].allocated_path = NULL;
+            continue;
+        }
+        size_t bytes_read = fread(src, 1, len, f);
+        if (bytes_read != (size_t)len) {
+            fprintf(stderr, "Error reading module '%s'\n", path);
+            free(src);
+            fclose(f);
+            free(allocated_path);
+            modules[i].prog = NULL;
+            modules[i].source = NULL;
+            modules[i].allocated_path = NULL;
+            continue;
+        }
         src[len] = '\0';
         fclose(f);
 

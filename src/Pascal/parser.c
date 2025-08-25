@@ -567,7 +567,14 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
                 rewind(nested_file);
                 unit_source_buffer = malloc(nested_fsize + 1);
                 if (!unit_source_buffer) { fclose(nested_file); free(nested_unit_path); EXIT_FAILURE_HANDLER(); }
-                fread(unit_source_buffer, 1, nested_fsize, nested_file);
+                size_t bytes_read = fread(unit_source_buffer, 1, nested_fsize, nested_file);
+                if (bytes_read != (size_t)nested_fsize) {
+                    fprintf(stderr, "Error reading unit file '%s'.\n", nested_unit_path);
+                    free(unit_source_buffer);
+                    fclose(nested_file);
+                    free(nested_unit_path);
+                    EXIT_FAILURE_HANDLER();
+                }
                 unit_source_buffer[nested_fsize] = '\0';
                 fclose(nested_file);
             } else {
@@ -947,7 +954,14 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                     rewind(unit_file);
                     unit_source_buffer = malloc(fsize + 1);
                     if (!unit_source_buffer) { fclose(unit_file); free(unit_file_path); EXIT_FAILURE_HANDLER(); }
-                    fread(unit_source_buffer, 1, fsize, unit_file);
+                    size_t bytes_read = fread(unit_source_buffer, 1, fsize, unit_file);
+                    if (bytes_read != (size_t)fsize) {
+                        fprintf(stderr, "Error reading unit file '%s'.\n", unit_file_path);
+                        free(unit_source_buffer);
+                        fclose(unit_file);
+                        free(unit_file_path);
+                        EXIT_FAILURE_HANDLER();
+                    }
                     unit_source_buffer[fsize] = '\0';
                     fclose(unit_file);
                 } else {

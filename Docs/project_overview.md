@@ -6,6 +6,14 @@ Pscal is an extensible virtual machine and compiler suite implemented in C. The 
 * **Clike compiler**: A compact, C-style language frontend that includes its own preprocessor and a REPL for interactive sessions.
 * **Tiny compiler**: An educational frontend written in Python.
 
+Detailed descriptions of the Pascal and C-like front ends can be found in
+[`pascal_overview.md`](pascal_overview.md) and
+[`clike_overview.md`](clike_overview.md). The virtual machine is covered in
+[`pscal_vm_overview.md`](pscal_vm_overview.md), and instructions for building
+custom front ends or extending VM builtins are in
+[`standalone_vm_frontends.md`](standalone_vm_frontends.md) and
+[`extending_builtins.md`](extending_builtins.md).
+
 All frontends generate a compact bytecode stream that is executed by the VM. This virtual machine provides a rich set of built-in routines and offers optional integrations with **SDL2** for graphics and audio, and **libcurl** for networking. The system is designed to be easily extensible, allowing for the addition of new built-in functions.
 
 ---

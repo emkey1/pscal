@@ -1,0 +1,191 @@
+#!/usr/bin/env clike
+/*
+ * Simple Galaxian-style shooter using SDL graphics and sound.
+ */
+int main() {
+    int ScreenWidth;
+    int ScreenHeight;
+    int PlayerX;
+    int PlayerY;
+    int PlayerW;
+    int PlayerH;
+    int PlayerSpeed;
+
+    int BulletX;
+    int BulletY;
+    int BulletW;
+    int BulletH;
+    int BulletSpeed;
+    int BulletActive;
+
+    const int AlienRows = 3;
+    const int AlienCols = 6;
+    int AlienW;
+    int AlienH;
+    int AlienPaddingX;
+    int AlienPaddingY;
+    int AlienDir;
+    int AlienSpeed;
+    int AliensAlive;
+    int i;
+    int j;
+    int minAlienX;
+    int maxAlienX;
+    int ShotSound;
+    int ExplodeSound;
+
+    /* Arrays are 1-based to match the underlying Pascal VM. */
+    int AlienX[AlienRows * AlienCols + 1];
+    int AlienY[AlienRows * AlienCols + 1];
+    int AlienAlive[AlienRows * AlienCols + 1];
+
+    ScreenWidth = 800;
+    ScreenHeight = 600;
+    initgraph(ScreenWidth, ScreenHeight, "Galaxian CLike");
+
+    initsoundsystem();
+    ShotSound = loadsound("/usr/local/pscal/lib/sounds/paddle_hit.wav");
+    ExplodeSound = loadsound("/usr/local/pscal/lib/sounds/wall_hit.wav");
+
+    PlayerW = 40;
+    PlayerH = 20;
+    PlayerX = ScreenWidth / 2 - PlayerW / 2;
+    PlayerY = ScreenHeight - PlayerH - 10;
+    PlayerSpeed = 5;
+
+    BulletW = 4;
+    BulletH = 10;
+    BulletSpeed = 8;
+    BulletActive = 0;
+
+    AlienW = 30;
+    AlienH = 20;
+    AlienPaddingX = 10;
+    AlienPaddingY = 10;
+    AlienSpeed = 2;
+    AlienDir = 1;
+
+    i = 1;
+    while (i <= AlienRows) {
+        j = 1;
+        while (j <= AlienCols) {
+            int idx;
+            idx = (i - 1) * AlienCols + j;
+            AlienX[idx] = 50 + (j - 1) * (AlienW + AlienPaddingX);
+            AlienY[idx] = 50 + (i - 1) * (AlienH + AlienPaddingY);
+            AlienAlive[idx] = 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    AliensAlive = AlienRows * AlienCols;
+
+    while (!quitrequested() && AliensAlive > 0) {
+        graphloop(16);
+
+        int key;
+        key = pollkey();
+        while (key != 0) {
+            if (key == 1073741904) {
+                PlayerX = PlayerX - PlayerSpeed;
+            } else if (key == 1073741903) {
+                PlayerX = PlayerX + PlayerSpeed;
+            } else if (key == 32) {
+                if (!BulletActive) {
+                    BulletActive = 1;
+                    BulletX = PlayerX + PlayerW / 2 - BulletW / 2;
+                    BulletY = PlayerY - BulletH;
+                    if (ShotSound != -1) {
+                        playsound(ShotSound);
+                    }
+                }
+            }
+            key = pollkey();
+        }
+        if (PlayerX < 0) { PlayerX = 0; }
+        if (PlayerX > ScreenWidth - PlayerW) { PlayerX = ScreenWidth - PlayerW; }
+
+        if (BulletActive) {
+            BulletY = BulletY - BulletSpeed;
+            if (BulletY < 0) {
+                BulletActive = 0;
+            }
+        }
+
+        minAlienX = ScreenWidth;
+        maxAlienX = 0;
+        i = 1;
+        while (i <= AlienRows * AlienCols) {
+            if (AlienAlive[i]) {
+                if (AlienX[i] < minAlienX) { minAlienX = AlienX[i]; }
+                if (AlienX[i] + AlienW > maxAlienX) { maxAlienX = AlienX[i] + AlienW; }
+            }
+            i = i + 1;
+        }
+        if (AlienDir == 1 && maxAlienX >= ScreenWidth - 10) {
+            AlienDir = -1;
+            i = 1;
+            while (i <= AlienRows * AlienCols) {
+                AlienY[i] = AlienY[i] + AlienH;
+                i = i + 1;
+            }
+        } else if (AlienDir == -1 && minAlienX <= 10) {
+            AlienDir = 1;
+            i = 1;
+            while (i <= AlienRows * AlienCols) {
+                AlienY[i] = AlienY[i] + AlienH;
+                i = i + 1;
+            }
+        }
+        i = 1;
+        while (i <= AlienRows * AlienCols) {
+            if (AlienAlive[i]) {
+                AlienX[i] = AlienX[i] + AlienSpeed * AlienDir;
+            }
+            i = i + 1;
+        }
+
+        if (BulletActive) {
+            i = 1;
+            while (i <= AlienRows * AlienCols) {
+                if (AlienAlive[i]) {
+                    if (BulletX < AlienX[i] + AlienW &&
+                        BulletX + BulletW > AlienX[i] &&
+                        BulletY < AlienY[i] + AlienH &&
+                        BulletY + BulletH > AlienY[i]) {
+                        AlienAlive[i] = 0;
+                        BulletActive = 0;
+                        AliensAlive = AliensAlive - 1;
+                        if (ExplodeSound != -1) {
+                            playsound(ExplodeSound);
+                        }
+                        break;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+
+        cleardevice();
+        setrgbcolor(0, 255, 0);
+        /* fillrect expects top-left and bottom-right coordinates */
+        fillrect(PlayerX, PlayerY, PlayerX + PlayerW - 1, PlayerY + PlayerH - 1);
+        if (BulletActive) {
+            setrgbcolor(255, 255, 0);
+            fillrect(BulletX, BulletY, BulletX + BulletW - 1, BulletY + BulletH - 1);
+        }
+        setrgbcolor(255, 0, 0);
+        i = 1;
+        while (i <= AlienRows * AlienCols) {
+            if (AlienAlive[i]) {
+                fillrect(AlienX[i], AlienY[i], AlienX[i] + AlienW - 1, AlienY[i] + AlienH - 1);
+            }
+            i = i + 1;
+        }
+        updatescreen();
+    }
+
+    quitsoundsystem();
+    closegraph();
+    return 0;
+}
