@@ -1,0 +1,7 @@
+set(MATH_BUILTIN_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/factorial.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/fibonacci.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/mandelbrot.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/chudnovsky.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/register.c
+    PARENT_SCOPE)

@@ -52,19 +52,25 @@ characters of a string in reverse order:
 
 ```c
 static Value vmReverseString(struct VM_s* vm, int argc, Value* args) {
-    if (argc != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "ReverseString expects a single string argument");
-        return makeNull();
+    if (argc != 1) {
+        runtimeError(vm, "ReverseString expects 1 argument.");
+        return makeString("");
     }
-    const char* s = AS_CSTRING(args[0]);
-    size_t len = strlen(s);
-    char* out = GC_MALLOC_ATOMIC(len + 1);
-    for (size_t i = 0; i < len; ++i) out[i] = s[len - 1 - i];
-    out[len] = '\0';
-    return makeString(out, len);
+    if (args[0].type != TYPE_STRING) {
+        runtimeError(vm, "ReverseString argument must be a string.");
+        return makeString("");
+    }
+    const char* src = args[0].s_val;
+    size_t len = strlen(src);
+    char* buf = (char*)malloc(len + 1);
+    for (size_t i = 0; i < len; ++i) buf[i] = src[len - 1 - i];
+    buf[len] = '\0';
+    Value result = makeString(buf);
+    free(buf);
+    return result;
 }
 
-void registerReverseString(void) {
+void registerReverseStringBuiltin(void) {
     registerBuiltinFunction("ReverseString", AST_FUNCTION_DECL, NULL);
     registerVmBuiltin("reversestring", vmReverseString);
 }
@@ -73,10 +79,10 @@ void registerReverseString(void) {
 The `strings/register.c` file wires the category together:
 
 ```c
-void registerReverseString(void);
+void registerReverseStringBuiltin(void);
 
 void pascal_ext_strings_init(void) {
-    registerReverseString();
+    registerReverseStringBuiltin();
 }
 ```
 

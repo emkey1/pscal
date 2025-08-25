@@ -1,0 +1,4 @@
+set(STRING_BUILTIN_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/reversestring.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/register.c
+    PARENT_SCOPE)

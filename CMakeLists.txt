@@ -144,10 +144,9 @@ if(SDL)
 endif()
 
 # ---- User-supplied builtin sources ----
-# Any .c files placed in src/ext_builtins will be automatically
-# compiled and linked into the main binaries.
-file(GLOB PSCAL_EXT_BUILTIN_SOURCES CONFIGURE_DEPENDS src/ext_builtins/*.c)
-list(APPEND PSCAL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+add_subdirectory(src/ext_builtins)
+list(APPEND PSCAL_SOURCES ${EXT_BUILTIN_SOURCES})
+add_compile_definitions(${EXT_BUILTIN_DEFS})
 
 
 # ---- Executable Targets Function ----
@@ -274,7 +273,7 @@ set(CLIKE_SOURCES
 )
 
 # Include user-supplied builtins in clike as well
-list(APPEND CLIKE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND CLIKE_SOURCES ${EXT_BUILTIN_SOURCES})
 
 # When SDL support is enabled, clike needs the same SDL backend sources
 # as the main executables to provide implementations for graphics and
