@@ -41,7 +41,7 @@ const char *varTypeToString(VarType type) {
         case TYPE_UINT32:       return "UINT32";
         case TYPE_INT64:        return "INT64";
         case TYPE_UINT64:       return "UINT64";
-        case TYPE_FLOAT:        return "FLOAT";
+        case TYPE_FLOAT:        return "REAL";
         case TYPE_LONG_DOUBLE:  return "LONG_DOUBLE";
         case TYPE_NIL:          return "NIL";
         default:                return "UNKNOWN_VAR_TYPE";
@@ -340,6 +340,7 @@ Value makeReal(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
+    v.d_val = (double)val;
     v.r_val = val;
     return v;
 }

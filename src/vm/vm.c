@@ -1669,6 +1669,7 @@ comparison_error_label:
                     }
                     else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
                         target_lvalue_ptr->r_val = (long double)value_to_set.i_val;
+                        target_lvalue_ptr->d_val = (double)value_to_set.i_val;
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {

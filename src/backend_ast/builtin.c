@@ -2055,6 +2055,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 double v = strtod(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
+                dst->d_val = v;
                 break;
             }
             case TYPE_BOOLEAN: {
@@ -2170,6 +2171,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 double v = strtod(p, &endp);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
+                dst->d_val = v;
                 p = endp ? endp : p;
                 break;
             }
@@ -2309,6 +2311,7 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
             dst->r_val = r;
+            dst->d_val = r;
             *code = makeInt(0);
         }
     } else {

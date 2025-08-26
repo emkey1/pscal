@@ -206,6 +206,7 @@ static bool read_value(FILE* f, Value* out) {
             break;
         case TYPE_REAL:
             if (fread(&out->r_val, sizeof(out->r_val), 1, f) != 1) return false;
+            out->d_val = (double)out->r_val;
             break;
         case TYPE_CHAR:
             if (fread(&out->c_val, sizeof(out->c_val), 1, f) != 1) return false;

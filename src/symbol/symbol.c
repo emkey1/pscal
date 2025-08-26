@@ -724,9 +724,16 @@ void updateSymbol(const char *name, Value val) {
             break;
 
         case TYPE_REAL:
-            if (val.type == TYPE_REAL) sym->value->r_val = val.r_val;
-            else if (val.type == TYPE_INTEGER) sym->value->r_val = (long double)val.i_val;
-            else if (val.type == TYPE_CHAR) sym->value->r_val = (long double)val.c_val;
+            if (val.type == TYPE_REAL) {
+                sym->value->r_val = val.r_val;
+                sym->value->d_val = val.d_val;
+            } else if (val.type == TYPE_INTEGER) {
+                sym->value->r_val = (long double)val.i_val;
+                sym->value->d_val = (double)val.i_val;
+            } else if (val.type == TYPE_CHAR) {
+                sym->value->r_val = (long double)val.c_val;
+                sym->value->d_val = (double)val.c_val;
+            }
             break;
 
         case TYPE_BYTE:
