@@ -1362,8 +1362,16 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         } else {
             VarType basicType = TYPE_VOID;
             // ... (checks for integer, real, char, etc.) ...
-             if (strcasecmp(typeNameCopy, "integer") == 0 || strcasecmp(typeNameCopy, "longint") == 0 || strcasecmp(typeNameCopy, "cardinal") == 0) basicType = TYPE_INTEGER;
-             else if (strcasecmp(typeNameCopy, "real") == 0) basicType = TYPE_REAL;
+             if (strcasecmp(typeNameCopy, "integer") == 0) basicType = TYPE_INT32;
+             else if (strcasecmp(typeNameCopy, "longint") == 0) basicType = TYPE_INT64;
+             else if (strcasecmp(typeNameCopy, "cardinal") == 0) basicType = TYPE_UINT32;
+             else if (strcasecmp(typeNameCopy, "shortint") == 0) basicType = TYPE_INT8;
+             else if (strcasecmp(typeNameCopy, "smallint") == 0) basicType = TYPE_INT16;
+             else if (strcasecmp(typeNameCopy, "int64") == 0) basicType = TYPE_INT64;
+             else if (strcasecmp(typeNameCopy, "single") == 0) basicType = TYPE_FLOAT;
+             else if (strcasecmp(typeNameCopy, "double") == 0) basicType = TYPE_DOUBLE;
+             else if (strcasecmp(typeNameCopy, "extended") == 0) basicType = TYPE_LONG_DOUBLE;
+             else if (strcasecmp(typeNameCopy, "real") == 0) basicType = TYPE_DOUBLE;
              else if (strcasecmp(typeNameCopy, "char") == 0) basicType = TYPE_CHAR;
              else if (strcasecmp(typeNameCopy, "byte") == 0) basicType = TYPE_BYTE;
              else if (strcasecmp(typeNameCopy, "word") == 0) basicType = TYPE_WORD;

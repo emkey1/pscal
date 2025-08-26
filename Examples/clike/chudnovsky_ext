@@ -3,6 +3,7 @@ int main() {
     long n;
     printf("Please enter an integer value for iterations: ");
     scanf(n);
-    printf("pi: %.15f\n", chudnovsky(n));
+    
+    printf("pi: %.31f\n", chudnovsky(n));
     return 0;
 }

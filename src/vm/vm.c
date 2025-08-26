@@ -721,9 +721,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         if (!op_is_handled) { \
             if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
                 if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
-                    double fa = as_f64(a_val_popped); \
-                    double fb = as_f64(b_val_popped); \
-                    if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
+                    long double fa = as_ld(a_val_popped); \
+                    long double fb = as_ld(b_val_popped); \
+                    if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
                         runtimeError(vm, "Runtime Error: Division by zero."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
@@ -759,7 +759,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             overflow = __builtin_mul_overflow(ia, ib, &iresult); \
                             break; \
                         case OP_DIVIDE: \
-                            result_val = makeReal((double)ia / (double)ib); \
+                            result_val = makeReal((long double)ia / (long double)ib); \
                             break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
@@ -1124,8 +1124,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 // Numeric comparison (Integers and Reals)
                 else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
                     if (a_val.type == TYPE_REAL || b_val.type == TYPE_REAL) {
-                        double fa = as_f64(a_val);
-                        double fb = as_f64(b_val);
+                        long double fa = as_ld(a_val);
+                        long double fb = as_ld(b_val);
                         switch (instruction_val) {
                             case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
                             case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
@@ -1668,7 +1668,7 @@ comparison_error_label:
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
-                        target_lvalue_ptr->r_val = (double)value_to_set.i_val;
+                        target_lvalue_ptr->r_val = (long double)value_to_set.i_val;
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
@@ -2469,9 +2469,9 @@ comparison_error_label:
 
                 if (raw_val.type == TYPE_REAL) {
                     if (precision >= 0) {
-                        snprintf(buf, sizeof(buf), "%*.*f", width, precision, raw_val.r_val);
+                        snprintf(buf, sizeof(buf), "%*.*Lf", width, precision, raw_val.r_val);
                     } else {
-                        snprintf(buf, sizeof(buf), "%*.*E", width, PASCAL_DEFAULT_FLOAT_PRECISION, raw_val.r_val);
+                        snprintf(buf, sizeof(buf), "%*.*LE", width, PASCAL_DEFAULT_FLOAT_PRECISION, raw_val.r_val);
                     }
                 } else if (raw_val.type == TYPE_INTEGER || raw_val.type == TYPE_BYTE || raw_val.type == TYPE_WORD) {
                     snprintf(buf, sizeof(buf), "%*lld", width, raw_val.i_val);

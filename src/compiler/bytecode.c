@@ -258,7 +258,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
-                case TYPE_REAL:    printf("%f", constantValue.r_val); break;
+                case TYPE_REAL:    printf("%Lf", constantValue.r_val); break;
                 case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
@@ -279,7 +279,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
-                case TYPE_REAL:    printf("%f", constantValue.r_val); break;
+                case TYPE_REAL:    printf("%Lf", constantValue.r_val); break;
                 case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
@@ -691,7 +691,7 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
             Value constantValue = chunk->constants[i];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("INT   %lld\n", constantValue.i_val); break;
-                case TYPE_REAL:    printf("REAL  %f\n", constantValue.r_val); break;
+                case TYPE_REAL:    printf("REAL  %Lf\n", constantValue.r_val); break;
                 case TYPE_STRING:  printf("STR   \"%s\"\n", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("CHAR  '%c'\n", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("BOOL  %s\n", constantValue.i_val ? "true" : "false"); break;
