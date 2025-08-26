@@ -27,7 +27,7 @@ Each line you enter is wrapped in a minimal `int main()` function and executed i
 
 ```
 $ build/bin/clike-repl
-clike> println("hello world");
+clike> printf("hello world\n");
 hello world
 clike> 2 + 2;
 4
