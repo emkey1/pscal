@@ -522,22 +522,28 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     compileExpression(node->left, chunk, ctx);
                 } else {
                     Value init;
-                    switch (node->var_type) {
-                        case TYPE_REAL:
-                            init = makeReal(0.0);
-                            break;
-                        case TYPE_STRING:
-                            init = makeNil();
-                            break;
-                        case TYPE_FILE:
-                            init = makeValueForType(TYPE_FILE, NULL, NULL);
-                            break;
-                        case TYPE_MEMORYSTREAM:
-                            init = makeValueForType(TYPE_MEMORYSTREAM, NULL, NULL);
-                            break;
-                        default:
-                            init = makeInt(0);
-                            break;
+                    if (is_real_type(node->var_type)) {
+                        init = makeReal(0.0);
+                        if (node->var_type == TYPE_FLOAT) init.f32_val = 0.0f;
+                else if (node->var_type == TYPE_DOUBLE) init.d_val = 0.0;
+                        init.type = node->var_type;
+                    } else {
+                        switch (node->var_type) {
+                            case TYPE_STRING:
+                                init = makeNil();
+                                break;
+                            case TYPE_FILE:
+                                init = makeValueForType(TYPE_FILE, NULL, NULL);
+                                break;
+                            case TYPE_MEMORYSTREAM:
+                                init = makeValueForType(TYPE_MEMORYSTREAM, NULL, NULL);
+                                break;
+                            default:
+                                init = makeInt(0);
+                                init.type = node->var_type;
+                                if (is_intlike_type(init.type)) init.u_val = 0;
+                                break;
+                        }
                     }
                     int cidx = addConstantToChunk(chunk, &init);
                     freeValue(&init);
@@ -604,6 +610,8 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             Value v;
             if (node->token.type == CLIKE_TOKEN_FLOAT_LITERAL) {
                 v = makeReal(node->token.float_val);
+                v.d_val = node->token.float_val;
+                v.type = TYPE_DOUBLE;
             } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL ||
                        node->var_type == TYPE_CHAR) {
                 // Treat character literals distinctly from integers so
@@ -611,6 +619,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 v = makeChar((char)node->token.int_val);
             } else {
                 v = makeInt(node->token.int_val);
+                v.type = node->var_type;
+                if (is_intlike_type(v.type)) {
+                    v.u_val = (unsigned long long)node->token.int_val;
+                }
             }
             int idx = addConstantToChunk(chunk, &v);
             writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
@@ -635,10 +647,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
                 case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
                 case CLIKE_TOKEN_SLASH:
-                    if (node->var_type == TYPE_INTEGER &&
+                    if (is_intlike_type(node->var_type) &&
                         node->left && node->right &&
-                        node->left->var_type == TYPE_INTEGER &&
-                        node->right->var_type == TYPE_INTEGER) {
+                        is_intlike_type(node->left->var_type) &&
+                        is_intlike_type(node->right->var_type)) {
                         /*
                          * In C, dividing two integers performs integer division
                          * (truncating toward zero).  The VM has a dedicated

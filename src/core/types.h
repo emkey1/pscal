@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <time.h>
+#include <stdint.h>
 #include "list.h"
 #include <stdbool.h>
 
@@ -40,6 +41,18 @@ typedef enum {
     TYPE_MEMORYSTREAM,
     TYPE_SET,
     TYPE_POINTER,
+    /* Extended integer and floating-point types */
+    TYPE_INT8,
+    TYPE_UINT8,
+    TYPE_INT16,
+    TYPE_UINT16,
+    TYPE_INT32,
+    TYPE_UINT32,
+    TYPE_INT64,
+    TYPE_UINT64,
+    TYPE_FLOAT,
+    TYPE_DOUBLE,
+    TYPE_LONG_DOUBLE,
     TYPE_NIL
 } VarType;
 
@@ -64,7 +77,10 @@ typedef struct ValueStruct {
     Type *enum_meta;
     union {
         long long i_val;
-        double r_val;
+        unsigned long long u_val;
+        float f32_val;
+        double d_val;
+        long double r_val;
         char *s_val;
         int c_val;
         FieldValue *record_val;

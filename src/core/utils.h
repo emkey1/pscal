@@ -32,9 +32,9 @@
 #define AS_BOOLEAN(value) ((value).i_val != 0) // Assumes i_val stores 0 for false, 1 for true
 
 // Also useful:
-#define IS_INTEGER(value) ((value).type == TYPE_INTEGER)
+#define IS_INTEGER(value) (is_intlike_type((value).type))
 #define AS_INTEGER(value) ((value).i_val)
-#define IS_REAL(value)    ((value).type == TYPE_REAL)
+#define IS_REAL(value)    (is_real_type((value).type))
 #define AS_REAL(value)    ((value).r_val)
 #define IS_STRING(value)  ((value).type == TYPE_STRING)
 #define AS_STRING(value)  ((value).s_val)
@@ -56,7 +56,34 @@ static const int pscalToAnsiBase[8] = {
 };
 
 static inline bool is_intlike_type(VarType t) {
-    return t == TYPE_INTEGER || t == TYPE_WORD || t == TYPE_BYTE;
+    switch (t) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static inline bool is_real_type(VarType t) {
+    switch (t) {
+        case TYPE_REAL:
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            return true;
+        default:
+            return false;
+    }
 }
 
 static inline bool is_ordinal_type(VarType t) {
@@ -67,29 +94,57 @@ static inline bool is_ordinal_type(VarType t) {
 
 static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
     switch (v->type) {
-        case TYPE_INTEGER:
+        case TYPE_UINT64:
+        case TYPE_UINT32:
+        case TYPE_UINT16:
+        case TYPE_UINT8:
         case TYPE_WORD:
         case TYPE_BYTE:
-        case TYPE_BOOLEAN: return v->i_val;
-        case TYPE_CHAR:    return (unsigned char)v->c_val;
-        // Real not allowed as delta in Pascal's inc/dec
+            return (long long)v->u_val;
+        case TYPE_INTEGER:
+        case TYPE_INT64:
+        case TYPE_INT32:
+        case TYPE_INT16:
+        case TYPE_INT8:
+        case TYPE_BOOLEAN:
+            return v->i_val;
+        case TYPE_CHAR:
+            return (unsigned char)v->c_val;
         default:
             runtimeError(vm, "Argument error: %s delta must be an ordinal, got %s.",
                          who, varTypeToString(v->type));
-            // You can longjmp/return; here we just return 0 and let caller bail if needed.
             return 0;
     }
 }
 
 #define IS_INTLIKE(v) (is_intlike_type((v).type))
-#define IS_NUMERIC(v) (IS_INTLIKE(v) || IS_REAL(v))
+#define IS_NUMERIC(v) (IS_INTLIKE(v) || is_real_type((v).type))
 
 // Accessors (use your existing Value layout: i_val for INTEGER/BYTE/WORD/BOOLEAN)
 static inline long long as_i64(Value v) {
-    return v.i_val; // INTEGER, BYTE, WORD, BOOLEAN all use i_val
+    switch (v.type) {
+        case TYPE_UINT64:
+        case TYPE_UINT32:
+        case TYPE_UINT16:
+        case TYPE_UINT8:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+            return (long long)v.u_val;
+        default:
+            return v.i_val;
+    }
 }
-static inline double as_f64(Value v) {
-    return (v.type == TYPE_REAL) ? v.r_val : (double)v.i_val;
+static inline long double as_ld(Value v) {
+    if (is_real_type(v.type)) {
+        switch (v.type) {
+            case TYPE_FLOAT:       return v.f32_val;
+            case TYPE_DOUBLE:      return v.d_val;
+            case TYPE_LONG_DOUBLE:
+            case TYPE_REAL:        return v.r_val;
+            default:               return v.r_val;
+        }
+    }
+    return (long double)as_i64(v);
 }
 
 const char *varTypeToString(VarType type);
@@ -107,7 +162,7 @@ void freeFieldValue(FieldValue *fv);
 
 // Value constructors
 Value makeInt(long long val);
-Value makeReal(double val);
+Value makeReal(long double val);
 Value makeByte(unsigned char val);
 Value makeWord(unsigned int val);
 Value makeNil(void);

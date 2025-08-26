@@ -474,7 +474,7 @@ Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
         return makeString("");
     }
     char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%f", AS_REAL(args[0]));
+    snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
     return makeString(buffer);
 }
 
@@ -2635,7 +2635,7 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
             snprintf(buffer, sizeof(buffer), "%lld", val.i_val);
             break;
         case TYPE_REAL:
-            snprintf(buffer, sizeof(buffer), "%f", val.r_val);
+            snprintf(buffer, sizeof(buffer), "%Lf", val.r_val);
             break;
         case TYPE_CHAR:
             snprintf(buffer, sizeof(buffer), "%c", val.c_val);

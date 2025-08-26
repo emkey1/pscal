@@ -12,7 +12,7 @@ static VarType builtinReturnType(const char* name) {
     if (!name) return TYPE_VOID;
 
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
-    if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "ord")  == 0) return TYPE_INT32;
 
     if (strcasecmp(name, "cos")  == 0 ||
         strcasecmp(name, "sin")  == 0 ||
@@ -21,7 +21,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "ln")   == 0 ||
         strcasecmp(name, "exp")  == 0 ||
         strcasecmp(name, "real") == 0) {
-        return TYPE_REAL;
+        return TYPE_DOUBLE;
     }
 
     if (strcasecmp(name, "round")     == 0 ||
@@ -38,7 +38,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "wherey")    == 0 ||
         strcasecmp(name, "getmaxx")   == 0 ||
         strcasecmp(name, "getmaxy")   == 0) {
-        return TYPE_INTEGER;
+        return TYPE_INT32;
     }
 
     if (strcasecmp(name, "inttostr")  == 0 ||
@@ -63,7 +63,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "loadsound") == 0 ||
         strcasecmp(name, "getticks") == 0 ||
         strcasecmp(name, "pollkey") == 0) {
-        return TYPE_INTEGER;
+        return TYPE_INT32;
     }
 
     if (strcasecmp(name, "keypressed") == 0 ||
@@ -145,13 +145,13 @@ static int functionCount = 0;
 
 static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("printf");
-    functions[functionCount].type = TYPE_INTEGER;
+    functions[functionCount].type = TYPE_INT32;
     functionCount++;
     functions[functionCount].name = strdup("scanf");
-    functions[functionCount].type = TYPE_INTEGER;
+    functions[functionCount].type = TYPE_INT32;
     functionCount++;
     functions[functionCount].name = strdup("strlen");
-    functions[functionCount].type = TYPE_INTEGER;
+    functions[functionCount].type = TYPE_INT32;
     functionCount++;
     functions[functionCount].name = strdup("itoa");
     functions[functionCount].type = TYPE_VOID;
@@ -222,7 +222,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_BINOP: {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
-            if (lt == TYPE_REAL || rt == TYPE_REAL) node->var_type = TYPE_REAL;
+            if (is_real_type(lt) || is_real_type(rt)) node->var_type = TYPE_DOUBLE;
             else if (lt == TYPE_STRING || rt == TYPE_STRING) node->var_type = TYPE_STRING;
             else node->var_type = lt != TYPE_UNKNOWN ? lt : rt;
             return node->var_type;
@@ -234,7 +234,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             VarType ft = analyzeExpr(node->third, scopes);
-            if (rt == TYPE_REAL || ft == TYPE_REAL) node->var_type = TYPE_REAL;
+            if (is_real_type(rt) || is_real_type(ft)) node->var_type = TYPE_DOUBLE;
             else if (rt == TYPE_STRING || ft == TYPE_STRING) node->var_type = TYPE_STRING;
             else node->var_type = rt != TYPE_UNKNOWN ? rt : ft;
             return node->var_type;
@@ -252,7 +252,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
                 if (lt != rt &&
-                    !(lt == TYPE_REAL && is_intlike_type(rt)) &&
+                    !(is_real_type(lt) && is_intlike_type(rt)) &&
                     !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
                     !(is_intlike_type(lt) && is_intlike_type(rt))) {
                     fprintf(stderr,
@@ -278,7 +278,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 }
                 if (node->child_count == 1) {
                     VarType at = analyzeExpr(node->children[0], scopes);
-                    if (at != TYPE_INTEGER) {
+                    if (!is_intlike_type(at)) {
                         fprintf(stderr,
                                 "Type error: exit argument must be an integer at line %d, column %d\n",
                                 node->token.line,
@@ -393,7 +393,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                 VarType declType = node->var_type;
                 if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
                     if (declType != initType &&
-                        !(declType == TYPE_REAL && is_intlike_type(initType)) &&
+                        !(is_real_type(declType) && is_intlike_type(initType)) &&
                         !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
                         !(is_intlike_type(declType) && is_intlike_type(initType))) {
                         fprintf(stderr,

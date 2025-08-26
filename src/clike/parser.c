@@ -8,35 +8,26 @@
 
 VarType clike_tokenTypeToVarType(ClikeTokenType t) {
     switch (t) {
-        case CLIKE_TOKEN_INT:
-        case CLIKE_TOKEN_LONG:
-            return TYPE_INTEGER;
-        case CLIKE_TOKEN_FLOAT:
-        case CLIKE_TOKEN_DOUBLE:
-            return TYPE_REAL;
-        case CLIKE_TOKEN_STR:
-            return TYPE_STRING;
-        case CLIKE_TOKEN_TEXT:
-            return TYPE_FILE;
-        case CLIKE_TOKEN_MSTREAM:
-            return TYPE_MEMORYSTREAM;
-        case CLIKE_TOKEN_VOID:
-            return TYPE_VOID;
-        case CLIKE_TOKEN_CHAR:
-            return TYPE_CHAR;
-        case CLIKE_TOKEN_BYTE:
-            return TYPE_BYTE;
-        default:
-            return TYPE_UNKNOWN;
+        case CLIKE_TOKEN_INT:        return TYPE_INT32;
+        case CLIKE_TOKEN_LONG:       return TYPE_INT64;
+        case CLIKE_TOKEN_FLOAT:      return TYPE_FLOAT;
+        case CLIKE_TOKEN_DOUBLE:     return TYPE_DOUBLE;
+        case CLIKE_TOKEN_STR:        return TYPE_STRING;
+        case CLIKE_TOKEN_TEXT:       return TYPE_FILE;
+        case CLIKE_TOKEN_MSTREAM:    return TYPE_MEMORYSTREAM;
+        case CLIKE_TOKEN_VOID:       return TYPE_VOID;
+        case CLIKE_TOKEN_CHAR:       return TYPE_CHAR;
+        case CLIKE_TOKEN_BYTE:       return TYPE_UINT8;
+        default:                     return TYPE_UNKNOWN;
     }
 }
 
 const char *clike_tokenTypeToTypeName(ClikeTokenType t) {
     switch (t) {
-        case CLIKE_TOKEN_INT:
-        case CLIKE_TOKEN_LONG:   return "integer";
-        case CLIKE_TOKEN_FLOAT:
-        case CLIKE_TOKEN_DOUBLE: return "real";
+        case CLIKE_TOKEN_INT:    return "int";
+        case CLIKE_TOKEN_LONG:   return "long";
+        case CLIKE_TOKEN_FLOAT:  return "float";
+        case CLIKE_TOKEN_DOUBLE: return "double";
         case CLIKE_TOKEN_STR:    return "string";
         case CLIKE_TOKEN_TEXT:   return "text";
         case CLIKE_TOKEN_MSTREAM:return "mstream";
@@ -49,9 +40,9 @@ const char *clike_tokenTypeToTypeName(ClikeTokenType t) {
 
 static VarType literalTokenToVarType(ClikeTokenType t) {
     switch (t) {
-        case CLIKE_TOKEN_FLOAT_LITERAL: return TYPE_REAL;
-        case CLIKE_TOKEN_CHAR_LITERAL: return TYPE_CHAR;
-        default: return TYPE_INTEGER;
+        case CLIKE_TOKEN_FLOAT_LITERAL: return TYPE_DOUBLE;
+        case CLIKE_TOKEN_CHAR_LITERAL:  return TYPE_CHAR;
+        default:                        return TYPE_INT32;
     }
 }
 
