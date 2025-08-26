@@ -32,9 +32,9 @@
 #define AS_BOOLEAN(value) ((value).i_val != 0) // Assumes i_val stores 0 for false, 1 for true
 
 // Also useful:
-#define IS_INTEGER(value) (is_intlike_type((value).type))
+#define IS_INTEGER(value) ((value).type == TYPE_INT32)
 #define AS_INTEGER(value) ((value).i_val)
-#define IS_REAL(value)    (is_real_type((value).type))
+#define IS_REAL(value)    ((value).type == TYPE_DOUBLE)
 #define AS_REAL(value)    ((value).r_val)
 #define IS_STRING(value)  ((value).type == TYPE_STRING)
 #define AS_STRING(value)  ((value).s_val)
@@ -84,6 +84,8 @@ static inline bool is_real_type(VarType t) {
         default:
             return false;
     }
+
+    return t == TYPE_INT32 || t == TYPE_WORD || t == TYPE_BYTE;
 }
 
 static inline bool is_ordinal_type(VarType t) {

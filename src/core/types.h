@@ -27,8 +27,8 @@ typedef struct FieldValue FieldValue;
 typedef enum {
     TYPE_UNKNOWN = 0,
     TYPE_VOID,
-    TYPE_INTEGER,
-    TYPE_REAL,
+    TYPE_INT32,
+    TYPE_DOUBLE,
     TYPE_STRING,
     TYPE_CHAR,
     TYPE_RECORD,
@@ -55,6 +55,21 @@ typedef enum {
     TYPE_LONG_DOUBLE,
     TYPE_NIL
 } VarType;
+
+/*
+ * Backwards compatibility aliases.
+ *
+ * Pascal traditionally exposes INTEGER and REAL as its fundamental numeric
+ * types.  The VM has been moving toward a more explicit naming scheme where
+ * the underlying sizes are part of the type name (e.g. INT32 and DOUBLE).
+ *
+ * To avoid a massive churn throughout the existing front‑ends we simply map
+ * the old identifiers to the new ones via macros.  This allows legacy code
+ * that still uses TYPE_INTEGER/TYPE_REAL to compile unchanged while the rest
+ * of the system can reason about the new INT32/DOUBLE symbols.
+ */
+#define TYPE_INTEGER TYPE_INT32
+#define TYPE_REAL    TYPE_DOUBLE
 
 typedef struct MStream {
     unsigned char *buffer;
