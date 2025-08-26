@@ -27,10 +27,13 @@ Each line you enter is wrapped in a minimal `int main()` function and executed i
 
 ```
 $ build/bin/clike-repl
-clike> println("hello world");
+clike> printf("hello world\n");
 hello world
 clike> 2 + 2;
 4
+clike> int a; a = 100; int b; b = 33; printf("%d\n", a + b);
+133
+clike> 
 clike> :quit
 ```
 

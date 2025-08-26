@@ -457,7 +457,9 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
     }
 
     if ((size_t)new_len > copy_len) {
-        memset(new_buf + copy_len, 0, (size_t)new_len - copy_len);
+        /* Fill remaining space with spaces so that strlen reflects the new length.
+           Using '\0' would terminate the string early and lead to length 0. */
+        memset(new_buf + copy_len, ' ', (size_t)new_len - copy_len);
     }
     new_buf[new_len] = '\0';
 
@@ -2874,6 +2876,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("IOResult", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SetLength", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Ln", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Log10", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);

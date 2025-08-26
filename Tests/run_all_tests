@@ -4,9 +4,9 @@ echo "Running Pascal Tests"
 echo "Pascal Tests End"
 echo "====================================="
 echo
-echo "Running Clike Tests"
+echo "Running CLike Tests"
 ./run_clike_tests.sh
-echo "Pascal Tests End"
+echo "CLike Tests End"
 echo "====================================="
 echo 
 echo "Running Tiny Tests"

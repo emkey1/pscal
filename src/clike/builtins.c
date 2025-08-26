@@ -1,19 +1,20 @@
 #include "clike/builtins.h"
 #include "backend_ast/builtin.h"
 #include <string.h>
+#include <strings.h>
 
 int clike_get_builtin_id(const char *name) {
     // The VM exposes Pascal's `length` builtin for string length.  Map the
     // C-like `strlen` to that builtin so we don't need a backend change.
-    if (strcmp(name, "strlen") == 0) {
+    if (strcasecmp(name, "strlen") == 0) {
         name = "length";
     }
     // Provide `itoa` as a wrapper around Pascal's `str` builtin.
-    if (strcmp(name, "itoa") == 0) {
+    if (strcasecmp(name, "itoa") == 0) {
         name = "str";
     }
     // Map C-like `exit` to Pascal's `halt` so an optional exit code may be supplied.
-    if (strcmp(name, "exit") == 0) {
+    if (strcasecmp(name, "exit") == 0) {
         name = "halt";
     }
     return getBuiltinIDForCompiler(name);

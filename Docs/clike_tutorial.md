@@ -1,6 +1,11 @@
 # Tutorial: Using the clike Compiler
 
-The `clike` binary compiles a small C-style language and immediately executes it on the Pscal virtual machine.
+The `clike` binary compiles a C-style language and immediately executes it using the PSCAL virtual machine.  By convention CLike 
+uses 
+
+`.cl` 
+
+as an extension, but this is optional and mostly ignored in the examples.
 
 ## Build the compiler
 
@@ -12,6 +17,11 @@ cmake --build build --target clike
 ```
 
 This generates `build/bin/clike`.
+
+## Install PSCAL Suite
+```sh
+sudo ./install.sh
+```
 
 ## Run a program
 

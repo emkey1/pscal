@@ -1360,10 +1360,22 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                         alias_sym->name = strdup(unq_lower);
                         alias_sym->is_alias = true;
                         alias_sym->real_symbol = qualified_proc_symbol;
+                        /* Copy metadata so the alias behaves like the real symbol during compilation */
+                        alias_sym->type = qualified_proc_symbol->type;
+                        alias_sym->arity = qualified_proc_symbol->arity;
+                        alias_sym->locals_count = qualified_proc_symbol->locals_count;
+                        alias_sym->bytecode_address = qualified_proc_symbol->bytecode_address;
+                        alias_sym->is_defined = qualified_proc_symbol->is_defined;
                         hashTableInsert(procedure_table, alias_sym);
                     } else {
-                        DEBUG_PRINT("[DEBUG] linkUnit: Unqualified alias '%s' already exists, skipping.\n",
-                                    unq_lower);
+                        /* Update existing placeholder with real implementation details */
+                        existing_unq->is_alias = true;
+                        existing_unq->real_symbol = qualified_proc_symbol;
+                        existing_unq->type = qualified_proc_symbol->type;
+                        existing_unq->arity = qualified_proc_symbol->arity;
+                        existing_unq->locals_count = qualified_proc_symbol->locals_count;
+                        existing_unq->bytecode_address = qualified_proc_symbol->bytecode_address;
+                        existing_unq->is_defined = qualified_proc_symbol->is_defined;
                     }
                 } else {
                     DEBUG_PRINT("[WARN] linkUnit: No implementation for '%s'; cannot alias '%s'.\n",
@@ -1616,11 +1628,31 @@ void printValueToStream(Value v, FILE *stream) {
             }
             fprintf(stream, "}");
             break;
-        case TYPE_ENUM:
-            fprintf(stream, "ENUM(%s, ord: %d)",
-                v.enum_val.enum_name ? v.enum_val.enum_name : (v.enum_meta ? v.enum_meta->name : "<type_unknown>"),
-                v.enum_val.ordinal);
+        case TYPE_ENUM: {
+            const char *type_name = v.enum_val.enum_name ?
+                v.enum_val.enum_name : (v.enum_meta ? v.enum_meta->name : NULL);
+            const char *member_name = NULL;
+            AST *enum_ast = v.base_type_node;
+            if (!enum_ast && type_name) {
+                enum_ast = lookupType(type_name);
+            }
+            if (enum_ast && enum_ast->type == AST_ENUM_TYPE &&
+                v.enum_val.ordinal >= 0 &&
+                v.enum_val.ordinal < enum_ast->child_count) {
+                AST *val_node = enum_ast->children[v.enum_val.ordinal];
+                if (val_node && val_node->token && val_node->token->value) {
+                    member_name = val_node->token->value;
+                }
+            }
+            if (member_name) {
+                fprintf(stream, "%s", member_name);
+            } else {
+                fprintf(stream, "ENUM(%s, ord: %d)",
+                        type_name ? type_name : "<type_unknown>",
+                        v.enum_val.ordinal);
+            }
             break;
+        }
         case TYPE_SET:
             // Corrected access to set_val and its members
             fprintf(stream, "SET(size:%d, values:[", v.set_val.set_size);

@@ -43,7 +43,8 @@ void sort_string(str* sp) {
     int i, j, len;
     char tmp;
     str s = *sp;
-    len = strlen(s);
+
+    len = strlen(s); // strings index from one
     i = 1;
     while (i <= len) {
         j = i + 1;
@@ -60,9 +61,13 @@ void sort_string(str* sp) {
     *sp = s;
 }
 
-str guessed = copy("ST", 1, 2);  // make a writable copy
-sort_string(&guessed);            // sorts in place
-printf("%s\n", guessed);
+void main() {
+    // String literals are immutable; make a writable copy first.
+    str sort = copy("This is a string", 1, strlen("This is a string"));
+    sort_string(&sort);
+    printf("Sorted String is %s\n", sort);
+}
+
 ```
 
 ## Example: Building a Linked List
@@ -73,27 +78,30 @@ struct Node {
     struct Node* next;
 };
 
-void push(struct Node** head, int value) {
+struct Node* push(struct Node* head, int value) {
     struct Node* n;
     new(&n);
     n->value = value;
-    n->next = *head;
-    *head = n;
+    n->next = head;
+    return n;
 }
 
 void print(struct Node* head) {
-    while (head) {
-        write(head->value, " ");
+    while (head != NULL) {
+        printf("%d ", head->value);
         head = head->next;
     }
-    writeln();
+    printf("\n");
 }
 
-struct Node* list = NULL;
-push(&list, 3);
-push(&list, 1);
-push(&list, 4);
-print(list);           // 4 1 3
+void main() {
+    struct Node* list = NULL;
+    list = push(list, 3);
+    list = push(list, 1);
+    list = push(list, 4);
+    print(list);           // 4 1 3
+}
+
 ```
 
 For tutorials and additional details, see

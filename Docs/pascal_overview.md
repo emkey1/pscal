@@ -39,6 +39,8 @@ end.
 ### Records and Sets Example
 
 ```pascal
+program RecordsSets;
+
 type
   Day = (Mon, Tue, Wed, Thu, Fri, Sat, Sun);
   DaySet = set of Day;
@@ -74,6 +76,8 @@ Builtins are implemented in C and exposed to Pascal through a lookup table【F:s
 Example:
 
 ```pascal
+program randomize;
+
 var
   n: integer;
 begin
@@ -92,6 +96,8 @@ Provides simple string helpers such as reversing text【F:lib/pascal/StringUtil.
 
 Example:
 ```pascal
+program ReverseWord;
+
 uses StringUtil;
 begin
   writeln(ReverseString('hello'));  // olleh
@@ -150,10 +156,14 @@ Common utility routines【F:lib/pascal/sysutils.pl†L1-L132】.
 
 Example:
 ```pascal
+program CheckFile;
+
 uses SysUtils;
 begin
   if FileExists('data.txt') then
-    writeln(UpperCase('found file'));
+    writeln(UpperCase('file found'));
+  else
+    writeln(UpperCase('file not found'));
 end.
 ```
 
