@@ -38,10 +38,11 @@ to the VM:
 ## Example: Sorting a String
 
 ```clike
-void sort_string(str s) {
+void sort_string(str* sp) {
     int i, j, len;
     char tmp;
-    len = strlen(s);
+    str s = *sp;
+    len = strlen(s); // strings index from one
     i = 1;
     while (i <= len) {
         j = i + 1;
@@ -55,10 +56,16 @@ void sort_string(str s) {
         }
         i++;
     }
+    *sp = s;
 }
 
-str guessed = "ST";
-sort_string(guessed);  // pass the string value, not its address
+void main() {
+    // String literals are immutable; make a writable copy first.
+    str sort = copy("This is a string", 1, strlen("This is a string"));
+    sort_string(&sort);
+    printf("Sorted String is %s\n", sort);
+}
+
 ```
 
 ## Example: Building a Linked List
