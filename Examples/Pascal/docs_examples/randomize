@@ -1,0 +1,9 @@
+program randomize;
+
+var
+  n: integer;
+begin
+  randomize;
+  n := random(10) + 1;
+  writeln('Random number: ', n);
+end.

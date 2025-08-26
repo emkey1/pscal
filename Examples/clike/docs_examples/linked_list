@@ -1,0 +1,29 @@
+struct Node {
+    int value;
+    struct Node* next;
+};
+
+struct Node* push(struct Node* head, int value) {
+    struct Node* n;
+    new(&n);
+    n->value = value;
+    n->next = head;
+    return n;
+}
+
+void print(struct Node* head) {
+    while (head != NULL) {
+        printf("%d ", head->value);
+        head = head->next;
+    }
+    printf("\n");
+}
+
+void main() {
+    struct Node* list = NULL;
+    list = push(list, 3);
+    list = push(list, 1);
+    list = push(list, 4);
+    print(list);           // 4 1 3
+}
+
