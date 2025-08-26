@@ -16,6 +16,8 @@ int main() {
     long n;
     printf("Please enter an integer value for iterations: ");
     scanf(n);
+
     printf("pi: %.31f\n", chudnovsky_native(n));
+
     return 0;
 }
