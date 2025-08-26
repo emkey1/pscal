@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 
 typedef struct {
     char *name;
@@ -830,11 +831,22 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                                 i++; // skip second %
                             } else {
                                 size_t j = i + 1;
-                                const char *specifiers = "cdiuoxXfFeEgGaAspn";
-                                while (j < flen && strchr(specifiers, fmt[j]) == NULL) {
+                                int width = 0;
+                                int precision = -1;
+                                while (j < flen && isdigit((unsigned char)fmt[j])) {
+                                    width = width * 10 + (fmt[j] - '0');
                                     j++;
                                 }
-                                if (j < flen && arg_index < node->child_count) {
+                                if (j < flen && fmt[j] == '.') {
+                                    j++;
+                                    precision = 0;
+                                    while (j < flen && isdigit((unsigned char)fmt[j])) {
+                                        precision = precision * 10 + (fmt[j] - '0');
+                                        j++;
+                                    }
+                                }
+                                const char *specifiers = "cdiuoxXfFeEgGaAspn";
+                                if (j < flen && strchr(specifiers, fmt[j]) != NULL && arg_index < node->child_count) {
                                     if (seglen > 0) {
                                         seg[seglen] = '\0';
                                         Value strv = makeString(seg);
@@ -846,6 +858,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                                         seglen = 0;
                                     }
                                     compileExpression(node->children[arg_index++], chunk, ctx);
+                                    if (width > 0 || precision >= 0) {
+                                        if (precision < 0) precision = PASCAL_DEFAULT_FLOAT_PRECISION;
+                                        writeBytecodeChunk(chunk, OP_FORMAT_VALUE, node->token.line);
+                                        writeBytecodeChunk(chunk, (uint8_t)width, node->token.line);
+                                        writeBytecodeChunk(chunk, (uint8_t)precision, node->token.line);
+                                    }
                                     write_arg_count++;
                                     i = j; // skip full format specifier
                                 } else {
