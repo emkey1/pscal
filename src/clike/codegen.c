@@ -900,8 +900,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 }
             } else if (strcasecmp(name, "assign") == 0 ||
                        strcasecmp(name, "reset") == 0 ||
+                       strcasecmp(name, "rewrite") == 0 ||
+                       strcasecmp(name, "append") == 0 ||
                        strcasecmp(name, "eof") == 0 ||
-                       strcasecmp(name, "close") == 0) {
+                       strcasecmp(name, "close") == 0 ||
+                       strcasecmp(name, "rename") == 0 ||
+                       strcasecmp(name, "remove") == 0) {
                 // File builtins take the file variable as a VAR parameter.
                 if (node->child_count > 0) {
                     compileLValue(node->children[0], chunk, ctx);
@@ -909,7 +913,9 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                         compileExpression(node->children[i], chunk, ctx);
                     }
                 }
-                int fnIndex = addStringConstant(chunk, name);
+                const char* vmName = name;
+                if (strcasecmp(name, "remove") == 0) vmName = "erase";
+                int fnIndex = addStringConstant(chunk, vmName);
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)fnIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
