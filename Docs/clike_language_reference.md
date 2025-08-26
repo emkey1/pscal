@@ -203,12 +203,10 @@ The C-like front end has access to the rich set of built-in functions provided b
 Here is a simple "Hello, World!" program to demonstrate the language's syntax:
 
 ```c
-#import "stdio.cl"
-
 int main() {
   printf("Hello, World!\n");
   return 0;
 }
 ```
 
-This code imports a standard I/O library, defines a `main` function, and uses the `printf` built-in function to print a string to the console.
+ This example uses the `printf` built-in function to print a string to the console.
