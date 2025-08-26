@@ -10,8 +10,10 @@ VarType clike_tokenTypeToVarType(ClikeTokenType t) {
     switch (t) {
         case CLIKE_TOKEN_INT:        return TYPE_INT32;
         case CLIKE_TOKEN_LONG:       return TYPE_INT64;
+        case CLIKE_TOKEN_LONG_LONG:  return TYPE_INT64;
         case CLIKE_TOKEN_FLOAT:      return TYPE_FLOAT;
         case CLIKE_TOKEN_DOUBLE:     return TYPE_DOUBLE;
+        case CLIKE_TOKEN_LONG_DOUBLE:return TYPE_LONG_DOUBLE;
         case CLIKE_TOKEN_STR:        return TYPE_STRING;
         case CLIKE_TOKEN_TEXT:       return TYPE_FILE;
         case CLIKE_TOKEN_MSTREAM:    return TYPE_MEMORYSTREAM;
@@ -26,8 +28,10 @@ const char *clike_tokenTypeToTypeName(ClikeTokenType t) {
     switch (t) {
         case CLIKE_TOKEN_INT:    return "int";
         case CLIKE_TOKEN_LONG:   return "long";
+        case CLIKE_TOKEN_LONG_LONG: return "long long";
         case CLIKE_TOKEN_FLOAT:  return "float";
         case CLIKE_TOKEN_DOUBLE: return "double";
+        case CLIKE_TOKEN_LONG_DOUBLE: return "long double";
         case CLIKE_TOKEN_STR:    return "string";
         case CLIKE_TOKEN_TEXT:   return "text";
         case CLIKE_TOKEN_MSTREAM:return "mstream";
@@ -69,6 +73,26 @@ static void expectToken(ParserClike *p, ClikeTokenType type, const char *msg) {
                 clikeTokenTypeToString(p->current.type));
         clike_error_count++;
     }
+}
+
+static ClikeToken parseTypeToken(ParserClike *p) {
+    ClikeToken type_tok = p->current;
+    if (type_tok.type == CLIKE_TOKEN_LONG && p->next.type == CLIKE_TOKEN_LONG) {
+        advanceParser(p);
+        advanceParser(p);
+        type_tok.type = CLIKE_TOKEN_LONG_LONG;
+        type_tok.lexeme = "long long";
+        type_tok.length = 9;
+    } else if (type_tok.type == CLIKE_TOKEN_LONG && p->next.type == CLIKE_TOKEN_DOUBLE) {
+        advanceParser(p);
+        advanceParser(p);
+        type_tok.type = CLIKE_TOKEN_LONG_DOUBLE;
+        type_tok.lexeme = "long double";
+        type_tok.length = 11;
+    } else {
+        advanceParser(p);
+    }
+    return type_tok;
 }
 
 static int isTypeToken(ClikeTokenType t);
@@ -346,7 +370,7 @@ ASTNodeClike* parseProgramClike(ParserClike *p) {
                 clike_error_count++;
                 break;
             }
-            ClikeToken type_tok = p->current; advanceParser(p);
+            ClikeToken type_tok = parseTypeToken(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
             ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
@@ -380,8 +404,9 @@ ASTNodeClike* parseProgramClike(ParserClike *p) {
 
 static int isTypeToken(ClikeTokenType t) {
     return t == CLIKE_TOKEN_INT || t == CLIKE_TOKEN_LONG ||
-           t == CLIKE_TOKEN_VOID || t == CLIKE_TOKEN_FLOAT ||
-           t == CLIKE_TOKEN_DOUBLE || t == CLIKE_TOKEN_STR ||
+           t == CLIKE_TOKEN_LONG_LONG || t == CLIKE_TOKEN_VOID ||
+           t == CLIKE_TOKEN_FLOAT || t == CLIKE_TOKEN_DOUBLE ||
+           t == CLIKE_TOKEN_LONG_DOUBLE || t == CLIKE_TOKEN_STR ||
            t == CLIKE_TOKEN_TEXT || t == CLIKE_TOKEN_MSTREAM ||
            t == CLIKE_TOKEN_CHAR || t == CLIKE_TOKEN_BYTE;
 }
@@ -481,7 +506,7 @@ static ASTNodeClike* structDeclaration(ParserClike *p, ClikeToken nameTok) {
 
     expectToken(p, CLIKE_TOKEN_LBRACE, "{");
     while (p->current.type != CLIKE_TOKEN_RBRACE && p->current.type != CLIKE_TOKEN_EOF) {
-        ClikeToken typeTok = p->current; advanceParser(p);
+        ClikeToken typeTok = parseTypeToken(p);
         ClikeToken structTypeTok; structTypeTok.lexeme = NULL; structTypeTok.length = 0;
         if (typeTok.type == CLIKE_TOKEN_STRUCT) {
             structTypeTok = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "struct name");
@@ -602,7 +627,7 @@ static ASTNodeClike* param(ParserClike *p) {
         node->is_const = isConst;
         return node;
     } else {
-        ClikeToken type_tok = p->current; advanceParser(p);
+        ClikeToken type_tok = parseTypeToken(p);
         int isPtr = 0;
         if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
         ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "param name");
@@ -650,7 +675,7 @@ static ASTNodeClike* compoundStmt(ParserClike *p) {
                 clike_error_count++;
                 break;
             }
-            ClikeToken type_tok = p->current; advanceParser(p);
+            ClikeToken type_tok = parseTypeToken(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
             ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
@@ -751,7 +776,7 @@ static ASTNodeClike* forStatement(ParserClike *p) {
                         p->current.line, p->current.column);
                 clike_error_count++;
             }
-            ClikeToken type_tok = p->current; advanceParser(p);
+            ClikeToken type_tok = parseTypeToken(p);
             int isPtr = 0;
             if (p->current.type == CLIKE_TOKEN_STAR) { advanceParser(p); isPtr = 1; }
             ClikeToken ident = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
@@ -1071,8 +1096,7 @@ static ASTNodeClike* unary(ParserClike *p) {
 static ASTNodeClike* factor(ParserClike *p) {
     if (matchToken(p, CLIKE_TOKEN_LPAREN)) {
         if (isTypeToken(p->current.type)) {
-            ClikeToken type_tok = p->current;
-            advanceParser(p);
+            ClikeToken type_tok = parseTypeToken(p);
             expectToken(p, CLIKE_TOKEN_RPAREN, ")");
             ASTNodeClike *expr = unary(p);
             const char *fname = NULL;
@@ -1083,6 +1107,7 @@ static ASTNodeClike* factor(ParserClike *p) {
                     break;
                 case CLIKE_TOKEN_INT:
                 case CLIKE_TOKEN_LONG:
+                case CLIKE_TOKEN_LONG_LONG:
                     fname = "trunc";
                     break;
                 case CLIKE_TOKEN_CHAR:

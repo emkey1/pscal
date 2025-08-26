@@ -14,15 +14,18 @@ static VarType builtinReturnType(const char* name) {
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
     if (strcasecmp(name, "ord")  == 0) return TYPE_INT32;
 
+    if (strcasecmp(name, "sqrt") == 0) return TYPE_LONG_DOUBLE;
+
     if (strcasecmp(name, "cos")  == 0 ||
         strcasecmp(name, "sin")  == 0 ||
         strcasecmp(name, "tan")  == 0 ||
-        strcasecmp(name, "sqrt") == 0 ||
         strcasecmp(name, "ln")   == 0 ||
         strcasecmp(name, "exp")  == 0 ||
         strcasecmp(name, "real") == 0) {
         return TYPE_DOUBLE;
     }
+
+    if (strcasecmp(name, "chudnovsky") == 0) return TYPE_LONG_DOUBLE;
 
     if (strcasecmp(name, "round")     == 0 ||
         strcasecmp(name, "trunc")     == 0 ||

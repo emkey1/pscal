@@ -18,6 +18,7 @@ The language is strongly typed and supports a range of features common to C and 
 The following are reserved keywords and cannot be used as identifiers:
 
 * `int`, `long`, `void`, `float`, `double`
+* the combinations `long double`, `long long`
 * `str`, `text`, `mstream`, `char`, `byte`
 * `if`, `else`, `while`, `for`, `do`, `switch`, `case`, `default`
 * `struct`, `enum`, `const`
@@ -41,8 +42,11 @@ The language supports a variety of built-in data types:
 
 | Keyword | VM Type | Description |
 | :--- | :--- | :--- |
-| `int`, `long` | `TYPE_INTEGER` | 64-bit signed integer. |
-| `float`, `double` | `TYPE_REAL` | 64-bit floating-point number. |
+| `int` | `TYPE_INT32` | 32-bit signed integer. |
+| `long`, `long long` | `TYPE_INT64` | 64-bit signed integer. |
+| `float` | `TYPE_FLOAT` | 32-bit floating-point number. |
+| `double` | `TYPE_DOUBLE` | 64-bit floating-point number. |
+| `long double` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
 | `char` | `TYPE_CHAR` | 8-bit character. |
 | `byte` | `TYPE_BYTE` | 8-bit unsigned integer. |
 | `str` | `TYPE_STRING` | Dynamic-length string. |

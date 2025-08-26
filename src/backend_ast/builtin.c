@@ -1285,9 +1285,12 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinSqrt(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "sqrt expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    long double x = (arg.type == TYPE_INTEGER) ? (long double)arg.i_val : as_ld(arg);
     if (x < 0) { runtimeError(vm, "sqrt expects a non-negative argument."); return makeReal(0.0); }
-    return makeReal(sqrt(x));
+    if (arg.type == TYPE_LONG_DOUBLE) {
+        return makeLongDouble(sqrtl(x));
+    }
+    return makeReal(sqrt((double)x));
 }
 
 Value vmBuiltinExp(VM* vm, int arg_count, Value* args) {
