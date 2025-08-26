@@ -32,9 +32,9 @@
 #define AS_BOOLEAN(value) ((value).i_val != 0) // Assumes i_val stores 0 for false, 1 for true
 
 // Also useful:
-#define IS_INTEGER(value) ((value).type == TYPE_INTEGER)
+#define IS_INTEGER(value) ((value).type == TYPE_INT32)
 #define AS_INTEGER(value) ((value).i_val)
-#define IS_REAL(value)    ((value).type == TYPE_REAL)
+#define IS_REAL(value)    ((value).type == TYPE_DOUBLE)
 #define AS_REAL(value)    ((value).r_val)
 #define IS_STRING(value)  ((value).type == TYPE_STRING)
 #define AS_STRING(value)  ((value).s_val)
@@ -56,7 +56,7 @@ static const int pscalToAnsiBase[8] = {
 };
 
 static inline bool is_intlike_type(VarType t) {
-    return t == TYPE_INTEGER || t == TYPE_WORD || t == TYPE_BYTE;
+    return t == TYPE_INT32 || t == TYPE_WORD || t == TYPE_BYTE;
 }
 
 static inline bool is_ordinal_type(VarType t) {
@@ -89,7 +89,7 @@ static inline long long as_i64(Value v) {
     return v.i_val; // INTEGER, BYTE, WORD, BOOLEAN all use i_val
 }
 static inline double as_f64(Value v) {
-    return (v.type == TYPE_REAL) ? v.r_val : (double)v.i_val;
+    return (v.type == TYPE_DOUBLE) ? v.r_val : (double)v.i_val;
 }
 
 const char *varTypeToString(VarType type);

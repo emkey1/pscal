@@ -20,8 +20,8 @@
 const char *varTypeToString(VarType type) {
     switch (type) {
         case TYPE_VOID:         return "VOID";
-        case TYPE_INTEGER:      return "INTEGER";
-        case TYPE_REAL:         return "REAL";
+        case TYPE_INT32:        return "INTEGER";
+        case TYPE_DOUBLE:       return "REAL";
         case TYPE_STRING:       return "STRING";
         case TYPE_CHAR:         return "CHAR";
         case TYPE_RECORD:       return "RECORD";
@@ -322,7 +322,7 @@ void freeFieldValue(FieldValue *fv) {
 Value makeInt(long long val) {
     Value v;
     memset(&v, 0, sizeof(Value)); // Initialize all fields to 0/NULL
-    v.type = TYPE_INTEGER;
+    v.type = TYPE_INT32;
     v.i_val = val;
     return v;
 }
@@ -330,7 +330,7 @@ Value makeInt(long long val) {
 Value makeReal(double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
-    v.type = TYPE_REAL;
+    v.type = TYPE_DOUBLE;
     v.r_val = val;
     return v;
 }
@@ -554,8 +554,8 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     }
 
     switch(type) {
-        case TYPE_INTEGER: v.i_val = 0; break;
-        case TYPE_REAL:    v.r_val = 0.0; break;
+        case TYPE_INT32:  v.i_val = 0;   break;
+        case TYPE_DOUBLE: v.r_val = 0.0; break;
         case TYPE_STRING: {
             v.s_val = NULL;
             v.max_length = -1;
@@ -576,7 +576,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                      #endif
                      Symbol *constSym = lookupSymbol(const_name);
 
-                     if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INTEGER) {
+                    if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INT32) {
                           parsed_len = constSym->value->i_val;
                           #ifdef DEBUG
                           fprintf(stderr, "[DEBUG makeValueForType] Found constant '%s' with value %lld.\n", const_name, parsed_len);
@@ -657,8 +657,8 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                        if (elemType == TYPE_VOID) {
                              if (elemTypeDefNode->type == AST_VARIABLE && elemTypeDefNode->token) {
                                  const char *tn = elemTypeDefNode->token->value;
-                                 if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INTEGER;
-                                 else if (strcasecmp(tn, "real") == 0) elemType = TYPE_REAL;
+                                 if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INT32;
+                                 else if (strcasecmp(tn, "real") == 0) elemType = TYPE_DOUBLE;
                                  else if (strcasecmp(tn, "char") == 0) elemType = TYPE_CHAR;
                                  else if (strcasecmp(tn, "boolean") == 0) elemType = TYPE_BOOLEAN;
                                  else if (strcasecmp(tn, "byte") == 0) elemType = TYPE_BYTE;
@@ -698,7 +698,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                          Value low_val = evaluateCompileTimeValue(subrange->left);
                          Value high_val = evaluateCompileTimeValue(subrange->right);
 
-                         if (low_val.type == TYPE_INTEGER && high_val.type == TYPE_INTEGER) {
+                        if (low_val.type == TYPE_INT32 && high_val.type == TYPE_INT32) {
                              lbs[i] = (int)low_val.i_val;
                              ubs[i] = (int)high_val.i_val;
                          } else {
@@ -893,8 +893,8 @@ void freeValue(Value *v) {
 //#endif
     switch (v->type) {
         case TYPE_VOID:
-        case TYPE_INTEGER:
-        case TYPE_REAL:
+        case TYPE_INT32:
+        case TYPE_DOUBLE:
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
         case TYPE_BYTE:
@@ -1081,10 +1081,10 @@ void dumpSymbol(Symbol *sym) {
     if (sym->value) {
         printf(", Value: ");
         switch (sym->type) {
-            case TYPE_INTEGER:
+            case TYPE_INT32:
                 printf("%lld", sym->value->i_val);
                 break;
-            case TYPE_REAL:
+            case TYPE_DOUBLE:
                 printf("%f", sym->value->r_val);
                 break;
             case TYPE_STRING:
@@ -1573,10 +1573,10 @@ void printValueToStream(Value v, FILE *stream) {
     }
 
     switch (v.type) {
-        case TYPE_INTEGER:
+        case TYPE_INT32:
             fprintf(stream, "%lld", v.i_val);
             break;
-        case TYPE_REAL:
+        case TYPE_DOUBLE:
             fprintf(stream, "%f", v.r_val);
             break;
         case TYPE_BOOLEAN:
