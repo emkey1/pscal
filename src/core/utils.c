@@ -565,7 +565,9 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
     switch(type) {
         case TYPE_INT32:  v.i_val = 0;   break;
-        case TYPE_DOUBLE: v.r_val = 0.0; break;
+        case TYPE_FLOAT:  v.f32_val = 0.0f; v.d_val = 0.0; v.r_val = 0.0; break;
+        case TYPE_DOUBLE: v.d_val = 0.0; v.r_val = 0.0; break;
+        case TYPE_LONG_DOUBLE: v.r_val = 0.0L; v.d_val = 0.0; break;
         case TYPE_STRING: {
             v.s_val = NULL;
             v.max_length = -1;
