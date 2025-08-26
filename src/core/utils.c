@@ -340,7 +340,6 @@ Value makeReal(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
-    v.d_val = (double)val;
     v.r_val = val;
     return v;
 }
@@ -565,9 +564,14 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
     switch(type) {
         case TYPE_INT32:  v.i_val = 0;   break;
-        case TYPE_FLOAT:  v.f32_val = 0.0f; v.d_val = 0.0; v.r_val = 0.0; break;
-        case TYPE_DOUBLE: v.d_val = 0.0; v.r_val = 0.0; break;
-        case TYPE_LONG_DOUBLE: v.r_val = 0.0L; v.d_val = 0.0; break;
+        case TYPE_INT64:  v.i_val = 0;   break;
+        case TYPE_UINT32: v.u_val = 0;   break;
+        case TYPE_UINT64: v.u_val = 0;   break;
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            v.r_val = 0.0L;
+            break;
         case TYPE_STRING: {
             v.s_val = NULL;
             v.max_length = -1;
@@ -1096,8 +1100,12 @@ void dumpSymbol(Symbol *sym) {
             case TYPE_INT32:
                 printf("%lld", sym->value->i_val);
                 break;
+            case TYPE_FLOAT:
             case TYPE_DOUBLE:
-                printf("%f", sym->value->r_val);
+                printf("%f", (double)sym->value->r_val);
+                break;
+            case TYPE_LONG_DOUBLE:
+                printf("%Lf", sym->value->r_val);
                 break;
             case TYPE_STRING:
                 printf("\"%s\"", sym->value->s_val ? sym->value->s_val : "(null)");
@@ -1589,10 +1597,8 @@ void printValueToStream(Value v, FILE *stream) {
             fprintf(stream, "%lld", v.i_val);
             break;
         case TYPE_FLOAT:
-            fprintf(stream, "%f", v.f32_val);
-            break;
         case TYPE_DOUBLE:
-            fprintf(stream, "%f", v.d_val);
+            fprintf(stream, "%f", (double)v.r_val);
             break;
         case TYPE_LONG_DOUBLE:
             fprintf(stream, "%Lf", v.r_val);
