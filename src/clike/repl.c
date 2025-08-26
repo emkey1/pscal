@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 #include "clike/parser.h"
 #include "clike/codegen.h"
 #include "clike/builtins.h"
@@ -27,10 +29,21 @@ static void initSymbolSystemClike(void) {
 
 int main(void) {
     vmInitTerminalState();
+
+    struct termios raw_termios;
+    tcgetattr(STDIN_FILENO, &raw_termios);
+    struct termios canon_termios = raw_termios;
+    canon_termios.c_lflag |= (ICANON | ECHO);
+    canon_termios.c_cc[VMIN] = 1;
+    canon_termios.c_cc[VTIME] = 0;
+
     char line[1024];
     while (1) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &canon_termios);
         printf("clike> ");
+        fflush(stdout);
         if (!fgets(line, sizeof(line), stdin)) break;
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
         if (strncmp(line, ":quit", 5) == 0) break;
 
         const char *prefix = "int main() {\n";
