@@ -31,6 +31,9 @@ clike> printf("hello world\n");
 hello world
 clike> 2 + 2;
 4
+clike> int a; a = 100; int b; b = 33; printf("%d\n", a + b);
+133
+clike> 
 clike> :quit
 ```
 
