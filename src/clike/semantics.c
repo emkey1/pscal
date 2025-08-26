@@ -179,7 +179,7 @@ static void registerBuiltinFunctions(void) {
 
 static VarType getFunctionType(const char *name) {
     for (int i = 0; i < functionCount; ++i) {
-        if (strcmp(functions[i].name, name) == 0) return functions[i].type;
+        if (strcasecmp(functions[i].name, name) == 0) return functions[i].type;
     }
     return TYPE_UNKNOWN;
 }
@@ -201,7 +201,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             return node->var_type;
         case TCAST_IDENTIFIER: {
             char *name = tokenToCString(node->token);
-            if (strcmp(name, "NULL") == 0) {
+            if (strcasecmp(name, "NULL") == 0) {
                 free(name);
                 node->var_type = TYPE_POINTER;
                 return TYPE_POINTER;
@@ -268,7 +268,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
             // `exit` behaves like C's exit: allow 0 or 1 integer argument.
-            if (strcmp(name, "exit") == 0) {
+            if (strcasecmp(name, "exit") == 0) {
                 if (node->child_count > 1) {
                     fprintf(stderr,
                             "Type error: exit expects at most 1 argument at line %d, column %d\n",
@@ -308,7 +308,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             for (int i = 0; i < node->child_count; ++i) {
                 analyzeExpr(node->children[i], scopes);
             }
-            if (strcmp(name, "mstreamcreate") == 0) {
+            if (strcasecmp(name, "mstreamcreate") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr,
                             "Type error: mstreamcreate expects no arguments at line %d, column %d\n",
@@ -316,8 +316,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                             node->token.column);
                     clike_error_count++;
                 }
-            } else if (strcmp(name, "mstreamloadfromfile") == 0 ||
-                       strcmp(name, "mstreamsavetofile") == 0) {
+            } else if (strcasecmp(name, "mstreamloadfromfile") == 0 ||
+                       strcasecmp(name, "mstreamsavetofile") == 0) {
                 if (node->child_count != 2) {
                     fprintf(stderr,
                             "Type error: %s expects 2 arguments at line %d, column %d\n",
@@ -343,7 +343,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                         clike_error_count++;
                     }
                 }
-            } else if (strcmp(name, "mstreamfree") == 0) {
+            } else if (strcasecmp(name, "mstreamfree") == 0) {
                 if (node->child_count != 1 || node->children[0]->var_type != TYPE_POINTER) {
                     fprintf(stderr,
                             "Type error: mstreamfree expects a pointer argument at line %d, column %d\n",
@@ -351,7 +351,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                             node->token.column);
                     clike_error_count++;
                 }
-            } else if (strcmp(name, "mstreambuffer") == 0) {
+            } else if (strcasecmp(name, "mstreambuffer") == 0) {
                 if (node->child_count != 1 || node->children[0]->var_type != TYPE_MEMORYSTREAM) {
                     fprintf(stderr,
                             "Type error: mstreambuffer expects an mstream argument at line %d, column %d\n",

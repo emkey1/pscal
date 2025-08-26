@@ -9,6 +9,7 @@
 #include "symbol/symbol.h"
 #include "globals.h"
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -761,7 +762,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         }
         case TCAST_IDENTIFIER: {
             char* name = tokenToCString(node->token);
-            if (strcmp(name, "NULL") == 0) {
+            if (strcasecmp(name, "NULL") == 0) {
                 Value v; memset(&v, 0, sizeof(Value));
                 // Emit a NIL constant instead of a zeroed POINTER to preserve
                 // the base type of pointer variables when assigning NULL.
@@ -813,7 +814,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             break;
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
-            if (strcmp(name, "printf") == 0) {
+            if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;
                 if (node->child_count > 0 && node->children[0]->type == TCAST_STRING) {
@@ -878,7 +879,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 freeValue(&zero);
                 writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)zidx, node->token.line);
-            } else if (strcmp(name, "scanf") == 0 || strcmp(name, "readln") == 0) {
+            } else if (strcasecmp(name, "scanf") == 0 || strcasecmp(name, "readln") == 0) {
                 // Compile arguments as l-values (addresses) and call the VM's
                 // `readln` builtin. `scanf` returns 0 to mimic C semantics,
                 // while `readln` is treated as a procedure.
@@ -890,17 +891,17 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 emitShort(chunk, (uint16_t)rlIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
 
-                if (strcmp(name, "scanf") == 0) {
+                if (strcasecmp(name, "scanf") == 0) {
                     Value zero = makeInt(0);
                     int idx = addConstantToChunk(chunk, &zero);
                     freeValue(&zero);
                     writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 }
-            } else if (strcmp(name, "assign") == 0 ||
-                       strcmp(name, "reset") == 0 ||
-                       strcmp(name, "eof") == 0 ||
-                       strcmp(name, "close") == 0) {
+            } else if (strcasecmp(name, "assign") == 0 ||
+                       strcasecmp(name, "reset") == 0 ||
+                       strcasecmp(name, "eof") == 0 ||
+                       strcasecmp(name, "close") == 0) {
                 // File builtins take the file variable as a VAR parameter.
                 if (node->child_count > 0) {
                     compileLValue(node->children[0], chunk, ctx);
@@ -912,7 +913,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)fnIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
-            } else if (strcmp(name, "random") == 0) {
+            } else if (strcasecmp(name, "random") == 0) {
                 // Direct wrapper around the VM's random builtin.
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
@@ -921,7 +922,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)rIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
-            } else if (strcmp(name, "itoa") == 0) {
+            } else if (strcasecmp(name, "itoa") == 0) {
                 // Wrap Pascal's Str builtin: first argument is a value,
                 // second is a VAR string parameter.
                 if (node->child_count == 2) {
@@ -936,7 +937,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)strIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
-            } else if (strcmp(name, "strlen") == 0) {
+            } else if (strcasecmp(name, "strlen") == 0) {
                 // Map C's strlen to the Pascal-style length builtin.
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
@@ -945,7 +946,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)lenIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
-            } else if (strcmp(name, "exit") == 0) {
+            } else if (strcasecmp(name, "exit") == 0) {
                 // Map C-like exit to the VM's halt builtin to allow an optional exit code.
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
