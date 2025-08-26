@@ -2874,6 +2874,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("IOResult", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SetLength", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Ln", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Log10", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);
