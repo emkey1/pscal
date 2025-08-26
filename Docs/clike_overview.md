@@ -92,11 +92,14 @@ void print(struct Node* head) {
     printf("\n");
 }
 
-struct Node* list = NULL;
-list = push(list, 3);
-list = push(list, 1);
-list = push(list, 4);
-print(list);           // 4 1 3
+void main() {
+    struct Node* list = NULL;
+    list = push(list, 3);
+    list = push(list, 1);
+    list = push(list, 4);
+    print(list);           // 4 1 3
+}
+
 ```
 
 For tutorials and additional details, see
