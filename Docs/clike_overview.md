@@ -85,7 +85,7 @@ struct Node* push(struct Node* head, int value) {
 }
 
 void print(struct Node* head) {
-    while (head) {
+    while (head != NULL) {
         printf("%d ", head->value);
         head = head->next;
     }
