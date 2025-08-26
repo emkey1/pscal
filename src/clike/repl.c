@@ -34,7 +34,7 @@ int main(void) {
         if (strncmp(line, ":quit", 5) == 0) break;
 
         const char *prefix = "int main() {\n";
-        const char *suffix = "\n}\n";
+        const char *suffix = "\nreturn 0;\n}\n";
         size_t len = strlen(prefix) + strlen(line) + strlen(suffix) + 1;
         char *src = (char*)malloc(len);
         snprintf(src, len, "%s%s%s", prefix, line, suffix);
@@ -49,6 +49,44 @@ int main(void) {
         ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
         ASTNodeClike *prog = parseProgramClike(&parser);
         freeParserClike(&parser);
+
+        /*
+         * If the user entered a simple expression (rather than a function
+         * call or statement), automatically wrap it in a printf so that the
+         * REPL echoes the result. This mimics the behaviour documented in the
+         * tutorial where entering `2 + 2;` prints `4`.
+         */
+        if (prog && prog->child_count == 1) {
+            ASTNodeClike *fn = prog->children[0];
+            if (fn->type == TCAST_FUN_DECL && fn->right && fn->right->child_count >= 1) {
+                ASTNodeClike *stmt = fn->right->children[0];
+                /* The final statement is the implicit 'return 0;' appended above. */
+                ASTNodeClike *last = fn->right->children[fn->right->child_count - 1];
+                if (last->type == TCAST_RETURN && stmt->type == TCAST_EXPR_STMT && stmt->left && stmt->left->type != TCAST_CALL) {
+                    ASTNodeClike *expr = stmt->left;
+
+                    ClikeToken printfTok = {0};
+                    printfTok.type = CLIKE_TOKEN_IDENTIFIER;
+                    printfTok.lexeme = "printf";
+                    printfTok.length = 6;
+                    printfTok.line = expr->token.line;
+                    printfTok.column = expr->token.column;
+
+                    ClikeToken fmtTok = {0};
+                    fmtTok.type = CLIKE_TOKEN_STRING;
+                    fmtTok.lexeme = "%lld\n";
+                    fmtTok.length = 5;
+                    fmtTok.line = expr->token.line;
+                    fmtTok.column = expr->token.column;
+
+                    ASTNodeClike *call = newASTNodeClike(TCAST_CALL, printfTok);
+                    ASTNodeClike *fmtNode = newASTNodeClike(TCAST_STRING, fmtTok);
+                    addChildClike(call, fmtNode);
+                    addChildClike(call, expr);
+                    setLeftClike(stmt, call);
+                }
+            }
+        }
 
         if (!verifyASTClikeLinks(prog, NULL)) {
             fprintf(stderr, "AST verification failed after parsing.\n");
