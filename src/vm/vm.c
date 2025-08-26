@@ -1123,7 +1123,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // Numeric comparison (Integers and Reals)
                 else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
-                    if (a_val.type == TYPE_REAL || b_val.type == TYPE_REAL) {
+                    if (is_real_type(a_val.type) || is_real_type(b_val.type)) {
                         long double fa = as_ld(a_val);
                         long double fb = as_ld(b_val);
                         switch (instruction_val) {
@@ -1667,8 +1667,11 @@ comparison_error_label:
                             }
                         }
                     }
-                    else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
-                        target_lvalue_ptr->r_val = (long double)value_to_set.i_val;
+                    else if (is_real_type(target_lvalue_ptr->type) && is_intlike_type(value_to_set.type)) {
+                        long double tmp = (long double)value_to_set.i_val;
+                        target_lvalue_ptr->r_val = tmp;
+                        target_lvalue_ptr->d_val = (double)tmp;
+                        target_lvalue_ptr->f32_val = (float)tmp;
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
@@ -2467,7 +2470,7 @@ comparison_error_label:
                 char buf[DEFAULT_STRING_CAPACITY];
                 buf[0] = '\0';
 
-                if (raw_val.type == TYPE_REAL) {
+                if (is_real_type(raw_val.type)) {
                     if (precision >= 0) {
                         snprintf(buf, sizeof(buf), "%*.*Lf", width, precision, raw_val.r_val);
                     } else {

@@ -298,7 +298,7 @@ Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
     Value arg = args[0];
     if (arg.type == TYPE_INTEGER) {
         return makeInt(arg.i_val * arg.i_val);
-    } else if (arg.type == TYPE_REAL) {
+    } else if (is_real_type(arg.type)) {
         return makeReal(arg.r_val * arg.r_val);
     }
     runtimeError(vm, "Sqr expects an Integer or Real argument. Got %s.", varTypeToString(arg.type));
@@ -472,12 +472,15 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_REAL) {
+    if (arg_count != 1 || !is_real_type(args[0].type)) {
         runtimeError(vm, "RealToStr expects 1 real argument.");
         return makeString("");
     }
     char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
+    if (args[0].type == TYPE_FLOAT)
+        snprintf(buffer, sizeof(buffer), "%f", args[0].f32_val);
+    else
+        snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
     return makeString(buffer);
 }
 
@@ -1416,7 +1419,7 @@ Value vmBuiltinTrunc(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "trunc expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
     if (arg.type == TYPE_INTEGER) return makeInt(arg.i_val);
-    if (arg.type == TYPE_REAL) return makeInt((long long)arg.r_val);
+    if (is_real_type(arg.type)) return makeInt((long long)arg.r_val);
     runtimeError(vm, "trunc expects a numeric argument.");
     return makeInt(0);
 }
@@ -1724,12 +1727,14 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
         const char* typeName = actualBaseTypeDef->token->value;
         if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "real")==0) { baseVarType=TYPE_REAL; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "real")==0 || strcasecmp(typeName, "double")==0) { baseVarType=TYPE_DOUBLE; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "float")==0) { baseVarType=TYPE_FLOAT; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "char")==0) { baseVarType=TYPE_CHAR; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "string")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "boolean")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "string")==0 || strcasecmp(typeName, "str")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "boolean")==0 || strcasecmp(typeName, "bool")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "byte")==0) { baseVarType=TYPE_BYTE; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "word")==0) { baseVarType=TYPE_WORD; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "int")==0) { baseVarType=TYPE_INT32; actualBaseTypeDef = NULL; }
         else {
             AST* lookedUpType = lookupType(typeName);
             if (!lookedUpType) { runtimeError(vm, "Cannot resolve base type '%s' in new().", typeName); return makeVoid(); }
@@ -2050,11 +2055,21 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 dst->i_val = v;
                 break;
             }
+            case TYPE_FLOAT: {
+                errno = 0;
+                float v = strtof(buffer, NULL);
+                if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
+                dst->f32_val = v;
+                dst->d_val = v;
+                dst->r_val = v;
+                break;
+            }
             case TYPE_REAL: {
                 errno = 0;
                 double v = strtod(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
+                dst->d_val = v;
                 break;
             }
             case TYPE_BOOLEAN: {
@@ -2164,12 +2179,24 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 p = endp ? endp : p;
                 break;
             }
+            case TYPE_FLOAT: {
+                errno = 0;
+                char* endp = NULL;
+                float v = strtof(p, &endp);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0f; }
+                dst->f32_val = v;
+                dst->d_val = v;
+                dst->r_val = v;
+                p = endp ? endp : p;
+                break;
+            }
             case TYPE_REAL: {
                 errno = 0;
                 char* endp = NULL;
                 double v = strtod(p, &endp);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
+                dst->d_val = v;
                 p = endp ? endp : p;
                 break;
             }
@@ -2303,12 +2330,19 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
 
     char* endptr = NULL;
     errno = 0;
-    if (dst->type == TYPE_REAL) {
+    if (dst->type == TYPE_REAL || dst->type == TYPE_FLOAT) {
         double r = strtod(s, &endptr);
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            dst->r_val = r;
+            if (dst->type == TYPE_FLOAT) {
+                dst->f32_val = (float)r;
+                dst->d_val = (float)r;
+                dst->r_val = (float)r;
+            } else {
+                dst->r_val = r;
+                dst->d_val = r;
+            }
             *code = makeInt(0);
         }
     } else {
@@ -2660,6 +2694,8 @@ Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
             return makeReal((double)arg.i_val);
         case TYPE_CHAR:
             return makeReal((double)arg.c_val);
+        case TYPE_FLOAT:
+            return makeReal(arg.r_val);
         case TYPE_REAL:
             // Return a copy of the real value itself, it's already a real.
             return makeReal(arg.r_val);
@@ -2709,6 +2745,9 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE:
         case TYPE_BOOLEAN:
             snprintf(buffer, sizeof(buffer), "%lld", val.i_val);
+            break;
+        case TYPE_FLOAT:
+            snprintf(buffer, sizeof(buffer), "%f", val.f32_val);
             break;
         case TYPE_REAL:
             snprintf(buffer, sizeof(buffer), "%Lf", val.r_val);
@@ -2760,14 +2799,14 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinAbs(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
     if (args[0].type == TYPE_INTEGER) return makeInt(llabs(args[0].i_val));
-    if (args[0].type == TYPE_REAL) return makeReal(fabs(args[0].r_val));
+    if (is_real_type(args[0].type)) return makeReal(fabsl(args[0].r_val));
     runtimeError(vm, "abs expects a numeric argument.");
     return makeInt(0);
 }
 
 Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Round expects 1 argument."); return makeInt(0); }
-    if (args[0].type == TYPE_REAL) return makeInt((long long)round(args[0].r_val));
+    if (is_real_type(args[0].type)) return makeInt((long long)llround(args[0].r_val));
     if (args[0].type == TYPE_INTEGER) return makeInt(args[0].i_val);
     runtimeError(vm, "Round expects a numeric argument.");
     return makeInt(0);

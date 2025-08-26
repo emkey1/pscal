@@ -38,12 +38,10 @@ const char *varTypeToString(VarType type) {
         case TYPE_UINT8:        return "UINT8";
         case TYPE_INT16:        return "INT16";
         case TYPE_UINT16:       return "UINT16";
-        case TYPE_INT32:        return "INT32";
         case TYPE_UINT32:       return "UINT32";
         case TYPE_INT64:        return "INT64";
         case TYPE_UINT64:       return "UINT64";
-        case TYPE_FLOAT:        return "FLOAT";
-        case TYPE_DOUBLE:       return "DOUBLE";
+        case TYPE_FLOAT:        return "REAL";
         case TYPE_LONG_DOUBLE:  return "LONG_DOUBLE";
         case TYPE_NIL:          return "NIL";
         default:                return "UNKNOWN_VAR_TYPE";
@@ -342,6 +340,7 @@ Value makeReal(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
+    v.d_val = (double)val;
     v.r_val = val;
     return v;
 }
@@ -566,7 +565,9 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
     switch(type) {
         case TYPE_INT32:  v.i_val = 0;   break;
-        case TYPE_DOUBLE: v.r_val = 0.0; break;
+        case TYPE_FLOAT:  v.f32_val = 0.0f; v.d_val = 0.0; v.r_val = 0.0; break;
+        case TYPE_DOUBLE: v.d_val = 0.0; v.r_val = 0.0; break;
+        case TYPE_LONG_DOUBLE: v.r_val = 0.0L; v.d_val = 0.0; break;
         case TYPE_STRING: {
             v.s_val = NULL;
             v.max_length = -1;
@@ -1587,10 +1588,14 @@ void printValueToStream(Value v, FILE *stream) {
         case TYPE_INT32:
             fprintf(stream, "%lld", v.i_val);
             break;
-        case TYPE_REAL:
-            fprintf(stream, "%Lf", v.r_val);
+        case TYPE_FLOAT:
+            fprintf(stream, "%f", v.f32_val);
+            break;
         case TYPE_DOUBLE:
-            fprintf(stream, "%f", v.r_val);
+            fprintf(stream, "%f", v.d_val);
+            break;
+        case TYPE_LONG_DOUBLE:
+            fprintf(stream, "%Lf", v.r_val);
             break;
         case TYPE_BOOLEAN:
             fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE"); // Boolean still uses i_val
