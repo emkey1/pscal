@@ -19,11 +19,11 @@ static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
 
     const long double C3 = 262537412640768000.0L; // 640320^3
     long double sum = 13591409.0L;
-    long double term = sum;
+    long double term = 1.0L;
 
     for (long k = 1; k < n; ++k) {
         long double k_d = (long double)k;
-        term *= -(6.0L * k_d - 5.0L) * (2.0L * k_d - 1.0L) * (6.0L * k_d - 1.0L);
+        term *= -(6.0L * k_d - 5.0L) * (2.0L * k_d - 1.0L) * (6.0L * k_d - 1.0L) * 24.0L;
         term /= k_d * k_d * k_d * C3;
         sum += term * (13591409.0L + 545140134.0L * k_d);
     }
