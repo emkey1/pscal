@@ -163,7 +163,7 @@ begin
   if FileExists('data.txt') then
     writeln(UpperCase('file found'));
   else
-    writelin(UpperCase('file not found');
+    writeln(UpperCase('file not found'));
 end.
 ```
 
