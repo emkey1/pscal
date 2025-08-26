@@ -76,7 +76,10 @@ VM. For instructions on adding your own routines, see
 | assign | (var f: File, name: String) | void | Bind a file variable to a name. |
 | reset | (var f: File) | void | Open file for reading. |
 | rewrite | (var f: File) | void | Open file for writing. |
+| append | (var f: File) | void | Open file for appending. |
 | close | (var f: File) | void | Close file. |
+| rename | (var f: File, newName: String) | void | Rename file. |
+| erase | (var f: File) | void | Delete file. (CLike front end calls this `remove`.) |
 | eof | ([f: File]) | Boolean | Test end of file. |
 | read | ([f: File,] var ...) | void | Read from file or console. |
 | readln | ([f: File,] var ...) | void | Read line from file or console. |

@@ -104,6 +104,33 @@ begin
   i := ioresult;
   AssertEqualInt(0, i, 'IOResult after successful close (read)');
 
+  writeln('--- Testing Append ---');
+  assign(f, '/tmp/pscal_testfile.txt');
+  append(f);
+  i := ioresult;
+  AssertEqualInt(0, i, 'IOResult after successful append');
+  writeln(f, 'Appended Line');
+  close(f);
+
+  assign(f, '/tmp/pscal_testfile.txt');
+  reset(f);
+  readln(f, tmp); // skip first line
+  readln(f, tmp); // skip second line
+  readln(f, tmp); // read appended line
+  AssertEqualStr('Appended Line', tmp, 'Append writes at end');
+  close(f);
+
+  writeln('--- Testing Rename and Erase ---');
+  assign(f, '/tmp/pscal_testfile.txt');
+  rename(f, '/tmp/pscal_testfile_renamed.txt');
+  i := ioresult;
+  AssertEqualInt(0, i, 'IOResult after successful rename');
+
+  assign(f, '/tmp/pscal_testfile_renamed.txt');
+  erase(f);
+  i := ioresult;
+  AssertEqualInt(0, i, 'IOResult after successful erase');
+
 
   writeln('--- Testing IOResult on Error ---');
   assign(f, '/tmp/pscal_nonexistent_file.txt'); // Assign a non-existent file

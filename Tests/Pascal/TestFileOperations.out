@@ -10,6 +10,12 @@ START: File Read Test (Line 1): PASS
 START: IOResult after successful readln 2: PASS
 START: File Read Test (Line 2): PASS
 START: IOResult after successful close (read): PASS
+--- Testing Append ---
+START: IOResult after successful append: PASS
+START: Append writes at end: PASS
+--- Testing Rename and Erase ---
+START: IOResult after successful rename: PASS
+START: IOResult after successful erase: PASS
 --- Testing IOResult on Error ---
 START: IOResult Error Test: PASS
 ---

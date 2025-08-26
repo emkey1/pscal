@@ -39,6 +39,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"api_receive", vmBuiltinApiReceive},
     {"api_send", vmBuiltinApiSend},
+    {"append", vmBuiltinAppend},
     {"arccos", vmBuiltinArccos},
     {"arcsin", vmBuiltinArcsin},
     {"arctan", vmBuiltinArctan},
@@ -98,6 +99,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"drawrect", vmBuiltinDrawrect}, // Moved
 #endif
     {"eof", vmBuiltinEof},
+    {"erase", vmBuiltinErase},
     {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
@@ -197,6 +199,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"readln", vmBuiltinReadln},
     {"real", vmBuiltinReal},
     {"realtostr", vmBuiltinRealtostr},
+    {"rename", vmBuiltinRename},
 #ifdef SDL
     {"rendercopy", vmBuiltinRendercopy}, // Moved
     {"rendercopyex", vmBuiltinRendercopyex}, // Moved
@@ -1861,6 +1864,29 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinAppend(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Append requires 1 argument."); return makeVoid(); }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Append: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Append must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Append."); return makeVoid(); }
+    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+
+    FILE* f = fopen(fileVarLValue->filename, "a");
+    if (f == NULL) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+    }
+    fileVarLValue->f_val = f;
+    return makeVoid();
+}
+
 Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Close requires 1 argument."); return makeVoid(); }
     
@@ -1876,6 +1902,56 @@ Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
         fileVarLValue->f_val = NULL;
     }
     // Standard Pascal does not de-assign the filename on Close.
+    return makeVoid();
+}
+
+Value vmBuiltinRename(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "Rename requires 2 arguments."); return makeVoid(); }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Rename: First argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First argument to Rename must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rename."); return makeVoid(); }
+    if (args[1].type != TYPE_STRING) { runtimeError(vm, "Second argument to Rename must be a string."); return makeVoid(); }
+    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+
+    int res = rename(fileVarLValue->filename, args[1].s_val);
+    if (res != 0) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+        free(fileVarLValue->filename);
+        fileVarLValue->filename = args[1].s_val ? strdup(args[1].s_val) : NULL;
+        if (args[1].s_val && !fileVarLValue->filename) {
+            runtimeError(vm, "Memory allocation failed for filename in Rename.");
+        }
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinErase(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Erase requires 1 argument."); return makeVoid(); }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Erase: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Erase must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Erase."); return makeVoid(); }
+    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+
+    int res = remove(fileVarLValue->filename);
+    if (res != 0) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+    }
     return makeVoid();
 }
 
@@ -2825,6 +2901,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcTan", AST_FUNCTION_DECL, NULL);
@@ -2903,6 +2980,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ReadKey", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Rename", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Erase", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
