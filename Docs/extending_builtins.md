@@ -160,13 +160,21 @@ The same built‑ins are available to the C‑like front end:
 
 ```c
 int main() {
-  printf("PID = %d\n", getpid());
-  return 0;
+    printf("PID = %d\n", getpid());
+    int* a;
+    int* b;
+    new(&a); new(&b);
+    *a = 1; *b = 2;
+    swap(&a, &b);
+    printf("After Swap: a=%d b=%d\n", *a, *b);
+    dispose(&a); dispose(&b);
+    return 0;
 }
 ```
 
 ```
-$ build/bin/clike Examples/clike/show_pid
-PID = 12345
+$ build/bin/clike Examples/clike/docs_examples/ShowExtendedBuiltins
+PID = 98106
+After Swap: a=2 b=1
 ```
 
