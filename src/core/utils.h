@@ -57,7 +57,6 @@ static const int pscalToAnsiBase[8] = {
 
 static inline bool is_intlike_type(VarType t) {
     switch (t) {
-        case TYPE_INTEGER:
         case TYPE_WORD:
         case TYPE_BYTE:
         case TYPE_INT8:
@@ -76,7 +75,6 @@ static inline bool is_intlike_type(VarType t) {
 
 static inline bool is_real_type(VarType t) {
     switch (t) {
-        case TYPE_REAL:
         case TYPE_FLOAT:
         case TYPE_DOUBLE:
         case TYPE_LONG_DOUBLE:
@@ -84,8 +82,6 @@ static inline bool is_real_type(VarType t) {
         default:
             return false;
     }
-
-    return t == TYPE_INT32 || t == TYPE_WORD || t == TYPE_BYTE;
 }
 
 static inline bool is_ordinal_type(VarType t) {
@@ -103,7 +99,6 @@ static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
         case TYPE_WORD:
         case TYPE_BYTE:
             return (long long)v->u_val;
-        case TYPE_INTEGER:
         case TYPE_INT64:
         case TYPE_INT32:
         case TYPE_INT16:
@@ -141,8 +136,7 @@ static inline long double as_ld(Value v) {
         switch (v.type) {
             case TYPE_FLOAT:       return v.f32_val;
             case TYPE_DOUBLE:      return v.d_val;
-            case TYPE_LONG_DOUBLE:
-            case TYPE_REAL:        return v.r_val;
+            case TYPE_LONG_DOUBLE: return v.r_val;
             default:               return v.r_val;
         }
     }
