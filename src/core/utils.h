@@ -154,6 +154,16 @@ void freeFieldValue(FieldValue *fv);
 // Value constructors
 Value makeInt(long long val);
 Value makeReal(long double val);
+Value makeFloat(float val);
+Value makeDouble(double val);
+Value makeLongDouble(long double val);
+Value makeInt8(int8_t val);
+Value makeUInt8(uint8_t val);
+Value makeInt16(int16_t val);
+Value makeUInt16(uint16_t val);
+Value makeUInt32(uint32_t val);
+Value makeInt64(long long val);
+Value makeUInt64(unsigned long long val);
 Value makeByte(unsigned char val);
 Value makeWord(unsigned int val);
 Value makeNil(void);
