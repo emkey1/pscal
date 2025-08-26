@@ -10,10 +10,11 @@ Pscal virtual machine.
 - **String indexing is 1-based** – Characters in a `str` start at index 1
   (`s[1]` is the first character). Accessing `s[0]` returns the length of the
   string as an integer.
-- **`str` values are pointers** – A `str` variable already evaluates to a
-  pointer to its character buffer.  Pass the variable directly to
-  functions; taking an additional address yields a pointer-to-pointer and
-  confuses element access.
+- **String literals are immutable** – Use `copy` to obtain a writable
+  string before modifying characters in place.
+- **`str` values are copied on call** – Strings are passed by value. To
+  mutate a caller's string, pass a pointer (e.g. `str*`) and write back to
+  it after making changes.
 - **Concatenation with `+`** – The `+` operator joins strings, e.g.
   `buffer = mstreambuffer(ms) + "\n";`.
 - **Standard string helpers** – Built-ins such as `strlen`, `copy` and
@@ -42,6 +43,7 @@ void sort_string(str* sp) {
     int i, j, len;
     char tmp;
     str s = *sp;
+
     len = strlen(s); // strings index from one
     i = 1;
     while (i <= len) {
