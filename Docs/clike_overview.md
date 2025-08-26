@@ -76,26 +76,26 @@ struct Node {
     struct Node* next;
 };
 
-void push(struct Node** head, int value) {
+struct Node* push(struct Node* head, int value) {
     struct Node* n;
     new(&n);
     n->value = value;
-    n->next = *head;
-    *head = n;
+    n->next = head;
+    return n;
 }
 
 void print(struct Node* head) {
     while (head) {
-        write(head->value, " ");
+        printf("%d ", head->value);
         head = head->next;
     }
-    writeln();
+    printf("\n");
 }
 
 struct Node* list = NULL;
-push(&list, 3);
-push(&list, 1);
-push(&list, 4);
+list = push(list, 3);
+list = push(list, 1);
+list = push(list, 4);
 print(list);           // 4 1 3
 ```
 
