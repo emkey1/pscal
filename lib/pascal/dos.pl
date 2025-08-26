@@ -51,6 +51,16 @@ begin
   GetEnv := dos_getenv(VarName);
 end;
 
+procedure GetDate(var Year, Month, Day, Dow: word);
+begin
+  dos_getdate(Year, Month, Day, Dow);
+end;
+
+procedure GetTime(var Hour, Minute, Second, Sec100: word);
+begin
+  dos_gettime(Hour, Minute, Second, Sec100);
+end;
+
 function Exec(Path, Cmd: string): integer;
 begin
   Exec := dos_exec(Path, Cmd);

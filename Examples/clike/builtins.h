@@ -52,6 +52,8 @@ int dos_getfattr();
 int dos_gettime();
 int dos_mkdir();
 int dos_rmdir();
+int getdate();
+int gettime();
 int drawcircle();
 int drawline();
 int drawpolygon();

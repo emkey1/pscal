@@ -141,8 +141,8 @@ VM. For instructions on adding your own routines, see
 | dos_rmdir / rmdir | (path: String) | Integer | Remove directory. |
 | dos_findfirst / findfirst | (pattern: String, attr: Integer) | Integer | Begin directory search. |
 | dos_findnext / findnext | () | Integer | Continue directory search. |
-| dos_getdate / getdate | () | Integer | Get system date packed as long. |
-| dos_gettime / gettime | () | Integer | Get system time packed as long. |
+| dos_getdate / getdate | (var Year, Month, Day, Dow: Word) | void | Retrieve system date components. |
+| dos_gettime / gettime | (var Hour, Minute, Second, Sec100: Word) | void | Retrieve system time components. |
 | dos_getfattr / getfattr | (path: String) | Integer | Get file attributes. |
 
 ## Networking
