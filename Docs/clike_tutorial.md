@@ -18,6 +18,11 @@ cmake --build build --target clike
 
 This generates `build/bin/clike`.
 
+## Install PSCAL Suite
+```sh
+sudo ./install.sh
+```
+
 ## Run a program
 
 Invoke the compiler with a source file:
