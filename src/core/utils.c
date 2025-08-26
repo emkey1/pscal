@@ -344,6 +344,86 @@ Value makeReal(long double val) {
     return v;
 }
 
+Value makeFloat(float val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_FLOAT;
+    v.f32_val = val;
+    return v;
+}
+
+Value makeDouble(double val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_DOUBLE;
+    v.d_val = val;
+    return v;
+}
+
+Value makeLongDouble(long double val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_LONG_DOUBLE;
+    v.r_val = val;
+    return v;
+}
+
+Value makeInt8(int8_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INT8;
+    v.i_val = val;
+    return v;
+}
+
+Value makeUInt8(uint8_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT8;
+    v.u_val = val;
+    return v;
+}
+
+Value makeInt16(int16_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INT16;
+    v.i_val = val;
+    return v;
+}
+
+Value makeUInt16(uint16_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT16;
+    v.u_val = val;
+    return v;
+}
+
+Value makeUInt32(uint32_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT32;
+    v.u_val = val;
+    return v;
+}
+
+Value makeInt64(long long val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INT64;
+    v.i_val = val;
+    return v;
+}
+
+Value makeUInt64(unsigned long long val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT64;
+    v.u_val = val;
+    return v;
+}
+
 Value makeByte(unsigned char val) {
     Value v;
     memset(&v, 0, sizeof(Value));

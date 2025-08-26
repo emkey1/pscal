@@ -1,15 +1,15 @@
 #!/usr/bin/env clike
-double chudnovsky_native(long n) {
-    const double C3 = 262537412640768000.0; // 640320^3
-    double sum = 13591409.0;
-    double term = 1.0;
+long double chudnovsky_native(long n) {
+    const long double C3 = 262537412640768000.0L; // 640320^3
+    long double sum = 13591409.0L;
+    long double term = 1.0L;
     for (long k = 1; k < n; k++) {
-        double k_d = (double)k;
-        term = term * -(6.0 * k_d - 5.0) * (2.0 * k_d - 1.0) * (6.0 * k_d - 1.0) * 24.0;
-        term = term / (k_d * k_d * k_d * C3);
-        sum = sum + term * (13591409.0 + 545140134.0 * k_d);
+        long double k_d = (long double)k;
+        term *= -(6.0L * k_d - 5.0L) * (2.0L * k_d - 1.0L) * (6.0L * k_d - 1.0L) * 24.0L;
+        term /= (k_d * k_d * k_d * C3);
+        sum += term * (13591409.0L + 545140134.0L * k_d);
     }
-    return 426880.0 * sqrt(10005.0) / sum;
+    return 426880.0L * sqrtl(10005.0L) / sum;
 }
 
 int main() {
@@ -17,7 +17,8 @@ int main() {
     printf("Please enter an integer value for iterations: ");
     scanf(n);
 
-    printf("pi: %.31f\n", chudnovsky_native(n));
+    long double pi = chudnovsky_native(n);
+    printf("pi: %.31Lf\n", pi);
 
     return 0;
 }

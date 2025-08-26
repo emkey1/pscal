@@ -5,16 +5,16 @@
 static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "Chudnovsky expects exactly 1 argument.");
-        return makeReal(0.0L);
+        return makeLongDouble(0.0L);
     }
-    if (args[0].type != TYPE_INTEGER) {
+    if (!is_intlike_type(args[0].type)) {
         runtimeError(vm, "Chudnovsky argument must be an integer.");
-        return makeReal(0.0L);
+        return makeLongDouble(0.0L);
     }
-    long n = args[0].i_val;
+    long n = (long)args[0].i_val;
     if (n <= 0) {
         runtimeError(vm, "Chudnovsky argument must be positive.");
-        return makeReal(0.0L);
+        return makeLongDouble(0.0L);
     }
 
     const long double C3 = 262537412640768000.0L; // 640320^3
@@ -29,7 +29,7 @@ static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
     }
 
     long double pi = 426880.0L * sqrtl(10005.0L) / sum;
-    return makeReal(pi);
+    return makeLongDouble(pi);
 }
 
 void registerChudnovskyBuiltin(void) {
