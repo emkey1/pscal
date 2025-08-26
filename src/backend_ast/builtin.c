@@ -477,10 +477,7 @@ Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
         return makeString("");
     }
     char buffer[128];
-    if (args[0].type == TYPE_FLOAT)
-        snprintf(buffer, sizeof(buffer), "%f", args[0].f32_val);
-    else
-        snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
+    snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
     return makeString(buffer);
 }
 
@@ -2059,8 +2056,6 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 float v = strtof(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
-                dst->f32_val = v;
-                dst->d_val = v;
                 dst->r_val = v;
                 break;
             }
@@ -2069,7 +2064,6 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 double v = strtod(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
-                dst->d_val = v;
                 break;
             }
             case TYPE_BOOLEAN: {
@@ -2184,8 +2178,6 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* endp = NULL;
                 float v = strtof(p, &endp);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0f; }
-                dst->f32_val = v;
-                dst->d_val = v;
                 dst->r_val = v;
                 p = endp ? endp : p;
                 break;
@@ -2196,7 +2188,6 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 double v = strtod(p, &endp);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
-                dst->d_val = v;
                 p = endp ? endp : p;
                 break;
             }
@@ -2335,14 +2326,7 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            if (dst->type == TYPE_FLOAT) {
-                dst->f32_val = (float)r;
-                dst->d_val = (float)r;
-                dst->r_val = (float)r;
-            } else {
-                dst->r_val = r;
-                dst->d_val = r;
-            }
+            dst->r_val = r;
             *code = makeInt(0);
         }
     } else {
@@ -2747,9 +2731,8 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
             snprintf(buffer, sizeof(buffer), "%lld", val.i_val);
             break;
         case TYPE_FLOAT:
-            snprintf(buffer, sizeof(buffer), "%f", val.f32_val);
-            break;
         case TYPE_REAL:
+        case TYPE_LONG_DOUBLE:
             snprintf(buffer, sizeof(buffer), "%Lf", val.r_val);
             break;
         case TYPE_CHAR:

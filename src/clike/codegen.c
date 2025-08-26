@@ -525,8 +525,6 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     Value init;
                     if (is_real_type(node->var_type)) {
                         init = makeReal(0.0);
-                        if (node->var_type == TYPE_FLOAT) init.f32_val = 0.0f;
-                else if (node->var_type == TYPE_DOUBLE) init.d_val = 0.0;
                         init.type = node->var_type;
                     } else {
                         switch (node->var_type) {
@@ -611,7 +609,6 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             Value v;
             if (node->token.type == CLIKE_TOKEN_FLOAT_LITERAL) {
                 v = makeReal(node->token.float_val);
-                v.d_val = node->token.float_val;
                 v.type = TYPE_DOUBLE;
             } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL ||
                        node->var_type == TYPE_CHAR) {

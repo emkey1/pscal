@@ -133,12 +133,7 @@ static inline long long as_i64(Value v) {
 }
 static inline long double as_ld(Value v) {
     if (is_real_type(v.type)) {
-        switch (v.type) {
-            case TYPE_FLOAT:       return v.f32_val;
-            case TYPE_DOUBLE:      return v.d_val;
-            case TYPE_LONG_DOUBLE: return v.r_val;
-            default:               return v.r_val;
-        }
+        return v.r_val;
     }
     return (long double)as_i64(v);
 }
