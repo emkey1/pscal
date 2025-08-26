@@ -1,0 +1,5 @@
+int main() {
+  printf("Random: %d\n", random(100));
+  printf("Uppercase: %c\n", upcase('a'));
+  return 0;
+}
