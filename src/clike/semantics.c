@@ -388,7 +388,22 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             char *name = tokenToCString(node->token);
             ss_add(scopes, name, node->var_type);
             free(name);
-            if (node->left) analyzeExpr(node->left, scopes);
+            if (node->left) {
+                VarType initType = analyzeExpr(node->left, scopes);
+                VarType declType = node->var_type;
+                if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
+                    if (declType != initType &&
+                        !(declType == TYPE_REAL && is_intlike_type(initType)) &&
+                        !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
+                        !(is_intlike_type(declType) && is_intlike_type(initType))) {
+                        fprintf(stderr,
+                                "Type error: cannot assign %s to %s at line %d, column %d\n",
+                                varTypeToString(initType), varTypeToString(declType),
+                                node->left->token.line, node->left->token.column);
+                        clike_error_count++;
+                    }
+                }
+            }
             break;
         }
         case TCAST_STRUCT_DECL:
