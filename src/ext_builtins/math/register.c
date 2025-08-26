@@ -2,8 +2,12 @@
 
 void registerFactorialBuiltin(void);
 void registerFibonacciBuiltin(void);
+void registerMandelbrotRowBuiltin(void);
+void registerChudnovskyBuiltin(void);
 
 void registerMathBuiltins(void) {
     registerFactorialBuiltin();
     registerFibonacciBuiltin();
+    registerMandelbrotRowBuiltin();
+    registerChudnovskyBuiltin();
 }

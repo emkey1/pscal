@@ -1,21 +1,61 @@
 # Extending VM Built-ins
 
-Pscal allows additional built-in routines to be linked into the virtual
+Pscal allows additional built‑in routines to be linked into the virtual
 machine at build time.  This makes it easy to expose host functionality
-without modifying the core source tree.  Any `*.c` files placed in
-`src/ext_builtins` are automatically compiled and linked into the
-executables.
+without modifying the core source tree.  Optional built‑ins live under
+`src/ext_builtins` and are grouped into categories.
 
 For a catalog of existing VM routines, see
 [`pscal_vm_builtins.md`](pscal_vm_builtins.md).
 
-## Creating a new builtin
+## Available extended built-ins
 
-Drop a C file into `src/ext_builtins` that defines one or more builtin
-handlers. Each file typically provides a small registration helper, and a
-separate `registerExtendedBuiltins` function ties them together. The
-repository includes `src/ext_builtins/getpid.c`, which exposes the process
-ID through a `GetPid` Pascal function:
+The project currently ships several optional built‑in groups:
+
+| Category | Location | Built-ins |
+| -------- | -------- | --------- |
+| **Math** | `src/ext_builtins/math` | `Factorial`, `Fibonacci`, `MandelbrotRow`, `Chudnovsky` |
+| **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `Swap` |
+| **Strings** | `src/ext_builtins/strings` | (none yet) |
+| **User** | `src/ext_builtins/user` | (user-defined) |
+
+Individual categories can be enabled or disabled at configure time with
+the following CMake options (all default to `ON`):
+
+```
+-DENABLE_EXT_BUILTIN_MATH=ON/OFF
+-DENABLE_EXT_BUILTIN_STRINGS=ON/OFF
+-DENABLE_EXT_BUILTIN_SYSTEM=ON/OFF
+-DENABLE_EXT_BUILTIN_USER=ON/OFF
+```
+
+## Creating a new built-in
+
+1. Choose a category under `src/ext_builtins` or create a new one.  For
+   quick experiments, drop files into `src/ext_builtins/user`.
+2. Drop a C file into that directory that defines the VM handler and a
+   registration helper:
+
+```c
+static Value vmBuiltinFoo(struct VM_s* vm, int argc, Value* args) {
+    /* ... */
+}
+
+void registerFooBuiltin(void) {
+    registerBuiltinFunction("Foo", AST_FUNCTION_DECL, NULL);
+    registerVmBuiltin("foo", vmBuiltinFoo);
+}
+```
+
+3. Update the category’s `register.c` to call `registerFooBuiltin`.
+4. Add the new source file to the category’s `CMakeLists.txt`.
+5. Re‑run CMake and rebuild.  The routine is now available to both the
+   Pascal and C‑like front ends.
+
+### Example: System built-ins
+
+The `system` category demonstrates two routines, `GetPid` and `Swap`.
+`getpid.c` exposes the current process ID:
 
 ```c
 #include <unistd.h>
@@ -33,9 +73,7 @@ void registerGetPidBuiltin(void) {
 }
 ```
 
-A second example shows how to accept VAR parameters.  `src/ext_builtins/swap.c`
-defines a simple procedure that swaps two variables and provides a helper
-`registerSwapBuiltin`:
+`swap.c` accepts two `VAR` parameters and exchanges their contents:
 
 ```c
 #include "core/utils.h"
@@ -73,31 +111,31 @@ void registerSwapBuiltin(void) {
 }
 ```
 
-A tiny `register.c` file wires the helpers together by defining
-`registerExtendedBuiltins`:
+The category's `register.c` ties the helpers together:
 
 ```c
+#include "backend_ast/builtin.h"
+
+void registerFileExistsBuiltin(void);
 void registerGetPidBuiltin(void);
 void registerSwapBuiltin(void);
 
-void registerExtendedBuiltins(void) {
+void registerSystemBuiltins(void) {
+    registerFileExistsBuiltin();
     registerGetPidBuiltin();
     registerSwapBuiltin();
 }
 ```
 
-Any additional files added to `src/ext_builtins` will be picked up the
-next time you run CMake and `make`, assuming you have also added it to the 
-src/ext_builtins/register.c file, as shown above.
+## Example usage
 
-## Using the builtins
-
-After rebuilding, the new routines can be invoked from Pascal code:
+After rebuilding with the system built‑ins enabled, the following Pascal
+program uses `GetPid` and `Swap`:
 
 ```pascal
 program ShowBuiltins;
-
-type PInt = ^integer;
+type
+  PInt = ^integer;
 var
   a, b: PInt;
 begin
@@ -110,16 +148,15 @@ begin
 end.
 ```
 
-Running the program prints the current process ID:
+Running the program prints:
 
 ```sh
-$ build/bin/pascal Examples/Pascal/show_builtins.p
+$ build/bin/pascal Examples/Pascal/ShowExtendedBuiltins
 PID = 12345
 After Swap: a=2 b=1
 ```
 
-The same builtin is available to the C-like front end.  An equivalent
-program can be written as:
+The same built‑ins are available to the C‑like front end:
 
 ```c
 int main() {
@@ -128,107 +165,8 @@ int main() {
 }
 ```
 
-Running it with the `clike` compiler yields the same output:
-
-```sh
-$ build/bin/clike Examples/CLike/show_pid.cl
+```
+$ build/bin/clike Examples/clike/show_pid
 PID = 12345
 ```
-
-## Performance implications
-Lets take the fibonacci examples in the Examples/Clike directory.
-
-First we'll time fibonacci_native.cl on my M1 MacBook Pro...
-```sh
-time ../../build/bin/clike fibonacci_ext.cl
-Please enter an integer value for fibonacci: 92
-0
-1
-1
-2
-3
-5
-8
-13
-21
-34
-55
-89
-144
-233
-377
-610
-987
-1597
-2584
-4181
-6765
-10946
-17711
-28657
-46368
-75025
-121393
-196418
-317811
-514229
-832040
-1346269
-2178309
-3524578
-5702887
-...
-fibonacci_ext.cl  0.01s user 0.01s system 0% cpu 3.058 total
-
-```
-
-Now we'll time fibonacci_ext.cl
-
-```sh
-time ../../build/bin/clike fibonacci_native.cl
-Please enter an integer value for fibonacci: 92
-0
-1
-1
-2
-3
-5
-8
-13
-21
-34
-55
-89
-144
-233
-377
-610
-987
-1597
-2584
-4181
-6765
-10946
-17711
-28657
-46368
-75025
-121393
-196418
-317811
-514229
-832040
-1346269
-2178309
-3524578
-5702887
-...
-fibonacci_native.cl  0.02s user 0.01s system 0% cpu 3.157 total
-```
-
-The performance improvement is small using the extended builtin C fibonacci function from 
-the src/ext_builtins directory, but it is there.  Other tasks might see a more substantial
-improvement.
-
-I'm favorably impressed by how fast the byte code compiled version is frankly.
 

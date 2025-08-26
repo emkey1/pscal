@@ -3,8 +3,7 @@
 void registerMathBuiltins(void);
 void registerStringBuiltins(void);
 void registerSystemBuiltins(void);
-void registerMandelbrotRowBuiltin(void);
-void registerChudnovskyBuiltin(void);
+void registerUserBuiltins(void);
 
 void registerExtendedBuiltins(void) {
 #ifdef ENABLE_EXT_BUILTIN_MATH
@@ -16,6 +15,7 @@ void registerExtendedBuiltins(void) {
 #ifdef ENABLE_EXT_BUILTIN_SYSTEM
     registerSystemBuiltins();
 #endif
-    registerMandelbrotRowBuiltin();
-    registerChudnovskyBuiltin();
+#ifdef ENABLE_EXT_BUILTIN_USER
+    registerUserBuiltins();
+#endif
 }
