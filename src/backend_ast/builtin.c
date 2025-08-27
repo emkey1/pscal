@@ -1483,7 +1483,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
 
     switch (target->type) {
         case TYPE_INTEGER:
-            target->i_val += delta;
+            SET_INT_VALUE(target, target->i_val + delta);
             break;
 
         case TYPE_BYTE: {
@@ -1491,7 +1491,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 255) {
                 runtimeError(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
             }
-            target->i_val = (next & 0xFF);
+            SET_INT_VALUE(target, next & 0xFF);
             break;
         }
 
@@ -1500,7 +1500,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 65535) {
                 runtimeError(vm, "Warning: Range check error incrementing WORD to %lld.", next);
             }
-            target->i_val = (next & 0xFFFF);
+            SET_INT_VALUE(target, next & 0xFFFF);
             break;
         }
 
@@ -1543,7 +1543,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
 
     switch (target->type) {
         case TYPE_INTEGER:
-            target->i_val -= delta;
+            SET_INT_VALUE(target, target->i_val - delta);
             break;
 
         case TYPE_BYTE: {
@@ -1551,7 +1551,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 255) {
                 runtimeError(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
             }
-            target->i_val = (next & 0xFF);
+            SET_INT_VALUE(target, next & 0xFF);
             break;
         }
 
@@ -1560,7 +1560,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 65535) {
                 runtimeError(vm, "Warning: Range check error decrementing WORD to %lld.", next);
             }
-            target->i_val = (next & 0xFFFF);
+            SET_INT_VALUE(target, next & 0xFFFF);
             break;
         }
 
