@@ -3,22 +3,26 @@
 // Renders an ASCII Mandelbrot to the console.
 
 int main() {
-    int width = ScreenCols();
+    int width = ScreenCols() - 1;
     int height = ScreenRows() - 2;
     int maxIterations = 1000;
-    double minRe = -2.0;
-    double maxRe = 1.0;
-    double minIm = -1.2;
-    double maxIm = minIm + (maxRe - minRe) * height / width;
+    double minRe = -2.25;
+    double maxRe = 1.25;
     double reFactor = (maxRe - minRe) / (width - 1);
+    double imSpan = (maxRe - minRe) * height / width;
+    double minIm = -imSpan / 2.0;
+    double maxIm = minIm + imSpan;
     double imFactor = (maxIm - minIm) / (height - 1);
+    char palette[] = " .:-=+*#%@";
+    int paletteSize = sizeof(palette) - 1;
     int row[width];
     for (int y = 0; y < height; y++) {
         double c_im = minIm + y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
         for (int x = 0; x < width; x++) {
             if (row[x] < maxIterations) {
-                printf("*");
+                int idx = row[x] * paletteSize / maxIterations;
+                printf("%c", palette[idx]);
             } else {
                 printf(" ");
             }
