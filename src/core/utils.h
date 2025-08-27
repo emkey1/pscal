@@ -134,7 +134,18 @@ static inline long long as_i64(Value v) {
 static inline long double as_ld(Value v) {
     switch (v.type) {
         case TYPE_FLOAT:
-            return v.real.f32_val;
+            /*
+             * Floats are stored with multiple precision representations in
+             * the Value union (long double, double and float).  Using the
+             * raw 32-bit float for numeric comparisons causes literals such
+             * as `3.14` assigned to a float and later compared to a `3.14`
+             * constant to fail equality checks due to rounding differences.
+             * Return the highest precision representation so that float
+             * values participate in comparisons using their original
+             * long‑double precision, matching existing regression
+             * expectations.
+             */
+            return v.real.r_val;
         case TYPE_DOUBLE:
             return v.real.d_val;
         case TYPE_LONG_DOUBLE:
