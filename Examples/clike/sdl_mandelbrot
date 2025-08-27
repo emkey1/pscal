@@ -12,6 +12,7 @@ int main() {
     float MaxRe;
     float MinIm;
     float MaxIm;
+    float ImRange;
     float ReFactor;
     float ImFactor;
     int MaxX;
@@ -40,7 +41,6 @@ int main() {
     MaxIterations = 128;
     MinRe = -2.0;
     MaxRe = 1.0;
-    MinIm = -1.2;
 
     ScreenUpdateInterval = 1;
     MandelBytesPerPixel = 4;
@@ -57,7 +57,9 @@ int main() {
     MaxX = getmaxx();
     MaxY = getmaxy();
 
-    MaxIm = MinIm + (MaxRe - MinRe) * MaxY / MaxX;
+    ImRange = (MaxRe - MinRe) * MaxY / MaxX;
+    MinIm = -ImRange / 2.0;
+    MaxIm = MinIm + ImRange;
     ReFactor = (MaxRe - MinRe) / (MaxX - 1);
     ImFactor = (MaxIm - MinIm) / (MaxY - 1);
 
