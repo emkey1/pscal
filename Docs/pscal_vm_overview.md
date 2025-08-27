@@ -196,7 +196,7 @@ This sequence uses `OP_JUMP_IF_FALSE` to exit the loop and `OP_JUMP` to repeat.
     * **Action:** Pushes a pointer to the specified upvalue's `Value` struct.
 * **`OP_INIT_LOCAL_ARRAY`**, **`OP_INIT_LOCAL_FILE`**, **`OP_INIT_LOCAL_POINTER`**:
     * **Operands:** Variable-length, including a slot index and type metadata.
-    * **Action:** Initializes a local variable of a complex type (array, file, or pointer) at the specified slot.
+    * **Action:** Initializes a local variable of a complex type (array, file, or pointer) at the specified slot. For arrays, any dimension using the sentinel bound index `0xFFFF` will pop its size from the stack (treated as an upper bound plus one) and assume a lower bound of `0`.
 * **`OP_GET_FIELD_ADDRESS`** / **`OP_GET_FIELD_ADDRESS16`**:
     * **Operands:** Constant index for the field's name.
     * **Action:** Pops a record or a pointer to a record from the stack and pushes a pointer to the specified field's `Value` struct.

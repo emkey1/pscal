@@ -444,23 +444,9 @@ static ASTNodeClike* structFunDeclaration(ParserClike *p, ClikeToken nameTok, Cl
     return node;
 }
 
-static int parseConstArrayDim(ParserClike *p) {
+static ASTNodeClike* parseArrayDim(ParserClike *p) {
     ASTNodeClike *expr = expression(p);
-    expr = optimizeClikeAST(expr);
-    int ok;
-    long long val = evalConstExpr(expr, &ok);
-    if (!ok) {
-        int line = expr ? expr->token.line : p->current.line;
-        int col = expr ? expr->token.column : p->current.column;
-        fprintf(stderr,
-                "Parse error at line %d, column %d: array size must be an integer constant expression\n",
-                line, col);
-        clike_error_count++;
-        if (expr) freeASTClike(expr);
-        return 0;
-    }
-    freeASTClike(expr);
-    return (int)val;
+    return optimizeClikeAST(expr);
 }
 
 static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token, ClikeToken ident, int isPointer) {
@@ -473,19 +459,26 @@ static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token,
         int capacity = 4;
         int count = 0;
         int *dims = (int*)malloc(sizeof(int) * capacity);
+        ASTNodeClike **dim_exprs = (ASTNodeClike**)malloc(sizeof(ASTNodeClike*) * capacity);
         do {
-            int dim = parseConstArrayDim(p);
             if (count >= capacity) {
                 capacity *= 2;
                 dims = (int*)realloc(dims, sizeof(int) * capacity);
+                dim_exprs = (ASTNodeClike**)realloc(dim_exprs, sizeof(ASTNodeClike*) * capacity);
             }
-            dims[count++] = dim;
+            ASTNodeClike *dimExpr = parseArrayDim(p);
+            int ok; long long val = evalConstExpr(dimExpr, &ok);
+            dims[count] = ok ? (int)val : 0;
+            dim_exprs[count] = dimExpr;
+            if (dimExpr) dimExpr->parent = node;
+            count++;
             expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
         } while (matchToken(p, CLIKE_TOKEN_LBRACKET));
 
         node->is_array = 1;
-        node->array_size = count > 0 ? dims[0] : 0;
+        node->array_size = (count > 0 && dims[0] != 0) ? dims[0] : 0;
         node->array_dims = dims;
+        node->array_dim_exprs = dim_exprs;
         node->dim_count = count;
         node->element_type = node->var_type;
         node->var_type = TYPE_ARRAY;
