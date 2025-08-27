@@ -59,8 +59,8 @@ VM. For instructions on adding your own routines, see
 | readln | ([file: File,] var ...) | void | Read line and parse into vars (all integer sizes, boolean, and float types incl. 80-bit). |
 | textcolor | (color: Integer) | void | Set text color. |
 | textbackground | (color: Integer) | void | Set background color. |
-| textcolore | (color: Integer) | void | Extended text color. |
-| textbackgrounde | (color: Integer) | void | Extended background color. |
+| textcolore | (color: Integer) | void | Set text color using 256-color palette. |
+| textbackgrounde | (color: Integer) | void | Set background color using 256-color palette. |
 | boldtext / highvideo | () | void | Enable bold text. |
 | lowvideo | () | void | Enable dim text. |
 | normalcolors / normvideo | () | void | Reset text attributes. |

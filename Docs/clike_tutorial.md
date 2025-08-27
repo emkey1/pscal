@@ -1,11 +1,6 @@
 # Tutorial: Using the clike Compiler
 
-The `clike` binary compiles a C-style language and immediately executes it using the PSCAL virtual machine.  By convention CLike 
-uses 
-
-`.cl` 
-
-as an extension, but this is optional and mostly ignored in the examples.
+The `clike` binary compiles a C-style language and immediately executes it using the PSCAL virtual machine. Source files may omit extensions; many examples in this project do so.
 
 ## Build the compiler
 
@@ -28,18 +23,18 @@ sudo ./install.sh
 Invoke the compiler with a source file:
 
 ```sh
-build/bin/clike path/to/program.cl
+build/bin/clike path/to/program
 ```
 
 For example, run the text-based Hangman game:
 
 ```sh
-build/bin/clike Examples/Clike/hangman5.cl
+build/bin/clike Examples/clike/hangman5
 ```
 
 The compiler translates the source to VM bytecode and executes it immediately.
 
 ## Sample programs
 
-Additional examples live in `Examples/Clike`, including `sdl_multibouncingballs.cl` for an SDL demo and `hangman5.cl` for a console game.
+Additional examples live in `Examples/clike`, including `sdl_multibouncingballs.cl` for an SDL demo and `hangman5` for a console game.
 
