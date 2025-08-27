@@ -2062,14 +2062,14 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 float v = strtof(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
-                dst->r_val = v;
+                dst->f32_val = v;
                 break;
             }
             case TYPE_REAL: {
                 errno = 0;
                 double v = strtod(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                dst->r_val = v;
+                dst->d_val = v;
                 break;
             }
             case TYPE_BOOLEAN: {
@@ -2201,7 +2201,9 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* endp = NULL;
                 long double v = strtold(p, &endp);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                dst->r_val = v;
+                if (dst->type == TYPE_FLOAT) dst->f32_val = (float)v;
+                else if (dst->type == TYPE_DOUBLE) dst->d_val = (double)v;
+                else dst->r_val = v;
                 p = endp ? endp : p;
                 break;
             }
@@ -2357,7 +2359,8 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            dst->r_val = r;
+            if (dst->type == TYPE_FLOAT) dst->f32_val = (float)r;
+            else dst->d_val = r;
             *code = makeInt(0);
         }
     } else {

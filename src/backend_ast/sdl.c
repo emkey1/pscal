@@ -805,7 +805,7 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
     if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2]) ||
         !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4]) || !IS_INTLIKE(args[5]) ||
         !IS_INTLIKE(args[6]) || !IS_INTLIKE(args[7]) || !IS_INTLIKE(args[8]) ||
-        args[9].type != TYPE_REAL || !IS_INTLIKE(args[10]) || !IS_INTLIKE(args[11]) ||
+        !is_real_type(args[9].type) || !IS_INTLIKE(args[10]) || !IS_INTLIKE(args[11]) ||
         !IS_INTLIKE(args[12])) {
         fprintf(stderr, "Runtime error: RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).\n");
         return makeVoid();
@@ -823,7 +823,7 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
 
     SDL_Rect dstRect = { (int)AS_INTEGER(args[5]), (int)AS_INTEGER(args[6]), (int)AS_INTEGER(args[7]), (int)AS_INTEGER(args[8]) };
 
-    double angle_degrees = args[9].r_val;
+    double angle_degrees = (double)AS_REAL(args[9]);
 
     SDL_Point rotationCenter;
     SDL_Point* centerPtr = NULL;
@@ -964,8 +964,8 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
     int centerX, centerY, radius;
     if (IS_INTLIKE(args[0])) {
         centerX = (int)AS_INTEGER(args[0]);
-    } else if (args[0].type == TYPE_REAL) {
-        centerX = (int)args[0].r_val;
+    } else if (is_real_type(args[0].type)) {
+        centerX = (int)AS_REAL(args[0]);
     } else {
         runtimeError(vm, "FillCircle argument 1 must be numeric.");
         return makeVoid();
@@ -973,8 +973,8 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
 
     if (IS_INTLIKE(args[1])) {
         centerY = (int)AS_INTEGER(args[1]);
-    } else if (args[1].type == TYPE_REAL) {
-        centerY = (int)args[1].r_val;
+    } else if (is_real_type(args[1].type)) {
+        centerY = (int)AS_REAL(args[1]);
     } else {
         runtimeError(vm, "FillCircle argument 2 must be numeric.");
         return makeVoid();
@@ -982,8 +982,8 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
 
     if (IS_INTLIKE(args[2])) {
         radius = (int)AS_INTEGER(args[2]);
-    } else if (args[2].type == TYPE_REAL) {
-        radius = (int)args[2].r_val;
+    } else if (is_real_type(args[2].type)) {
+        radius = (int)AS_REAL(args[2]);
     } else {
         runtimeError(vm, "FillCircle argument 3 must be numeric.");
         return makeVoid();

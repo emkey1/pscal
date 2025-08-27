@@ -162,7 +162,11 @@ static bool write_value(FILE* f, const Value* v) {
         case TYPE_BYTE:
         case TYPE_BOOLEAN:
             fwrite(&v->i_val, sizeof(v->i_val), 1, f); break;
+        case TYPE_FLOAT:
+            fwrite(&v->f32_val, sizeof(v->f32_val), 1, f); break;
         case TYPE_REAL:
+            fwrite(&v->d_val, sizeof(v->d_val), 1, f); break;
+        case TYPE_LONG_DOUBLE:
             fwrite(&v->r_val, sizeof(v->r_val), 1, f); break;
         case TYPE_CHAR:
             fwrite(&v->c_val, sizeof(v->c_val), 1, f); break;
@@ -204,9 +208,16 @@ static bool read_value(FILE* f, Value* out) {
         case TYPE_BOOLEAN:
             if (fread(&out->i_val, sizeof(out->i_val), 1, f) != 1) return false;
             break;
+        case TYPE_FLOAT:
+            if (fread(&out->f32_val, sizeof(out->f32_val), 1, f) != 1) return false;
+            out->r_val = (long double)out->f32_val;
+            break;
         case TYPE_REAL:
+            if (fread(&out->d_val, sizeof(out->d_val), 1, f) != 1) return false;
+            out->r_val = (long double)out->d_val;
+            break;
+        case TYPE_LONG_DOUBLE:
             if (fread(&out->r_val, sizeof(out->r_val), 1, f) != 1) return false;
-            out->d_val = (double)out->r_val;
             break;
         case TYPE_CHAR:
             if (fread(&out->c_val, sizeof(out->c_val), 1, f) != 1) return false;

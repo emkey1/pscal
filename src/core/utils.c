@@ -341,6 +341,7 @@ Value makeReal(long double val) {
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
     v.d_val = (double)val;
+    v.r_val = (long double)v.d_val;
     return v;
 }
 
@@ -349,6 +350,7 @@ Value makeFloat(float val) {
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_FLOAT;
     v.f32_val = val;
+    v.r_val = (long double)val;
     return v;
 }
 
@@ -1181,8 +1183,10 @@ void dumpSymbol(Symbol *sym) {
                 printf("%lld", sym->value->i_val);
                 break;
             case TYPE_FLOAT:
+                printf("%f", sym->value->f32_val);
+                break;
             case TYPE_DOUBLE:
-                printf("%f", (double)sym->value->r_val);
+                printf("%f", sym->value->d_val);
                 break;
             case TYPE_LONG_DOUBLE:
                 printf("%Lf", sym->value->r_val);
@@ -1698,8 +1702,10 @@ void printValueToStream(Value v, FILE *stream) {
             fprintf(stream, "%llu", v.u_val);
             break;
         case TYPE_FLOAT:
+            fprintf(stream, "%f", v.f32_val);
+            break;
         case TYPE_DOUBLE:
-            fprintf(stream, "%f", (double)v.r_val);
+            fprintf(stream, "%f", v.d_val);
             break;
         case TYPE_LONG_DOUBLE:
             fprintf(stream, "%Lf", v.r_val);

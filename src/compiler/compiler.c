@@ -675,9 +675,9 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (left_val.type == TYPE_REAL || right_val.type == TYPE_REAL) {
-                    double a = (left_val.type == TYPE_REAL) ? left_val.r_val : (double)left_val.i_val;
-                    double b = (right_val.type == TYPE_REAL) ? right_val.r_val : (double)right_val.i_val;
+                if (is_real_type(left_val.type) || is_real_type(right_val.type)) {
+                    double a = is_real_type(left_val.type) ? (double)AS_REAL(left_val) : (double)left_val.i_val;
+                    double b = is_real_type(right_val.type) ? (double)AS_REAL(right_val) : (double)right_val.i_val;
                     switch (node->token->type) {
                         case TOKEN_PLUS:
                             result = makeReal(a + b);
@@ -761,9 +761,10 @@ Value evaluateCompileTimeValue(AST* node) {
                     if (operand_val.type == TYPE_INTEGER) {
                         operand_val.i_val = -operand_val.i_val;
                         return operand_val; // Return the modified value
-                    } else if (operand_val.type == TYPE_REAL) {
-                        operand_val.r_val = -operand_val.r_val;
-                        return operand_val; // Return the modified value
+                    } else if (is_real_type(operand_val.type)) {
+                        double tmp = -(double)AS_REAL(operand_val);
+                        freeValue(&operand_val);
+                        return makeReal(tmp);
                     }
                 } else if (node->token->type == TOKEN_PLUS) {
                     // Unary plus is a no-op, just return the operand's value.
