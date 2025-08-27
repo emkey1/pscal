@@ -1673,34 +1673,30 @@ comparison_error_label:
                     }
                     else if (is_real_type(target_lvalue_ptr->type) && is_real_type(value_to_set.type)) {
                         long double tmp = AS_REAL(value_to_set);
-                        target_lvalue_ptr->r_val = tmp;
-                        target_lvalue_ptr->d_val = (double)tmp;
-                        target_lvalue_ptr->f32_val = (float)tmp;
+                        SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
                     else if (is_real_type(target_lvalue_ptr->type) && is_intlike_type(value_to_set.type)) {
                         long double tmp = (long double)value_to_set.i_val;
-                        target_lvalue_ptr->r_val = tmp;
-                        target_lvalue_ptr->d_val = (double)tmp;
-                        target_lvalue_ptr->f32_val = (float)tmp;
+                        SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
                             runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
                         }
-                        target_lvalue_ptr->i_val = value_to_set.i_val & 0xFF;
+                        SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFF);
                     }
                     else if (target_lvalue_ptr->type == TYPE_WORD && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 65535) {
                             runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
                         }
-                        target_lvalue_ptr->i_val = value_to_set.i_val & 0xFFFF;
+                        SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFFFF);
                     }
                     else if (target_lvalue_ptr->type == TYPE_INTEGER &&
                              (value_to_set.type == TYPE_BYTE || value_to_set.type == TYPE_WORD || value_to_set.type == TYPE_BOOLEAN)) {
-                        target_lvalue_ptr->i_val = value_to_set.i_val;
+                        SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val);
                     }
                     else if (target_lvalue_ptr->type == TYPE_INTEGER && value_to_set.type == TYPE_CHAR) {
-                        target_lvalue_ptr->i_val = (long long)value_to_set.c_val;
+                        SET_INT_VALUE(target_lvalue_ptr, (long long)value_to_set.c_val);
                     }
                     else if (target_lvalue_ptr->type == TYPE_CHAR) {
                         if (value_to_set.type == TYPE_CHAR) {
@@ -2051,9 +2047,7 @@ comparison_error_label:
                 } else if (is_real_type(target_slot->type)) {
                     long double tmp = is_real_type(value_from_stack.type) ? AS_REAL(value_from_stack)
                                         : (long double)AS_INTEGER(value_from_stack);
-                    target_slot->r_val = tmp;
-                    target_slot->d_val = (double)tmp;
-                    target_slot->f32_val = (float)tmp;
+                    SET_REAL_VALUE(target_slot, tmp);
                 } else {
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.

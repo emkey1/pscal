@@ -2055,30 +2055,30 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 long long v = strtoll(buffer, NULL, 10);
                 if (errno == ERANGE) { last_io_error = 1; v = 0; }
-                dst->i_val = v;
+                SET_INT_VALUE(dst, v);
                 break;
             }
             case TYPE_FLOAT: {
                 errno = 0;
                 float v = strtof(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
-                dst->f32_val = v;
+                SET_REAL_VALUE(dst, v);
                 break;
             }
             case TYPE_REAL: {
                 errno = 0;
                 double v = strtod(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                dst->d_val = v;
+                SET_REAL_VALUE(dst, v);
                 break;
             }
             case TYPE_BOOLEAN: {
                 if (strcasecmp(buffer, "true") == 0 || strcmp(buffer, "1") == 0) {
-                    dst->i_val = 1;
+                    SET_INT_VALUE(dst, 1);
                 } else if (strcasecmp(buffer, "false") == 0 || strcmp(buffer, "0") == 0) {
-                    dst->i_val = 0;
+                    SET_INT_VALUE(dst, 0);
                 } else {
-                    dst->i_val = 0;
+                    SET_INT_VALUE(dst, 0);
                     last_io_error = 1;
                 }
                 break;
@@ -2176,7 +2176,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* endp = NULL;
                 long long v = strtoll(p, &endp, 10);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
-                dst->i_val = v;
+                SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
             }
@@ -2190,7 +2190,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* endp = NULL;
                 unsigned long long v = strtoull(p, &endp, 10);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
-                dst->u_val = v;
+                SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
             }
@@ -2201,25 +2201,23 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* endp = NULL;
                 long double v = strtold(p, &endp);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                if (dst->type == TYPE_FLOAT) dst->f32_val = (float)v;
-                else if (dst->type == TYPE_DOUBLE) dst->d_val = (double)v;
-                else dst->r_val = v;
+                SET_REAL_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
             }
             case TYPE_BOOLEAN: {
                 if (strncasecmp(p, "true", 4) == 0) {
-                    dst->i_val = 1;
+                    SET_INT_VALUE(dst, 1);
                     p += 4;
                 } else if (strncasecmp(p, "false", 5) == 0) {
-                    dst->i_val = 0;
+                    SET_INT_VALUE(dst, 0);
                     p += 5;
                 } else {
                     errno = 0;
                     char* endp = NULL;
                     long long v = strtoll(p, &endp, 10);
                     if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
-                    dst->i_val = v ? 1 : 0;
+                    SET_INT_VALUE(dst, v ? 1 : 0);
                     p = endp ? endp : p;
                 }
                 break;
@@ -2359,8 +2357,7 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            if (dst->type == TYPE_FLOAT) dst->f32_val = (float)r;
-            else dst->d_val = r;
+            SET_REAL_VALUE(dst, r);
             *code = makeInt(0);
         }
     } else {
@@ -2368,7 +2365,7 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            dst->i_val = n;
+            SET_INT_VALUE(dst, n);
             *code = makeInt(0);
         }
     }

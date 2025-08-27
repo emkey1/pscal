@@ -332,7 +332,7 @@ Value makeInt(long long val) {
     Value v;
     memset(&v, 0, sizeof(Value)); // Initialize all fields to 0/NULL
     v.type = TYPE_INT32;
-    v.i_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -340,8 +340,7 @@ Value makeReal(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
-    v.d_val = (double)val;
-    v.r_val = (long double)v.d_val;
+    SET_REAL_VALUE(&v, val);
     return v;
 }
 
@@ -349,8 +348,7 @@ Value makeFloat(float val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_FLOAT;
-    v.f32_val = val;
-    v.r_val = (long double)val;
+    SET_REAL_VALUE(&v, val);
     return v;
 }
 
@@ -358,7 +356,7 @@ Value makeDouble(double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
-    v.d_val = val;
+    SET_REAL_VALUE(&v, val);
     return v;
 }
 
@@ -366,7 +364,7 @@ Value makeLongDouble(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_LONG_DOUBLE;
-    v.r_val = val;
+    SET_REAL_VALUE(&v, val);
     return v;
 }
 
@@ -374,7 +372,7 @@ Value makeInt8(int8_t val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_INT8;
-    v.i_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -382,7 +380,7 @@ Value makeUInt8(uint8_t val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_UINT8;
-    v.u_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -390,7 +388,7 @@ Value makeInt16(int16_t val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_INT16;
-    v.i_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -398,7 +396,7 @@ Value makeUInt16(uint16_t val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_UINT16;
-    v.u_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -406,7 +404,7 @@ Value makeUInt32(uint32_t val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_UINT32;
-    v.u_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -414,7 +412,7 @@ Value makeInt64(long long val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_INT64;
-    v.i_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -422,7 +420,7 @@ Value makeUInt64(unsigned long long val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_UINT64;
-    v.u_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -430,7 +428,7 @@ Value makeByte(unsigned char val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_BYTE;
-    v.i_val = val;  // Store the byte in the integer field.
+    SET_INT_VALUE(&v, val);  // Store the byte in the integer field.
     return v;
 }
 
@@ -439,7 +437,7 @@ Value makeWord(unsigned int val) {
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_WORD;
     // Use i_val, ensuring it handles potential size differences if long long > unsigned int
-    v.i_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -645,14 +643,14 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     }
 
     switch(type) {
-        case TYPE_INT32:  v.i_val = 0;   break;
-        case TYPE_INT64:  v.i_val = 0;   break;
-        case TYPE_UINT32: v.u_val = 0;   break;
-        case TYPE_UINT64: v.u_val = 0;   break;
+        case TYPE_INT32:  SET_INT_VALUE(&v, 0);   break;
+        case TYPE_INT64:  SET_INT_VALUE(&v, 0);   break;
+        case TYPE_UINT32: SET_INT_VALUE(&v, 0);   break;
+        case TYPE_UINT64: SET_INT_VALUE(&v, 0);   break;
         case TYPE_FLOAT:
         case TYPE_DOUBLE:
         case TYPE_LONG_DOUBLE:
-            v.r_val = 0.0L;
+            SET_REAL_VALUE(&v, 0.0L);
             break;
         case TYPE_STRING: {
             v.s_val = NULL;
@@ -1183,13 +1181,13 @@ void dumpSymbol(Symbol *sym) {
                 printf("%lld", sym->value->i_val);
                 break;
             case TYPE_FLOAT:
-                printf("%f", sym->value->f32_val);
+                printf("%f", sym->value->real.f32_val);
                 break;
             case TYPE_DOUBLE:
-                printf("%f", sym->value->d_val);
+                printf("%f", sym->value->real.d_val);
                 break;
             case TYPE_LONG_DOUBLE:
-                printf("%Lf", sym->value->r_val);
+                printf("%Lf", sym->value->real.r_val);
                 break;
             case TYPE_STRING:
                 printf("\"%s\"", sym->value->s_val ? sym->value->s_val : "(null)");
@@ -1702,13 +1700,13 @@ void printValueToStream(Value v, FILE *stream) {
             fprintf(stream, "%llu", v.u_val);
             break;
         case TYPE_FLOAT:
-            fprintf(stream, "%f", v.f32_val);
+            fprintf(stream, "%f", v.real.f32_val);
             break;
         case TYPE_DOUBLE:
-            fprintf(stream, "%f", v.d_val);
+            fprintf(stream, "%f", v.real.d_val);
             break;
         case TYPE_LONG_DOUBLE:
-            fprintf(stream, "%Lf", v.r_val);
+            fprintf(stream, "%Lf", v.real.r_val);
             break;
         case TYPE_BOOLEAN:
             fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE"); // Boolean still uses i_val
