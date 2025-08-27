@@ -1129,6 +1129,27 @@ static ASTNodeClike* unary(ParserClike *p) {
         setRightClike(assign, bin);
         return assign;
     }
+    if (p->current.type == CLIKE_TOKEN_SIZEOF) {
+        ClikeToken op = p->current; advanceParser(p);
+        ASTNodeClike *operand = NULL;
+        if (p->current.type == CLIKE_TOKEN_LPAREN) {
+            advanceParser(p);
+            if (isTypeToken(p->current.type)) {
+                ClikeToken type_tok = parseTypeToken(p);
+                expectToken(p, CLIKE_TOKEN_RPAREN, ")");
+                operand = newASTNodeClike(TCAST_IDENTIFIER, type_tok);
+                operand->var_type = clike_tokenTypeToVarType(type_tok.type);
+            } else {
+                operand = expression(p);
+                expectToken(p, CLIKE_TOKEN_RPAREN, ")");
+            }
+        } else {
+            operand = unary(p);
+        }
+        ASTNodeClike *node = newASTNodeClike(TCAST_SIZEOF, op);
+        setLeftClike(node, operand);
+        return node;
+    }
     return factor(p);
 }
 

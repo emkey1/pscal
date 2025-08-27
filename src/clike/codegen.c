@@ -640,6 +640,14 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
+        case TCAST_SIZEOF: {
+            Value v = makeInt(node->token.int_val);
+            v.type = TYPE_INT64;
+            int idx = addConstantToChunk(chunk, &v);
+            writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            break;
+        }
         case TCAST_STRING: {
             char* s = tokenStringToCString(node->token);
             Value v = makeString(s);
