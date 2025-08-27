@@ -1,10 +1,11 @@
 #!/usr/bin/env clike
+// In reality, 2 iterations reaches the maximum resolution for 80 bit floats
 int main() {
     long n;
     printf("Please enter an integer value for iterations: ");
     scanf(n);
 
     long double pi = chudnovsky(n);
-    printf("pi: %.31Lf\n", pi);
+    printf("pi: %.23Lf\n", pi);
     return 0;
 }

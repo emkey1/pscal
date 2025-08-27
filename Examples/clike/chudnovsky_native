@@ -1,4 +1,5 @@
 #!/usr/bin/env clike
+// In reality, 2 iterations reaches the maximum resolution for 80 bit float
 long double chudnovsky_native(long n) {
     const long double C3 = 262537412640768000; // 640320^3
     long double sum = 13591409.0;
@@ -18,7 +19,7 @@ int main() {
     scanf(n);
 
     long double pi = chudnovsky_native(n);
-    printf("pi: %.31Lf\n", pi);
+    printf("pi: %.23Lf\n", pi);
 
     return 0;
 }
