@@ -97,7 +97,7 @@ The language supports a standard set of operators with C-like precedence.
 | 11 | `&&` | Left-to-right |
 | 12 | `||` | Left-to-right |
 | 13 | `?:` | Right-to-left |
-| 14 | `=` `+=` `-=` `*=` `/=` `%=` | Right-to-left |
+| 14 | `=` `+=` `-=` `*=` `/=` `%=` `&=` `|=` `<<=` `>>=` | Right-to-left |
 
 ### **Statements**
 

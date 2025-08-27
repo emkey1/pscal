@@ -909,18 +909,46 @@ static ASTNodeClike* expression(ParserClike *p) { return assignment(p); }
 
 static ASTNodeClike* assignment(ParserClike *p) {
     ASTNodeClike *node = conditional(p);
-    if (p->current.type == CLIKE_TOKEN_EQUAL) {
+    ClikeTokenType t = p->current.type;
+    if (t == CLIKE_TOKEN_EQUAL) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *right = assignment(p);
         ASTNodeClike *assign = newASTNodeClike(TCAST_ASSIGN, op);
         setLeftClike(assign, node);
         setRightClike(assign, right);
         return assign;
-    } else if (p->current.type == CLIKE_TOKEN_PLUS_EQUAL) {
+    } else if (
+        t == CLIKE_TOKEN_PLUS_EQUAL || t == CLIKE_TOKEN_MINUS_EQUAL ||
+        t == CLIKE_TOKEN_STAR_EQUAL || t == CLIKE_TOKEN_SLASH_EQUAL ||
+        t == CLIKE_TOKEN_PERCENT_EQUAL || t == CLIKE_TOKEN_BIT_AND_EQUAL ||
+        t == CLIKE_TOKEN_BIT_OR_EQUAL || t == CLIKE_TOKEN_SHL_EQUAL ||
+        t == CLIKE_TOKEN_SHR_EQUAL
+    ) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *right = assignment(p);
-        ClikeToken plusTok = op; plusTok.type = CLIKE_TOKEN_PLUS; plusTok.lexeme = "+"; plusTok.length = 1;
-        ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, plusTok);
+        ClikeToken binTok = op;
+        switch (t) {
+            case CLIKE_TOKEN_PLUS_EQUAL:
+                binTok.type = CLIKE_TOKEN_PLUS; binTok.lexeme = "+"; binTok.length = 1; break;
+            case CLIKE_TOKEN_MINUS_EQUAL:
+                binTok.type = CLIKE_TOKEN_MINUS; binTok.lexeme = "-"; binTok.length = 1; break;
+            case CLIKE_TOKEN_STAR_EQUAL:
+                binTok.type = CLIKE_TOKEN_STAR; binTok.lexeme = "*"; binTok.length = 1; break;
+            case CLIKE_TOKEN_SLASH_EQUAL:
+                binTok.type = CLIKE_TOKEN_SLASH; binTok.lexeme = "/"; binTok.length = 1; break;
+            case CLIKE_TOKEN_PERCENT_EQUAL:
+                binTok.type = CLIKE_TOKEN_PERCENT; binTok.lexeme = "%"; binTok.length = 1; break;
+            case CLIKE_TOKEN_BIT_AND_EQUAL:
+                binTok.type = CLIKE_TOKEN_BIT_AND; binTok.lexeme = "&"; binTok.length = 1; break;
+            case CLIKE_TOKEN_BIT_OR_EQUAL:
+                binTok.type = CLIKE_TOKEN_BIT_OR; binTok.lexeme = "|"; binTok.length = 1; break;
+            case CLIKE_TOKEN_SHL_EQUAL:
+                binTok.type = CLIKE_TOKEN_SHL; binTok.lexeme = "<<"; binTok.length = 2; break;
+            case CLIKE_TOKEN_SHR_EQUAL:
+                binTok.type = CLIKE_TOKEN_SHR; binTok.lexeme = ">>"; binTok.length = 2; break;
+            default: break; // unreachable
+        }
+        ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, binTok);
         setLeftClike(bin, cloneASTClike(node));
         setRightClike(bin, right);
         ClikeToken eqTok = op; eqTok.type = CLIKE_TOKEN_EQUAL; eqTok.lexeme = "="; eqTok.length = 1;
