@@ -14,7 +14,7 @@ int main() {
     double imFactor = (maxIm - minIm) / (height - 1);
     int row[width];
     for (int y = 0; y < height; y++) {
-        double c_im = maxIm - y * imFactor;
+        double c_im = minIm + y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
         for (int x = 0; x < width; x++) {
             if (row[x] < maxIterations) {
