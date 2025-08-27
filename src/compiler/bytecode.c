@@ -9,11 +9,13 @@
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in OP_CALL_HOST cast)
 #include "globals.h"
+#include "core/version.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
 // addConstantToChunk, emitShort, patchShort from your provided file.
 
 void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
+    chunk->version = PSCAL_VM_VERSION;
     chunk->count = 0;
     chunk->capacity = 0;
     chunk->code = NULL;

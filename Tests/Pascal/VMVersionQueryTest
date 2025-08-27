@@ -1,0 +1,7 @@
+program VMVersionQueryTest;
+begin
+  if VMVersion = BytecodeVersion then
+    writeln('ok')
+  else
+    writeln('mismatch');
+end.
