@@ -2165,9 +2165,10 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
         }
 
         switch (dst->type) {
-            case TYPE_INTEGER:
-            case TYPE_WORD:
-            case TYPE_BYTE: {
+            case TYPE_INT8:
+            case TYPE_INT16:
+            case TYPE_INT32: /* TYPE_INTEGER */
+            case TYPE_INT64: {
                 errno = 0;
                 char* endp = NULL;
                 long long v = strtoll(p, &endp, 10);
@@ -2176,22 +2177,46 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 p = endp ? endp : p;
                 break;
             }
-            case TYPE_FLOAT: {
+            case TYPE_UINT8:
+            case TYPE_BYTE:
+            case TYPE_UINT16:
+            case TYPE_WORD:
+            case TYPE_UINT32:
+            case TYPE_UINT64: {
                 errno = 0;
                 char* endp = NULL;
-                float v = strtof(p, &endp);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0f; }
+                unsigned long long v = strtoull(p, &endp, 10);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                dst->u_val = v;
+                p = endp ? endp : p;
+                break;
+            }
+            case TYPE_FLOAT:
+            case TYPE_DOUBLE: /* TYPE_REAL */
+            case TYPE_LONG_DOUBLE: {
+                errno = 0;
+                char* endp = NULL;
+                long double v = strtold(p, &endp);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
                 dst->r_val = v;
                 p = endp ? endp : p;
                 break;
             }
-            case TYPE_REAL: {
-                errno = 0;
-                char* endp = NULL;
-                double v = strtod(p, &endp);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                dst->r_val = v;
-                p = endp ? endp : p;
+            case TYPE_BOOLEAN: {
+                if (strncasecmp(p, "true", 4) == 0) {
+                    dst->i_val = 1;
+                    p += 4;
+                } else if (strncasecmp(p, "false", 5) == 0) {
+                    dst->i_val = 0;
+                    p += 5;
+                } else {
+                    errno = 0;
+                    char* endp = NULL;
+                    long long v = strtoll(p, &endp, 10);
+                    if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                    dst->i_val = v ? 1 : 0;
+                    p = endp ? endp : p;
+                }
                 break;
             }
             case TYPE_CHAR:
