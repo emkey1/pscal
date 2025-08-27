@@ -1,15 +1,15 @@
 #!/usr/bin/env clike
 long double chudnovsky_native(long n) {
     const long double C3 = 262537412640768000; // 640320^3
-    long double sum = 13591409;
-    long double term = 1;
+    long double sum = 13591409.0;
+    long double term = 1.0;
     for (long k = 1; k < n; k++) {
-        long double k_d = (long double)k;
-        term *= (-(6 * k_d - 5) * (2 * k_d - 1) * (6 * k_d - 1) * 24);
+        long double k_d = k * 1.0;
+        term *= (-(6.0 * k_d - 5.0) * (2.0 * k_d - 1.0) * (6.0 * k_d - 1.0) * 24.0);
         term /= (k_d * k_d * k_d * C3);
-        sum += term * (13591409 + 545140134 * k_d);
+        sum += term * (13591409.0 + 545140134.0 * k_d);
     }
-    return 426880 * sqrt(10005) / sum;
+    return 426880.0 * sqrt(10005.0) / sum;
 }
 
 int main() {

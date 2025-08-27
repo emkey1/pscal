@@ -57,7 +57,7 @@ static ASTNodeClike* foldBinary(ASTNodeClike* node) {
         t.float_val = res;
     }
     ASTNodeClike* newNode = newASTNodeClike(TCAST_NUMBER, t);
-    newNode->var_type = result_is_float ? TYPE_DOUBLE : TYPE_INT32;
+    newNode->var_type = result_is_float ? TYPE_DOUBLE : TYPE_INT64;
     freeASTClike(node);
     return newNode;
 }
@@ -78,7 +78,7 @@ static ASTNodeClike* foldUnary(ASTNodeClike* node) {
     t.type = CLIKE_TOKEN_NUMBER; t.int_val = (long long)res; t.float_val = res;
     }
     ASTNodeClike* newNode = newASTNodeClike(TCAST_NUMBER, t);
-    newNode->var_type = is_float ? TYPE_DOUBLE : TYPE_INT32;
+    newNode->var_type = is_float ? TYPE_DOUBLE : TYPE_INT64;
     freeASTClike(node);
     return newNode;
 }

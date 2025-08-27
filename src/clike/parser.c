@@ -46,7 +46,7 @@ static VarType literalTokenToVarType(ClikeTokenType t) {
     switch (t) {
         case CLIKE_TOKEN_FLOAT_LITERAL: return TYPE_DOUBLE;
         case CLIKE_TOKEN_CHAR_LITERAL:  return TYPE_CHAR;
-        default:                        return TYPE_INT32;
+        default:                        return TYPE_INT64;
     }
 }
 
@@ -176,11 +176,29 @@ static void freeConstTable(void) {
     const_count = 0;
 }
 
+static inline int is_intlike_type_local(VarType t) {
+    switch (t) {
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static long long evalConstExpr(ASTNodeClike* node, int *ok) {
     if (!node) { *ok = 0; return 0; }
     switch (node->type) {
         case TCAST_NUMBER:
-            if (node->var_type == TYPE_INTEGER) { *ok = 1; return node->token.int_val; }
+            if (is_intlike_type_local(node->var_type)) { *ok = 1; return node->token.int_val; }
             *ok = 0; return 0;
         case TCAST_IDENTIFIER: {
             long long val;
@@ -268,7 +286,7 @@ static char* clikeTokenToCString(ClikeToken t) {
 static AST* makeBuiltinTypeAST(ClikeToken t) {
     const char *name = clike_tokenTypeToTypeName(t.type);
     VarType vt = clike_tokenTypeToVarType(t.type);
-    if (!name) { name = "integer"; vt = TYPE_INTEGER; }
+    if (!name) { name = "integer"; vt = TYPE_INT64; }
     Token *tok = makeIdentToken(name);
     AST *node = newASTNode(AST_VARIABLE, tok);
     setTypeAST(node, vt);
@@ -1107,7 +1125,7 @@ static ASTNodeClike* unary(ParserClike *p) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *operand = unary(p);
         ClikeToken oneTok = op; oneTok.type = CLIKE_TOKEN_NUMBER; oneTok.lexeme = "1"; oneTok.length = 1; oneTok.int_val = 1LL;
-        ASTNodeClike *one = newASTNodeClike(TCAST_NUMBER, oneTok); one->var_type = TYPE_INTEGER;
+        ASTNodeClike *one = newASTNodeClike(TCAST_NUMBER, oneTok); one->var_type = TYPE_INT64;
         ClikeToken opTok = op; opTok.type = (op.type == CLIKE_TOKEN_PLUS_PLUS) ? CLIKE_TOKEN_PLUS : CLIKE_TOKEN_MINUS; opTok.lexeme = (op.type == CLIKE_TOKEN_PLUS_PLUS)?"+":"-"; opTok.length = 1;
         ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, opTok);
         setLeftClike(bin, cloneASTClike(operand));
@@ -1227,7 +1245,7 @@ static ASTNodeClike* postfix(ParserClike *p, ASTNodeClike *node) {
     if (p->current.type == CLIKE_TOKEN_PLUS_PLUS || p->current.type == CLIKE_TOKEN_MINUS_MINUS) {
         ClikeToken op = p->current; advanceParser(p);
         ClikeToken oneTok = op; oneTok.type = CLIKE_TOKEN_NUMBER; oneTok.lexeme = "1"; oneTok.length = 1; oneTok.int_val = 1LL;
-        ASTNodeClike *one = newASTNodeClike(TCAST_NUMBER, oneTok); one->var_type = TYPE_INTEGER;
+        ASTNodeClike *one = newASTNodeClike(TCAST_NUMBER, oneTok); one->var_type = TYPE_INT64;
         ClikeToken opTok = op; opTok.type = (op.type == CLIKE_TOKEN_PLUS_PLUS)?CLIKE_TOKEN_PLUS:CLIKE_TOKEN_MINUS; opTok.lexeme = (op.type==CLIKE_TOKEN_PLUS_PLUS)?"+":"-"; opTok.length = 1;
         ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, opTok);
         setLeftClike(bin, cloneASTClike(node));

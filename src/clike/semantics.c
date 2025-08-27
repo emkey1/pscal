@@ -488,7 +488,8 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                     clike_error_count++;
                 }
             } else if (t != TYPE_UNKNOWN && t != retType &&
-                       !(is_real_type(t) && is_real_type(retType))) {
+                       !(is_real_type(t) && is_real_type(retType)) &&
+                       !(is_intlike_type(t) && is_intlike_type(retType))) {
                 fprintf(stderr,
                         "Type error: return type %s does not match %s at line %d, column %d\n",
                         varTypeToString(t), varTypeToString(retType),
