@@ -466,11 +466,17 @@ static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token,
                 dims = (int*)realloc(dims, sizeof(int) * capacity);
                 dim_exprs = (ASTNodeClike**)realloc(dim_exprs, sizeof(ASTNodeClike*) * capacity);
             }
-            ASTNodeClike *dimExpr = parseArrayDim(p);
-            int ok; long long val = evalConstExpr(dimExpr, &ok);
-            dims[count] = ok ? (int)val : 0;
-            dim_exprs[count] = dimExpr;
-            if (dimExpr) dimExpr->parent = node;
+            ASTNodeClike *dimExpr = NULL;
+            if (p->current.type != CLIKE_TOKEN_RBRACKET) {
+                dimExpr = parseArrayDim(p);
+                int ok; long long val = evalConstExpr(dimExpr, &ok);
+                dims[count] = ok ? (int)val : 0;
+                dim_exprs[count] = dimExpr;
+                if (dimExpr) dimExpr->parent = node;
+            } else {
+                dims[count] = 0;
+                dim_exprs[count] = NULL;
+            }
             count++;
             expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
         } while (matchToken(p, CLIKE_TOKEN_LBRACKET));
@@ -485,6 +491,13 @@ static ASTNodeClike* varDeclarationNoSemi(ParserClike *p, ClikeToken type_token,
     }
     if (matchToken(p, CLIKE_TOKEN_EQUAL)) {
         setLeftClike(node, expression(p));
+    }
+
+    if (node->is_array && node->dim_count > 0 && node->array_dims[0] == 0 &&
+        node->element_type == TYPE_CHAR && node->left &&
+        node->left->type == TCAST_STRING) {
+        node->array_dims[0] = node->left->token.length + 1;
+        node->array_size = node->array_dims[0];
     }
 
     if (node->left) {
