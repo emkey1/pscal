@@ -1,6 +1,6 @@
 #!/usr/bin/env clike
-long fact(long n) {
-    long result;
+long long fact(long long n) {
+    long long result;
     result = 1;
     while (n > 1) {
         result = result * n;
@@ -10,7 +10,7 @@ long fact(long n) {
 }
 
 int main() {
-    long n;
+    long long n;
     clrscr();
     gotoxy(1,1);
     printf("Please enter an integer value to calculate a factorial: ");
@@ -19,6 +19,6 @@ int main() {
         printf("64 bit ints don't support factorial > 20\n");
         return 1;
     }
-    printf("%d: %lld\n", n, factorial(n));
+    printf("%lld: %lld\n", n, factorial(n));
     return 0;
 }

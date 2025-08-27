@@ -1,7 +1,7 @@
 #!/usr/bin/env clike
 int main() {
-    double i;
-    double j;
+    long long i;
+    long long j;
     i = 0;
     clrscr();
     gotoxy(1,1);
@@ -12,7 +12,7 @@ int main() {
        exit();
     }
     while (i <= j) {
-        printf("%d: %lld\n", i, fibonacci(i));
+        printf("%lld: %lld\n", i, fibonacci(i));
         i = i + 1;
     }
     return 0;

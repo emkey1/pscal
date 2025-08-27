@@ -220,9 +220,11 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
     switch(type) {
         case CLIKE_TOKEN_INT: return "TOKEN_INT";
         case CLIKE_TOKEN_LONG: return "TOKEN_LONG";
+        case CLIKE_TOKEN_LONG_LONG: return "TOKEN_LONG_LONG";
         case CLIKE_TOKEN_VOID: return "TOKEN_VOID";
         case CLIKE_TOKEN_FLOAT: return "TOKEN_FLOAT";
         case CLIKE_TOKEN_DOUBLE: return "TOKEN_DOUBLE";
+        case CLIKE_TOKEN_LONG_DOUBLE: return "TOKEN_LONG_DOUBLE";
         case CLIKE_TOKEN_STR: return "TOKEN_STR";
         case CLIKE_TOKEN_TEXT: return "TOKEN_TEXT";
         case CLIKE_TOKEN_MSTREAM: return "TOKEN_MSTREAM";

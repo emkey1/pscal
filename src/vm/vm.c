@@ -728,11 +728,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
+                    int useLong = (a_val_popped.type == TYPE_LONG_DOUBLE || b_val_popped.type == TYPE_LONG_DOUBLE); \
                     switch (current_instruction_code) { \
-                        case OP_ADD:      result_val = makeReal(fa + fb); break; \
-                        case OP_SUBTRACT: result_val = makeReal(fa - fb); break; \
-                        case OP_MULTIPLY: result_val = makeReal(fa * fb); break; \
-                        case OP_DIVIDE:   result_val = makeReal(fa / fb); break; \
+                        case OP_ADD:      result_val = useLong ? makeLongDouble(fa + fb) : makeReal(fa + fb); break; \
+                        case OP_SUBTRACT: result_val = useLong ? makeLongDouble(fa - fb) : makeReal(fa - fb); break; \
+                        case OP_MULTIPLY: result_val = useLong ? makeLongDouble(fa * fb) : makeReal(fa * fb); break; \
+                        case OP_DIVIDE:   result_val = useLong ? makeLongDouble(fa / fb) : makeReal(fa / fb); break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for real numbers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
@@ -936,7 +937,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 Value val_popped = pop(vm);
                 Value result_val;
                 if (IS_INTEGER(val_popped)) result_val = makeInt(-AS_INTEGER(val_popped));
-                else if (IS_REAL(val_popped)) result_val = makeReal(-AS_REAL(val_popped));
+                else if (IS_REAL(val_popped)) {
+                    if (val_popped.type == TYPE_LONG_DOUBLE) result_val = makeLongDouble(-AS_REAL(val_popped));
+                    else result_val = makeReal(-AS_REAL(val_popped));
+                }
                 else {
                     runtimeError(vm, "Runtime Error: Operand for negate must be a number.");
                     freeValue(&val_popped);
