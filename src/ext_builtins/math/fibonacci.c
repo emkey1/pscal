@@ -34,11 +34,11 @@ static Value vmBuiltinFibonacci(struct VM_s* vm, int arg_count, Value* args) {
         runtimeError(vm, "Fibonacci expects exactly 1 argument.");
         return makeInt(-1);
     }
-    if (args[0].type != TYPE_INTEGER) {
+    if (!IS_INTLIKE(args[0])) {
         runtimeError(vm, "Fibonacci argument must be an integer.");
         return makeInt(-1);
     }
-    long long n = args[0].i_val;
+    long long n = as_i64(args[0]);
     if (n < 0) {
         runtimeError(vm, "Fibonacci argument must be non-negative.");
         return makeInt(-1);

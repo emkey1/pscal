@@ -33,9 +33,9 @@
 
 // Also useful:
 #define IS_INTEGER(value) (is_intlike_type((value).type))
-#define AS_INTEGER(value) ((value).i_val)
+#define AS_INTEGER(value) (as_i64(value))
 #define IS_REAL(value)    (is_real_type((value).type))
-#define AS_REAL(value)    ((value).r_val)
+#define AS_REAL(value)    (as_ld(value))
 #define IS_STRING(value)  ((value).type == TYPE_STRING)
 #define AS_STRING(value)  ((value).s_val)
 #define IS_CHAR(value)    ((value).type == TYPE_CHAR)
@@ -132,10 +132,16 @@ static inline long long as_i64(Value v) {
     }
 }
 static inline long double as_ld(Value v) {
-    if (is_real_type(v.type)) {
-        return v.r_val;
+    switch (v.type) {
+        case TYPE_FLOAT:
+            return v.real.f32_val;
+        case TYPE_DOUBLE:
+            return v.real.d_val;
+        case TYPE_LONG_DOUBLE:
+            return v.real.r_val;
+        default:
+            return (long double)as_i64(v);
     }
-    return (long double)as_i64(v);
 }
 
 const char *varTypeToString(VarType type);

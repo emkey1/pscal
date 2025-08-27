@@ -7,11 +7,11 @@ static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
         runtimeError(vm, "Chudnovsky expects exactly 1 argument.");
         return makeLongDouble(0.0L);
     }
-    if (!is_intlike_type(args[0].type)) {
+    if (!IS_INTLIKE(args[0])) {
         runtimeError(vm, "Chudnovsky argument must be an integer.");
         return makeLongDouble(0.0L);
     }
-    long n = (long)args[0].i_val;
+    long long n = as_i64(args[0]);
     if (n <= 0) {
         runtimeError(vm, "Chudnovsky argument must be positive.");
         return makeLongDouble(0.0L);

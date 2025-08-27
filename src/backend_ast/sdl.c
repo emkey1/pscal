@@ -148,7 +148,7 @@ void SdlCleanupAtExit(void) {
 
 
 Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 || !IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) || args[2].type != TYPE_STRING) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
         return makeVoid();
     }
@@ -166,8 +166,8 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
     }
 
-    int width = (int)args[0].i_val;
-    int height = (int)args[1].i_val;
+    int width = (int)AS_INTEGER(args[0]);
+    int height = (int)AS_INTEGER(args[1]);
     const char* title = args[2].s_val ? args[2].s_val : "Pscal Graphics";
 
     if (width <= 0 || height <= 0) {
@@ -218,10 +218,10 @@ Value vmBuiltinFillrect(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "FillRect expects 4 integer arguments."); return makeVoid(); }
     // ... type checks for all 4 args being integer ...
     SDL_Rect rect;
-    rect.x = (int)args[0].i_val;
-    rect.y = (int)args[1].i_val;
-    rect.w = (int)args[2].i_val - rect.x + 1;
-    rect.h = (int)args[3].i_val - rect.y + 1;
+    rect.x = (int)AS_INTEGER(args[0]);
+    rect.y = (int)AS_INTEGER(args[1]);
+    rect.w = (int)AS_INTEGER(args[2]) - rect.x + 1;
+    rect.h = (int)AS_INTEGER(args[3]) - rect.y + 1;
     if (rect.w < 0) { rect.x += rect.w; rect.w = -rect.w; }
     if (rect.h < 0) { rect.y += rect.h; rect.h = -rect.h; }
     SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
@@ -247,7 +247,7 @@ Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    int textureID = (int)idVal.i_val;
+    int textureID = (int)AS_INTEGER(idVal);
     if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
         runtimeError(vm, "UpdateTexture called with invalid TextureID %d.", textureID);
         return makeVoid();
@@ -272,7 +272,7 @@ Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
     }
 
     for (int i = 0; i < expectedPscalArraySize; ++i) {
-        c_pixel_buffer[i] = (unsigned char)pixelDataVal.array_val[i].i_val;
+        c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
     }
 
     if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
@@ -323,9 +323,9 @@ Value vmBuiltinGetticks(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "SetRGBColor expects 3 arguments."); return makeVoid(); }
-    gSdlCurrentColor.r = (Uint8)args[0].i_val;
-    gSdlCurrentColor.g = (Uint8)args[1].i_val;
-    gSdlCurrentColor.b = (Uint8)args[2].i_val;
+    gSdlCurrentColor.r = (Uint8)AS_INTEGER(args[0]);
+    gSdlCurrentColor.g = (Uint8)AS_INTEGER(args[1]);
+    gSdlCurrentColor.b = (Uint8)AS_INTEGER(args[2]);
     gSdlCurrentColor.a = 255;
     if (gSdlRenderer) {
         SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
@@ -401,8 +401,8 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinDestroytexture(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTEGER(args[0])) { runtimeError(vm, "DestroyTexture expects 1 integer argument."); return makeVoid(); }
-    int textureID = (int)args[0].i_val;
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) { runtimeError(vm, "DestroyTexture expects 1 integer argument."); return makeVoid(); }
+    int textureID = (int)AS_INTEGER(args[0]);
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID]) {
         SDL_DestroyTexture(gSdlTextures[textureID]);
         gSdlTextures[textureID] = NULL;
@@ -419,17 +419,17 @@ Value vmBuiltinRendercopyrect(VM* vm, int arg_count, Value* args) {
         fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopyRect.\n");
         return makeVoid();
     }
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) || !IS_INTEGER(args[2]) ||
-        !IS_INTEGER(args[3]) || !IS_INTEGER(args[4])) {
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2]) ||
+        !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
         fprintf(stderr, "Runtime error: RenderCopyRect expects integer arguments (TextureID, DestX, DestY, DestW, DestH).\n");
         return makeVoid();
     }
-    int textureID = (int)args[0].i_val;
+    int textureID = (int)AS_INTEGER(args[0]);
     if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || !gSdlTextures[textureID]) {
         fprintf(stderr, "Runtime error: RenderCopyRect called with invalid TextureID.\n");
         return makeVoid();
     }
-    SDL_Rect dstRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
+    SDL_Rect dstRect = { (int)AS_INTEGER(args[1]), (int)AS_INTEGER(args[2]), (int)AS_INTEGER(args[3]), (int)AS_INTEGER(args[4]) };
     SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, &dstRect);
     return makeVoid();
 }
@@ -446,7 +446,7 @@ Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
     if (!gSdlFont) { runtimeError(vm, "Font not initialized for RenderTextToTexture."); return makeInt(-1); }
 
     const char* text = AS_STRING(args[0]);
-    SDL_Color color = { (Uint8)args[1].i_val, (Uint8)args[2].i_val, (Uint8)args[3].i_val, 255 };
+    SDL_Color color = { (Uint8)AS_INTEGER(args[1]), (Uint8)AS_INTEGER(args[2]), (Uint8)AS_INTEGER(args[3]), 255 };
     
     SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text, color);
     if (!surf) return makeInt(-1);
@@ -494,7 +494,7 @@ Value vmBuiltinInittextsystem(VM* vm, int arg_count, Value* args) {
     }
 
     const char* font_path = fontNameVal.s_val;
-    int font_size = (int)fontSizeVal.i_val;
+    int font_size = (int)AS_INTEGER(fontSizeVal);
 
     // Close previous font if one was loaded
     if (gSdlFont) {
@@ -516,10 +516,10 @@ Value vmBuiltinCreatetargettexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "CreateTargetTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before CreateTargetTexture."); return makeInt(-1); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1])) { runtimeError(vm, "CreateTargetTexture arguments must be integers."); return makeInt(-1); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) { runtimeError(vm, "CreateTargetTexture arguments must be integers."); return makeInt(-1); }
 
-    int width = (int)args[0].i_val;
-    int height = (int)args[1].i_val;
+    int width = (int)AS_INTEGER(args[0]);
+    int height = (int)AS_INTEGER(args[1]);
 
     if (width <= 0 || height <= 0) { runtimeError(vm, "CreateTargetTexture dimensions must be positive."); return makeInt(-1); }
 
@@ -541,10 +541,10 @@ Value vmBuiltinCreatetexture(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "CreateTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before CreateTexture."); return makeInt(-1); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1])) { runtimeError(vm, "CreateTexture arguments must be integers."); return makeInt(-1); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) { runtimeError(vm, "CreateTexture arguments must be integers."); return makeInt(-1); }
 
-    int width = (int)args[0].i_val;
-    int height = (int)args[1].i_val;
+    int width = (int)AS_INTEGER(args[0]);
+    int height = (int)AS_INTEGER(args[1]);
 
     if (width <= 0 || height <= 0) { runtimeError(vm, "CreateTexture dimensions must be positive."); return makeInt(-1); }
 
@@ -566,11 +566,11 @@ Value vmBuiltinDrawcircle(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawCircle."); return makeVoid(); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) || !IS_INTEGER(args[2])) { runtimeError(vm, "DrawCircle arguments must be integers."); return makeVoid(); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2])) { runtimeError(vm, "DrawCircle arguments must be integers."); return makeVoid(); }
 
-    int centerX = (int)args[0].i_val;
-    int centerY = (int)args[1].i_val;
-    int radius = (int)args[2].i_val;
+    int centerX = (int)AS_INTEGER(args[0]);
+    int centerY = (int)AS_INTEGER(args[1]);
+    int radius = (int)AS_INTEGER(args[2]);
 
     if (radius < 0) return makeVoid();
 
@@ -605,13 +605,13 @@ Value vmBuiltinDrawline(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "DrawLine expects 4 integer arguments (x1, y1, x2, y2)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawLine."); return makeVoid(); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) ||
-        !IS_INTEGER(args[2]) || !IS_INTEGER(args[3])) { runtimeError(vm, "DrawLine arguments must be integers."); return makeVoid(); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) ||
+        !IS_INTLIKE(args[2]) || !IS_INTLIKE(args[3])) { runtimeError(vm, "DrawLine arguments must be integers."); return makeVoid(); }
 
-    int x1 = (int)args[0].i_val;
-    int y1 = (int)args[1].i_val;
-    int x2 = (int)args[2].i_val;
-    int y2 = (int)args[3].i_val;
+    int x1 = (int)AS_INTEGER(args[0]);
+    int y1 = (int)AS_INTEGER(args[1]);
+    int x2 = (int)AS_INTEGER(args[2]);
+    int y2 = (int)AS_INTEGER(args[3]);
 
     SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
     SDL_RenderDrawLine(gSdlRenderer, x1, y1, x2, y2);
@@ -622,10 +622,10 @@ Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) { runtimeError(vm, "DrawPolygon expects 2 arguments (PointsArray, NumPoints)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for DrawPolygon."); return makeVoid(); }
 
-    if (args[0].type != TYPE_ARRAY || !IS_INTEGER(args[1])) { runtimeError(vm, "DrawPolygon argument type mismatch."); return makeVoid(); }
+    if (args[0].type != TYPE_ARRAY || !IS_INTLIKE(args[1])) { runtimeError(vm, "DrawPolygon argument type mismatch."); return makeVoid(); }
     if (args[0].element_type != TYPE_RECORD) { runtimeError(vm, "DrawPolygon Points argument must be an ARRAY OF PointRecord."); return makeVoid(); }
 
-    int numPoints = (int)args[1].i_val;
+    int numPoints = (int)AS_INTEGER(args[1]);
     if (numPoints < 2) return makeVoid();
 
     int total_elements_in_pascal_array = 1;
@@ -643,8 +643,8 @@ Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
 
         if (fieldX && strcasecmp(fieldX->name, "x") == 0 && is_intlike_type(fieldX->value.type) &&
             fieldY && strcasecmp(fieldY->name, "y") == 0 && is_intlike_type(fieldY->value.type)) {
-            sdlPoints[i].x = (int)fieldX->value.i_val;
-            sdlPoints[i].y = (int)fieldY->value.i_val;
+            sdlPoints[i].x = (int)AS_INTEGER(fieldX->value);
+            sdlPoints[i].y = (int)AS_INTEGER(fieldY->value);
         } else { runtimeError(vm, "PointRecord does not have correct X,Y integer fields."); free(sdlPoints); return makeVoid(); }
     }
 
@@ -661,13 +661,13 @@ Value vmBuiltinDrawrect(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) { runtimeError(vm, "DrawRect expects 4 integer arguments (X1, Y1, X2, Y2)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawRect."); return makeVoid(); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) ||
-        !IS_INTEGER(args[2]) || !IS_INTEGER(args[3])) { runtimeError(vm, "DrawRect arguments must be integers."); return makeVoid(); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) ||
+        !IS_INTLIKE(args[2]) || !IS_INTLIKE(args[3])) { runtimeError(vm, "DrawRect arguments must be integers."); return makeVoid(); }
 
-    int x1 = (int)args[0].i_val;
-    int y1 = (int)args[1].i_val;
-    int x2 = (int)args[2].i_val;
-    int y2 = (int)args[3].i_val;
+    int x1 = (int)AS_INTEGER(args[0]);
+    int y1 = (int)AS_INTEGER(args[1]);
+    int x2 = (int)AS_INTEGER(args[2]);
+    int y2 = (int)AS_INTEGER(args[3]);
 
     SDL_Rect rect;
     rect.x = (x1 < x2) ? x1 : x2;
@@ -684,13 +684,13 @@ Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 6) { runtimeError(vm, "GetPixelColor expects 6 arguments (X, Y: Integer; var R, G, B, A: Byte)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for GetPixelColor."); return makeVoid(); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1])) { runtimeError(vm, "GetPixelColor X,Y coordinates must be integers."); return makeVoid(); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) { runtimeError(vm, "GetPixelColor X,Y coordinates must be integers."); return makeVoid(); }
 
     if (args[2].type != TYPE_POINTER || args[3].type != TYPE_POINTER ||
         args[4].type != TYPE_POINTER || args[5].type != TYPE_POINTER) { runtimeError(vm, "GetPixelColor R,G,B,A parameters must be VAR Byte."); return makeVoid(); }
 
-    int x = (int)args[0].i_val;
-    int y = (int)args[1].i_val;
+    int x = (int)AS_INTEGER(args[0]);
+    int y = (int)AS_INTEGER(args[1]);
 
     Value* r_ptr = (Value*)args[2].ptr_val;
     Value* g_ptr = (Value*)args[3].ptr_val;
@@ -752,10 +752,10 @@ Value vmBuiltinOuttextxy(VM* vm, int arg_count, Value* args) {
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before OutTextXY."); return makeVoid(); }
     if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "Text system or font not initialized before OutTextXY."); return makeVoid(); }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) || args[2].type != TYPE_STRING) { runtimeError(vm, "OutTextXY argument type mismatch."); return makeVoid(); }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING) { runtimeError(vm, "OutTextXY argument type mismatch."); return makeVoid(); }
 
-    int x = (int)args[0].i_val;
-    int y = (int)args[1].i_val;
+    int x = (int)AS_INTEGER(args[0]);
+    int y = (int)AS_INTEGER(args[1]);
     const char* text_to_render = args[2].s_val ? args[2].s_val : "";
 
     SDL_Surface* textSurface = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
@@ -773,7 +773,7 @@ Value vmBuiltinOuttextxy(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRendercopy(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTEGER(args[0])) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         fprintf(stderr, "Runtime error: RenderCopy expects 1 argument (TextureID: Integer).\n");
         return makeVoid();
     }
@@ -782,7 +782,7 @@ Value vmBuiltinRendercopy(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    int textureID = (int)args[0].i_val;
+    int textureID = (int)AS_INTEGER(args[0]);
     if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
         fprintf(stderr, "Runtime error: RenderCopy called with invalid TextureID.\n");
         return makeVoid();
@@ -802,33 +802,33 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1]) || !IS_INTEGER(args[2]) ||
-        !IS_INTEGER(args[3]) || !IS_INTEGER(args[4]) || !IS_INTEGER(args[5]) ||
-        !IS_INTEGER(args[6]) || !IS_INTEGER(args[7]) || !IS_INTEGER(args[8]) ||
-        args[9].type != TYPE_REAL || !IS_INTEGER(args[10]) || !IS_INTEGER(args[11]) ||
-        !IS_INTEGER(args[12])) {
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2]) ||
+        !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4]) || !IS_INTLIKE(args[5]) ||
+        !IS_INTLIKE(args[6]) || !IS_INTLIKE(args[7]) || !IS_INTLIKE(args[8]) ||
+        !is_real_type(args[9].type) || !IS_INTLIKE(args[10]) || !IS_INTLIKE(args[11]) ||
+        !IS_INTLIKE(args[12])) {
         fprintf(stderr, "Runtime error: RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).\n");
         return makeVoid();
     }
 
-    int textureID = (int)args[0].i_val;
+    int textureID = (int)AS_INTEGER(args[0]);
     if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
         fprintf(stderr, "Runtime error: RenderCopyEx called with invalid or unloaded TextureID.\n");
         return makeVoid();
     }
     SDL_Texture* texture = gSdlTextures[textureID];
 
-    SDL_Rect srcRect = { (int)args[1].i_val, (int)args[2].i_val, (int)args[3].i_val, (int)args[4].i_val };
+    SDL_Rect srcRect = { (int)AS_INTEGER(args[1]), (int)AS_INTEGER(args[2]), (int)AS_INTEGER(args[3]), (int)AS_INTEGER(args[4]) };
     SDL_Rect* srcRectPtr = (srcRect.w > 0 && srcRect.h > 0) ? &srcRect : NULL;
 
-    SDL_Rect dstRect = { (int)args[5].i_val, (int)args[6].i_val, (int)args[7].i_val, (int)args[8].i_val };
+    SDL_Rect dstRect = { (int)AS_INTEGER(args[5]), (int)AS_INTEGER(args[6]), (int)AS_INTEGER(args[7]), (int)AS_INTEGER(args[8]) };
 
-    double angle_degrees = args[9].r_val;
+    double angle_degrees = (double)AS_REAL(args[9]);
 
     SDL_Point rotationCenter;
     SDL_Point* centerPtr = NULL;
-    int pscalRotX = (int)args[10].i_val;
-    int pscalRotY = (int)args[11].i_val;
+    int pscalRotX = (int)AS_INTEGER(args[10]);
+    int pscalRotY = (int)AS_INTEGER(args[11]);
 
     if (pscalRotX >= 0 && pscalRotY >= 0) {
         rotationCenter.x = pscalRotX;
@@ -837,7 +837,7 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
     }
 
     SDL_RendererFlip sdl_flip = SDL_FLIP_NONE;
-    int flipMode = (int)args[12].i_val;
+    int flipMode = (int)AS_INTEGER(args[12]);
     if (flipMode == 1) sdl_flip = SDL_FLIP_HORIZONTAL;
     else if (flipMode == 2) sdl_flip = SDL_FLIP_VERTICAL;
     else if (flipMode == 3) sdl_flip = (SDL_RendererFlip)(SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL);
@@ -847,13 +847,13 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || (!IS_INTEGER(args[0]) && args[0].type != TYPE_BYTE)) {
+    if (arg_count != 1 || (!IS_INTLIKE(args[0]) && args[0].type != TYPE_BYTE)) {
         runtimeError(vm, "SetColor expects 1 argument (color index 0-255).");
         return makeVoid();
     }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before SetColor."); return makeVoid(); }
 
-    long long colorCode = args[0].i_val;
+    long long colorCode = AS_INTEGER(args[0]);
 
     if (colorCode >= 0 && colorCode <= 15) {
          unsigned char intensity = (colorCode > 7) ? 255 : 192;
@@ -878,10 +878,10 @@ Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTEGER(args[0])) { runtimeError(vm, "SetRenderTarget expects 1 argument (TextureID: Integer)."); return makeVoid(); }
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) { runtimeError(vm, "SetRenderTarget expects 1 argument (TextureID: Integer)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before SetRenderTarget."); return makeVoid(); }
 
-    int textureID = (int)args[0].i_val;
+    int textureID = (int)AS_INTEGER(args[0]);
 
     SDL_Texture* targetTexture = NULL;
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID] != NULL) {
@@ -962,28 +962,28 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
     // error and nothing was drawn.  To make the builtin more forgiving
     // we transparently truncate real arguments to integers.
     int centerX, centerY, radius;
-    if (IS_INTEGER(args[0])) {
-        centerX = (int)args[0].i_val;
-    } else if (args[0].type == TYPE_REAL) {
-        centerX = (int)args[0].r_val;
+    if (IS_INTLIKE(args[0])) {
+        centerX = (int)AS_INTEGER(args[0]);
+    } else if (is_real_type(args[0].type)) {
+        centerX = (int)AS_REAL(args[0]);
     } else {
         runtimeError(vm, "FillCircle argument 1 must be numeric.");
         return makeVoid();
     }
 
-    if (IS_INTEGER(args[1])) {
-        centerY = (int)args[1].i_val;
-    } else if (args[1].type == TYPE_REAL) {
-        centerY = (int)args[1].r_val;
+    if (IS_INTLIKE(args[1])) {
+        centerY = (int)AS_INTEGER(args[1]);
+    } else if (is_real_type(args[1].type)) {
+        centerY = (int)AS_REAL(args[1]);
     } else {
         runtimeError(vm, "FillCircle argument 2 must be numeric.");
         return makeVoid();
     }
 
-    if (IS_INTEGER(args[2])) {
-        radius = (int)args[2].i_val;
-    } else if (args[2].type == TYPE_REAL) {
-        radius = (int)args[2].r_val;
+    if (IS_INTLIKE(args[2])) {
+        radius = (int)AS_INTEGER(args[2]);
+    } else if (is_real_type(args[2].type)) {
+        radius = (int)AS_REAL(args[2]);
     } else {
         runtimeError(vm, "FillCircle argument 3 must be numeric.");
         return makeVoid();
@@ -1025,12 +1025,12 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
         return makeVoid();
     }
-    if (!IS_INTEGER(args[0]) && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
+    if (!IS_INTLIKE(args[0]) && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
         runtimeError(vm, "GraphLoop argument must be an integer-like type.");
         return makeVoid();
     }
 
-    long long ms = args[0].i_val;
+    long long ms = AS_INTEGER(args[0]);
     if (ms < 0) ms = 0;
 
     if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
@@ -1061,13 +1061,13 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (!IS_INTEGER(args[0]) || !IS_INTEGER(args[1])) {
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
         runtimeError(vm, "PutPixel coordinates must be integers.");
         return makeVoid();
     }
 
-    int x = (int)args[0].i_val;
-    int y = (int)args[1].i_val;
+    int x = (int)AS_INTEGER(args[0]);
+    int y = (int)AS_INTEGER(args[1]);
 
     // Set the draw color from the global state
     SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);

@@ -85,15 +85,15 @@ typedef struct EnumType {
 // Forward declaration of AST
 typedef struct AST AST;
 
+typedef struct RealValue { float f32_val; double d_val; long double r_val; } RealValue;
+
 typedef struct ValueStruct {
     VarType type;
     Type *enum_meta;
+    long long i_val;
+    unsigned long long u_val;
+    RealValue real;
     union {
-        long long i_val;
-        unsigned long long u_val;
-        float f32_val;
-        double d_val;
-        long double r_val;
         char *s_val;
         int c_val;
         FieldValue *record_val;
@@ -124,6 +124,13 @@ typedef struct ValueStruct {
         // Potentially add base_type if needed later VarType set_base_type;
     } set_val;
 } Value;
+
+/* Helpers to initialise numeric fields consistently. */
+#define SET_INT_VALUE(dest, val) \
+    do { (dest)->i_val = (long long)(val); (dest)->u_val = (unsigned long long)(val); } while(0)
+#define SET_REAL_VALUE(dest, val) \
+    do { (dest)->real.r_val = (long double)(val); (dest)->real.d_val = (double)(dest)->real.r_val; \
+         (dest)->real.f32_val = (float)(dest)->real.r_val; } while(0)
 
 typedef struct FieldValue {
     char *name;
