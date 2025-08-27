@@ -1,6 +1,7 @@
 #include "core/cache.h"
 #include "core/utils.h" // for Value constructors
 #include "globals.h"
+#include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
 #include "Pascal/ast.h"
@@ -15,7 +16,7 @@
 
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION 4
+#define CACHE_VERSION PSCAL_VM_VERSION /* doubles as VM bytecode version */
 
 
 static unsigned long hash_path(const char* path) {
@@ -296,7 +297,24 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
             uint32_t magic = 0, ver = 0;
             if (fread(&magic, sizeof(magic), 1, f) == 1 &&
                 fread(&ver, sizeof(ver), 1, f) == 1 &&
-                magic == CACHE_MAGIC && ver == CACHE_VERSION) {
+                magic == CACHE_MAGIC) {
+                const char* strict_env = getenv("PSCAL_STRICT_VM");
+                bool strict = strict_env && strict_env[0] != '\0';
+                if (ver > CACHE_VERSION) {
+                    if (strict) {
+                        fprintf(stderr,
+                                "Cached bytecode requires VM version %u but current VM version is %u\\n",
+                                ver, CACHE_VERSION);
+                        fclose(f);
+                        free(cache_path);
+                        return false;
+                    } else {
+                        fprintf(stderr,
+                                "Warning: cached bytecode targets VM version %u but running version is %u\\n",
+                                ver, CACHE_VERSION);
+                    }
+                }
+                chunk->version = ver;
                 int count = 0;
                 if (fread(&count, sizeof(count), 1, f) == 1 &&
                     fread(&const_count, sizeof(const_count), 1, f) == 1) {
@@ -431,7 +449,27 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
         uint32_t magic = 0, ver = 0;
         if (fread(&magic, sizeof(magic), 1, f) == 1 &&
             fread(&ver, sizeof(ver), 1, f) == 1 &&
-            magic == CACHE_MAGIC && ver == CACHE_VERSION) {
+            magic == CACHE_MAGIC) {
+            const char* strict_env = getenv("PSCAL_STRICT_VM");
+            bool strict = strict_env && strict_env[0] != '\0';
+            if (ver > CACHE_VERSION) {
+                if (strict) {
+                    fprintf(stderr,
+                            "Bytecode requires VM version %u but this VM only supports version %u\\n",
+                            ver, CACHE_VERSION);
+                    fclose(f);
+                    return false;
+                } else {
+                    fprintf(stderr,
+                            "Warning: bytecode targets VM version %u but running version is %u\\n",
+                            ver, CACHE_VERSION);
+                }
+            } else if (ver < CACHE_VERSION) {
+                fprintf(stderr,
+                        "Warning: bytecode version %u is older than VM version %u\\n",
+                        ver, CACHE_VERSION);
+            }
+            chunk->version = ver;
             int count = 0;
             if (fread(&count, sizeof(count), 1, f) == 1 &&
                 fread(&const_count, sizeof(const_count), 1, f) == 1) {
@@ -583,7 +621,7 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     if (!cache_path) return;
     FILE* f = fopen(cache_path, "wb");
     if (!f) { free(cache_path); return; }
-    uint32_t magic = CACHE_MAGIC, ver = CACHE_VERSION;
+    uint32_t magic = CACHE_MAGIC, ver = chunk->version;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
     fwrite(&chunk->count, sizeof(chunk->count), 1, f);

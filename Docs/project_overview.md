@@ -40,7 +40,7 @@ The project follows a classic compiler and virtual machine design:
     * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).
     * String manipulation (`copy`, `pos`, `length`).
     * System interaction (`getpid`, `dos_exec`).
-* **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified.
+* **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified. Cached bytecode carries a version tag; programs can query `VMVersion` and `BytecodeVersion` to decide how to handle mismatches. Set `PSCAL_STRICT_VM=1` to have the VM abort when bytecode targets a newer VM.
 
 ---
 

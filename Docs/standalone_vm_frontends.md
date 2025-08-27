@@ -95,6 +95,10 @@ with open(path, "wb") as f:
 ```
 
 The builder encodes the bytecode and constant table and writes the final file.
+`CACHE_VERSION` also identifies the VM bytecode format. A VM built with an
+older version will load the bytecode but emit a warning if it targets a newer
+VM. Programs can call `VMVersion` and `BytecodeVersion` to decide whether to
+continue or exit. Set `PSCAL_STRICT_VM=1` to force the VM to abort instead.
 Run the result with:
 
 ```sh

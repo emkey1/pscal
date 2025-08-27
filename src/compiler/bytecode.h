@@ -103,6 +103,7 @@ typedef enum {
 // --- Bytecode Chunk Structure ---
 // A "chunk" represents a compiled piece of code (e.g., a procedure, function, or the main program block)
 typedef struct {
+    uint32_t version;   // VM bytecode version this chunk targets
     int count;          // Number of bytes currently in use in 'code'
     int capacity;       // Allocated capacity for 'code'
     uint8_t* code;      // The array of bytecode instructions and operands
