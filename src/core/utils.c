@@ -643,10 +643,18 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     }
 
     switch(type) {
-        case TYPE_INT32:  SET_INT_VALUE(&v, 0);   break;
-        case TYPE_INT64:  SET_INT_VALUE(&v, 0);   break;
-        case TYPE_UINT32: SET_INT_VALUE(&v, 0);   break;
-        case TYPE_UINT64: SET_INT_VALUE(&v, 0);   break;
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            SET_INT_VALUE(&v, 0);
+            break;
         case TYPE_FLOAT:
         case TYPE_DOUBLE:
         case TYPE_LONG_DOUBLE:
@@ -837,8 +845,6 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
              if (!v.enum_val.enum_name) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
              v.base_type_node = actual_type_def;
              break;
-        case TYPE_BYTE:    v.i_val = 0; break;
-        case TYPE_WORD:    v.i_val = 0; break;
         case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; v.max_length = 0; break;
         case TYPE_POINTER:
             v.ptr_val = NULL;
