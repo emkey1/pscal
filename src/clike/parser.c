@@ -19,7 +19,7 @@ VarType clike_tokenTypeToVarType(ClikeTokenType t) {
         case CLIKE_TOKEN_MSTREAM:    return TYPE_MEMORYSTREAM;
         case CLIKE_TOKEN_VOID:       return TYPE_VOID;
         case CLIKE_TOKEN_CHAR:       return TYPE_CHAR;
-        case CLIKE_TOKEN_BYTE:       return TYPE_UINT8;
+        case CLIKE_TOKEN_BYTE:       return TYPE_BYTE;
         default:                     return TYPE_UNKNOWN;
     }
 }
