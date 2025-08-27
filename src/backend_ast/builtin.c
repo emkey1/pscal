@@ -325,8 +325,10 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
         return makeInt(AS_INTEGER(arg) + 1);
     }
     switch(arg.type) {
-        case TYPE_CHAR:    return makeChar(arg.c_val + 1);
-        case TYPE_BOOLEAN: return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
+        case TYPE_CHAR:
+            return makeChar(arg.c_val + 1);
+        case TYPE_BOOLEAN:
+            return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
         case TYPE_ENUM: {
             int ordinal = arg.enum_val.ordinal;
             if (arg.enum_meta && ordinal + 1 >= arg.enum_meta->member_count) {
@@ -338,9 +340,11 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
             result.base_type_node = arg.base_type_node;
             return result;
         }
+        default:
+            runtimeError(vm, "Succ requires an ordinal type argument. Got %s.",
+                         varTypeToString(arg.type));
+            return makeVoid();
     }
-    runtimeError(vm, "Succ requires an ordinal type argument. Got %s.", varTypeToString(arg.type));
-    return makeVoid();
 }
 
 Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
