@@ -340,7 +340,7 @@ Value makeReal(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_DOUBLE;
-    v.r_val = val;
+    v.d_val = (double)val;
     return v;
 }
 
