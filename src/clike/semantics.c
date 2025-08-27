@@ -484,6 +484,10 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             if (node->left) {
                 VarType initType = analyzeExpr(node->left, scopes);
                 VarType declType = node->var_type;
+                if (declType == TYPE_ARRAY && node->element_type == TYPE_CHAR &&
+                    node->left->type == TCAST_STRING) {
+                    initType = declType;
+                }
                 if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
                     if (declType != initType &&
                         !(is_real_type(declType) && is_intlike_type(initType)) &&

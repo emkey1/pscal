@@ -531,6 +531,30 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 }
                 writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+                if (node->left && node->left->type == TCAST_STRING &&
+                    node->element_type == TYPE_CHAR && node->dim_count == 1) {
+                    char* str = tokenStringToCString(node->left->token);
+                    int slen = strlen(str);
+                    for (int i = 0; i <= slen; ++i) {
+                        char ch = (i < slen) ? str[i] : '\0';
+                        Value idxVal = makeInt(i);
+                        int idxConst = addConstantToChunk(chunk, &idxVal);
+                        freeValue(&idxVal);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)idxConst, node->token.line);
+                        writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                        writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
+                        writeBytecodeChunk(chunk, 1, node->token.line);
+                        Value chVal = makeChar(ch);
+                        int chConst = addConstantToChunk(chunk, &chVal);
+                        freeValue(&chVal);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)chConst, node->token.line);
+                        writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line);
+                    }
+                    free(str);
+                }
             } else {
                 if (node->left) {
                     compileExpression(node->left, chunk, ctx);
