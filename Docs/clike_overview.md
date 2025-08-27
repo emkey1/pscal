@@ -1,6 +1,6 @@
 # C-Like Front End Overview
 
-The `clike` front end provides a small C-style language that targets the
+The `clike` front end provides a C-style language that targets the
 Pscal virtual machine.
 
 ## Core Semantics
