@@ -32,6 +32,7 @@ The project follows a classic compiler and virtual machine design:
 ## Key Features and Capabilities
 
 * **Dual Language Support**: The ability to compile both Pascal-like and C-like code to the same bytecode is a major feature.
+* **Rich Type System**: Signed and unsigned integers from 8 to 64 bits and floating-point types up to extended precision.
 * **Graphics and Audio**: Through SDL bindings, the language supports creating graphical applications with audio capabilities, including window creation, shape and text rendering, and sound playback.
 * **Networking**: A networking API using `libcurl` allows for making HTTP requests and handling responses.
 * **Rich Built-in Library**: A comprehensive set of built-in functions is provided for:
@@ -90,11 +91,11 @@ cd Tests; ./run_all_tests
 ## Directory Layout
 
 * src/: Core compiler(s) and virtual machine sources
-    * backend_ast: Contains the backend of the compiler, focusing on the Abstract Syntax Tree (AST). It includes the code for built-in functions and interface.s
-    * clike: The complete frontend for the C-like language. 
+    * backend_ast: Contains the backend of the compiler, focusing on the Abstract Syntax Tree (AST). It includes the code for built-in functions and interfaces
+    * clike: The complete frontend for the C-like language.
     * compiler: Contains core components of the compiler that are shared across the different language frontends such as bytecode definition and the portion that translates the AST into bytecode.
     * core: Houses fundamental utilities and data structures used throughout the project. This includes implementations for lists, bytecode caching, and common type definitions.
-    * ext_builtins: The source code for additional, "external" built-in functions. This modular design allows for new features to be added to the language easily. 
+    * ext_builtins: The source code for additional, "external" built-in functions. This modular design allows for new features to be added to the language easily.
     * pascal: The Pascal-like language frontend, containing its lexer, parser, and AST implementation.
     * symbol: The implementation of the symbol table, which is a critical component for the compiler to manage identifiers such as variables and functions.
     * vm: The source code for the stack-based virtual machine that executes the bytecode produced by the front ends.

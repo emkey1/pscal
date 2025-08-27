@@ -15,6 +15,9 @@ Start here to explore the available guides and references in this directory.
 - [clike_tutorial.md](clike_tutorial.md): build and run the C-like compiler.
 - [clike_repl_tutorial.md](clike_repl_tutorial.md): interact with the language through the REPL.
 
+## Tiny compiler
+- [tools/tiny](../tools/tiny): educational Python-based compiler front end.
+
 ## Virtual machine
 - [pscal_vm_overview.md](pscal_vm_overview.md): stack-based VM architecture and opcode reference.
 - [pscal_vm_builtins.md](pscal_vm_builtins.md): catalog of built-in functions provided by the VM.

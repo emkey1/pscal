@@ -17,7 +17,7 @@ The VM executes bytecode on a stack-based interpreter. It provides helper routin
 
 Pscal implements a substantial subset of classic Pascal:
 
-* **Basic types** – integer, real, boolean, char, string, enumerations, sets and records.
+* **Basic types** – integers (`ShortInt` through `Int64`), real numbers (`Single`, `Double`, `Extended`), boolean, char, string, enumerations, sets and records.
 * **Control flow** – `if`, `case`, `for`, `while`, `repeat…until`, and `break`.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
@@ -161,7 +161,7 @@ program CheckFile;
 uses SysUtils;
 begin
   if FileExists('data.txt') then
-    writeln(UpperCase('file found'));
+    writeln(UpperCase('file found'))
   else
     writeln(UpperCase('file not found'));
 end.

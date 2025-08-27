@@ -51,6 +51,9 @@ The language supports a variety of built-in data types:
 | `char` | `TYPE_CHAR` | 8-bit character. |
 | `byte` | `TYPE_BYTE` | 8-bit unsigned integer. |
 | `str` | `TYPE_STRING` | Dynamic-length string. |
+| `text` | `TYPE_FILE` | File handle for text I/O. |
+| `mstream` | `TYPE_MEMORYSTREAM` | In-memory byte stream. |
+| `void` | `TYPE_VOID` | Absence of value (used for procedures). |
 
 ### **Variables and Constants**
 

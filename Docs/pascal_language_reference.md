@@ -27,7 +27,7 @@ The following are reserved keywords and cannot be used as identifiers:
 * `of`, `or`, `out`
 * `procedure`, `program`
 * `read`, `readln`, `record`, `repeat`
-* `set`, `shl`, `shr`
+* `set`, `shl`, `shr`, `xor`
 * `then`, `to`, `true`, `type`
 * `unit`, `until`, `uses`
 * `var`, `while`, `write`, `writeln`
@@ -49,11 +49,17 @@ The language supports a variety of built-in data types:
 
 | Keyword | VM Type | Description |
 | :--- | :--- | :--- |
-| `Integer`, `LongInt` | `TYPE_INTEGER` | 64-bit signed integer. |
-| `Real` | `TYPE_REAL` | 64-bit floating-point number. |
-| `Char` | `TYPE_CHAR` | 8-bit character. |
+| `ShortInt` | `TYPE_INT8` | 8-bit signed integer. |
+| `SmallInt` | `TYPE_INT16` | 16-bit signed integer. |
+| `Integer` | `TYPE_INT32` | 32-bit signed integer. |
+| `LongInt`, `Int64` | `TYPE_INT64` | 64-bit signed integer. |
 | `Byte` | `TYPE_BYTE` | 8-bit unsigned integer. |
 | `Word` | `TYPE_WORD` | 16-bit unsigned integer. |
+| `Cardinal` | `TYPE_UINT32` | 32-bit unsigned integer. |
+| `Single` | `TYPE_FLOAT` | 32-bit floating-point number. |
+| `Real`, `Double` | `TYPE_DOUBLE` | 64-bit floating-point number. |
+| `Extended` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
+| `Char` | `TYPE_CHAR` | 8-bit character. |
 | `String` | `TYPE_STRING` | Dynamic-length or fixed-length string. |
 | `Boolean` | `TYPE_BOOLEAN` | `True` or `False`. |
 | `Text`, `File` | `TYPE_FILE` | Represents a file handle. |
