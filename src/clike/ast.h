@@ -33,6 +33,7 @@ typedef enum {
     TCAST_MEMBER,
     TCAST_ADDR,
     TCAST_DEREF,
+    TCAST_SIZEOF,
     TCAST_CALL,
     TCAST_STRUCT_DECL
 } ASTNodeTypeClike;
