@@ -469,6 +469,8 @@ Value makeChar(char c) {
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_CHAR;
     v.c_val = c;
+    unsigned char uc = (unsigned char)c;
+    SET_INT_VALUE(&v, uc); // Keep numeric fields in sync for ordinal ops
     v.max_length = 1; // Character has a fixed length of 1
     return v;
 }
