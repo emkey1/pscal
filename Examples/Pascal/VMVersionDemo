@@ -1,0 +1,11 @@
+#!/usr/bin/env pascal
+program VMVersionDemo;
+begin
+  writeln('VM version: ', VMVersion);
+  writeln('Bytecode version: ', BytecodeVersion);
+  if VMVersion <> BytecodeVersion then
+  begin
+    writeln('bytecode targets newer VM');
+    halt(1);
+  end;
+end.
