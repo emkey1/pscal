@@ -68,6 +68,8 @@ static inline bool is_intlike_type(VarType t) {
         case TYPE_INT64:
         case TYPE_UINT64:
             return true;
+        case TYPE_CHAR:
+            return true;
         default:
             return false;
     }
