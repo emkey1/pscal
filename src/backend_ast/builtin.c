@@ -2478,10 +2478,10 @@ Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
     Value* month = (Value*)args[1].ptr_val;
     Value* day = (Value*)args[2].ptr_val;
     Value* dow = (Value*)args[3].ptr_val;
-    if (year) year->i_val = tm_info.tm_year + 1900;
-    if (month) month->i_val = tm_info.tm_mon + 1;
-    if (day) day->i_val = tm_info.tm_mday;
-    if (dow) dow->i_val = tm_info.tm_wday;
+    if (year) { year->type = TYPE_WORD; SET_INT_VALUE(year, tm_info.tm_year + 1900); }
+    if (month) { month->type = TYPE_WORD; SET_INT_VALUE(month, tm_info.tm_mon + 1); }
+    if (day) { day->type = TYPE_WORD; SET_INT_VALUE(day, tm_info.tm_mday); }
+    if (dow) { dow->type = TYPE_WORD; SET_INT_VALUE(dow, tm_info.tm_wday); }
     return makeVoid();
 }
 
@@ -2498,10 +2498,10 @@ Value vmBuiltinDosGettime(VM* vm, int arg_count, Value* args) {
     Value* min = (Value*)args[1].ptr_val;
     Value* sec = (Value*)args[2].ptr_val;
     Value* sec100 = (Value*)args[3].ptr_val;
-    if (hour) hour->i_val = tm_info.tm_hour;
-    if (min) min->i_val = tm_info.tm_min;
-    if (sec) sec->i_val = tm_info.tm_sec;
-    if (sec100) sec100->i_val = (int)(tv.tv_usec / 10000);
+    if (hour) { hour->type = TYPE_WORD; SET_INT_VALUE(hour, tm_info.tm_hour); }
+    if (min) { min->type = TYPE_WORD; SET_INT_VALUE(min, tm_info.tm_min); }
+    if (sec) { sec->type = TYPE_WORD; SET_INT_VALUE(sec, tm_info.tm_sec); }
+    if (sec100) { sec100->type = TYPE_WORD; SET_INT_VALUE(sec100, (int)(tv.tv_usec / 10000)); }
     return makeVoid();
 }
 
