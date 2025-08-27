@@ -503,18 +503,31 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else if (node->is_array) {
                 int elemNameIdx = addStringConstant(chunk, "");
+                // Compile dynamic dimension sizes before emitting the init opcode
+                if (node->array_dim_exprs) {
+                    for (int d = 0; d < node->dim_count; ++d) {
+                        if (node->array_dims[d] == 0 && node->array_dim_exprs[d]) {
+                            compileExpression(node->array_dim_exprs[d], chunk, ctx);
+                        }
+                    }
+                }
                 writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->dim_count, node->token.line);
                 for (int d = 0; d < node->dim_count; ++d) {
-                    Value lower = makeInt(0);
-                    Value upper = makeInt(node->array_dims[d] - 1);
-                    int lidx = addConstantToChunk(chunk, &lower);
-                    int uidx = addConstantToChunk(chunk, &upper);
-                    freeValue(&lower);
-                    freeValue(&upper);
-                    emitShort(chunk, (uint16_t)lidx, node->token.line);
-                    emitShort(chunk, (uint16_t)uidx, node->token.line);
+                    if (node->array_dims[d] == 0 && node->array_dim_exprs && node->array_dim_exprs[d]) {
+                        emitShort(chunk, 0xFFFF, node->token.line);
+                        emitShort(chunk, 0xFFFF, node->token.line);
+                    } else {
+                        Value lower = makeInt(0);
+                        Value upper = makeInt(node->array_dims[d] - 1);
+                        int lidx = addConstantToChunk(chunk, &lower);
+                        int uidx = addConstantToChunk(chunk, &upper);
+                        freeValue(&lower);
+                        freeValue(&upper);
+                        emitShort(chunk, (uint16_t)lidx, node->token.line);
+                        emitShort(chunk, (uint16_t)uidx, node->token.line);
+                    }
                 }
                 writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);

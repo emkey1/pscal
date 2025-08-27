@@ -12,6 +12,7 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     node->is_array = 0;
     node->array_size = 0;
     node->array_dims = NULL;
+    node->array_dim_exprs = NULL;
     node->dim_count = 0;
     node->element_type = TYPE_UNKNOWN;
     node->is_const = 0;
@@ -64,6 +65,13 @@ ASTNodeClike *cloneASTClike(ASTNodeClike *node) {
         copy->array_dims = (int*)malloc(sizeof(int) * node->dim_count);
         memcpy(copy->array_dims, node->array_dims, sizeof(int) * node->dim_count);
     }
+    if (node->dim_count > 0 && node->array_dim_exprs) {
+        copy->array_dim_exprs = (ASTNodeClike**)malloc(sizeof(ASTNodeClike*) * node->dim_count);
+        for (int i = 0; i < node->dim_count; ++i) {
+            copy->array_dim_exprs[i] = cloneASTClike(node->array_dim_exprs[i]);
+            if (copy->array_dim_exprs[i]) copy->array_dim_exprs[i]->parent = copy;
+        }
+    }
     setLeftClike(copy, cloneASTClike(node->left));
     setRightClike(copy, cloneASTClike(node->right));
     setThirdClike(copy, cloneASTClike(node->third));
@@ -81,6 +89,12 @@ void freeASTClike(ASTNodeClike *node) {
     if (node->third) freeASTClike(node->third);
     free(node->children);
     free(node->array_dims);
+    if (node->array_dim_exprs) {
+        for (int i = 0; i < node->dim_count; ++i) {
+            freeASTClike(node->array_dim_exprs[i]);
+        }
+        free(node->array_dim_exprs);
+    }
     free(node);
 }
 
@@ -217,6 +231,11 @@ bool verifyASTClikeLinks(ASTNodeClike *node, ASTNodeClike *expectedParent) {
     if (!verifyASTClikeLinks(node->third, node)) links_ok = false;
     for (int i = 0; i < node->child_count; ++i) {
         if (!verifyASTClikeLinks(node->children[i], node)) links_ok = false;
+    }
+    if (node->array_dim_exprs) {
+        for (int i = 0; i < node->dim_count; ++i) {
+            if (!verifyASTClikeLinks(node->array_dim_exprs[i], node)) links_ok = false;
+        }
     }
     return links_ok;
 }
