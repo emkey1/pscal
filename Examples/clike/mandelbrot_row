@@ -5,6 +5,11 @@
 int main() {
     int width = ScreenCols() - 1;
     int height = ScreenRows() - 2;
+    if (width < 1 || height < 1) {
+        printf("Terminal too small for Mandelbrot.\n");
+        return 1;
+    }
+    clrscr();
     int maxIterations = 1000;
     double minRe = -2.25;
     double maxRe = 1.25;
