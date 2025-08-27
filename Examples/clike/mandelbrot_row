@@ -3,8 +3,8 @@
 // Renders an ASCII Mandelbrot to the console.
 
 int main() {
-    int width = 80;
-    int height = 24;
+    int width = ScreenCols();
+    int height = ScreenRows() - 2;
     int maxIterations = 1000;
     double minRe = -2.0;
     double maxRe = 1.0;
@@ -12,7 +12,7 @@ int main() {
     double maxIm = minIm + (maxRe - minRe) * height / width;
     double reFactor = (maxRe - minRe) / (width - 1);
     double imFactor = (maxIm - minIm) / (height - 1);
-    int row[80];
+    int row[height];
     for (int y = 0; y < height; y++) {
         double c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
