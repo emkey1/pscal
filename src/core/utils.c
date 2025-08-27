@@ -1673,8 +1673,29 @@ void printValueToStream(Value v, FILE *stream) {
     }
 
     switch (v.type) {
+        case TYPE_INT8:
+            fprintf(stream, "%hhd", (int8_t)v.i_val);
+            break;
+        case TYPE_UINT8:
+            fprintf(stream, "%hhu", (uint8_t)v.u_val);
+            break;
+        case TYPE_INT16:
+            fprintf(stream, "%hd", (int16_t)v.i_val);
+            break;
+        case TYPE_UINT16:
+            fprintf(stream, "%hu", (uint16_t)v.u_val);
+            break;
         case TYPE_INT32:
             fprintf(stream, "%lld", v.i_val);
+            break;
+        case TYPE_UINT32:
+            fprintf(stream, "%u", (uint32_t)v.u_val);
+            break;
+        case TYPE_INT64:
+            fprintf(stream, "%lld", v.i_val);
+            break;
+        case TYPE_UINT64:
+            fprintf(stream, "%llu", v.u_val);
             break;
         case TYPE_FLOAT:
         case TYPE_DOUBLE:

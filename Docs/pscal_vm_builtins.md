@@ -53,8 +53,10 @@ VM. For instructions on adding your own routines, see
 | window | (left: Integer, top: Integer, right: Integer, bottom: Integer) | void | Set output window. |
 | keypressed | () | Boolean | True if key waiting. |
 | readkey | ([var c: Char]) | Char | Read key. Optionally stores into VAR char. |
+| write | ([file: File,] ...) | void | Write values to file or console (all integer sizes, boolean, and float types incl. 80-bit). |
+| writeln | ([file: File,] ...) | void | Write values and newline (all integer sizes, boolean, and float types incl. 80-bit). |
 | read | ([file: File,] var ...) | void | Read values from file or console. |
-| readln | ([file: File,] var ...) | void | Read line from file or console. |
+| readln | ([file: File,] var ...) | void | Read line and parse into vars (all integer sizes, boolean, and float types incl. 80-bit). |
 | textcolor | (color: Integer) | void | Set text color. |
 | textbackground | (color: Integer) | void | Set background color. |
 | textcolore | (color: Integer) | void | Extended text color. |
@@ -82,7 +84,7 @@ VM. For instructions on adding your own routines, see
 | erase | (var f: File) | void | Delete file. (CLike front end calls this `remove`.) |
 | eof | ([f: File]) | Boolean | Test end of file. |
 | read | ([f: File,] var ...) | void | Read from file or console. |
-| readln | ([f: File,] var ...) | void | Read line from file or console. |
+| readln | ([f: File,] var ...) | void | Read line and parse into vars (all integer sizes, boolean, and float types incl. 80-bit). |
 | ioresult | () | Integer | Return last I/O error code. |
 
 ## Memory Streams

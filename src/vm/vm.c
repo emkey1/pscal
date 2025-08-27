@@ -2480,8 +2480,21 @@ comparison_error_label:
                     } else {
                         snprintf(buf, sizeof(buf), "%*.*LE", width, PASCAL_DEFAULT_FLOAT_PRECISION, raw_val.r_val);
                     }
-                } else if (raw_val.type == TYPE_INTEGER || raw_val.type == TYPE_BYTE || raw_val.type == TYPE_WORD) {
-                    snprintf(buf, sizeof(buf), "%*lld", width, raw_val.i_val);
+                } else if (is_intlike_type(raw_val.type)) {
+                    if (raw_val.type == TYPE_UINT64 || raw_val.type == TYPE_UINT32 ||
+                        raw_val.type == TYPE_UINT16 || raw_val.type == TYPE_UINT8 ||
+                        raw_val.type == TYPE_WORD   || raw_val.type == TYPE_BYTE) {
+                        unsigned long long u = raw_val.u_val;
+                        if (raw_val.type == TYPE_BYTE || raw_val.type == TYPE_UINT8)   u &= 0xFFULL;
+                        if (raw_val.type == TYPE_WORD || raw_val.type == TYPE_UINT16) u &= 0xFFFFULL;
+                        if (raw_val.type == TYPE_UINT32) u &= 0xFFFFFFFFULL;
+                        snprintf(buf, sizeof(buf), "%*llu", width, u);
+                    } else {
+                        long long s = raw_val.i_val;
+                        if (raw_val.type == TYPE_INT8)  s = (int8_t)s;
+                        if (raw_val.type == TYPE_INT16) s = (int16_t)s;
+                        snprintf(buf, sizeof(buf), "%*lld", width, s);
+                    }
                 } else if (raw_val.type == TYPE_STRING) {
                     const char* source_str = raw_val.s_val ? raw_val.s_val : "";
                     size_t len = strlen(source_str);
