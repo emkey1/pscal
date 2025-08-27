@@ -24,8 +24,8 @@ The project follows a classic compiler and virtual machine design:
 
 * **Frontends**: Each frontend is responsible for parsing its respective language (Pascal-like or C-like) and constructing an Abstract Syntax Tree (AST).
 * **Compiler**: A compiler processes the AST, performs semantic analysis (for the C-like language), and generates bytecode. The C-like frontend also includes an optimization pass to improve the generated code.
-* **Virtual Machine (VM)**: A stack-based VM executes the bytecode, providing a portable runtime environment.
 * **Symbol Table**: A hash table-based symbol table manages variables, functions, and types during compilation.
+* **Virtual Machine (VM)**: A stack-based VM executes the bytecode, providing a portable runtime environment.
 
 ---
 
