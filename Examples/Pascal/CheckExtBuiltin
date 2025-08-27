@@ -1,0 +1,8 @@
+#!/usr/bin/env pascal
+program CheckExtBuiltin;
+begin
+  if HasExtBuiltin('system', 'GetPid') then
+    writeln('GetPid available: ', GetPid)
+  else
+    writeln('GetPid unavailable');
+end.

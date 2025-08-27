@@ -1,5 +1,6 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
+#include "core/version.h"
 #include "symbol/symbol.h"
 #ifdef SDL
 #include "backend_ast/sdl.h"
@@ -55,6 +56,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"biwherey", vmBuiltinWherey},
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
+    {"bytecodeversion", vmBuiltinBytecodeVersion},
     {"ceil", vmBuiltinCeil},
     {"chr", vmBuiltinChr},
 #ifdef SDL
@@ -245,6 +247,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"val", vmBuiltinVal},
     {"valreal", vmBuiltinValreal},
+    {"vmversion", vmBuiltinVMVersion},
 #ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
@@ -2391,6 +2394,17 @@ Value vmBuiltinValreal(VM* vm, int arg_count, Value* args) {
     return vmBuiltinVal(vm, arg_count, args);
 }
 
+Value vmBuiltinVMVersion(VM* vm, int arg_count, Value* args) {
+    (void)vm; (void)args;
+    return arg_count == 0 ? makeInt(PSCAL_VM_VERSION) : makeInt(-1);
+}
+
+Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0 || !vm || !vm->chunk) return makeInt(-1);
+    return makeInt(vm->chunk->version);
+}
+
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
         runtimeError(vm, "dos_exec expects 2 string arguments.");
@@ -3072,8 +3086,10 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("TextColorE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("BytecodeVersion", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("VMVersion", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);

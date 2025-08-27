@@ -9,6 +9,8 @@ option(ENABLE_EXT_BUILTIN_USER "Enable user-provided builtins" ON)
 # Base sources that are always built
 set(PSCAL_EXT_BUILTIN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/register.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/registry.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/query_builtin.c
 )
 
 # Conditionally add builtin categories
