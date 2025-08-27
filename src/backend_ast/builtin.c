@@ -348,11 +348,22 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_CHAR) {
+    if (arg_count != 1) {
         runtimeError(vm, "Upcase expects 1 char argument.");
         return makeChar('\0');
     }
-    return makeChar(toupper(args[0].c_val));
+
+    Value arg = args[0];
+    char c;
+    if (arg.type == TYPE_CHAR) {
+        c = arg.c_val;
+    } else if (IS_INTLIKE(arg)) {
+        c = (char)AS_INTEGER(arg);
+    } else {
+        runtimeError(vm, "Upcase expects 1 char argument.");
+        return makeChar('\0');
+    }
+    return makeChar((char)toupper((unsigned char)c));
 }
 
 Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
