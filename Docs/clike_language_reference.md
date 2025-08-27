@@ -32,6 +32,7 @@ Identifiers are used for the names of variables, functions, and user-defined typ
 #### **Literals**
 
 * **Integer Literals:** Can be decimal (e.g., `123`) or hexadecimal (e.g., `0x7B`).
+  Unsuffixed integer literals are interpreted as 64-bit signed values.
 * **Floating-Point Literals:** Written with a decimal point (e.g., `3.14`).
 * **Character Literals:** Enclosed in single quotes (e.g., `'a'`). They support standard C-style escape sequences (`\n`, `\r`, `\t`, `\\`, `\'`).
 * **String Literals:** Enclosed in double quotes (e.g., `"hello"`). They also support C-style escape sequences.

@@ -259,7 +259,7 @@ Value vmBuiltinInitsoundsystem(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinPlaysound(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTEGER(args[0])) {
         runtimeError(vm, "PlaySound expects 1 integer argument.");
     } else {
         audioPlaySound((int)args[0].i_val);
@@ -268,7 +268,7 @@ Value vmBuiltinPlaysound(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinFreesound(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTEGER(args[0])) {
         runtimeError(vm, "FreeSound expects 1 integer argument.");
     } else {
         audioFreeSound((int)args[0].i_val);
