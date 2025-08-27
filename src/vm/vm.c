@@ -434,7 +434,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             }
             Value lower_val = vm->chunk->constants[lower_idx];
             Value upper_val = vm->chunk->constants[upper_idx];
-            if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+            if (!is_intlike_type(lower_val.type) || !is_intlike_type(upper_val.type)) {
                 runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
                 free(lower_bounds); free(upper_bounds);
                 return INTERPRET_RUNTIME_ERROR;
@@ -851,7 +851,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (index_val.type != TYPE_INTEGER) {
+                if (!is_intlike_type(index_val.type)) {
                     runtimeError(vm, "VM Error: String index must be an integer.");
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1449,7 +1449,7 @@ comparison_error_label:
                     Value* base_val = (Value*)operand.ptr_val;
                     if (base_val && base_val->type == TYPE_STRING) {
                         Value index_val = pop(vm);
-                        if (index_val.type != TYPE_INTEGER) {
+                        if (!is_intlike_type(index_val.type)) {
                             runtimeError(vm, "VM Error: String index must be an integer.");
                             freeValue(&index_val);
                             freeValue(&operand);
@@ -1487,7 +1487,7 @@ comparison_error_label:
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
-                    if (index_val.type != TYPE_INTEGER) {
+                    if (!is_intlike_type(index_val.type)) {
                         runtimeError(vm, "VM Error: Array index must be an integer.");
                         free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
                     }
@@ -1801,7 +1801,7 @@ comparison_error_label:
                  Value index_val = pop(vm);
                  Value base_val = pop(vm); // Can be string or char
 
-                 if (index_val.type != TYPE_INTEGER) {
+                 if (!is_intlike_type(index_val.type)) {
                      runtimeError(vm, "VM Error: String/Char index must be an integer.");
                      freeValue(&index_val); freeValue(&base_val);
                      return INTERPRET_RUNTIME_ERROR;
@@ -2151,7 +2151,7 @@ comparison_error_label:
                     }
                     Value lower_val = vm->chunk->constants[lower_idx];
                     Value upper_val = vm->chunk->constants[upper_idx];
-                    if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+                    if (!is_intlike_type(lower_val.type) || !is_intlike_type(upper_val.type)) {
                         runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
                         free(lower_bounds); free(upper_bounds);
                         return INTERPRET_RUNTIME_ERROR;
