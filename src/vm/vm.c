@@ -1715,6 +1715,8 @@ comparison_error_label:
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign %s to CHAR.", varTypeToString(value_to_set.type));
                         }
+                        unsigned char uc = (unsigned char)target_lvalue_ptr->c_val;
+                        SET_INT_VALUE(target_lvalue_ptr, uc);
                     }
                     else {
                         freeValue(target_lvalue_ptr);
