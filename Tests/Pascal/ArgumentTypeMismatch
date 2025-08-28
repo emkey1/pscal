@@ -6,7 +6,9 @@ end;
 
 var
   x: integer;
+  s: string;
 begin
   x := 5;
-  Foo(x, x); { wrong type for second argument }
+  s := 'hi';
+  Foo(s, x); { wrong type for first argument }
 end.

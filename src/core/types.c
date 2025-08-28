@@ -23,7 +23,8 @@ VarType inferBinaryOpType(VarType left, VarType right) {
     bool left_int = is_intlike_type(left);
     bool right_int = is_intlike_type(right);
 
-    if ((left_real && right_int) || (right_real && left_int)) return TYPE_UNKNOWN;
+    if (left_real && right_int) return left;
+    if (right_real && left_int) return right;
 
     if (left_real && right_real) {
         if (left == TYPE_LONG_DOUBLE || right == TYPE_LONG_DOUBLE) return TYPE_LONG_DOUBLE;
