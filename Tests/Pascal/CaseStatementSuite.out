@@ -1,4 +1,4 @@
---- Testing CASE Statements with Verification ---
+]10;?--- Testing CASE Statements with Verification ---
 
 Testing INTEGER CASE:
 START: Integer Case (i=0): PASS
@@ -10,10 +10,6 @@ START: Integer Case (i=5): PASS
 START: Integer Case (i=6): PASS
 
 Testing CHAR CASE:
-'): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
 START: Char Case (ch=' '): PASS
 START: Char Case (ch='!'): PASS
 START: Char Case (ch='"'): PASS
@@ -78,43 +74,37 @@ START: Char Case (ch='\'): PASS
 START: Char Case (ch=']'): PASS
 START: Char Case (ch='^'): PASS
 START: Char Case (ch='_'): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
-START: Char Case (ch=''): PASS
+START: Char Case (ch='`'): PASS
+START: Char Case (ch='a'): PASS
+START: Char Case (ch='b'): PASS
+START: Char Case (ch='c'): PASS
+START: Char Case (ch='d'): PASS
+START: Char Case (ch='e'): PASS
+START: Char Case (ch='f'): PASS
+START: Char Case (ch='g'): PASS
+START: Char Case (ch='h'): PASS
+START: Char Case (ch='i'): PASS
+START: Char Case (ch='j'): PASS
+START: Char Case (ch='k'): PASS
+START: Char Case (ch='l'): PASS
+START: Char Case (ch='m'): PASS
+START: Char Case (ch='n'): PASS
+START: Char Case (ch='o'): PASS
+START: Char Case (ch='p'): PASS
+START: Char Case (ch='q'): PASS
+START: Char Case (ch='r'): PASS
+START: Char Case (ch='s'): PASS
+START: Char Case (ch='t'): PASS
+START: Char Case (ch='u'): PASS
+START: Char Case (ch='v'): PASS
+START: Char Case (ch='w'): PASS
+START: Char Case (ch='x'): PASS
+START: Char Case (ch='y'): PASS
+START: Char Case (ch='z'): PASS
+START: Char Case (ch='{'): PASS
+START: Char Case (ch='|'): PASS
+START: Char Case (ch='}'): PASS
+START: Char Case (ch='~'): PASS
 
 Testing ENUM CASE (TColor):
 START: Enum TColor Case (Ord=0): PASS
