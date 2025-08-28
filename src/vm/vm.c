@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h> // For bool, true, false
+#include <pthread.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -30,6 +31,81 @@
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
+}
+
+// --- Thread Scheduler Helpers ---
+static void saveThreadContext(VM* vm) {
+    Thread* t = &vm->threads[vm->currentThread];
+    t->chunk = vm->chunk;
+    t->ip = vm->ip;
+    t->stackSize = (int)(vm->stackTop - vm->stack);
+    if (t->stack) {
+        memcpy(t->stack, vm->stack, sizeof(Value) * t->stackSize);
+    }
+    t->frameCount = vm->frameCount;
+    if (t->frames) {
+        memcpy(t->frames, vm->frames, sizeof(CallFrame) * t->frameCount);
+    }
+}
+
+static void loadThreadContext(VM* vm, int idx) {
+    Thread* t = &vm->threads[idx];
+    vm->chunk = t->chunk;
+    vm->ip = t->ip;
+    if (t->stack) {
+        memcpy(vm->stack, t->stack, sizeof(Value) * t->stackSize);
+    }
+    vm->stackTop = vm->stack + t->stackSize;
+    vm->frameCount = t->frameCount;
+    if (t->frames) {
+        memcpy(vm->frames, t->frames, sizeof(CallFrame) * t->frameCount);
+    }
+}
+
+static void switchThread(VM* vm) {
+    if (vm->threadCount <= 1) return;
+    saveThreadContext(vm);
+    int start = vm->currentThread;
+    for (int i = 1; i <= vm->threadCount; i++) {
+        int idx = (start + i) % vm->threadCount;
+        if (vm->threads[idx].active) {
+            vm->currentThread = idx;
+            loadThreadContext(vm, idx);
+            return;
+        }
+    }
+}
+
+static int createThread(VM* vm, uint16_t entry) {
+    if (vm->threadCount >= VM_MAX_THREADS) return -1;
+    Thread* t = &vm->threads[vm->threadCount];
+    t->chunk = vm->chunk;
+    t->ip = vm->chunk->code + entry;
+    t->stackSize = 0;
+    t->frameCount = 0;
+    t->active = true;
+    if (!t->stack) {
+        t->stack = malloc(sizeof(Value) * VM_STACK_MAX);
+        if (!t->stack) return -1;
+    }
+    if (!t->frames) {
+        t->frames = malloc(sizeof(CallFrame) * VM_CALL_STACK_MAX);
+        if (!t->frames) return -1;
+    }
+    int id = vm->threadCount;
+    vm->threadCount++;
+    return id;
+}
+
+static void joinThread(VM* vm, int id) {
+    if (id < 0 || id >= vm->threadCount) return;
+    while (vm->threads[id].active) {
+        switchThread(vm);
+    }
+    free(vm->threads[id].stack);
+    vm->threads[id].stack = NULL;
+    free(vm->threads[id].frames);
+    vm->threads[id].frames = NULL;
 }
 
 // Internal function shared by stack dump helpers
@@ -285,6 +361,14 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
     vm->exit_requested = false;
 
+    vm->threadCount = 0;
+    vm->currentThread = 0;
+    for (int i = 0; i < VM_MAX_THREADS; i++) {
+        vm->threads[i].active = false;
+        vm->threads[i].stack = NULL;
+        vm->threads[i].frames = NULL;
+    }
+
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
     }
@@ -302,6 +386,13 @@ void freeVM(VM* vm) {
     // clear the pointer to signal that the VM no longer uses it.
     if (vm->vmGlobalSymbols) {
         vm->vmGlobalSymbols = NULL;
+    }
+
+    for (int i = 0; i < VM_MAX_THREADS; i++) {
+        free(vm->threads[i].stack);
+        vm->threads[i].stack = NULL;
+        free(vm->threads[i].frames);
+        vm->threads[i].frames = NULL;
     }
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
@@ -557,6 +648,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
+    // Initialize main thread context
+    vm->threadCount = 1;
+    vm->currentThread = 0;
+    Thread* mainThread = &vm->threads[0];
+    mainThread->chunk = chunk;
+    mainThread->ip = vm->ip;
+    mainThread->stackSize = 0;
+    mainThread->frameCount = 0;
+    mainThread->active = true;
+    if (!mainThread->stack) {
+        mainThread->stack = malloc(sizeof(Value) * VM_STACK_MAX);
+        if (!mainThread->stack) return INTERPRET_RUNTIME_ERROR;
+    }
+    if (!mainThread->frames) {
+        mainThread->frames = malloc(sizeof(CallFrame) * VM_CALL_STACK_MAX);
+        if (!mainThread->frames) return INTERPRET_RUNTIME_ERROR;
+    }
+
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
         Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
@@ -806,14 +915,26 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool halted = false;
                 InterpretResult res = returnFromCall(vm, &halted);
                 if (res != INTERPRET_OK) return res;
-                if (halted) return INTERPRET_OK;
+                if (halted) {
+                    vm->threads[vm->currentThread].active = false;
+                    bool any = false;
+                    for (int i = 0; i < vm->threadCount; i++) if (vm->threads[i].active) { any = true; break; }
+                    if (!any) return INTERPRET_OK;
+                    switchThread(vm);
+                }
                 break;
             }
             case OP_EXIT: {
                 bool halted = false;
                 InterpretResult res = returnFromCall(vm, &halted);
                 if (res != INTERPRET_OK) return res;
-                if (halted) return INTERPRET_OK;
+                if (halted) {
+                    vm->threads[vm->currentThread].active = false;
+                    bool any = false;
+                    for (int i = 0; i < vm->threadCount; i++) if (vm->threads[i].active) { any = true; break; }
+                    if (!any) return INTERPRET_OK;
+                    switchThread(vm);
+                }
                 break;
             }
             case OP_CONSTANT: {
@@ -881,7 +1002,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -903,7 +1026,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1836,13 +1961,17 @@ comparison_error_label:
              }
             case OP_DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
+                pthread_mutex_lock(&globals_mutex);
                 InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                pthread_mutex_unlock(&globals_mutex);
                 if (r != INTERPRET_OK) return r;
                 break;
             }
             case OP_DEFINE_GLOBAL16: {
                 Value varNameVal = READ_CONSTANT16();
+                pthread_mutex_lock(&globals_mutex);
                 InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                pthread_mutex_unlock(&globals_mutex);
                 if (r != INTERPRET_OK) return r;
                 break;
             }
@@ -1859,7 +1988,9 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1881,7 +2012,9 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1903,9 +2036,11 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 if (!sym) {
                     runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                    pthread_mutex_unlock(&globals_mutex);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -1920,7 +2055,7 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
                 updateSymbol(name_val->s_val, value_from_stack);
-
+                pthread_mutex_unlock(&globals_mutex);
                 break;
             }
             case OP_SET_GLOBAL16: {
@@ -1936,9 +2071,11 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 if (!sym) {
                     runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                    pthread_mutex_unlock(&globals_mutex);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -1953,6 +2090,7 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
                 updateSymbol(name_val->s_val, value_from_stack);
+                pthread_mutex_unlock(&globals_mutex);
                 break;
             }
             case OP_GET_LOCAL: {
@@ -2343,7 +2481,9 @@ comparison_error_label:
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
+                    pthread_mutex_lock(&globals_mutex);
                     Value result = handler(vm, arg_count, args);
+                    pthread_mutex_unlock(&globals_mutex);
 
                     // Pop arguments from the stack and free their contents
                     // This is crucial to prevent stack corruption.
@@ -2461,7 +2601,14 @@ comparison_error_label:
             }
 
             case OP_HALT:
-                return INTERPRET_OK;
+                vm->threads[vm->currentThread].active = false;
+                {
+                    bool any = false;
+                    for (int i = 0; i < vm->threadCount; i++) if (vm->threads[i].active) { any = true; break; }
+                    if (!any) return INTERPRET_OK;
+                    switchThread(vm);
+                    break;
+                }
             case OP_CALL_HOST: {
                 HostFunctionID host_id = READ_HOST_ID();
                 if (host_id >= HOST_FN_COUNT || vm->host_functions[host_id] == NULL) {
@@ -2469,8 +2616,32 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 HostFn func = vm->host_functions[host_id];
+                pthread_mutex_lock(&globals_mutex);
                 Value result = func(vm);
+                pthread_mutex_unlock(&globals_mutex);
                 push(vm, result);
+                break;
+            }
+            case OP_THREAD_CREATE: {
+                uint16_t entry = READ_SHORT(vm);
+                int id = createThread(vm, entry);
+                if (id < 0) {
+                    runtimeError(vm, "Thread limit exceeded.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeInt(id));
+                break;
+            }
+            case OP_THREAD_JOIN: {
+                Value tidVal = pop(vm);
+                if (!IS_INTLIKE(tidVal)) {
+                    runtimeError(vm, "Thread id must be integer.");
+                    freeValue(&tidVal);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int tid = (int)tidVal.i_val;
+                freeValue(&tidVal);
+                joinThread(vm, tid);
                 break;
             }
             case OP_FORMAT_VALUE: {
@@ -2529,6 +2700,7 @@ comparison_error_label:
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;
         }
+        switchThread(vm);
         next_instruction:;
     }
     return INTERPRET_OK;

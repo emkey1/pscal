@@ -19,6 +19,7 @@
 #define MAX_HOST_FUNCTIONS 4096
 
 #define VM_CALL_STACK_MAX 4096
+#define VM_MAX_THREADS 16
 
 // Forward declaration
 struct VM_s;
@@ -51,8 +52,22 @@ typedef struct {
     Value** upvalues;
 } CallFrame;
 
+// Thread structure representing a lightweight VM thread
+typedef struct {
+    BytecodeChunk* chunk;       // Bytecode being executed
+    uint8_t* ip;                // Instruction pointer for this thread
+    
+    Value* stack;               // Operand stack for the thread
+    int stackSize;              // Number of active values on the stack
+
+    CallFrame* frames;          // Call frames for this thread
+    int frameCount;             // Active call frames
+
+    bool active;                // Whether this thread is runnable
+} Thread;
+
 // --- Virtual Machine Structure ---
-typedef struct VM_s { 
+typedef struct VM_s {
     BytecodeChunk* chunk;     // The chunk of bytecode to execute
     uint8_t* ip;              // Instruction Pointer: points to the *next* byte to be read
 
@@ -69,6 +84,11 @@ typedef struct VM_s {
     int frameCount;
 
     bool exit_requested;      // Indicates a builtin requested early exit from the current frame
+
+    // Threading support
+    Thread threads[VM_MAX_THREADS];
+    int threadCount;
+    int currentThread;
 
 } VM;
 
