@@ -1715,6 +1715,8 @@ comparison_error_label:
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign %s to CHAR.", varTypeToString(value_to_set.type));
                         }
+                        unsigned char uc = (unsigned char)target_lvalue_ptr->c_val;
+                        SET_INT_VALUE(target_lvalue_ptr, uc);
                     }
                     else {
                         freeValue(target_lvalue_ptr);
@@ -2518,6 +2520,8 @@ comparison_error_label:
                     } else {
                         snprintf(buf, sizeof(buf), "%*.*LE", width, PASCAL_DEFAULT_FLOAT_PRECISION, rv);
                     }
+                } else if (raw_val.type == TYPE_CHAR) {
+                    snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
                 } else if (is_intlike_type(raw_val.type)) {
                     if (raw_val.type == TYPE_UINT64 || raw_val.type == TYPE_UINT32 ||
                         raw_val.type == TYPE_UINT16 || raw_val.type == TYPE_UINT8 ||
@@ -2541,8 +2545,6 @@ comparison_error_label:
                 } else if (raw_val.type == TYPE_BOOLEAN) {
                     const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
                     snprintf(buf, sizeof(buf), "%*s", width, bool_str);
-                } else if (raw_val.type == TYPE_CHAR) {
-                    snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
                 } else {
                     snprintf(buf, sizeof(buf), "%*s", width, "?");
                 }

@@ -2240,9 +2240,18 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 }
                 break;
             }
-            case TYPE_CHAR:
-                if (*p) { dst->c_val = *p++; } else { dst->c_val = '\0'; last_io_error = 1; }
+            case TYPE_CHAR: {
+                if (*p) {
+                    dst->c_val = *p++;
+                    unsigned char uc = (unsigned char)dst->c_val;
+                    SET_INT_VALUE(dst, uc);
+                } else {
+                    dst->c_val = '\0';
+                    SET_INT_VALUE(dst, 0);
+                    last_io_error = 1;
+                }
                 break;
+            }
 
             case TYPE_STRING: {
                 char* tmp = strdup(p);
