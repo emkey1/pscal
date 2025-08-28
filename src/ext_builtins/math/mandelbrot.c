@@ -1,5 +1,6 @@
 #include "core/utils.h"
 #include "backend_ast/builtin.h"
+#include "globals.h" // for globals_mutex
 #include <string.h>
 
 static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args) {
@@ -56,8 +57,7 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
     }
 
     double c_re = minRe;
-    Value *outPtr = outArr;
-    for (int x = 0; x <= maxX; ++x, c_re += reFactor, ++outPtr) {
+    for (int x = 0; x <= maxX; ++x, c_re += reFactor) {
         double Z_re = 0.0;
         double Z_im = 0.0;
         int n = 0;
@@ -72,8 +72,11 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
             Z_im = tmp;
             n++;
         }
+        Value* outPtr = &outArr[x];
         if (outPtr->type != TYPE_INTEGER) {
+            pthread_mutex_lock(&globals_mutex);
             freeValue(outPtr);
+            pthread_mutex_unlock(&globals_mutex);
             memset(outPtr, 0, sizeof(Value));
             outPtr->type = TYPE_INTEGER;
         }
