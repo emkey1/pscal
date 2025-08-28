@@ -27,11 +27,15 @@ static VarType builtinReturnType(const char* name) {
 
     if (strcasecmp(name, "chudnovsky") == 0) return TYPE_LONG_DOUBLE;
 
+    if (strcasecmp(name, "paramcount") == 0) {
+        /* Return a wide integer to match the builtin implementation. */
+        return TYPE_INT64;
+    }
+
     if (strcasecmp(name, "round")     == 0 ||
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
         strcasecmp(name, "ioresult")  == 0 ||
-        strcasecmp(name, "paramcount")== 0 ||
         strcasecmp(name, "length")    == 0 ||
         strcasecmp(name, "strlen")    == 0 ||
         strcasecmp(name, "pos")       == 0 ||
