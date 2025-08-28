@@ -26,7 +26,14 @@
 
 #include "types.h"
 
+// Pascal traditionally models the CHAR type as an 8-bit ordinal with a
+// maximum value of 255.  The VM previously exposed the full Unicode range,
+// which caused functions such as High(char) and Ord(High(char)) to report a
+// maximum of 0x10FFFF.  This broke expectations of legacy Pascal code and the
+// regression test suite.  Define an explicit maximum for Pascal CHAR values so
+// the runtime can enforce classic 0..255 semantics.
 #define UNICODE_MAX 0x10FFFF
+#define PASCAL_CHAR_MAX 255
 // Bytecode related stuff
 // Make sure Value and VarType are defined before these.
 #define IS_BOOLEAN(value) ((value).type == TYPE_BOOLEAN)

@@ -450,7 +450,12 @@ Token *getNextToken(Lexer *lexer) {
             // The parser's `evaluateCompileTimeValue` will see a STRING_CONST of length 1
             // and correctly convert it to a CHAR value.
             char char_buf[2];
-            char_buf[0] = (char)val;
+            /* Store the numeric character code using an unsigned cast so that
+             * values 128..255 are preserved instead of sign-extending to
+             * negative numbers on platforms where 'char' is signed.  The
+             * parser later interprets single-character string tokens as CHAR
+             * constants. */
+            char_buf[0] = (unsigned char)val;
             char_buf[1] = '\0';
             return newToken(TOKEN_STRING_CONST, char_buf, start_line, start_column);
         }

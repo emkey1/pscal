@@ -316,7 +316,7 @@ Value vmBuiltinChr(VM* vm, int arg_count, Value* args) {
         return makeChar('\0');
     }
     long long code = AS_INTEGER(args[0]);
-    if (code < 0 || code > UNICODE_MAX) {
+    if (code < 0 || code > PASCAL_CHAR_MAX) {
         runtimeError(vm, "Chr argument out of range.");
         return makeChar('\0');
     }
@@ -334,7 +334,7 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
     }
     switch(arg.type) {
         case TYPE_CHAR:
-            if (arg.c_val >= UNICODE_MAX) {
+            if (arg.c_val >= PASCAL_CHAR_MAX) {
                 runtimeError(vm, "Succ char overflow.");
                 return makeVoid();
             }
@@ -1588,7 +1588,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
 
         case TYPE_CHAR: {
             long long next = target->c_val + delta;
-            if (next < 0 || next > UNICODE_MAX) {
+            if (next < 0 || next > PASCAL_CHAR_MAX) {
                 runtimeError(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
             }
             target->c_val = (int)next;
@@ -1654,7 +1654,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
 
         case TYPE_CHAR: {
             long long next = target->c_val - delta;
-            if (next < 0 || next > UNICODE_MAX) {
+            if (next < 0 || next > PASCAL_CHAR_MAX) {
                 runtimeError(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
             }
             target->c_val = (int)next;
@@ -1769,7 +1769,7 @@ Value vmBuiltinHigh(VM* vm, int arg_count, Value* args) {
 
     switch (t) {
         case TYPE_INTEGER: return makeInt(2147483647);
-        case TYPE_CHAR:    return makeChar(UNICODE_MAX);
+        case TYPE_CHAR:    return makeChar(PASCAL_CHAR_MAX);
         case TYPE_BOOLEAN: return makeBoolean(true);
         case TYPE_BYTE:    return makeInt(255);
         case TYPE_WORD:    return makeInt(65535);
