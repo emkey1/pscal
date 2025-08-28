@@ -1386,9 +1386,40 @@ Value vmBuiltinCotan(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinPower(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "power expects 2 arguments."); return makeReal(0.0); }
-    double base = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
-    double exponent = IS_INTLIKE(args[1]) ? (double)AS_INTEGER(args[1]) : (double)AS_REAL(args[1]);
+    if (arg_count != 2) {
+        runtimeError(vm, "power expects 2 arguments.");
+        return makeReal(0.0);
+    }
+
+    bool base_is_int = IS_INTLIKE(args[0]);
+    bool exp_is_int  = IS_INTLIKE(args[1]);
+
+    if (base_is_int && exp_is_int) {
+        long long base = AS_INTEGER(args[0]);
+        long long exp  = AS_INTEGER(args[1]);
+        if (exp >= 0) {
+            long long result = 1;
+            long long b = base;
+            long long e = exp;
+            bool overflow = false;
+            while (e > 0 && !overflow) {
+                if (e & 1) {
+                    overflow |= __builtin_mul_overflow(result, b, &result);
+                }
+                e >>= 1;
+                if (e)
+                    overflow |= __builtin_mul_overflow(b, b, &b);
+            }
+            if (!overflow) {
+                return makeInt(result);
+            }
+            // fall through to real computation on overflow
+        }
+        // negative exponent falls through to real computation
+    }
+
+    double base = base_is_int ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
+    double exponent = exp_is_int ? (double)AS_INTEGER(args[1]) : (double)AS_REAL(args[1]);
     return makeReal(pow(base, exponent));
 }
 
