@@ -1417,17 +1417,37 @@ Value vmBuiltinTanh(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinMax(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "max expects 2 arguments."); return makeReal(0.0); }
-    double a = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
-    double b = IS_INTLIKE(args[1]) ? (double)AS_INTEGER(args[1]) : (double)AS_REAL(args[1]);
-    return makeReal((a > b) ? a : b);
+    if (arg_count != 2) { runtimeError(vm, "max expects 2 arguments."); return makeInt(0); }
+
+    bool aInt = IS_INTLIKE(args[0]);
+    bool bInt = IS_INTLIKE(args[1]);
+
+    if (aInt && bInt) {
+        long long a = AS_INTEGER(args[0]);
+        long long b = AS_INTEGER(args[1]);
+        return makeInt((a > b) ? a : b);
+    } else {
+        double a = aInt ? (double)AS_INTEGER(args[0]) : AS_REAL(args[0]);
+        double b = bInt ? (double)AS_INTEGER(args[1]) : AS_REAL(args[1]);
+        return makeReal((a > b) ? a : b);
+    }
 }
 
 Value vmBuiltinMin(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "min expects 2 arguments."); return makeReal(0.0); }
-    double a = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
-    double b = IS_INTLIKE(args[1]) ? (double)AS_INTEGER(args[1]) : (double)AS_REAL(args[1]);
-    return makeReal((a < b) ? a : b);
+    if (arg_count != 2) { runtimeError(vm, "min expects 2 arguments."); return makeInt(0); }
+
+    bool aInt = IS_INTLIKE(args[0]);
+    bool bInt = IS_INTLIKE(args[1]);
+
+    if (aInt && bInt) {
+        long long a = AS_INTEGER(args[0]);
+        long long b = AS_INTEGER(args[1]);
+        return makeInt((a < b) ? a : b);
+    } else {
+        double a = aInt ? (double)AS_INTEGER(args[0]) : AS_REAL(args[0]);
+        double b = bInt ? (double)AS_INTEGER(args[1]) : AS_REAL(args[1]);
+        return makeReal((a < b) ? a : b);
+    }
 }
 
 Value vmBuiltinFloor(VM* vm, int arg_count, Value* args) {

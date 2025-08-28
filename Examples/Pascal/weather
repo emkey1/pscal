@@ -67,12 +67,6 @@ end;
 // --- END ReadApiKeyFromFile ---
 
 
-// --- Min function ---
-function Min(a, b: integer): integer;
-begin
-  if a < b then Min := a else Min := b;
-end;
-
 // --- Helper function ExtractStringValue ---
 function ExtractStringValue(jsonString: string; key: string; startSearchPos: integer): string;
 var
@@ -81,15 +75,17 @@ var
 begin
   ExtractStringValue := '';
   searchPattern := '"' + key + '":"';
-  // Use Min to prevent overflow if startSearchPos is near end of jsonString
-  subStr := copy(jsonString, startSearchPos, Min(length(jsonString) - startSearchPos + 1, MAX_SUBSTR_LEN));
+  // Use min to prevent overflow if startSearchPos is near end of jsonString
+  subStr := copy(jsonString, startSearchPos,
+                 min(length(jsonString) - startSearchPos + 1, MAX_SUBSTR_LEN));
   keyPos := pos(searchPattern, subStr);
 
   if keyPos > 0 then
   begin
     valueStartPos := startSearchPos + keyPos + length(searchPattern) - 1;
-    // Use Min again for safety when looking for the closing quote
-    subStr := copy(jsonString, valueStartPos, Min(length(jsonString) - valueStartPos + 1, MAX_SUBSTR_LEN));
+    // Use min again for safety when looking for the closing quote
+    subStr := copy(jsonString, valueStartPos,
+                   min(length(jsonString) - valueStartPos + 1, MAX_SUBSTR_LEN));
     relEndPos := pos('"', subStr);
     if relEndPos > 0 then
     begin
@@ -106,8 +102,9 @@ var
 begin
   ExtractNumericValueStr := '';
   searchPattern := '"' + key + '":';
-  // Use Min for safety
-  subStr := copy(jsonString, startSearchPos, Min(length(jsonString) - startSearchPos + 1, MAX_SUBSTR_LEN));
+  // Use min for safety
+  subStr := copy(jsonString, startSearchPos,
+                 min(length(jsonString) - startSearchPos + 1, MAX_SUBSTR_LEN));
   keyPos := pos(searchPattern, subStr);
 
   if keyPos > 0 then
@@ -119,14 +116,15 @@ begin
        inc(valueStartPos);
     end;
 
-    // Use Min for safety when searching for end delimiter
-    subStr := copy(jsonString, valueStartPos, Min(length(jsonString) - valueStartPos + 1, MAX_SUBSTR_LEN));
+    // Use min for safety when searching for end delimiter
+    subStr := copy(jsonString, valueStartPos,
+                   min(length(jsonString) - valueStartPos + 1, MAX_SUBSTR_LEN));
     relCommaPos := pos(',', subStr);
     relBracePos := pos('}', subStr);
 
     // Determine end position robustly
     if (relCommaPos > 0) and (relBracePos > 0) then
-        relEndPos := Min(relCommaPos, relBracePos)
+        relEndPos := min(relCommaPos, relBracePos)
     else if relCommaPos > 0 then
         relEndPos := relCommaPos
     else if relBracePos > 0 then
