@@ -1,2 +1,2 @@
-L11: Compiler Error: argument 2 to 'foo' expects type REAL but got INTEGER.
+L13: Compiler Error: argument 1 to 'foo' expects type INTEGER but got STRING.
 Compilation failed with errors.

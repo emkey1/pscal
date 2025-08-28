@@ -248,6 +248,9 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                  arg_vt == TYPE_UINT32)) {
                 return true;
             }
+            if (is_real_type(param_actual->var_type) && is_intlike_type(arg_vt)) {
+                return true;
+            }
             return false;
         }
     } else if (!arg_actual) {

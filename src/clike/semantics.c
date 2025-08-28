@@ -357,6 +357,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
             if (lt != rt &&
                 !(is_real_type(lt) && is_real_type(rt)) &&
+                !(is_real_type(lt) && is_intlike_type(rt)) &&
                 !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
                 !(is_intlike_type(lt) && is_intlike_type(rt))) {
                 fprintf(stderr,

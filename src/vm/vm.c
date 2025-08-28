@@ -1669,10 +1669,8 @@ comparison_error_label:
                         SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
                     else if (is_real_type(target_lvalue_ptr->type) && is_intlike_type(value_to_set.type)) {
-                        runtimeError(vm, "Type mismatch: Cannot assign integer to real.");
-                        freeValue(&value_to_set);
-                        freeValue(&pointer_to_lvalue);
-                        return INTERPRET_RUNTIME_ERROR;
+                        long double tmp = as_ld(value_to_set);
+                        SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
@@ -1994,9 +1992,8 @@ comparison_error_label:
                         long double tmp = AS_REAL(value_from_stack);
                         SET_REAL_VALUE(target_slot, tmp);
                     } else if (is_intlike_type(value_from_stack.type)) {
-                        runtimeError(vm, "Type mismatch: Cannot assign integer to real.");
-                        freeValue(&value_from_stack);
-                        return INTERPRET_RUNTIME_ERROR;
+                        long double tmp = as_ld(value_from_stack);
+                        SET_REAL_VALUE(target_slot, tmp);
                     } else {
                         runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
                         freeValue(&value_from_stack);
@@ -2063,6 +2060,15 @@ comparison_error_label:
                     }
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
                     target_slot->s_val[target_slot->max_length] = '\0';
+                } else if (is_real_type(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        long double tmp = as_ld(value_from_stack);
+                        SET_REAL_VALUE(target_slot, tmp);
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                 } else {
                     AST* preserved_base = target_slot->base_type_node;
                     freeValue(target_slot);
@@ -2399,6 +2405,18 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04d.", target_address);
                     vm->frameCount--;
                     return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (proc_symbol->type_def && proc_symbol->type_def->child_count >= declared_arity) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = proc_symbol->type_def->children[i];
+                        Value* arg_val = frame->slots + i;
+                        if (is_real_type(param_ast->var_type) && is_intlike_type(arg_val->type)) {
+                            long double tmp = as_ld(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
                 }
 
                 frame->function_symbol = proc_symbol;
