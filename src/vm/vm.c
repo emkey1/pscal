@@ -1119,12 +1119,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
                     bool a_real = is_real_type(a_val.type);
                     bool b_real = is_real_type(b_val.type);
-                    if (a_real != b_real) {
-                        runtimeError(vm, "Runtime Error: Cannot compare real and integer values.");
-                        freeValue(&a_val); freeValue(&b_val);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    if (a_real) {
+
+                    if (a_real || b_real) {
                         long double fa = as_ld(a_val);
                         long double fb = as_ld(b_val);
                         switch (instruction_val) {
