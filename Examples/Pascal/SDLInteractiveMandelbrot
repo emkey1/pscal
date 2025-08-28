@@ -101,7 +101,6 @@ BEGIN
   FOR LocalPy := 0 TO ViewPixelHeight - 1 DO BEGIN
     c_im := MaxIm - (LocalPy * ScaleIm);
     MandelbrotRow(MinRe, ScaleRe, c_im, MandelMaxIterations, ViewPixelWidth - 1, RowIterations);
-    BufferBaseIdx := LocalPy * ViewPixelWidth * MandelBytesPerPixel;
     FOR LocalPx := 0 TO ViewPixelWidth - 1 DO BEGIN
       Iteration := RowIterations[LocalPx];
       IF Iteration = MandelMaxIterations THEN BEGIN
@@ -113,16 +112,18 @@ BEGIN
         G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256;
         B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
       END;
+      BufferBaseIdx := (LocalPy * ViewPixelWidth + LocalPx) * MandelBytesPerPixel;
       PixelData[BufferBaseIdx + 0] := R_calc;
       PixelData[BufferBaseIdx + 1] := G_calc;
       PixelData[BufferBaseIdx + 2] := B_calc;
       PixelData[BufferBaseIdx + 3] := 255;
-      BufferBaseIdx := BufferBaseIdx + MandelBytesPerPixel;
     END; // Px
     PercentDone := Trunc( (LocalPy + 1) * 100.0 / ViewPixelHeight );
     GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', LocalPy + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
     IF (((LocalPy + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (LocalPy = ViewPixelHeight - 1)) THEN
+    BEGIN
       UpdateAndDisplayTextureInProgress;
+    END;
   END; // Py
   GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
 END;
@@ -135,7 +136,6 @@ BEGIN // Main Program
   GotoXY(1, ControlsStartY + 2); Write('- RClick: Reset View');
   GotoXY(1, ControlsStartY + 3); Write('- Q Key (in terminal): Quit');
   GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
-  Writeln('Does not currently work');
 
   InitGraph(MandelWindowWidth, MandelWindowHeight, MandelWindowTitle);
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);
