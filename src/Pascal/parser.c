@@ -52,6 +52,8 @@ void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const ch
 #endif // DEBUG
 
 AST *parseWriteArgument(Parser *parser);
+AST *spawnStatement(Parser *parser);
+AST *joinStatement(Parser *parser);
 
 AST *declarations(Parser *parser, bool in_interface) {
 #ifdef DEBUG
@@ -2149,6 +2151,12 @@ AST *statement(Parser *parser) {
              node = readlnStatement(parser); // Parses READLN (...)
              // *** Semicolon check REMOVED from here ***
              break;
+        case TOKEN_SPAWN:
+            node = spawnStatement(parser);
+            break;
+        case TOKEN_JOIN:
+            node = joinStatement(parser);
+            break;
         case TOKEN_BREAK:
             eat(parser, TOKEN_BREAK); // Consume BREAK keyword
             node = newASTNode(AST_BREAK, NULL);
@@ -2359,6 +2367,26 @@ AST *readlnStatement(Parser *parser) {
         free(args);
     } else {n->children=NULL;n->child_count=0; n->child_capacity=0;}
     return n;
+}
+
+AST *spawnStatement(Parser *parser) {
+    eat(parser, TOKEN_SPAWN);
+    if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Expected procedure identifier after SPAWN");
+        return newASTNode(AST_NOOP, NULL);
+    }
+    AST *call = procedureCall(parser);
+    AST *node = newThreadSpawn(call);
+    setTypeAST(node, TYPE_INTEGER);
+    return node;
+}
+
+AST *joinStatement(Parser *parser) {
+    eat(parser, TOKEN_JOIN);
+    AST *exprNode = expression(parser);
+    if (!exprNode) return newASTNode(AST_NOOP, NULL);
+    AST *node = newThreadJoin(exprNode);
+    return node;
 }
 // exprList: Calls expression
 AST *exprList(Parser *parser) {
@@ -2683,7 +2711,10 @@ AST *factor(Parser *parser) {
     // if (dumpExec) fprintf(stderr, "[DEBUG_FACTOR] Entry: Token %s ('%s')\n", tokenTypeToString(initialTokenType), initialToken->value ? initialToken->value : "NULL");
     #endif
 
-    if (initialTokenType == TOKEN_NIL) {
+    if (initialTokenType == TOKEN_SPAWN) {
+        node = spawnStatement(parser);
+        return node;
+    } else if (initialTokenType == TOKEN_NIL) {
         Token* c = copyToken(initialToken); // Copy the initial NIL token
         eat(parser, TOKEN_NIL);             // Consume NIL, frees original initialToken
         node = newASTNode(AST_NIL, c);      // Create node with the copy

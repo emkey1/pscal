@@ -44,4 +44,8 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode);
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode);
 VarType getBuiltinReturnType(const char* name);
 void dumpASTJSON(AST *node, FILE *outFile);
+
+// Threading helpers
+AST *newThreadSpawn(AST *call);
+AST *newThreadJoin(AST *expr);
 #endif // AST_H

@@ -22,12 +22,12 @@ The following are reserved keywords and cannot be used as identifiers:
 * `case`, `const`, `div`, `do`, `downto`
 * `else`, `end`, `enum`
 * `false`, `for`, `function`
-* `if`, `implementation`, `in`, `inline`, `initialization`, `interface`
+* `if`, `implementation`, `in`, `inline`, `initialization`, `interface`, `join`
 * `mod`, `nil`, `not`
 * `of`, `or`, `out`
 * `procedure`, `program`
 * `read`, `readln`, `record`, `repeat`
-* `set`, `shl`, `shr`, `xor`
+* `set`, `shl`, `shr`, `spawn`, `xor`
 * `then`, `to`, `true`, `type`
 * `unit`, `until`, `uses`
 * `var`, `while`, `write`, `writeln`
@@ -218,6 +218,23 @@ The Pascal front end has access to the full suite of built-in routines provided 
 * Memory management (`New`, `Dispose`)
 * Console I/O (`GotoXY`, `TextColor`, `ClrScr`, etc.)
 * SDL-based graphics and sound, if compiled with SDL support.
+
+### **Threading**
+
+The Pascal front end supports lightweight concurrency using two keywords:
+
+* `spawn` – starts a new thread executing a parameterless procedure and returns a thread identifier.
+* `join` – waits for the thread whose identifier is given to finish execution.
+
+Example:
+
+```pascal
+var tid: integer;
+begin
+  tid := spawn WorkerProc;
+  join tid;
+end.
+```
 
 ### **Example Code**
 

@@ -1622,6 +1622,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             addBreakJump(chunk, line);
             break;
         }
+        case AST_THREAD_SPAWN: {
+            compileRValue(node, chunk, line);
+            writeBytecodeChunk(chunk, OP_POP, line);
+            break;
+        }
+        case AST_THREAD_JOIN: {
+            if (node->left) {
+                compileRValue(node->left, chunk, getLine(node->left));
+            }
+            writeBytecodeChunk(chunk, OP_THREAD_JOIN, line);
+            break;
+        }
         case AST_WRITELN: {
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {
@@ -2358,6 +2370,27 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_NIL: {
             int constIndex = addNilConstant(chunk);
             emitConstant(chunk, constIndex, line);
+            break;
+        }
+        case AST_THREAD_SPAWN: {
+            AST *call = node->left;
+            if (!call || call->type != AST_PROCEDURE_CALL) {
+                fprintf(stderr, "L%d: Compiler error: spawn expects procedure call.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+            const char *calleeName = call->token->value;
+            Symbol *proc_symbol = lookupProcedure(calleeName);
+            if (!proc_symbol || !proc_symbol->is_defined) {
+                fprintf(stderr, "L%d: Compiler error: Undefined procedure '%s' in spawn.\n", line, calleeName);
+                compiler_had_error = true;
+                break;
+            }
+            if (call->child_count > 0) {
+                fprintf(stderr, "L%d: Compiler warning: Arguments to '%s' ignored in spawn.\n", line, calleeName);
+            }
+            writeBytecodeChunk(chunk, OP_THREAD_CREATE, line);
+            emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
             break;
         }
         case AST_DEREFERENCE: {

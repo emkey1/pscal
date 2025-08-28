@@ -170,6 +170,9 @@ static AST* optimizeNode(AST* node) {
             }
             break;
         }
+        case AST_THREAD_SPAWN:
+        case AST_THREAD_JOIN:
+            break;
         default: break;
     }
     return node;

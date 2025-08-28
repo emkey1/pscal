@@ -18,7 +18,7 @@ static Keyword keywords[] = {
     {"in", TOKEN_IN}, // Added IN
     {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},
-    {"interface", TOKEN_INTERFACE}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
+    {"interface", TOKEN_INTERFACE}, {"join", TOKEN_JOIN}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
     {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
     {"out", TOKEN_OUT}, // Added OUT
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
@@ -27,6 +27,7 @@ static Keyword keywords[] = {
     {"set", TOKEN_SET}, // <--- ADD THIS LINE (alphabetical position)
     {"shl", TOKEN_SHL}, // Added SHL
     {"shr", TOKEN_SHR}, // Added SHR
+    {"spawn", TOKEN_SPAWN},
     {"then", TOKEN_THEN},
     {"to", TOKEN_TO}, {"true", TOKEN_TRUE}, {"type", TOKEN_TYPE},
     {"unit", TOKEN_UNIT}, {"until", TOKEN_UNTIL}, {"uses", TOKEN_USES},
