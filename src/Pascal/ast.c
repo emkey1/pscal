@@ -63,6 +63,18 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     return node;
 }
 
+AST *newThreadSpawn(AST *call) {
+    AST *node = newASTNode(AST_THREAD_SPAWN, NULL);
+    setLeft(node, call);
+    return node;
+}
+
+AST *newThreadJoin(AST *expr) {
+    AST *node = newASTNode(AST_THREAD_JOIN, NULL);
+    setLeft(node, expr);
+    return node;
+}
+
 #ifdef DEBUG
 #define MAX_DEBUG_DEPTH 50
 void debugAST(AST *node, int indent) {

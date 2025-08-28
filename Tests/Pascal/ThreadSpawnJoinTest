@@ -1,0 +1,15 @@
+program ThreadSpawnJoinTest;
+
+procedure Worker;
+begin
+  writeln('worker running');
+end;
+
+var
+  tid: integer;
+begin
+  writeln('before spawn');
+  tid := spawn Worker;
+  join tid;
+  writeln('after join');
+end.

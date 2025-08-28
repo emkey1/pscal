@@ -1,0 +1,22 @@
+program ThreadingDemo;
+
+procedure Worker1;
+begin
+  writeln('worker 1');
+end;
+
+procedure Worker2;
+begin
+  writeln('worker 2');
+end;
+
+var
+  t1, t2: integer;
+begin
+  writeln('spawning threads');
+  t1 := spawn Worker1;
+  t2 := spawn Worker2;
+  join t1;
+  join t2;
+  writeln('all threads joined');
+end.
