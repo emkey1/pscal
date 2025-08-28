@@ -4,7 +4,7 @@ program DisplayWeather;
 uses CRT, SysUtils; // Assuming CRT for file ops, SysUtils for ParamStr etc.
 
 const
-  API_KEY_FILENAME = 'openweathermap.key';       // Filename for key
+  API_KEY_FILENAME = '/usr/local/pscal/lib/openweathermap.key';       // Filename for key
   MAX_SUBSTR_LEN = 1024;                         // Max length for copy/pos substrings
 
 type
