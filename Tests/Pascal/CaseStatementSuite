@@ -63,7 +63,8 @@ begin
     // Loop through printable characters in the first 512 code points
     for i := 0 to 511 do
     begin
-      if (i >= 32) and (i <= 126) then
+      // restrict to printable ASCII range for reproducible output
+      if (i >= Ord(' ')) and (i <= Ord('~')) then
       begin
         ch := Chr(i);
         // Determine expected result first
