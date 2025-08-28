@@ -19,6 +19,8 @@ typedef struct {
 void initParserClike(ParserClike *parser, const char *source);
 void freeParserClike(ParserClike *parser);
 ASTNodeClike* parseProgramClike(ParserClike *parser);
+ASTNodeClike* clike_spawnStatement(ParserClike *p);
+ASTNodeClike* clike_joinStatement(ParserClike *p);
 
 extern char **clike_imports;
 extern int clike_import_count;

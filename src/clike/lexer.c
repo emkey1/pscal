@@ -74,6 +74,8 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 8 && strncmp(start, "continue", 8) == 0) return makeToken(lexer, CLIKE_TOKEN_CONTINUE, start, length, column);
     if (length == 6 && strncmp(start, "return", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_RETURN, start, length, column);
     if (length == 6 && strncmp(start, "import", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_IMPORT, start, length, column);
+    if (length == 5 && strncmp(start, "spawn", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_SPAWN, start, length, column);
+    if (length == 4 && strncmp(start, "join", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_JOIN, start, length, column);
     if (length == 6 && strncmp(start, "sizeof", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_SIZEOF, start, length, column);
     return makeToken(lexer, CLIKE_TOKEN_IDENTIFIER, start, length, column);
 }
@@ -262,6 +264,8 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_CONTINUE: return "TOKEN_CONTINUE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
         case CLIKE_TOKEN_IMPORT: return "TOKEN_IMPORT";
+        case CLIKE_TOKEN_SPAWN: return "TOKEN_SPAWN";
+        case CLIKE_TOKEN_JOIN: return "TOKEN_JOIN";
         case CLIKE_TOKEN_SIZEOF: return "TOKEN_SIZEOF";
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";

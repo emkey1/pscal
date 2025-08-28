@@ -481,6 +481,31 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_UNKNOWN;
             return TYPE_UNKNOWN;
+        case TCAST_THREAD_SPAWN: {
+            if (node->left) {
+                VarType ct = analyzeExpr(node->left, scopes);
+                if (node->left->type != TCAST_CALL) {
+                    fprintf(stderr,
+                            "Type error: spawn expects function call at line %d, column %d\n",
+                            node->left->token.line, node->left->token.column);
+                    clike_error_count++;
+                } else {
+                    if (ct != TYPE_VOID && ct != TYPE_UNKNOWN) {
+                        fprintf(stderr,
+                                "Type error: spawned function must return void at line %d, column %d\n",
+                                node->left->token.line, node->left->token.column);
+                        clike_error_count++;
+                    }
+                    if (node->left->child_count > 0) {
+                        fprintf(stderr,
+                                "Type warning: arguments to spawned function ignored at line %d, column %d\n",
+                                node->left->token.line, node->left->token.column);
+                    }
+                }
+            }
+            node->var_type = TYPE_INT32;
+            return TYPE_INT32;
+        }
         default:
             return TYPE_UNKNOWN;
     }
@@ -593,6 +618,18 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
         case TCAST_EXPR_STMT:
             if (node->left) analyzeExpr(node->left, scopes);
             break;
+        case TCAST_THREAD_JOIN: {
+            if (node->left) {
+                VarType t = analyzeExpr(node->left, scopes);
+                if (!is_intlike_type(t)) {
+                    fprintf(stderr,
+                            "Type error: join expects integer thread id at line %d, column %d\n",
+                            node->left->token.line, node->left->token.column);
+                    clike_error_count++;
+                }
+            }
+            break;
+        }
         default:
             if (node->type == TCAST_ASSIGN) {
                 analyzeExpr(node, scopes);
