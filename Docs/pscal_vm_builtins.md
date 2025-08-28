@@ -111,9 +111,9 @@ VM. For instructions on adding your own routines, see
 | exp | (x: Real) | Real | Exponential. |
 | ln | (x: Real) | Real | Natural logarithm. |
 | log10 | (x: Real) | Real | Base-10 logarithm. |
-| power | (base: Real, exponent: Real) | Real | Raise to power. |
-| max | (a: Real, b: Real) | Real | Maximum of two values. |
-| min | (a: Real, b: Real) | Real | Minimum of two values. |
+| power | (base: Numeric, exponent: Numeric) | Integer/Real | Raise to power. |
+| max | (a: Numeric, b: Numeric) | Integer/Real | Maximum of two values. |
+| min | (a: Numeric, b: Numeric) | Integer/Real | Minimum of two values. |
 | round | (x: Real) | Integer | Round to nearest integer. |
 | floor | (x: Real) | Integer | Floor. |
 | ceil | (x: Real) | Integer | Ceiling. |
@@ -124,6 +124,8 @@ VM. For instructions on adding your own routines, see
 | tan | (x: Real) | Real | Tangent. |
 | tanh | (x: Real) | Real | Hyperbolic tangent. |
 | trunc | (x: Real) | Integer | Truncate real to integer. |
+
+Numeric builtins preserve integer types when all inputs are integral. In particular, `power`, `max`, and `min` return integers when given only integer arguments and fall back to real otherwise.
 
 ## Random
 
