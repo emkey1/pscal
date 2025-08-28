@@ -56,11 +56,11 @@ typedef struct {
 typedef struct {
     BytecodeChunk* chunk;       // Bytecode being executed
     uint8_t* ip;                // Instruction pointer for this thread
-
-    Value stack[VM_STACK_MAX];  // Operand stack for the thread
+    
+    Value* stack;               // Operand stack for the thread
     int stackSize;              // Number of active values on the stack
 
-    CallFrame frames[VM_CALL_STACK_MAX];
+    CallFrame* frames;          // Call frames for this thread
     int frameCount;             // Active call frames
 
     bool active;                // Whether this thread is runnable

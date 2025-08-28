@@ -39,19 +39,27 @@ static void saveThreadContext(VM* vm) {
     t->chunk = vm->chunk;
     t->ip = vm->ip;
     t->stackSize = (int)(vm->stackTop - vm->stack);
-    memcpy(t->stack, vm->stack, sizeof(Value) * t->stackSize);
+    if (t->stack) {
+        memcpy(t->stack, vm->stack, sizeof(Value) * t->stackSize);
+    }
     t->frameCount = vm->frameCount;
-    memcpy(t->frames, vm->frames, sizeof(CallFrame) * t->frameCount);
+    if (t->frames) {
+        memcpy(t->frames, vm->frames, sizeof(CallFrame) * t->frameCount);
+    }
 }
 
 static void loadThreadContext(VM* vm, int idx) {
     Thread* t = &vm->threads[idx];
     vm->chunk = t->chunk;
     vm->ip = t->ip;
-    memcpy(vm->stack, t->stack, sizeof(Value) * t->stackSize);
+    if (t->stack) {
+        memcpy(vm->stack, t->stack, sizeof(Value) * t->stackSize);
+    }
     vm->stackTop = vm->stack + t->stackSize;
     vm->frameCount = t->frameCount;
-    memcpy(vm->frames, t->frames, sizeof(CallFrame) * t->frameCount);
+    if (t->frames) {
+        memcpy(vm->frames, t->frames, sizeof(CallFrame) * t->frameCount);
+    }
 }
 
 static void switchThread(VM* vm) {
@@ -76,6 +84,14 @@ static int createThread(VM* vm, uint16_t entry) {
     t->stackSize = 0;
     t->frameCount = 0;
     t->active = true;
+    if (!t->stack) {
+        t->stack = malloc(sizeof(Value) * VM_STACK_MAX);
+        if (!t->stack) return -1;
+    }
+    if (!t->frames) {
+        t->frames = malloc(sizeof(CallFrame) * VM_CALL_STACK_MAX);
+        if (!t->frames) return -1;
+    }
     int id = vm->threadCount;
     vm->threadCount++;
     return id;
@@ -86,6 +102,10 @@ static void joinThread(VM* vm, int id) {
     while (vm->threads[id].active) {
         switchThread(vm);
     }
+    free(vm->threads[id].stack);
+    vm->threads[id].stack = NULL;
+    free(vm->threads[id].frames);
+    vm->threads[id].frames = NULL;
 }
 
 // Internal function shared by stack dump helpers
@@ -345,6 +365,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->currentThread = 0;
     for (int i = 0; i < VM_MAX_THREADS; i++) {
         vm->threads[i].active = false;
+        vm->threads[i].stack = NULL;
+        vm->threads[i].frames = NULL;
     }
 
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
@@ -364,6 +386,13 @@ void freeVM(VM* vm) {
     // clear the pointer to signal that the VM no longer uses it.
     if (vm->vmGlobalSymbols) {
         vm->vmGlobalSymbols = NULL;
+    }
+
+    for (int i = 0; i < VM_MAX_THREADS; i++) {
+        free(vm->threads[i].stack);
+        vm->threads[i].stack = NULL;
+        free(vm->threads[i].frames);
+        vm->threads[i].frames = NULL;
     }
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
@@ -628,6 +657,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     mainThread->stackSize = 0;
     mainThread->frameCount = 0;
     mainThread->active = true;
+    if (!mainThread->stack) {
+        mainThread->stack = malloc(sizeof(Value) * VM_STACK_MAX);
+        if (!mainThread->stack) return INTERPRET_RUNTIME_ERROR;
+    }
+    if (!mainThread->frames) {
+        mainThread->frames = malloc(sizeof(CallFrame) * VM_CALL_STACK_MAX);
+        if (!mainThread->frames) return INTERPRET_RUNTIME_ERROR;
+    }
 
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
