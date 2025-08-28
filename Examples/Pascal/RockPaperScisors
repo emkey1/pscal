@@ -34,7 +34,7 @@ begin
     ClrScr;
     writeln('Rock Paper Scissors');
     writeln('--------------------');
-    writeln('Enter R, P, or S and press enter:');
+    write('Enter R, P, or S and press enter: ');
     readln(playerChoice);
     playerChoice := UpCase(playerChoice);
 

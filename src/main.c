@@ -209,7 +209,7 @@ int main(int argc, char *argv[]) {
             // First non-option argument is the source file
             sourceFile = argv[i];
             programName = sourceFile; // Use actual filename for logs/dumps
-            pscal_params_start_index = i + 1; // Next args are for the Pscal program
+            pscal_params_start_index = i + 1; // Next args are for the front end program
             break; // Stop parsing options, rest are program args
         }
     }
@@ -269,7 +269,7 @@ int main(int argc, char *argv[]) {
     source_buffer[fsize] = '\0';
     fclose(file);
 
-    // Set up Pscal program's command-line parameters
+    // Set up front end program's command-line parameters
     if (pscal_params_start_index < argc) {
         gParamCount = argc - pscal_params_start_index;
         gParamValues = &argv[pscal_params_start_index];
