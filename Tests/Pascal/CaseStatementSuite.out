@@ -1,4 +1,4 @@
-]10;?--- Testing CASE Statements with Verification ---
+--- Testing CASE Statements with Verification ---
 
 Testing INTEGER CASE:
 START: Integer Case (i=0): PASS
