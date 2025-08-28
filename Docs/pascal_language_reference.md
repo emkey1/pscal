@@ -59,7 +59,7 @@ The language supports a variety of built-in data types:
 | `Single` | `TYPE_FLOAT` | 32-bit floating-point number. |
 | `Real`, `Double` | `TYPE_DOUBLE` | 64-bit floating-point number. |
 | `Extended` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
-| `Char` | `TYPE_CHAR` | 8-bit character. |
+| `Char` | `TYPE_CHAR` | Unicode code point. |
 | `String` | `TYPE_STRING` | Dynamic-length or fixed-length string. |
 | `Boolean` | `TYPE_BOOLEAN` | `True` or `False`. |
 | `Text`, `File` | `TYPE_FILE` | Represents a file handle. |

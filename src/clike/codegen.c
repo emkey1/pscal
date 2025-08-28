@@ -648,7 +648,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 v = makeReal(node->token.float_val);
             } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL) {
                 // Emit character literals distinctly
-                v = makeChar((char)node->token.int_val);
+                v = makeChar(node->token.int_val);
             } else {
                 // Default to 64-bit integer regardless of inferred var_type
                 v = makeInt(node->token.int_val);

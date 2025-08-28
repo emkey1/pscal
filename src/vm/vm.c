@@ -652,22 +652,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             } \
         } \
         \
-        /* Char +/- intlike */ \
-        if (!op_is_handled) { \
-            if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
-                if (a_val_popped.type == TYPE_CHAR && IS_INTLIKE(b_val_popped)) { \
-                    char result_char = (current_instruction_code == OP_ADD) ? \
-                                       (AS_CHAR(a_val_popped) + (char)as_i64(b_val_popped)) : \
-                                       (AS_CHAR(a_val_popped) - (char)as_i64(b_val_popped)); \
-                    result_val = makeChar(result_char); \
-                    op_is_handled = true; \
-                } else if (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_CHAR && current_instruction_code == OP_ADD) { \
-                    char result_char = (char)(as_i64(a_val_popped) + AS_CHAR(b_val_popped)); \
-                    result_val = makeChar(result_char); \
-                    op_is_handled = true; \
-                } \
-            } \
-        } \
+        /* Char +/- intlike handled as numeric ordinal operations */ \
 \
         /* Enum +/- intlike */ \
         if (!op_is_handled) { \
@@ -1204,7 +1189,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     comparison_succeeded = true;
                 } else if ((IS_CHAR(a_val) && IS_INTEGER(b_val)) || (IS_INTEGER(a_val) && IS_CHAR(b_val))) {
-                    char char_val = IS_CHAR(a_val) ? AS_CHAR(a_val) : AS_CHAR(b_val);
+                    int char_val = IS_CHAR(a_val) ? AS_CHAR(a_val) : AS_CHAR(b_val);
                     long long int_val = IS_INTEGER(a_val) ? AS_INTEGER(a_val) : AS_INTEGER(b_val);
 
                     switch (instruction_val) {
@@ -1222,8 +1207,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // Char comparison
                 else if (IS_CHAR(a_val) && IS_CHAR(b_val)) {
-                    char ca = AS_CHAR(a_val);
-                    char cb = AS_CHAR(b_val);
+                    int ca = AS_CHAR(a_val);
+                    int cb = AS_CHAR(b_val);
                     switch (instruction_val) {
                         case OP_EQUAL:         result_val = makeBoolean(ca == cb); break;
                         case OP_NOT_EQUAL:     result_val = makeBoolean(ca != cb); break;
@@ -1720,19 +1705,18 @@ comparison_error_label:
                         } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
                             size_t len = strlen(value_to_set.s_val);
                             if (len == 1) {
-                                target_lvalue_ptr->c_val = value_to_set.s_val[0];
+                                target_lvalue_ptr->c_val = (unsigned char)value_to_set.s_val[0];
                             } else if (len == 0) {
                                 target_lvalue_ptr->c_val = '\0';
                             } else {
                                 runtimeError(vm, "Type mismatch: Cannot assign multi-character string to CHAR.");
                             }
                         } else if (value_to_set.type == TYPE_INTEGER) {
-                            target_lvalue_ptr->c_val = (char)value_to_set.i_val;
+                            target_lvalue_ptr->c_val = (int)value_to_set.i_val;
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign %s to CHAR.", varTypeToString(value_to_set.type));
                         }
-                        unsigned char uc = (unsigned char)target_lvalue_ptr->c_val;
-                        SET_INT_VALUE(target_lvalue_ptr, uc);
+                        SET_INT_VALUE(target_lvalue_ptr, target_lvalue_ptr->c_val);
                     }
                     else {
                         freeValue(target_lvalue_ptr);

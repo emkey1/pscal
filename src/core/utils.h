@@ -26,6 +26,7 @@
 
 #include "types.h"
 
+#define UNICODE_MAX 0x10FFFF
 // Bytecode related stuff
 // Make sure Value and VarType are defined before these.
 #define IS_BOOLEAN(value) ((value).type == TYPE_BOOLEAN)
@@ -108,7 +109,7 @@ static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
         case TYPE_BOOLEAN:
             return v->i_val;
         case TYPE_CHAR:
-            return (unsigned char)v->c_val;
+            return v->c_val;
         default:
             runtimeError(vm, "Argument error: %s delta must be an ordinal, got %s.",
                          who, varTypeToString(v->type));
@@ -190,7 +191,7 @@ Value makeNil(void);
 // Used by the 'new' builtin.
 Value makePointer(void* address, AST* base_type_node); // <<< ADD THIS PROTOTYPE >>>
 Value makeString(const char *val);
-Value makeChar(char c);
+Value makeChar(int c);
 Value makeBoolean(int b);
 Value makeFile(FILE *f);
 Value makeRecord(FieldValue *rec);

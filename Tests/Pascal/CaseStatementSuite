@@ -59,35 +59,36 @@ begin
   writeln;
 
   // --- Test CASE with Char ---
-  writeln('Testing CHAR CASE:');
-  // Loop through relevant characters including test cases and edge cases
-  for ch := 'X' to ']' do // Covers 'X', 'Y', 'Z', '[', '\', ']'
-  begin
-     // Determine expected result first
-    case ch of
-      'A': expectedString := 'Letter A';       // Not hit in this loop
-      'B'..'D': expectedString := 'Letter B, C, or D'; // Not hit
-      'Y', 'Z': expectedString := 'Letter Y or Z';
-      '[': expectedString := 'Opening Bracket';
-    else
-      expectedString := 'Other Character'; // Includes 'X', '\', ']'
-    end;
+    writeln('Testing CHAR CASE:');
+    // Loop through the first 512 characters to keep runtime reasonable
+    for i := 0 to 511 do
+    begin
+      ch := Chr(i);
+      // Determine expected result first
+      case ch of
+        'A': expectedString := 'Letter A';
+        'B'..'D': expectedString := 'Letter B, C, or D';
+        'Y', 'Z': expectedString := 'Letter Y or Z';
+        '[': expectedString := 'Opening Bracket';
+      else
+        expectedString := 'Other Character';
+      end;
 
-    // Execute the case and capture result
-    case ch of
-      'A': resultString := 'Letter A';
-      'B'..'D': resultString := 'Letter B, C, or D';
-      'Y', 'Z': resultString := 'Letter Y or Z';
-      '[': resultString := 'Opening Bracket';
-    else
-      resultString := 'Other Character';
-    end; // end case ch
+      // Execute the case and capture result
+      case ch of
+        'A': resultString := 'Letter A';
+        'B'..'D': resultString := 'Letter B, C, or D';
+        'Y', 'Z': resultString := 'Letter Y or Z';
+        '[': resultString := 'Opening Bracket';
+      else
+        resultString := 'Other Character';
+      end; // end case ch
 
-    // Verify
-    testDesc := 'Char Case (ch=''' + ch + ''')';
-    VerifyString(resultString, expectedString, testDesc);
-  end; // end for ch
-  writeln;
+      // Verify
+      testDesc := 'Char Case (ch=''' + ch + ''')';
+      VerifyString(resultString, expectedString, testDesc);
+    end; // end for i
+    writeln;
 
   // --- Test CASE with Enum (TColor) ---
   writeln('Testing ENUM CASE (TColor):');
