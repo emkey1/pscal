@@ -707,12 +707,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
                 bool a_real = IS_REAL(a_val_popped); \
                 bool b_real = IS_REAL(b_val_popped); \
-                if (a_real != b_real) { \
-                    runtimeError(vm, "Runtime Error: Mixing real and integer operands is not allowed."); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-                } \
-                if (a_real) { \
+                if (a_real || b_real) { \
                     long double fa = as_ld(a_val_popped); \
                     long double fb = as_ld(b_val_popped); \
                     if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
@@ -753,6 +748,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             break; \
                         case OP_DIVIDE: \
                             result_val = makeReal((long double)ia / (long double)ib); \
+                            break; \
+                        case OP_MOD: \
+                            iresult = ib == 0 ? 0 : ia % ib; \
                             break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \

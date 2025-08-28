@@ -592,7 +592,8 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_STRING:
-            if (node->token && strlen(node->token->value) == 1) return makeChar(node->token->value[0]);
+            if (node->token && strlen(node->token->value) == 1)
+                return makeChar((unsigned char)node->token->value[0]);
             if (node->token) return makeString(node->token->value);
             break;
         case AST_BOOLEAN:
@@ -2337,7 +2338,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             // If the string literal has a length of 1, treat it as a character constant
             if (strlen(node_token->value) == 1) {
-                Value val = makeChar(node_token->value[0]);
+                /* Single-character string literals represent CHAR constants.
+                 * Cast through unsigned char so values in the 128..255 range
+                 * are preserved correctly. */
+                Value val = makeChar((unsigned char)node_token->value[0]);
                 int constIndex = addConstantToChunk(chunk, &val);
                 emitConstant(chunk, constIndex, line);
                 // The temporary char value `val` does not need `freeValue`
