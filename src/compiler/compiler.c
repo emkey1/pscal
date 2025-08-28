@@ -640,7 +640,7 @@ Value evaluateCompileTimeValue(AST* node) {
                 } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
                     Value arg = evaluateCompileTimeValue(node->children[0]);
                     if (arg.type == TYPE_INTEGER) {
-                        Value result = makeChar((char)arg.i_val);
+                        Value result = makeChar(arg.i_val);
                         freeValue(&arg);
                         return result;
                     }
@@ -649,7 +649,7 @@ Value evaluateCompileTimeValue(AST* node) {
                     Value arg = evaluateCompileTimeValue(node->children[0]);
                     Value result = makeVoid();
                     if (arg.type == TYPE_CHAR) {
-                        result = makeInt((unsigned char)arg.c_val);
+                        result = makeInt(arg.c_val);
                     } else if (arg.type == TYPE_BOOLEAN) {
                         result = makeInt(arg.i_val ? 1 : 0);
                     } else if (arg.type == TYPE_ENUM) {

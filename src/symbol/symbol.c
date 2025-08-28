@@ -813,10 +813,7 @@ void updateSymbol(const char *name, Value val) {
             if (val.type == TYPE_CHAR) sym->value->c_val = val.c_val;
             else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) sym->value->c_val = val.s_val[0];
             else if (val.type == TYPE_INTEGER) {
-                if (val.i_val < 0 || val.i_val > 255) {
-                    fprintf(stderr, "Runtime warning: Assignment to CHAR variable '%s' out of ASCII range (0-255). Value %lld will be truncated.\n", name, val.i_val);
-                }
-                sym->value->c_val = (char)(val.i_val & 0xFF);
+                sym->value->c_val = (int)val.i_val;
             }
             break;
 

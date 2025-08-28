@@ -315,7 +315,12 @@ Value vmBuiltinChr(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Chr expects 1 integer argument.");
         return makeChar('\0');
     }
-    return makeChar((char)AS_INTEGER(args[0]));
+    long long code = AS_INTEGER(args[0]);
+    if (code < 0 || code > UNICODE_MAX) {
+        runtimeError(vm, "Chr argument out of range.");
+        return makeChar('\0');
+    }
+    return makeChar((int)code);
 }
 
 Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
@@ -329,6 +334,10 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
     }
     switch(arg.type) {
         case TYPE_CHAR:
+            if (arg.c_val >= UNICODE_MAX) {
+                runtimeError(vm, "Succ char overflow.");
+                return makeVoid();
+            }
             return makeChar(arg.c_val + 1);
         case TYPE_BOOLEAN:
             return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
@@ -357,16 +366,16 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
     }
 
     Value arg = args[0];
-    char c;
+    int c;
     if (arg.type == TYPE_CHAR) {
         c = arg.c_val;
     } else if (IS_INTLIKE(arg)) {
-        c = (char)AS_INTEGER(arg);
+        c = (int)AS_INTEGER(arg);
     } else {
         runtimeError(vm, "Upcase expects 1 char argument.");
         return makeChar('\0');
     }
-    return makeChar((char)toupper((unsigned char)c));
+    return makeChar(toupper((unsigned char)c));
 }
 
 Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
@@ -930,21 +939,23 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     }
     vmEnableRawMode();
 
-    char c;
-    if (read(STDIN_FILENO, &c, 1) != 1) {
-        c = '\0';
+    unsigned char ch_byte;
+    if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+        ch_byte = '\0';
     }
+    int c = ch_byte;
 
     if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
             runtimeError(vm, "ReadKey argument must be a VAR char.");
         } else {
             Value* dst = (Value*)args[0].ptr_val;
-            if (dst->type == TYPE_CHAR) {
-                dst->c_val = c;
-            } else {
-                runtimeError(vm, "ReadKey argument must be of type CHAR.");
-            }
+                if (dst->type == TYPE_CHAR) {
+                    dst->c_val = c;
+                    SET_INT_VALUE(dst, dst->c_val);
+                } else {
+                    runtimeError(vm, "ReadKey argument must be of type CHAR.");
+                }
         }
     }
 
@@ -1514,7 +1525,7 @@ static inline long long coerceDeltaToI64(const Value* v) {
         case TYPE_BOOLEAN:
             return v->i_val;
         case TYPE_CHAR:
-            return (unsigned char)v->c_val;
+            return v->c_val;
         default:
             return 0;
     }
@@ -1523,7 +1534,7 @@ static inline long long coerceDeltaToI64(const Value* v) {
 Value vmBuiltinOrd(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "ord expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
-    if (arg.type == TYPE_CHAR) return makeInt((unsigned char)arg.c_val);
+    if (arg.type == TYPE_CHAR) return makeInt(arg.c_val);
     if (arg.type == TYPE_BOOLEAN) return makeInt(arg.i_val);
     if (arg.type == TYPE_ENUM) return makeInt(arg.enum_val.ordinal);
     if (IS_INTLIKE(arg)) return makeInt(AS_INTEGER(arg));
@@ -1575,9 +1586,15 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
             break;
         }
 
-        case TYPE_CHAR:
-            target->c_val = (char)((unsigned char)target->c_val + (unsigned long long)delta);
+        case TYPE_CHAR: {
+            long long next = target->c_val + delta;
+            if (next < 0 || next > UNICODE_MAX) {
+                runtimeError(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
+            }
+            target->c_val = (int)next;
+            SET_INT_VALUE(target, target->c_val);
             break;
+        }
 
         case TYPE_ENUM:
             target->enum_val.ordinal += (int)delta;
@@ -1635,9 +1652,15 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
             break;
         }
 
-        case TYPE_CHAR:
-            target->c_val = (char)((unsigned char)target->c_val - (unsigned long long)delta);
+        case TYPE_CHAR: {
+            long long next = target->c_val - delta;
+            if (next < 0 || next > UNICODE_MAX) {
+                runtimeError(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
+            }
+            target->c_val = (int)next;
+            SET_INT_VALUE(target, target->c_val);
             break;
+        }
 
         case TYPE_ENUM:
             target->enum_val.ordinal -= (int)delta;
@@ -1746,7 +1769,7 @@ Value vmBuiltinHigh(VM* vm, int arg_count, Value* args) {
 
     switch (t) {
         case TYPE_INTEGER: return makeInt(2147483647);
-        case TYPE_CHAR:    return makeChar((unsigned char)255);
+        case TYPE_CHAR:    return makeChar(UNICODE_MAX);
         case TYPE_BOOLEAN: return makeBoolean(true);
         case TYPE_BYTE:    return makeInt(255);
         case TYPE_WORD:    return makeInt(65535);
@@ -2113,7 +2136,8 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
         if (dst->type == TYPE_CHAR) {
             int ch = fgetc(input_stream);
             if (ch == EOF) { last_io_error = feof(input_stream) ? 0 : 1; break; }
-            dst->c_val = (char)ch;
+            dst->c_val = ch;
+            SET_INT_VALUE(dst, dst->c_val);
             continue;
         }
 
@@ -2299,9 +2323,8 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
             }
             case TYPE_CHAR: {
                 if (*p) {
-                    dst->c_val = *p++;
-                    unsigned char uc = (unsigned char)dst->c_val;
-                    SET_INT_VALUE(dst, uc);
+                dst->c_val = (unsigned char)*p++;
+                SET_INT_VALUE(dst, dst->c_val);
                 } else {
                     dst->c_val = '\0';
                     SET_INT_VALUE(dst, 0);

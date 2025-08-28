@@ -48,7 +48,7 @@ The language supports a variety of built-in data types:
 | `float` | `TYPE_FLOAT` | 32-bit floating-point number. |
 | `double` | `TYPE_DOUBLE` | 64-bit floating-point number. |
 | `long double` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
-| `char` | `TYPE_CHAR` | 8-bit character. |
+| `char` | `TYPE_CHAR` | Unicode code point. |
 | `byte` | `TYPE_BYTE` | 8-bit unsigned integer. |
 | `str` | `TYPE_STRING` | Dynamic-length string. |
 | `text` | `TYPE_FILE` | File handle for text I/O. |
