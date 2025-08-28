@@ -97,15 +97,27 @@ static int createThread(VM* vm, uint16_t entry) {
     return id;
 }
 
-static void joinThread(VM* vm, int id) {
-    if (id < 0 || id >= vm->threadCount) return;
-    while (vm->threads[id].active) {
-        switchThread(vm);
+// Join the thread with the given id. If the thread is still
+// running, yield to the scheduler and re-execute the join
+// instruction later by rewinding the instruction pointer. The
+// function returns true when the target thread has finished and
+// its resources have been freed.
+static bool joinThread(VM* vm, int id) {
+    if (id < 0 || id >= vm->threadCount) return true;
+
+    // If the thread is still active, rewind the instruction pointer so
+    // OP_THREAD_JOIN will be executed again when this thread is rescheduled.
+    if (vm->threads[id].active) {
+        if (vm->ip > vm->chunk->code) vm->ip--; // Join has no operands.
+        return false; // Yield via scheduler after this instruction
     }
+
+    // Thread has finished; clean up its allocated stack and frame storage.
     free(vm->threads[id].stack);
     vm->threads[id].stack = NULL;
     free(vm->threads[id].frames);
     vm->threads[id].frames = NULL;
+    return true;
 }
 
 // Internal function shared by stack dump helpers
@@ -319,8 +331,6 @@ static Value pop(VM* vm) {
 
     return result; // Return the copy, which the caller is now responsible for.
 }
-
-/*
 static Value peek(VM* vm, int distance) { // Using your original name 'peek'
     if (vm->stackTop - vm->stack < distance + 1) {
         runtimeError(vm, "VM Error: Stack underflow (peek too deep).");
@@ -328,7 +338,6 @@ static Value peek(VM* vm, int distance) { // Using your original name 'peek'
     }
     return vm->stackTop[-(distance + 1)];
 }
- */
 
 // --- Host Function C Implementations ---
 static Value vmHostQuitRequested(VM* vm) {
@@ -2633,15 +2642,19 @@ comparison_error_label:
                 break;
             }
             case OP_THREAD_JOIN: {
-                Value tidVal = pop(vm);
+                Value tidVal = peek(vm, 0);
                 if (!IS_INTLIKE(tidVal)) {
                     runtimeError(vm, "Thread id must be integer.");
-                    freeValue(&tidVal);
+                    Value popped_tid = pop(vm);
+                    freeValue(&popped_tid);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 int tid = (int)tidVal.i_val;
-                freeValue(&tidVal);
-                joinThread(vm, tid);
+                if (!joinThread(vm, tid)) {
+                    break; // Yield; retry join after other threads run
+                }
+                Value popped_tid = pop(vm);
+                freeValue(&popped_tid);
                 break;
             }
             case OP_FORMAT_VALUE: {
