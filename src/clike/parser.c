@@ -129,6 +129,8 @@ static ASTNodeClike* breakStatement(ParserClike *p);
 static ASTNodeClike* continueStatement(ParserClike *p);
 static ASTNodeClike* returnStatement(ParserClike *p);
 static ASTNodeClike* switchStatement(ParserClike *p);
+ASTNodeClike* clike_spawnStatement(ParserClike *p);
+ASTNodeClike* clike_joinStatement(ParserClike *p);
 
 char **clike_imports = NULL;
 int clike_import_count = 0;
@@ -734,6 +736,7 @@ static ASTNodeClike* statement(ParserClike *p) {
         case CLIKE_TOKEN_BREAK: return breakStatement(p);
         case CLIKE_TOKEN_CONTINUE: return continueStatement(p);
         case CLIKE_TOKEN_RETURN: return returnStatement(p);
+        case CLIKE_TOKEN_JOIN: return clike_joinStatement(p);
         case CLIKE_TOKEN_LBRACE: return compoundStmt(p);
         default: return expressionStatement(p);
     }
@@ -914,6 +917,28 @@ static ASTNodeClike* returnStatement(ParserClike *p) {
     expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
     ASTNodeClike *node = newASTNodeClike(TCAST_RETURN, p->current);
     setLeftClike(node, expr);
+    return node;
+}
+
+ASTNodeClike* clike_joinStatement(ParserClike *p) {
+    ClikeToken tok = p->current;
+    expectToken(p, CLIKE_TOKEN_JOIN, "join");
+    ASTNodeClike *expr = expression(p);
+    expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
+    ASTNodeClike *node = newThreadJoinClike(expr);
+    node->token = tok;
+    return node;
+}
+
+ASTNodeClike* clike_spawnStatement(ParserClike *p) {
+    ClikeToken tok = p->current;
+    expectToken(p, CLIKE_TOKEN_SPAWN, "spawn");
+    ClikeToken ident = p->current;
+    expectToken(p, CLIKE_TOKEN_IDENTIFIER, "identifier");
+    ASTNodeClike *callNode = call(p, ident);
+    ASTNodeClike *node = newThreadSpawnClike(callNode);
+    node->token = tok;
+    node->var_type = TYPE_INT32;
     return node;
 }
 
@@ -1168,6 +1193,9 @@ static ASTNodeClike* unary(ParserClike *p) {
 }
 
 static ASTNodeClike* factor(ParserClike *p) {
+    if (p->current.type == CLIKE_TOKEN_SPAWN) {
+        return clike_spawnStatement(p);
+    }
     if (matchToken(p, CLIKE_TOKEN_LPAREN)) {
         if (isTypeToken(p->current.type)) {
             ClikeToken type_tok = parseTypeToken(p);

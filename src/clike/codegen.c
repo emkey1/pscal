@@ -263,6 +263,10 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             if (node->left) compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, OP_RETURN, node->token.line);
             break;
+        case TCAST_THREAD_JOIN:
+            if (node->left) compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_THREAD_JOIN, node->token.line);
+            break;
         case TCAST_EXPR_STMT:
             if (node->left) {
                 compileExpression(node->left, chunk, ctx);
@@ -861,6 +865,19 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             }
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
             break;
+        case TCAST_THREAD_SPAWN: {
+            ASTNodeClike *call = node->left;
+            if (call && call->type == TCAST_CALL) {
+                char *name = tokenToCString(call->token);
+                Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                if (sym) {
+                    writeBytecodeChunk(chunk, OP_THREAD_CREATE, call->token.line);
+                    emitShort(chunk, (uint16_t)sym->bytecode_address, call->token.line);
+                }
+                free(name);
+            }
+            break;
+        }
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
             if (strcasecmp(name, "printf") == 0) {
