@@ -20,6 +20,8 @@ static ASTNodeClike* foldBinary(ASTNodeClike* node) {
     double lv, rv; int lf, rf;
     if (!isConst(node->left, &lv, &lf) || !isConst(node->right, &rv, &rf))
         return node;
+    if ((lf && !rf) || (!lf && rf))
+        return node; /* Do not fold mixed int/float to avoid implicit conversion */
     int result_is_float = lf || rf;
     double res = 0;
     switch (node->token.type) {

@@ -275,7 +275,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_BINOP: {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
-            if (is_real_type(lt) || is_real_type(rt)) {
+            if ((is_real_type(lt) && is_intlike_type(rt)) ||
+                (is_real_type(rt) && is_intlike_type(lt))) {
+                fprintf(stderr,
+                        "Type error: cannot mix real and integer in expression at line %d, column %d\n",
+                        node->token.line, node->token.column);
+                clike_error_count++;
+                node->var_type = TYPE_UNKNOWN;
+            } else if (is_real_type(lt) && is_real_type(rt)) {
                 if (lt == TYPE_LONG_DOUBLE || rt == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                 else if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                 else node->var_type = TYPE_FLOAT;
@@ -293,7 +300,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             VarType ft = analyzeExpr(node->third, scopes);
-            if (is_real_type(rt) || is_real_type(ft)) {
+            if ((is_real_type(rt) && is_intlike_type(ft)) ||
+                (is_real_type(ft) && is_intlike_type(rt))) {
+                fprintf(stderr,
+                        "Type error: cannot mix real and integer in expression at line %d, column %d\n",
+                        node->token.line, node->token.column);
+                clike_error_count++;
+                node->var_type = TYPE_UNKNOWN;
+            } else if (is_real_type(rt) && is_real_type(ft)) {
                 if (rt == TYPE_LONG_DOUBLE || ft == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                 else if (rt == TYPE_DOUBLE || ft == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                 else node->var_type = TYPE_FLOAT;
@@ -348,16 +362,15 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
             if (lt != rt &&
-                !(is_real_type(lt) && is_intlike_type(rt)) &&
                 !(is_real_type(lt) && is_real_type(rt)) &&
                 !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
                 !(is_intlike_type(lt) && is_intlike_type(rt))) {
-                    fprintf(stderr,
-                            "Type error: cannot assign %s to %s at line %d, column %d\n",
-                            varTypeToString(rt), varTypeToString(lt),
-                            node->token.line, node->token.column);
-                    clike_error_count++;
-                }
+                fprintf(stderr,
+                        "Type error: cannot assign %s to %s at line %d, column %d\n",
+                        varTypeToString(rt), varTypeToString(lt),
+                        node->token.line, node->token.column);
+                clike_error_count++;
+            }
             }
             node->var_type = lt;
             return lt;
@@ -494,7 +507,6 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                 }
                 if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
                     if (declType != initType &&
-                        !(is_real_type(declType) && is_intlike_type(initType)) &&
                         !(is_real_type(declType) && is_real_type(initType)) &&
                         !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
                         !(is_intlike_type(declType) && is_intlike_type(initType))) {

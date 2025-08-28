@@ -675,9 +675,9 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (is_real_type(left_val.type) || is_real_type(right_val.type)) {
-                    double a = is_real_type(left_val.type) ? (double)AS_REAL(left_val) : (double)left_val.i_val;
-                    double b = is_real_type(right_val.type) ? (double)AS_REAL(right_val) : (double)right_val.i_val;
+                if (is_real_type(left_val.type) && is_real_type(right_val.type)) {
+                    double a = (double)AS_REAL(left_val);
+                    double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
                         case TOKEN_PLUS:
                             result = makeReal(a + b);
@@ -695,7 +695,7 @@ Value evaluateCompileTimeValue(AST* node) {
                                 result = makeReal(a / b);
                             }
                             break;
-                        case TOKEN_MOD:
+        case TOKEN_MOD:
                             if (b == 0.0) {
                                 fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
                             } else {
@@ -705,6 +705,8 @@ Value evaluateCompileTimeValue(AST* node) {
                         default:
                             break;
                     }
+                } else if (is_real_type(left_val.type) || is_real_type(right_val.type)) {
+                    fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
                 } else { // Both operands are integers
                     long long a = left_val.i_val;
                     long long b = right_val.i_val;

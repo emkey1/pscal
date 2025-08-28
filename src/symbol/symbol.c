@@ -664,8 +664,7 @@ void updateSymbol(const char *name, Value val) {
         types_compatible = true; // Exact type match
     } else {
         // Handle specific allowed coercions and promotions.
-        if (is_real_type(sym->type) && is_intlike_type(val.type)) types_compatible = true;
-        else if (is_real_type(sym->type) && is_real_type(val.type)) types_compatible = true;
+        if (is_real_type(sym->type) && is_real_type(val.type)) types_compatible = true;
         else if (sym->type == TYPE_INTEGER && is_real_type(val.type)) { types_compatible = false; } // No implicit Real to Integer
         else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
         else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
@@ -727,30 +726,18 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_REAL:
             if (is_real_type(val.type)) {
                 SET_REAL_VALUE(sym->value, AS_REAL(val));
-            } else if (val.type == TYPE_INTEGER) {
-                SET_REAL_VALUE(sym->value, val.i_val);
-            } else if (val.type == TYPE_CHAR) {
-                SET_REAL_VALUE(sym->value, val.c_val);
             }
             break;
 
         case TYPE_FLOAT:
             if (is_real_type(val.type)) {
                 SET_REAL_VALUE(sym->value, AS_REAL(val));
-            } else if (val.type == TYPE_INTEGER) {
-                SET_REAL_VALUE(sym->value, val.i_val);
-            } else if (val.type == TYPE_CHAR) {
-                SET_REAL_VALUE(sym->value, val.c_val);
             }
             break;
 
         case TYPE_LONG_DOUBLE:
             if (is_real_type(val.type)) {
                 SET_REAL_VALUE(sym->value, AS_REAL(val));
-            } else if (val.type == TYPE_INTEGER) {
-                SET_REAL_VALUE(sym->value, val.i_val);
-            } else if (val.type == TYPE_CHAR) {
-                SET_REAL_VALUE(sym->value, val.c_val);
             }
             break;
 
