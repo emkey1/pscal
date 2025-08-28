@@ -96,7 +96,11 @@ typedef enum {
                       // Operands: 2-byte name_idx, 2-byte address, 1-byte arg count
     OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
     OP_EXIT,          // Early exit from the current function without halting the VM
-    OP_FORMAT_VALUE   // Format the value on top of the stack. Operands: width (byte), precision (byte)
+    OP_FORMAT_VALUE,  // Format the value on top of the stack. Operands: width (byte), precision (byte)
+
+    // --- Threading Opcodes ---
+    OP_THREAD_CREATE, // Create a new lightweight thread. Operand: 2-byte entry offset
+    OP_THREAD_JOIN    // Join on a thread. Operand: none (pops thread id from stack)
 
 } OpCode;
 

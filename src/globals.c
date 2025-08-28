@@ -3,6 +3,7 @@
 
 // Include the globals header file, which declares the global variables.
 #include "globals.h" // This now includes symbol.h and defines HashTable
+#include <pthread.h>
 
 
 // --- Global Variable Definitions and Initialization ---
@@ -67,3 +68,6 @@ Symbol *current_function_symbol = NULL; // Define the global variable here.
 
 // Note: Other global SDL/Audio variables declared in globals.h are typically
 // defined and initialized in their respective .c files (sdl.c, audio.c).
+
+// Mutex definition guarding shared global tables
+pthread_mutex_t globals_mutex = PTHREAD_MUTEX_INITIALIZER;

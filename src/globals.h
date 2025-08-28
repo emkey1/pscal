@@ -4,6 +4,7 @@
 
 #include <stdio.h>  // For fprintf, stderr
 #include <stdlib.h> // For exit, EXIT_FAILURE
+#include <pthread.h> // For mutex guarding of global tables
 
 #include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
 #ifdef SDL
@@ -74,6 +75,9 @@ extern List *inserted_global_names;
 
 extern int break_requested;
 extern int exit_requested; // Flag set by builtin 'exit' to unwind the current routine
+
+// Mutex protecting shared global tables
+extern pthread_mutex_t globals_mutex;
 
 #define DEFAULT_STRING_CAPACITY 255
 
