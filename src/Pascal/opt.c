@@ -33,6 +33,8 @@ static AST* foldBinary(AST* node) {
     double lv, rv; int lf, rf;
     if (!isConst(node->left, &lv, &lf) || !isConst(node->right, &rv, &rf))
         return node;
+    if ((lf && !rf) || (!lf && rf))
+        return node; // Avoid folding mixed int/real expressions
     double res = 0;
     int result_is_float = lf || rf;
     int result_is_bool = 0;

@@ -720,7 +720,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         /* Numeric arithmetic (INTEGER/BYTE/WORD/REAL) */ \
         if (!op_is_handled) { \
             if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
-                if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
+                bool a_real = IS_REAL(a_val_popped); \
+                bool b_real = IS_REAL(b_val_popped); \
+                if (a_real != b_real) { \
+                    runtimeError(vm, "Runtime Error: Mixing real and integer operands is not allowed."); \
+                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                    return INTERPRET_RUNTIME_ERROR; \
+                } \
+                if (a_real) { \
                     long double fa = as_ld(a_val_popped); \
                     long double fb = as_ld(b_val_popped); \
                     if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
@@ -1127,7 +1134,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // Numeric comparison (Integers and Reals)
                 else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
-                    if (is_real_type(a_val.type) || is_real_type(b_val.type)) {
+                    bool a_real = is_real_type(a_val.type);
+                    bool b_real = is_real_type(b_val.type);
+                    if (a_real != b_real) {
+                        runtimeError(vm, "Runtime Error: Cannot compare real and integer values.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (a_real) {
                         long double fa = as_ld(a_val);
                         long double fb = as_ld(b_val);
                         switch (instruction_val) {
@@ -1676,8 +1690,10 @@ comparison_error_label:
                         SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
                     else if (is_real_type(target_lvalue_ptr->type) && is_intlike_type(value_to_set.type)) {
-                        long double tmp = (long double)value_to_set.i_val;
-                        SET_REAL_VALUE(target_lvalue_ptr, tmp);
+                        runtimeError(vm, "Type mismatch: Cannot assign integer to real.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
@@ -1927,35 +1943,7 @@ comparison_error_label:
                 }
 
                 Value value_from_stack = pop(vm);
-
-                if (sym->value->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
-                    // Preserve pointer type information when assigning NIL.
-                    sym->value->ptr_val = NULL;
-                } else if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
-                    const char* source_str = "";
-                    char char_buf[2] = {0};
-
-                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
-                        source_str = value_from_stack.s_val;
-                    } else if (value_from_stack.type == TYPE_CHAR) {
-                        char_buf[0] = value_from_stack.c_val;
-                        source_str = char_buf;
-                    }
-
-                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
-                    sym->value->s_val[sym->value->max_length] = '\0';
-
-                } else {
-                    // Deep-copy all other types.
-                    AST* preserved_base = sym->value->base_type_node;
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&value_from_stack);
-                    if (sym->value->type == TYPE_POINTER && sym->value->base_type_node == NULL) {
-                        sym->value->base_type_node = preserved_base;
-                    }
-                }
-
-                freeValue(&value_from_stack);
+                updateSymbol(name_val->s_val, value_from_stack);
 
                 break;
             }
@@ -1988,30 +1976,7 @@ comparison_error_label:
                 }
 
                 Value value_from_stack = pop(vm);
-
-                if (sym->value->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
-                    // Maintain pointer type when assigning NIL.
-                    sym->value->ptr_val = NULL;
-                } else if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
-                    const char* source_str = "";
-                    char char_buf[2] = {0};
-                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
-                        source_str = value_from_stack.s_val;
-                    } else if (value_from_stack.type == TYPE_CHAR) {
-                        char_buf[0] = value_from_stack.c_val;
-                        source_str = char_buf;
-                    }
-                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
-                    sym->value->s_val[sym->value->max_length] = '\0';
-                } else {
-                    AST* preserved_base = sym->value->base_type_node;
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&value_from_stack);
-                    if (sym->value->type == TYPE_POINTER && sym->value->base_type_node == NULL) {
-                        sym->value->base_type_node = preserved_base;
-                    }
-                }
-                freeValue(&value_from_stack);
+                updateSymbol(name_val->s_val, value_from_stack);
                 break;
             }
             case OP_GET_LOCAL: {
@@ -2047,9 +2012,18 @@ comparison_error_label:
                     target_slot->s_val[target_slot->max_length] = '\0';
 
                 } else if (is_real_type(target_slot->type)) {
-                    long double tmp = is_real_type(value_from_stack.type) ? AS_REAL(value_from_stack)
-                                        : (long double)AS_INTEGER(value_from_stack);
-                    SET_REAL_VALUE(target_slot, tmp);
+                    if (is_real_type(value_from_stack.type)) {
+                        long double tmp = AS_REAL(value_from_stack);
+                        SET_REAL_VALUE(target_slot, tmp);
+                    } else if (is_intlike_type(value_from_stack.type)) {
+                        runtimeError(vm, "Type mismatch: Cannot assign integer to real.");
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                 } else {
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.
