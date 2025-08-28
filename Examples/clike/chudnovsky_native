@@ -1,13 +1,14 @@
 #!/usr/bin/env clike
-double chudnovsky_native(long n) {
-    const double C3 = 262537412640768000.0; // 640320^3
-    double sum = 13591409.0;
-    double term = 1.0;
+// In reality, 2 iterations reaches the maximum resolution for 80 bit float
+long double chudnovsky_native(long n) {
+    const long double C3 = 262537412640768000; // 640320^3
+    long double sum = 13591409.0;
+    long double term = 1.0;
     for (long k = 1; k < n; k++) {
-        double k_d = (double)k;
-        term = term * -(6.0 * k_d - 5.0) * (2.0 * k_d - 1.0) * (6.0 * k_d - 1.0) * 24.0;
-        term = term / (k_d * k_d * k_d * C3);
-        sum = sum + term * (13591409.0 + 545140134.0 * k_d);
+        long double k_d = k * 1.0;
+        term *= (-(6.0 * k_d - 5.0) * (2.0 * k_d - 1.0) * (6.0 * k_d - 1.0) * 24.0);
+        term /= (k_d * k_d * k_d * C3);
+        sum += term * (13591409.0 + 545140134.0 * k_d);
     }
     return 426880.0 * sqrt(10005.0) / sum;
 }
@@ -16,6 +17,9 @@ int main() {
     long n;
     printf("Please enter an integer value for iterations: ");
     scanf(n);
-    printf("pi: %.17f\n", chudnovsky_native(n));
+
+    long double pi = chudnovsky_native(n);
+    printf("pi: %.23Lf\n", pi);
+
     return 0;
 }

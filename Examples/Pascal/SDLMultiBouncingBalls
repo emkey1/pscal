@@ -38,10 +38,10 @@ BEGIN
   FOR k := 1 TO NumBalls DO
   BEGIN
     Balls[k].radius := 8 + Random(13); // Radius 8 to 20
-    Balls[k].x := Balls[k].radius + Random(WindowWidth - 2 * Balls[k].radius);
-    Balls[k].y := Balls[k].radius + Random(WindowHeight - 2 * Balls[k].radius);
+    Balls[k].x := Balls[k].radius + Random(WindowWidth - 2 * Balls[k].radius) * 1.0;
+    Balls[k].y := Balls[k].radius + Random(WindowHeight - 2 * Balls[k].radius) * 1.0;
 
-    Speed_pps := MinInitialSpeed + Random(Trunc(MaxInitialSpeed - MinInitialSpeed + 1.0));
+    Speed_pps := MinInitialSpeed + Random(Trunc(MaxInitialSpeed - MinInitialSpeed + 1.0)) * 1.0;
     Angle := Random(360) * (3.14159265 / 180.0); // Random angle in radians
 
     Balls[k].dx := Cos(Angle) * Speed_pps / TargetFPS;
@@ -57,7 +57,7 @@ BEGIN
     Balls[k].r := Random(206) + 50;
     Balls[k].g := Random(206) + 50;
     Balls[k].b := Random(206) + 50;
-    Balls[k].mass := Balls[k].radius * Balls[k].radius; // Mass proportional to area (roughly)
+    Balls[k].mass := Balls[k].radius * Balls[k].radius * 1.0; // Mass proportional to area (roughly)
     Balls[k].active := True;
   END;
 END;

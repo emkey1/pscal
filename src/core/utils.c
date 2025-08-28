@@ -20,8 +20,8 @@
 const char *varTypeToString(VarType type) {
     switch (type) {
         case TYPE_VOID:         return "VOID";
-        case TYPE_INTEGER:      return "INTEGER";
-        case TYPE_REAL:         return "REAL";
+        case TYPE_INT32:        return "INTEGER";
+        case TYPE_DOUBLE:       return "REAL";
         case TYPE_STRING:       return "STRING";
         case TYPE_CHAR:         return "CHAR";
         case TYPE_RECORD:       return "RECORD";
@@ -34,6 +34,15 @@ const char *varTypeToString(VarType type) {
         case TYPE_MEMORYSTREAM: return "MEMORY_STREAM";
         case TYPE_SET:          return "SET";
         case TYPE_POINTER:      return "POINTER";
+        case TYPE_INT8:         return "INT8";
+        case TYPE_UINT8:        return "UINT8";
+        case TYPE_INT16:        return "INT16";
+        case TYPE_UINT16:       return "UINT16";
+        case TYPE_UINT32:       return "UINT32";
+        case TYPE_INT64:        return "INT64";
+        case TYPE_UINT64:       return "UINT64";
+        case TYPE_FLOAT:        return "REAL";
+        case TYPE_LONG_DOUBLE:  return "LONG_DOUBLE";
         case TYPE_NIL:          return "NIL";
         default:                return "UNKNOWN_VAR_TYPE";
     }
@@ -113,9 +122,9 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_BREAK:         return "BREAK";
         case TOKEN_OUT:           return "OUT";
         case TOKEN_SET:           return "SET";
-        case TOKEN_CARET:         return "CARET";   // <<< ADDED
-        case TOKEN_NIL:           return "NIL";     // <<< ADDED
-        case TOKEN_INLINE:       return "INLINE";  // <<< ADDED
+        case TOKEN_CARET:         return "CARET";   
+        case TOKEN_NIL:           return "NIL";    
+        case TOKEN_INLINE:       return "INLINE"; 
         default:
             // Create a small buffer to handle potentially large unknown enum values
             // Although, this function should ideally cover all defined TokenType values.
@@ -322,16 +331,96 @@ void freeFieldValue(FieldValue *fv) {
 Value makeInt(long long val) {
     Value v;
     memset(&v, 0, sizeof(Value)); // Initialize all fields to 0/NULL
-    v.type = TYPE_INTEGER;
-    v.i_val = val;
+    v.type = TYPE_INT32;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
-Value makeReal(double val) {
+Value makeReal(long double val) {
     Value v;
     memset(&v, 0, sizeof(Value));
-    v.type = TYPE_REAL;
-    v.r_val = val;
+    v.type = TYPE_DOUBLE;
+    SET_REAL_VALUE(&v, val);
+    return v;
+}
+
+Value makeFloat(float val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_FLOAT;
+    SET_REAL_VALUE(&v, val);
+    return v;
+}
+
+Value makeDouble(double val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_DOUBLE;
+    SET_REAL_VALUE(&v, val);
+    return v;
+}
+
+Value makeLongDouble(long double val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_LONG_DOUBLE;
+    SET_REAL_VALUE(&v, val);
+    return v;
+}
+
+Value makeInt8(int8_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INT8;
+    SET_INT_VALUE(&v, val);
+    return v;
+}
+
+Value makeUInt8(uint8_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT8;
+    SET_INT_VALUE(&v, val);
+    return v;
+}
+
+Value makeInt16(int16_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INT16;
+    SET_INT_VALUE(&v, val);
+    return v;
+}
+
+Value makeUInt16(uint16_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT16;
+    SET_INT_VALUE(&v, val);
+    return v;
+}
+
+Value makeUInt32(uint32_t val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT32;
+    SET_INT_VALUE(&v, val);
+    return v;
+}
+
+Value makeInt64(long long val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INT64;
+    SET_INT_VALUE(&v, val);
+    return v;
+}
+
+Value makeUInt64(unsigned long long val) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_UINT64;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -339,7 +428,7 @@ Value makeByte(unsigned char val) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_BYTE;
-    v.i_val = val;  // Store the byte in the integer field.
+    SET_INT_VALUE(&v, val);  // Store the byte in the integer field.
     return v;
 }
 
@@ -348,7 +437,7 @@ Value makeWord(unsigned int val) {
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_WORD;
     // Use i_val, ensuring it handles potential size differences if long long > unsigned int
-    v.i_val = val;
+    SET_INT_VALUE(&v, val);
     return v;
 }
 
@@ -375,11 +464,12 @@ Value makeString(const char *val) {
     return v;
 }
 
-Value makeChar(char c) {
+Value makeChar(int c) {
     Value v;
     memset(&v, 0, sizeof(Value));
     v.type = TYPE_CHAR;
     v.c_val = c;
+    SET_INT_VALUE(&v, c); // Keep numeric fields in sync for ordinal ops
     v.max_length = 1; // Character has a fixed length of 1
     return v;
 }
@@ -554,8 +644,23 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     }
 
     switch(type) {
-        case TYPE_INTEGER: v.i_val = 0; break;
-        case TYPE_REAL:    v.r_val = 0.0; break;
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            SET_INT_VALUE(&v, 0);
+            break;
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            SET_REAL_VALUE(&v, 0.0L);
+            break;
         case TYPE_STRING: {
             v.s_val = NULL;
             v.max_length = -1;
@@ -576,7 +681,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                      #endif
                      Symbol *constSym = lookupSymbol(const_name);
 
-                     if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INTEGER) {
+                    if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INT32) {
                           parsed_len = constSym->value->i_val;
                           #ifdef DEBUG
                           fprintf(stderr, "[DEBUG makeValueForType] Found constant '%s' with value %lld.\n", const_name, parsed_len);
@@ -657,8 +762,8 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                        if (elemType == TYPE_VOID) {
                              if (elemTypeDefNode->type == AST_VARIABLE && elemTypeDefNode->token) {
                                  const char *tn = elemTypeDefNode->token->value;
-                                 if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INTEGER;
-                                 else if (strcasecmp(tn, "real") == 0) elemType = TYPE_REAL;
+                                 if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INT32;
+                                 else if (strcasecmp(tn, "real") == 0) elemType = TYPE_DOUBLE;
                                  else if (strcasecmp(tn, "char") == 0) elemType = TYPE_CHAR;
                                  else if (strcasecmp(tn, "boolean") == 0) elemType = TYPE_BOOLEAN;
                                  else if (strcasecmp(tn, "byte") == 0) elemType = TYPE_BYTE;
@@ -698,7 +803,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                          Value low_val = evaluateCompileTimeValue(subrange->left);
                          Value high_val = evaluateCompileTimeValue(subrange->right);
 
-                         if (low_val.type == TYPE_INTEGER && high_val.type == TYPE_INTEGER) {
+                        if (low_val.type == TYPE_INT32 && high_val.type == TYPE_INT32) {
                              lbs[i] = (int)low_val.i_val;
                              ubs[i] = (int)high_val.i_val;
                          } else {
@@ -741,8 +846,6 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
              if (!v.enum_val.enum_name) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
              v.base_type_node = actual_type_def;
              break;
-        case TYPE_BYTE:    v.i_val = 0; break;
-        case TYPE_WORD:    v.i_val = 0; break;
         case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; v.max_length = 0; break;
         case TYPE_POINTER:
             v.ptr_val = NULL;
@@ -893,8 +996,8 @@ void freeValue(Value *v) {
 //#endif
     switch (v->type) {
         case TYPE_VOID:
-        case TYPE_INTEGER:
-        case TYPE_REAL:
+        case TYPE_INT32:
+        case TYPE_DOUBLE:
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
         case TYPE_BYTE:
@@ -1081,11 +1184,17 @@ void dumpSymbol(Symbol *sym) {
     if (sym->value) {
         printf(", Value: ");
         switch (sym->type) {
-            case TYPE_INTEGER:
+            case TYPE_INT32:
                 printf("%lld", sym->value->i_val);
                 break;
-            case TYPE_REAL:
-                printf("%f", sym->value->r_val);
+            case TYPE_FLOAT:
+                printf("%f", sym->value->real.f32_val);
+                break;
+            case TYPE_DOUBLE:
+                printf("%f", sym->value->real.d_val);
+                break;
+            case TYPE_LONG_DOUBLE:
+                printf("%Lf", sym->value->real.r_val);
                 break;
             case TYPE_STRING:
                 printf("\"%s\"", sym->value->s_val ? sym->value->s_val : "(null)");
@@ -1573,11 +1682,38 @@ void printValueToStream(Value v, FILE *stream) {
     }
 
     switch (v.type) {
-        case TYPE_INTEGER:
+        case TYPE_INT8:
+            fprintf(stream, "%hhd", (int8_t)v.i_val);
+            break;
+        case TYPE_UINT8:
+            fprintf(stream, "%hhu", (uint8_t)v.u_val);
+            break;
+        case TYPE_INT16:
+            fprintf(stream, "%hd", (int16_t)v.i_val);
+            break;
+        case TYPE_UINT16:
+            fprintf(stream, "%hu", (uint16_t)v.u_val);
+            break;
+        case TYPE_INT32:
             fprintf(stream, "%lld", v.i_val);
             break;
-        case TYPE_REAL:
-            fprintf(stream, "%f", v.r_val);
+        case TYPE_UINT32:
+            fprintf(stream, "%u", (uint32_t)v.u_val);
+            break;
+        case TYPE_INT64:
+            fprintf(stream, "%lld", v.i_val);
+            break;
+        case TYPE_UINT64:
+            fprintf(stream, "%llu", v.u_val);
+            break;
+        case TYPE_FLOAT:
+            fprintf(stream, "%f", v.real.f32_val);
+            break;
+        case TYPE_DOUBLE:
+            fprintf(stream, "%f", v.real.d_val);
+            break;
+        case TYPE_LONG_DOUBLE:
+            fprintf(stream, "%Lf", v.real.r_val);
             break;
         case TYPE_BOOLEAN:
             fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE"); // Boolean still uses i_val

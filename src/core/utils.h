@@ -26,16 +26,24 @@
 
 #include "types.h"
 
+// Pascal traditionally models the CHAR type as an 8-bit ordinal with a
+// maximum value of 255.  The VM previously exposed the full Unicode range,
+// which caused functions such as High(char) and Ord(High(char)) to report a
+// maximum of 0x10FFFF.  This broke expectations of legacy Pascal code and the
+// regression test suite.  Define an explicit maximum for Pascal CHAR values so
+// the runtime can enforce classic 0..255 semantics.
+#define UNICODE_MAX 0x10FFFF
+#define PASCAL_CHAR_MAX 255
 // Bytecode related stuff
 // Make sure Value and VarType are defined before these.
 #define IS_BOOLEAN(value) ((value).type == TYPE_BOOLEAN)
 #define AS_BOOLEAN(value) ((value).i_val != 0) // Assumes i_val stores 0 for false, 1 for true
 
 // Also useful:
-#define IS_INTEGER(value) ((value).type == TYPE_INTEGER)
-#define AS_INTEGER(value) ((value).i_val)
-#define IS_REAL(value)    ((value).type == TYPE_REAL)
-#define AS_REAL(value)    ((value).r_val)
+#define IS_INTEGER(value) (is_intlike_type((value).type))
+#define AS_INTEGER(value) (as_i64(value))
+#define IS_REAL(value)    (is_real_type((value).type))
+#define AS_REAL(value)    (as_ld(value))
 #define IS_STRING(value)  ((value).type == TYPE_STRING)
 #define AS_STRING(value)  ((value).s_val)
 #define IS_CHAR(value)    ((value).type == TYPE_CHAR)
@@ -56,7 +64,34 @@ static const int pscalToAnsiBase[8] = {
 };
 
 static inline bool is_intlike_type(VarType t) {
-    return t == TYPE_INTEGER || t == TYPE_WORD || t == TYPE_BYTE;
+    switch (t) {
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            return true;
+        case TYPE_CHAR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static inline bool is_real_type(VarType t) {
+    switch (t) {
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            return true;
+        default:
+            return false;
+    }
 }
 
 static inline bool is_ordinal_type(VarType t) {
@@ -67,29 +102,67 @@ static inline bool is_ordinal_type(VarType t) {
 
 static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
     switch (v->type) {
-        case TYPE_INTEGER:
+        case TYPE_UINT64:
+        case TYPE_UINT32:
+        case TYPE_UINT16:
+        case TYPE_UINT8:
         case TYPE_WORD:
         case TYPE_BYTE:
-        case TYPE_BOOLEAN: return v->i_val;
-        case TYPE_CHAR:    return (unsigned char)v->c_val;
-        // Real not allowed as delta in Pascal's inc/dec
+            return (long long)v->u_val;
+        case TYPE_INT64:
+        case TYPE_INT32:
+        case TYPE_INT16:
+        case TYPE_INT8:
+        case TYPE_BOOLEAN:
+            return v->i_val;
+        case TYPE_CHAR:
+            return v->c_val;
         default:
             runtimeError(vm, "Argument error: %s delta must be an ordinal, got %s.",
                          who, varTypeToString(v->type));
-            // You can longjmp/return; here we just return 0 and let caller bail if needed.
             return 0;
     }
 }
 
 #define IS_INTLIKE(v) (is_intlike_type((v).type))
-#define IS_NUMERIC(v) (IS_INTLIKE(v) || IS_REAL(v))
+#define IS_NUMERIC(v) (IS_INTLIKE(v) || is_real_type((v).type))
 
 // Accessors (use your existing Value layout: i_val for INTEGER/BYTE/WORD/BOOLEAN)
 static inline long long as_i64(Value v) {
-    return v.i_val; // INTEGER, BYTE, WORD, BOOLEAN all use i_val
+    switch (v.type) {
+        case TYPE_UINT64:
+        case TYPE_UINT32:
+        case TYPE_UINT16:
+        case TYPE_UINT8:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+            return (long long)v.u_val;
+        default:
+            return v.i_val;
+    }
 }
-static inline double as_f64(Value v) {
-    return (v.type == TYPE_REAL) ? v.r_val : (double)v.i_val;
+static inline long double as_ld(Value v) {
+    switch (v.type) {
+        case TYPE_FLOAT:
+            /*
+             * Floats are stored with multiple precision representations in
+             * the Value union (long double, double and float).  Using the
+             * raw 32-bit float for numeric comparisons causes literals such
+             * as `3.14` assigned to a float and later compared to a `3.14`
+             * constant to fail equality checks due to rounding differences.
+             * Return the highest precision representation so that float
+             * values participate in comparisons using their original
+             * long‑double precision, matching existing regression
+             * expectations.
+             */
+            return v.real.r_val;
+        case TYPE_DOUBLE:
+            return v.real.d_val;
+        case TYPE_LONG_DOUBLE:
+            return v.real.r_val;
+        default:
+            return (long double)as_i64(v);
+    }
 }
 
 const char *varTypeToString(VarType type);
@@ -107,7 +180,17 @@ void freeFieldValue(FieldValue *fv);
 
 // Value constructors
 Value makeInt(long long val);
-Value makeReal(double val);
+Value makeReal(long double val);
+Value makeFloat(float val);
+Value makeDouble(double val);
+Value makeLongDouble(long double val);
+Value makeInt8(int8_t val);
+Value makeUInt8(uint8_t val);
+Value makeInt16(int16_t val);
+Value makeUInt16(uint16_t val);
+Value makeUInt32(uint32_t val);
+Value makeInt64(long long val);
+Value makeUInt64(unsigned long long val);
 Value makeByte(unsigned char val);
 Value makeWord(unsigned int val);
 Value makeNil(void);
@@ -115,7 +198,7 @@ Value makeNil(void);
 // Used by the 'new' builtin.
 Value makePointer(void* address, AST* base_type_node); // <<< ADD THIS PROTOTYPE >>>
 Value makeString(const char *val);
-Value makeChar(char c);
+Value makeChar(int c);
 Value makeBoolean(int b);
 Value makeFile(FILE *f);
 Value makeRecord(FieldValue *rec);

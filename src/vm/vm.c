@@ -434,7 +434,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             }
             Value lower_val = vm->chunk->constants[lower_idx];
             Value upper_val = vm->chunk->constants[upper_idx];
-            if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
+            if (!is_intlike_type(lower_val.type) || !is_intlike_type(upper_val.type)) {
                 runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
                 free(lower_bounds); free(upper_bounds);
                 return INTERPRET_RUNTIME_ERROR;
@@ -652,22 +652,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             } \
         } \
         \
-        /* Char +/- intlike */ \
-        if (!op_is_handled) { \
-            if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
-                if (a_val_popped.type == TYPE_CHAR && IS_INTLIKE(b_val_popped)) { \
-                    char result_char = (current_instruction_code == OP_ADD) ? \
-                                       (AS_CHAR(a_val_popped) + (char)as_i64(b_val_popped)) : \
-                                       (AS_CHAR(a_val_popped) - (char)as_i64(b_val_popped)); \
-                    result_val = makeChar(result_char); \
-                    op_is_handled = true; \
-                } else if (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_CHAR && current_instruction_code == OP_ADD) { \
-                    char result_char = (char)(as_i64(a_val_popped) + AS_CHAR(b_val_popped)); \
-                    result_val = makeChar(result_char); \
-                    op_is_handled = true; \
-                } \
-            } \
-        } \
+        /* Char +/- intlike handled as numeric ordinal operations */ \
 \
         /* Enum +/- intlike */ \
         if (!op_is_handled) { \
@@ -720,19 +705,22 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         /* Numeric arithmetic (INTEGER/BYTE/WORD/REAL) */ \
         if (!op_is_handled) { \
             if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
-                if (IS_REAL(a_val_popped) || IS_REAL(b_val_popped)) { \
-                    double fa = as_f64(a_val_popped); \
-                    double fb = as_f64(b_val_popped); \
-                    if (current_instruction_code == OP_DIVIDE && fb == 0.0) { \
+                bool a_real = IS_REAL(a_val_popped); \
+                bool b_real = IS_REAL(b_val_popped); \
+                if (a_real || b_real) { \
+                    long double fa = as_ld(a_val_popped); \
+                    long double fb = as_ld(b_val_popped); \
+                    if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
                         runtimeError(vm, "Runtime Error: Division by zero."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
+                    int useLong = (a_val_popped.type == TYPE_LONG_DOUBLE || b_val_popped.type == TYPE_LONG_DOUBLE); \
                     switch (current_instruction_code) { \
-                        case OP_ADD:      result_val = makeReal(fa + fb); break; \
-                        case OP_SUBTRACT: result_val = makeReal(fa - fb); break; \
-                        case OP_MULTIPLY: result_val = makeReal(fa * fb); break; \
-                        case OP_DIVIDE:   result_val = makeReal(fa / fb); break; \
+                        case OP_ADD:      result_val = useLong ? makeLongDouble(fa + fb) : makeReal(fa + fb); break; \
+                        case OP_SUBTRACT: result_val = useLong ? makeLongDouble(fa - fb) : makeReal(fa - fb); break; \
+                        case OP_MULTIPLY: result_val = useLong ? makeLongDouble(fa * fb) : makeReal(fa * fb); break; \
+                        case OP_DIVIDE:   result_val = useLong ? makeLongDouble(fa / fb) : makeReal(fa / fb); break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for real numbers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
@@ -759,7 +747,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             overflow = __builtin_mul_overflow(ia, ib, &iresult); \
                             break; \
                         case OP_DIVIDE: \
-                            result_val = makeReal((double)ia / (double)ib); \
+                            result_val = makeReal((long double)ia / (long double)ib); \
+                            break; \
+                        case OP_MOD: \
+                            iresult = ib == 0 ? 0 : ia % ib; \
                             break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
@@ -850,7 +841,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (index_val.type != TYPE_INTEGER) {
+                if (!is_intlike_type(index_val.type)) {
                     runtimeError(vm, "VM Error: String index must be an integer.");
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -936,7 +927,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 Value val_popped = pop(vm);
                 Value result_val;
                 if (IS_INTEGER(val_popped)) result_val = makeInt(-AS_INTEGER(val_popped));
-                else if (IS_REAL(val_popped)) result_val = makeReal(-AS_REAL(val_popped));
+                else if (IS_REAL(val_popped)) {
+                    if (val_popped.type == TYPE_LONG_DOUBLE) result_val = makeLongDouble(-AS_REAL(val_popped));
+                    else result_val = makeReal(-AS_REAL(val_popped));
+                }
                 else {
                     runtimeError(vm, "Runtime Error: Operand for negate must be a number.");
                     freeValue(&val_popped);
@@ -1123,9 +1117,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // Numeric comparison (Integers and Reals)
                 else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
-                    if (a_val.type == TYPE_REAL || b_val.type == TYPE_REAL) {
-                        double fa = as_f64(a_val);
-                        double fb = as_f64(b_val);
+                    bool a_real = is_real_type(a_val.type);
+                    bool b_real = is_real_type(b_val.type);
+
+                    if (a_real || b_real) {
+                        long double fa = as_ld(a_val);
+                        long double fb = as_ld(b_val);
                         switch (instruction_val) {
                             case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
                             case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
@@ -1186,7 +1183,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     comparison_succeeded = true;
                 } else if ((IS_CHAR(a_val) && IS_INTEGER(b_val)) || (IS_INTEGER(a_val) && IS_CHAR(b_val))) {
-                    char char_val = IS_CHAR(a_val) ? AS_CHAR(a_val) : AS_CHAR(b_val);
+                    int char_val = IS_CHAR(a_val) ? AS_CHAR(a_val) : AS_CHAR(b_val);
                     long long int_val = IS_INTEGER(a_val) ? AS_INTEGER(a_val) : AS_INTEGER(b_val);
 
                     switch (instruction_val) {
@@ -1204,8 +1201,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // Char comparison
                 else if (IS_CHAR(a_val) && IS_CHAR(b_val)) {
-                    char ca = AS_CHAR(a_val);
-                    char cb = AS_CHAR(b_val);
+                    int ca = AS_CHAR(a_val);
+                    int cb = AS_CHAR(b_val);
                     switch (instruction_val) {
                         case OP_EQUAL:         result_val = makeBoolean(ca == cb); break;
                         case OP_NOT_EQUAL:     result_val = makeBoolean(ca != cb); break;
@@ -1445,7 +1442,7 @@ comparison_error_label:
                     Value* base_val = (Value*)operand.ptr_val;
                     if (base_val && base_val->type == TYPE_STRING) {
                         Value index_val = pop(vm);
-                        if (index_val.type != TYPE_INTEGER) {
+                        if (!is_intlike_type(index_val.type)) {
                             runtimeError(vm, "VM Error: String index must be an integer.");
                             freeValue(&index_val);
                             freeValue(&operand);
@@ -1483,7 +1480,7 @@ comparison_error_label:
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
-                    if (index_val.type != TYPE_INTEGER) {
+                    if (!is_intlike_type(index_val.type)) {
                         runtimeError(vm, "VM Error: Array index must be an integer.");
                         free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
                     }
@@ -1667,27 +1664,32 @@ comparison_error_label:
                             }
                         }
                     }
-                    else if (target_lvalue_ptr->type == TYPE_REAL && value_to_set.type == TYPE_INTEGER) {
-                        target_lvalue_ptr->r_val = (double)value_to_set.i_val;
+                    else if (is_real_type(target_lvalue_ptr->type) && is_real_type(value_to_set.type)) {
+                        long double tmp = AS_REAL(value_to_set);
+                        SET_REAL_VALUE(target_lvalue_ptr, tmp);
+                    }
+                    else if (is_real_type(target_lvalue_ptr->type) && is_intlike_type(value_to_set.type)) {
+                        long double tmp = as_ld(value_to_set);
+                        SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
                             runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
                         }
-                        target_lvalue_ptr->i_val = value_to_set.i_val & 0xFF;
+                        SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFF);
                     }
                     else if (target_lvalue_ptr->type == TYPE_WORD && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 65535) {
                             runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
                         }
-                        target_lvalue_ptr->i_val = value_to_set.i_val & 0xFFFF;
+                        SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFFFF);
                     }
                     else if (target_lvalue_ptr->type == TYPE_INTEGER &&
                              (value_to_set.type == TYPE_BYTE || value_to_set.type == TYPE_WORD || value_to_set.type == TYPE_BOOLEAN)) {
-                        target_lvalue_ptr->i_val = value_to_set.i_val;
+                        SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val);
                     }
                     else if (target_lvalue_ptr->type == TYPE_INTEGER && value_to_set.type == TYPE_CHAR) {
-                        target_lvalue_ptr->i_val = (long long)value_to_set.c_val;
+                        SET_INT_VALUE(target_lvalue_ptr, (long long)value_to_set.c_val);
                     }
                     else if (target_lvalue_ptr->type == TYPE_CHAR) {
                         if (value_to_set.type == TYPE_CHAR) {
@@ -1695,17 +1697,18 @@ comparison_error_label:
                         } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
                             size_t len = strlen(value_to_set.s_val);
                             if (len == 1) {
-                                target_lvalue_ptr->c_val = value_to_set.s_val[0];
+                                target_lvalue_ptr->c_val = (unsigned char)value_to_set.s_val[0];
                             } else if (len == 0) {
                                 target_lvalue_ptr->c_val = '\0';
                             } else {
                                 runtimeError(vm, "Type mismatch: Cannot assign multi-character string to CHAR.");
                             }
                         } else if (value_to_set.type == TYPE_INTEGER) {
-                            target_lvalue_ptr->c_val = (char)value_to_set.i_val;
+                            target_lvalue_ptr->c_val = (int)value_to_set.i_val;
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign %s to CHAR.", varTypeToString(value_to_set.type));
                         }
+                        SET_INT_VALUE(target_lvalue_ptr, target_lvalue_ptr->c_val);
                     }
                     else {
                         freeValue(target_lvalue_ptr);
@@ -1794,7 +1797,7 @@ comparison_error_label:
                  Value index_val = pop(vm);
                  Value base_val = pop(vm); // Can be string or char
 
-                 if (index_val.type != TYPE_INTEGER) {
+                 if (!is_intlike_type(index_val.type)) {
                      runtimeError(vm, "VM Error: String/Char index must be an integer.");
                      freeValue(&index_val); freeValue(&base_val);
                      return INTERPRET_RUNTIME_ERROR;
@@ -1916,35 +1919,7 @@ comparison_error_label:
                 }
 
                 Value value_from_stack = pop(vm);
-
-                if (sym->value->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
-                    // Preserve pointer type information when assigning NIL.
-                    sym->value->ptr_val = NULL;
-                } else if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
-                    const char* source_str = "";
-                    char char_buf[2] = {0};
-
-                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
-                        source_str = value_from_stack.s_val;
-                    } else if (value_from_stack.type == TYPE_CHAR) {
-                        char_buf[0] = value_from_stack.c_val;
-                        source_str = char_buf;
-                    }
-
-                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
-                    sym->value->s_val[sym->value->max_length] = '\0';
-
-                } else {
-                    // Deep-copy all other types.
-                    AST* preserved_base = sym->value->base_type_node;
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&value_from_stack);
-                    if (sym->value->type == TYPE_POINTER && sym->value->base_type_node == NULL) {
-                        sym->value->base_type_node = preserved_base;
-                    }
-                }
-
-                freeValue(&value_from_stack);
+                updateSymbol(name_val->s_val, value_from_stack);
 
                 break;
             }
@@ -1977,30 +1952,7 @@ comparison_error_label:
                 }
 
                 Value value_from_stack = pop(vm);
-
-                if (sym->value->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
-                    // Maintain pointer type when assigning NIL.
-                    sym->value->ptr_val = NULL;
-                } else if (sym->value->type == TYPE_STRING && sym->value->max_length > 0) {
-                    const char* source_str = "";
-                    char char_buf[2] = {0};
-                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
-                        source_str = value_from_stack.s_val;
-                    } else if (value_from_stack.type == TYPE_CHAR) {
-                        char_buf[0] = value_from_stack.c_val;
-                        source_str = char_buf;
-                    }
-                    strncpy(sym->value->s_val, source_str, sym->value->max_length);
-                    sym->value->s_val[sym->value->max_length] = '\0';
-                } else {
-                    AST* preserved_base = sym->value->base_type_node;
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&value_from_stack);
-                    if (sym->value->type == TYPE_POINTER && sym->value->base_type_node == NULL) {
-                        sym->value->base_type_node = preserved_base;
-                    }
-                }
-                freeValue(&value_from_stack);
+                updateSymbol(name_val->s_val, value_from_stack);
                 break;
             }
             case OP_GET_LOCAL: {
@@ -2035,6 +1987,18 @@ comparison_error_label:
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
                     target_slot->s_val[target_slot->max_length] = '\0';
 
+                } else if (is_real_type(target_slot->type)) {
+                    if (is_real_type(value_from_stack.type)) {
+                        long double tmp = AS_REAL(value_from_stack);
+                        SET_REAL_VALUE(target_slot, tmp);
+                    } else if (is_intlike_type(value_from_stack.type)) {
+                        long double tmp = as_ld(value_from_stack);
+                        SET_REAL_VALUE(target_slot, tmp);
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                 } else {
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.
@@ -2096,6 +2060,15 @@ comparison_error_label:
                     }
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
                     target_slot->s_val[target_slot->max_length] = '\0';
+                } else if (is_real_type(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        long double tmp = as_ld(value_from_stack);
+                        SET_REAL_VALUE(target_slot, tmp);
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                 } else {
                     AST* preserved_base = target_slot->base_type_node;
                     freeValue(target_slot);
@@ -2125,32 +2098,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                int* lower_bounds = malloc(sizeof(int) * dimension_count);
-                int* upper_bounds = malloc(sizeof(int) * dimension_count);
-                if (!lower_bounds || !upper_bounds) {
-                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
-                    if (lower_bounds) free(lower_bounds);
-                    if (upper_bounds) free(upper_bounds);
+                uint16_t *lower_idx = malloc(sizeof(uint16_t) * dimension_count);
+                uint16_t *upper_idx = malloc(sizeof(uint16_t) * dimension_count);
+                if (!lower_idx || !upper_idx) {
+                    runtimeError(vm, "VM Error: Malloc failed for array bound indices.");
+                    if (lower_idx) free(lower_idx);
+                    if (upper_idx) free(upper_idx);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
                 for (int i = 0; i < dimension_count; i++) {
-                    uint16_t lower_idx = READ_SHORT(vm);
-                    uint16_t upper_idx = READ_SHORT(vm);
-                    if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
-                        runtimeError(vm, "VM Error: Array bound constant index out of range.");
-                        free(lower_bounds); free(upper_bounds);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    Value lower_val = vm->chunk->constants[lower_idx];
-                    Value upper_val = vm->chunk->constants[upper_idx];
-                    if (lower_val.type != TYPE_INTEGER || upper_val.type != TYPE_INTEGER) {
-                        runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
-                        free(lower_bounds); free(upper_bounds);
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    lower_bounds[i] = (int)lower_val.i_val;
-                    upper_bounds[i] = (int)upper_val.i_val;
+                    lower_idx[i] = READ_SHORT(vm);
+                    upper_idx[i] = READ_SHORT(vm);
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
@@ -2160,6 +2119,51 @@ comparison_error_label:
                 if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
                     elem_type_def = lookupType(elem_name_val.s_val);
                 }
+
+                int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                if (!lower_bounds || !upper_bounds) {
+                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                    free(lower_idx); free(upper_idx);
+                    if (lower_bounds) free(lower_bounds);
+                    if (upper_bounds) free(upper_bounds);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = dimension_count - 1; i >= 0; i--) {
+                    if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
+                        Value size_val = pop(vm);
+                        if (!is_intlike_type(size_val.type)) {
+                            runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
+                            free(lower_bounds); free(upper_bounds);
+                            free(lower_idx); free(upper_idx);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        lower_bounds[i] = 0;
+                        upper_bounds[i] = (int)size_val.i_val - 1;
+                        freeValue(&size_val);
+                    } else {
+                        if (lower_idx[i] >= vm->chunk->constants_count || upper_idx[i] >= vm->chunk->constants_count) {
+                            runtimeError(vm, "VM Error: Array bound constant index out of range.");
+                            free(lower_bounds); free(upper_bounds);
+                            free(lower_idx); free(upper_idx);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        Value lower_val = vm->chunk->constants[lower_idx[i]];
+                        Value upper_val = vm->chunk->constants[upper_idx[i]];
+                        if (!is_intlike_type(lower_val.type) || !is_intlike_type(upper_val.type)) {
+                            runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
+                            free(lower_bounds); free(upper_bounds);
+                            free(lower_idx); free(upper_idx);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        lower_bounds[i] = (int)lower_val.i_val;
+                        upper_bounds[i] = (int)upper_val.i_val;
+                    }
+                }
+
+                free(lower_idx);
+                free(upper_idx);
 
                 Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
 
@@ -2403,6 +2407,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                if (proc_symbol->type_def && proc_symbol->type_def->child_count >= declared_arity) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = proc_symbol->type_def->children[i];
+                        Value* arg_val = frame->slots + i;
+                        if (is_real_type(param_ast->var_type) && is_intlike_type(arg_val->type)) {
+                            long double tmp = as_ld(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
                 frame->function_symbol = proc_symbol;
                 frame->locals_count = proc_symbol->locals_count;
                 frame->upvalue_count = proc_symbol->upvalue_count;
@@ -2467,14 +2483,30 @@ comparison_error_label:
                 char buf[DEFAULT_STRING_CAPACITY];
                 buf[0] = '\0';
 
-                if (raw_val.type == TYPE_REAL) {
+                if (is_real_type(raw_val.type)) {
+                    long double rv = AS_REAL(raw_val);
                     if (precision >= 0) {
-                        snprintf(buf, sizeof(buf), "%*.*f", width, precision, raw_val.r_val);
+                        snprintf(buf, sizeof(buf), "%*.*Lf", width, precision, rv);
                     } else {
-                        snprintf(buf, sizeof(buf), "%*.*E", width, PASCAL_DEFAULT_FLOAT_PRECISION, raw_val.r_val);
+                        snprintf(buf, sizeof(buf), "%*.*LE", width, PASCAL_DEFAULT_FLOAT_PRECISION, rv);
                     }
-                } else if (raw_val.type == TYPE_INTEGER || raw_val.type == TYPE_BYTE || raw_val.type == TYPE_WORD) {
-                    snprintf(buf, sizeof(buf), "%*lld", width, raw_val.i_val);
+                } else if (raw_val.type == TYPE_CHAR) {
+                    snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
+                } else if (is_intlike_type(raw_val.type)) {
+                    if (raw_val.type == TYPE_UINT64 || raw_val.type == TYPE_UINT32 ||
+                        raw_val.type == TYPE_UINT16 || raw_val.type == TYPE_UINT8 ||
+                        raw_val.type == TYPE_WORD   || raw_val.type == TYPE_BYTE) {
+                        unsigned long long u = raw_val.u_val;
+                        if (raw_val.type == TYPE_BYTE || raw_val.type == TYPE_UINT8)   u &= 0xFFULL;
+                        if (raw_val.type == TYPE_WORD || raw_val.type == TYPE_UINT16) u &= 0xFFFFULL;
+                        if (raw_val.type == TYPE_UINT32) u &= 0xFFFFFFFFULL;
+                        snprintf(buf, sizeof(buf), "%*llu", width, u);
+                    } else {
+                        long long s = raw_val.i_val;
+                        if (raw_val.type == TYPE_INT8)  s = (int8_t)s;
+                        if (raw_val.type == TYPE_INT16) s = (int16_t)s;
+                        snprintf(buf, sizeof(buf), "%*lld", width, s);
+                    }
                 } else if (raw_val.type == TYPE_STRING) {
                     const char* source_str = raw_val.s_val ? raw_val.s_val : "";
                     size_t len = strlen(source_str);
@@ -2483,8 +2515,6 @@ comparison_error_label:
                 } else if (raw_val.type == TYPE_BOOLEAN) {
                     const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
                     snprintf(buf, sizeof(buf), "%*s", width, bool_str);
-                } else if (raw_val.type == TYPE_CHAR) {
-                    snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
                 } else {
                     snprintf(buf, sizeof(buf), "%*s", width, "?");
                 }

@@ -33,6 +33,7 @@ typedef enum {
     TCAST_MEMBER,
     TCAST_ADDR,
     TCAST_DEREF,
+    TCAST_SIZEOF,
     TCAST_CALL,
     TCAST_STRUCT_DECL
 } ASTNodeTypeClike;
@@ -44,6 +45,7 @@ typedef struct ASTNodeClike {
     int is_array;           // Non-zero if this declaration is an array
     int array_size;         // Size of array for single-dimensional arrays
     int *array_dims;        // Sizes for each dimension in multi-dimensional arrays
+    struct ASTNodeClike **array_dim_exprs; // Expressions for dimension sizes (optional)
     int dim_count;          // Number of dimensions if this node represents an array
     VarType element_type;   // Element type if this node represents an array
     int is_const;           // Non-zero if this declaration is const-qualified

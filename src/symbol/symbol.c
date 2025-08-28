@@ -664,8 +664,8 @@ void updateSymbol(const char *name, Value val) {
         types_compatible = true; // Exact type match
     } else {
         // Handle specific allowed coercions and promotions.
-        if (sym->type == TYPE_REAL && val.type == TYPE_INTEGER) types_compatible = true;
-        else if (sym->type == TYPE_INTEGER && val.type == TYPE_REAL) { types_compatible = false; } // No implicit Real to Integer
+        if (is_real_type(sym->type) && (is_real_type(val.type) || is_intlike_type(val.type))) types_compatible = true;
+        else if (sym->type == TYPE_INTEGER && is_real_type(val.type)) { types_compatible = false; } // No implicit Real to Integer
         else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
         else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
         else if (sym->type == TYPE_INTEGER && (val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN || val.type == TYPE_CHAR)) types_compatible = true;
@@ -718,15 +718,27 @@ void updateSymbol(const char *name, Value val) {
     // Use a switch on the TARGET symbol's type to handle assignments correctly.
     switch (sym->type) {
         case TYPE_INTEGER:
-            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) sym->value->i_val = val.i_val;
-            else if (val.type == TYPE_CHAR) sym->value->i_val = (long long)val.c_val;
-            else if (val.type == TYPE_REAL) sym->value->i_val = (long long)val.r_val; // Implicit Truncation
+            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) SET_INT_VALUE(sym->value, val.i_val);
+            else if (val.type == TYPE_CHAR) SET_INT_VALUE(sym->value, (long long)val.c_val);
+            else if (is_real_type(val.type)) SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
             break;
 
         case TYPE_REAL:
-            if (val.type == TYPE_REAL) sym->value->r_val = val.r_val;
-            else if (val.type == TYPE_INTEGER) sym->value->r_val = (double)val.i_val;
-            else if (val.type == TYPE_CHAR) sym->value->r_val = (double)val.c_val;
+            if (is_real_type(val.type) || is_intlike_type(val.type)) {
+                SET_REAL_VALUE(sym->value, as_ld(val));
+            }
+            break;
+
+        case TYPE_FLOAT:
+            if (is_real_type(val.type) || is_intlike_type(val.type)) {
+                SET_REAL_VALUE(sym->value, as_ld(val));
+            }
+            break;
+
+        case TYPE_LONG_DOUBLE:
+            if (is_real_type(val.type) || is_intlike_type(val.type)) {
+                SET_REAL_VALUE(sym->value, as_ld(val));
+            }
             break;
 
         case TYPE_BYTE:
@@ -734,11 +746,11 @@ void updateSymbol(const char *name, Value val) {
                 if (val.i_val < 0 || val.i_val > 255) {
                     fprintf(stderr, "Runtime warning: Assignment to BYTE variable '%s' out of range (0-255). Value %lld will be truncated.\n", name, val.i_val);
                 }
-                sym->value->i_val = (val.i_val & 0xFF);
+                SET_INT_VALUE(sym->value, (val.i_val & 0xFF));
             } else if (val.type == TYPE_CHAR) {
-                sym->value->i_val = (long long)val.c_val;
+                SET_INT_VALUE(sym->value, (long long)val.c_val);
             } else if (val.type == TYPE_BOOLEAN) {
-                sym->value->i_val = val.i_val;
+                SET_INT_VALUE(sym->value, val.i_val);
             }
             break;
 
@@ -747,11 +759,11 @@ void updateSymbol(const char *name, Value val) {
                 if (val.i_val < 0 || val.i_val > 65535) {
                     fprintf(stderr, "Runtime warning: Assignment to WORD variable '%s' out of range (0-65535). Value %lld will be truncated.\n", name, val.i_val);
                 }
-                sym->value->i_val = (val.i_val & 0xFFFF);
+                SET_INT_VALUE(sym->value, (val.i_val & 0xFFFF));
             } else if (val.type == TYPE_CHAR) {
-                sym->value->i_val = (long long)val.c_val;
+                SET_INT_VALUE(sym->value, (long long)val.c_val);
             } else if (val.type == TYPE_BOOLEAN) {
-                sym->value->i_val = val.i_val;
+                SET_INT_VALUE(sym->value, val.i_val);
             }
             break;
 
@@ -788,8 +800,8 @@ void updateSymbol(const char *name, Value val) {
             break;
 
         case TYPE_BOOLEAN:
-            if (val.type == TYPE_BOOLEAN) sym->value->i_val = val.i_val;
-            else if (val.type == TYPE_INTEGER) sym->value->i_val = (val.i_val != 0) ? 1 : 0;
+            if (val.type == TYPE_BOOLEAN) SET_INT_VALUE(sym->value, val.i_val);
+            else if (val.type == TYPE_INTEGER) SET_INT_VALUE(sym->value, (val.i_val != 0) ? 1 : 0);
             break;
 
         case TYPE_FILE:
@@ -801,10 +813,7 @@ void updateSymbol(const char *name, Value val) {
             if (val.type == TYPE_CHAR) sym->value->c_val = val.c_val;
             else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) sym->value->c_val = val.s_val[0];
             else if (val.type == TYPE_INTEGER) {
-                if (val.i_val < 0 || val.i_val > 255) {
-                    fprintf(stderr, "Runtime warning: Assignment to CHAR variable '%s' out of ASCII range (0-255). Value %lld will be truncated.\n", name, val.i_val);
-                }
-                sym->value->c_val = (char)(val.i_val & 0xFF);
+                sym->value->c_val = (int)val.i_val;
             }
             break;
 

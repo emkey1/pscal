@@ -1,11 +1,12 @@
 #include "clike/opt.h"
 #include "clike/lexer.h"
 #include "core/types.h"
+#include "core/utils.h"
 #include <stdlib.h>
 
 static int isConst(ASTNodeClike* n, double* out, int* is_float) {
     if (!n || n->type != TCAST_NUMBER) return 0;
-    if (n->var_type == TYPE_REAL) {
+    if (is_real_type(n->var_type)) {
         if (out) *out = n->token.float_val;
         if (is_float) *is_float = 1;
     } else {
@@ -19,6 +20,8 @@ static ASTNodeClike* foldBinary(ASTNodeClike* node) {
     double lv, rv; int lf, rf;
     if (!isConst(node->left, &lv, &lf) || !isConst(node->right, &rv, &rf))
         return node;
+    if ((lf && !rf) || (!lf && rf))
+        return node; /* Do not fold mixed int/float to avoid implicit conversion */
     int result_is_float = lf || rf;
     double res = 0;
     switch (node->token.type) {
@@ -56,7 +59,7 @@ static ASTNodeClike* foldBinary(ASTNodeClike* node) {
         t.float_val = res;
     }
     ASTNodeClike* newNode = newASTNodeClike(TCAST_NUMBER, t);
-    newNode->var_type = result_is_float ? TYPE_REAL : TYPE_INTEGER;
+    newNode->var_type = result_is_float ? TYPE_DOUBLE : TYPE_INT64;
     freeASTClike(node);
     return newNode;
 }
@@ -77,7 +80,7 @@ static ASTNodeClike* foldUnary(ASTNodeClike* node) {
     t.type = CLIKE_TOKEN_NUMBER; t.int_val = (long long)res; t.float_val = res;
     }
     ASTNodeClike* newNode = newASTNodeClike(TCAST_NUMBER, t);
-    newNode->var_type = is_float ? TYPE_REAL : TYPE_INTEGER;
+    newNode->var_type = is_float ? TYPE_DOUBLE : TYPE_INT64;
     freeASTClike(node);
     return newNode;
 }

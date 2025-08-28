@@ -1,5 +1,6 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
+#include "core/version.h"
 #include "symbol/symbol.h"
 #ifdef SDL
 #include "backend_ast/sdl.h"
@@ -39,6 +40,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"api_receive", vmBuiltinApiReceive},
     {"api_send", vmBuiltinApiSend},
+    {"append", vmBuiltinAppend},
     {"arccos", vmBuiltinArccos},
     {"arcsin", vmBuiltinArcsin},
     {"arctan", vmBuiltinArctan},
@@ -54,6 +56,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"biwherey", vmBuiltinWherey},
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
+    {"bytecodeversion", vmBuiltinBytecodeVersion},
     {"ceil", vmBuiltinCeil},
     {"chr", vmBuiltinChr},
 #ifdef SDL
@@ -98,6 +101,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"drawrect", vmBuiltinDrawrect}, // Moved
 #endif
     {"eof", vmBuiltinEof},
+    {"erase", vmBuiltinErase},
     {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
@@ -197,6 +201,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"readln", vmBuiltinReadln},
     {"real", vmBuiltinReal},
     {"realtostr", vmBuiltinRealtostr},
+    {"rename", vmBuiltinRename},
 #ifdef SDL
     {"rendercopy", vmBuiltinRendercopy}, // Moved
     {"rendercopyex", vmBuiltinRendercopyex}, // Moved
@@ -242,6 +247,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"val", vmBuiltinVal},
     {"valreal", vmBuiltinValreal},
+    {"vmversion", vmBuiltinVMVersion},
 #ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
@@ -293,21 +299,28 @@ Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
         return makeInt(0);
     }
     Value arg = args[0];
-    if (arg.type == TYPE_INTEGER) {
-        return makeInt(arg.i_val * arg.i_val);
-    } else if (arg.type == TYPE_REAL) {
-        return makeReal(arg.r_val * arg.r_val);
+    if (IS_INTLIKE(arg)) {
+        long long v = AS_INTEGER(arg);
+        return makeInt(v * v);
+    } else if (is_real_type(arg.type)) {
+        long double v = AS_REAL(arg);
+        return makeReal(v * v);
     }
     runtimeError(vm, "Sqr expects an Integer or Real argument. Got %s.", varTypeToString(arg.type));
     return makeInt(0);
 }
 
 Value vmBuiltinChr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "Chr expects 1 integer argument.");
         return makeChar('\0');
     }
-    return makeChar((char)args[0].i_val);
+    long long code = AS_INTEGER(args[0]);
+    if (code < 0 || code > PASCAL_CHAR_MAX) {
+        runtimeError(vm, "Chr argument out of range.");
+        return makeChar('\0');
+    }
+    return makeChar((int)code);
 }
 
 Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
@@ -316,10 +329,18 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     Value arg = args[0];
+    if (IS_INTLIKE(arg)) {
+        return makeInt(AS_INTEGER(arg) + 1);
+    }
     switch(arg.type) {
-        case TYPE_INTEGER: return makeInt(arg.i_val + 1);
-        case TYPE_CHAR:    return makeChar(arg.c_val + 1);
-        case TYPE_BOOLEAN: return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
+        case TYPE_CHAR:
+            if (arg.c_val >= PASCAL_CHAR_MAX) {
+                runtimeError(vm, "Succ char overflow.");
+                return makeVoid();
+            }
+            return makeChar(arg.c_val + 1);
+        case TYPE_BOOLEAN:
+            return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
         case TYPE_ENUM: {
             int ordinal = arg.enum_val.ordinal;
             if (arg.enum_meta && ordinal + 1 >= arg.enum_meta->member_count) {
@@ -332,17 +353,29 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
             return result;
         }
         default:
-            runtimeError(vm, "Succ requires an ordinal type argument. Got %s.", varTypeToString(arg.type));
+            runtimeError(vm, "Succ requires an ordinal type argument. Got %s.",
+                         varTypeToString(arg.type));
             return makeVoid();
     }
 }
 
 Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_CHAR) {
+    if (arg_count != 1) {
         runtimeError(vm, "Upcase expects 1 char argument.");
         return makeChar('\0');
     }
-    return makeChar(toupper(args[0].c_val));
+
+    Value arg = args[0];
+    int c;
+    if (arg.type == TYPE_CHAR) {
+        c = arg.c_val;
+    } else if (IS_INTLIKE(arg)) {
+        c = (int)AS_INTEGER(arg);
+    } else {
+        runtimeError(vm, "Upcase expects 1 char argument.");
+        return makeChar('\0');
+    }
+    return makeChar(toupper((unsigned char)c));
 }
 
 Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
@@ -380,7 +413,7 @@ Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
     // Allow the first argument to be a char
-    if (arg_count != 3 || (args[0].type != TYPE_STRING && args[0].type != TYPE_CHAR) || args[1].type != TYPE_INTEGER || args[2].type != TYPE_INTEGER) {
+    if (arg_count != 3 || (args[0].type != TYPE_STRING && args[0].type != TYPE_CHAR) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2])) {
         runtimeError(vm, "Copy expects (String/Char, Integer, Integer).");
         return makeString("");
     }
@@ -421,7 +454,7 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2 || args[0].type != TYPE_POINTER || args[1].type != TYPE_INTEGER) {
+    if (arg_count != 2 || args[0].type != TYPE_POINTER || !IS_INTLIKE(args[1])) {
         runtimeError(vm, "SetLength expects (var string, integer).");
         return makeVoid();
     }
@@ -469,25 +502,31 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_REAL) {
+    if (arg_count != 1 || !is_real_type(args[0].type)) {
         runtimeError(vm, "RealToStr expects 1 real argument.");
         return makeString("");
     }
     char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%f", AS_REAL(args[0]));
+    snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
     return makeString(buffer);
 }
 
 Value vmBuiltinParamcount(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "ParamCount expects 0 arguments.");
-        return makeInt(0);
+        return makeInt64(0);
     }
-    return makeInt(gParamCount);
+    /*
+     * ParamCount should reflect the number of command line parameters as an
+     * integer.  Since the VM now supports multiple integer widths, use the
+     * widest standard signed integer to avoid inadvertent promotion to a
+     * floating type or other category.
+     */
+    return makeInt64(gParamCount);
 }
 
 Value vmBuiltinParamstr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "ParamStr expects 1 integer argument.");
         return makeString("");
     }
@@ -900,21 +939,23 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     }
     vmEnableRawMode();
 
-    char c;
-    if (read(STDIN_FILENO, &c, 1) != 1) {
-        c = '\0';
+    unsigned char ch_byte;
+    if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+        ch_byte = '\0';
     }
+    int c = ch_byte;
 
     if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
             runtimeError(vm, "ReadKey argument must be a VAR char.");
         } else {
             Value* dst = (Value*)args[0].ptr_val;
-            if (dst->type == TYPE_CHAR) {
-                dst->c_val = c;
-            } else {
-                runtimeError(vm, "ReadKey argument must be of type CHAR.");
-            }
+                if (dst->type == TYPE_CHAR) {
+                    dst->c_val = c;
+                    SET_INT_VALUE(dst, dst->c_val);
+                } else {
+                    runtimeError(vm, "ReadKey argument must be of type CHAR.");
+                }
         }
     }
 
@@ -932,7 +973,7 @@ Value vmBuiltinQuitrequested(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2 || args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
         runtimeError(vm, "GotoXY expects 2 integer arguments.");
         return makeVoid();
     }
@@ -946,7 +987,7 @@ Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinTextcolor(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "TextColor expects 1 integer argument.");
         return makeVoid();
     }
@@ -958,7 +999,7 @@ Value vmBuiltinTextcolor(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "TextBackground expects 1 integer argument.");
         return makeVoid();
     }
@@ -967,8 +1008,8 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_BYTE && args[0].type != TYPE_WORD)) { // <<< MODIFIED LINE
-        runtimeError(vm, "TextColorE expects an integer-compatible argument (Integer, Word, Byte)."); // Changed error message
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "TextColorE expects an integer argument.");
         return makeVoid();
     }
     gCurrentTextColor = (int)AS_INTEGER(args[0]);
@@ -978,7 +1019,7 @@ Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinTextbackgrounde(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_INTEGER) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "TextBackgroundE expects 1 integer argument.");
         return makeVoid();
     }
@@ -1241,8 +1282,8 @@ Value vmBuiltinHighvideo(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4 ||
-        args[0].type != TYPE_INTEGER || args[1].type != TYPE_INTEGER ||
-        args[2].type != TYPE_INTEGER || args[3].type != TYPE_INTEGER) {
+        !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) ||
+        !IS_INTLIKE(args[2]) || !IS_INTLIKE(args[3])) {
         runtimeError(vm, "Window expects 4 integer arguments.");
         return makeVoid();
     }
@@ -1282,22 +1323,25 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinSqrt(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "sqrt expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    long double x = IS_INTLIKE(arg) ? (long double)AS_INTEGER(arg) : AS_REAL(arg);
     if (x < 0) { runtimeError(vm, "sqrt expects a non-negative argument."); return makeReal(0.0); }
-    return makeReal(sqrt(x));
+    if (arg.type == TYPE_LONG_DOUBLE) {
+        return makeLongDouble(sqrtl(x));
+    }
+    return makeReal(sqrt((double)x));
 }
 
 Value vmBuiltinExp(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "exp expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(exp(x));
 }
 
 Value vmBuiltinLn(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "ln expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     if (x <= 0) { runtimeError(vm, "ln expects a positive argument."); return makeReal(0.0); }
     return makeReal(log(x));
 }
@@ -1305,121 +1349,172 @@ Value vmBuiltinLn(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinCos(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "cos expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(cos(x));
 }
 
 Value vmBuiltinSin(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "sin expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(sin(x));
 }
 
 Value vmBuiltinTan(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "tan expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(tan(x));
 }
 
 Value vmBuiltinArctan(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "arctan expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(atan(x));
 }
 
 Value vmBuiltinArcsin(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "arcsin expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(asin(x));
 }
 
 Value vmBuiltinArccos(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "arccos expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(acos(x));
 }
 
 Value vmBuiltinCotan(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "cotan expects 1 argument."); return makeReal(0.0); }
     Value arg = args[0];
-    double x = (arg.type == TYPE_INTEGER) ? (double)arg.i_val : arg.r_val;
+    double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     double t = tan(x);
     return makeReal(1.0 / t);
 }
 
 Value vmBuiltinPower(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "power expects 2 arguments."); return makeReal(0.0); }
-    double base = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
-    double exponent = (args[1].type == TYPE_INTEGER) ? (double)args[1].i_val : args[1].r_val;
+    if (arg_count != 2) {
+        runtimeError(vm, "power expects 2 arguments.");
+        return makeReal(0.0);
+    }
+
+    bool base_is_int = IS_INTLIKE(args[0]);
+    bool exp_is_int  = IS_INTLIKE(args[1]);
+
+    if (base_is_int && exp_is_int) {
+        long long base = AS_INTEGER(args[0]);
+        long long exp  = AS_INTEGER(args[1]);
+        if (exp >= 0) {
+            long long result = 1;
+            long long b = base;
+            long long e = exp;
+            bool overflow = false;
+            while (e > 0 && !overflow) {
+                if (e & 1) {
+                    overflow |= __builtin_mul_overflow(result, b, &result);
+                }
+                e >>= 1;
+                if (e)
+                    overflow |= __builtin_mul_overflow(b, b, &b);
+            }
+            if (!overflow) {
+                return makeInt(result);
+            }
+            // fall through to real computation on overflow
+        }
+        // negative exponent falls through to real computation
+    }
+
+    double base = base_is_int ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
+    double exponent = exp_is_int ? (double)AS_INTEGER(args[1]) : (double)AS_REAL(args[1]);
     return makeReal(pow(base, exponent));
 }
 
 Value vmBuiltinLog10(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "log10 expects 1 argument."); return makeReal(0.0); }
-    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
     return makeReal(log10(x));
 }
 
 Value vmBuiltinSinh(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "sinh expects 1 argument."); return makeReal(0.0); }
-    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
     return makeReal(sinh(x));
 }
 
 Value vmBuiltinCosh(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "cosh expects 1 argument."); return makeReal(0.0); }
-    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
     return makeReal(cosh(x));
 }
 
 Value vmBuiltinTanh(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "tanh expects 1 argument."); return makeReal(0.0); }
-    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
     return makeReal(tanh(x));
 }
 
 Value vmBuiltinMax(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "max expects 2 arguments."); return makeReal(0.0); }
-    double a = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
-    double b = (args[1].type == TYPE_INTEGER) ? (double)args[1].i_val : args[1].r_val;
-    return makeReal((a > b) ? a : b);
+    if (arg_count != 2) { runtimeError(vm, "max expects 2 arguments."); return makeInt(0); }
+
+    bool aInt = IS_INTLIKE(args[0]);
+    bool bInt = IS_INTLIKE(args[1]);
+
+    if (aInt && bInt) {
+        long long a = AS_INTEGER(args[0]);
+        long long b = AS_INTEGER(args[1]);
+        return makeInt((a > b) ? a : b);
+    } else {
+        double a = aInt ? (double)AS_INTEGER(args[0]) : AS_REAL(args[0]);
+        double b = bInt ? (double)AS_INTEGER(args[1]) : AS_REAL(args[1]);
+        return makeReal((a > b) ? a : b);
+    }
 }
 
 Value vmBuiltinMin(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "min expects 2 arguments."); return makeReal(0.0); }
-    double a = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
-    double b = (args[1].type == TYPE_INTEGER) ? (double)args[1].i_val : args[1].r_val;
-    return makeReal((a < b) ? a : b);
+    if (arg_count != 2) { runtimeError(vm, "min expects 2 arguments."); return makeInt(0); }
+
+    bool aInt = IS_INTLIKE(args[0]);
+    bool bInt = IS_INTLIKE(args[1]);
+
+    if (aInt && bInt) {
+        long long a = AS_INTEGER(args[0]);
+        long long b = AS_INTEGER(args[1]);
+        return makeInt((a < b) ? a : b);
+    } else {
+        double a = aInt ? (double)AS_INTEGER(args[0]) : AS_REAL(args[0]);
+        double b = bInt ? (double)AS_INTEGER(args[1]) : AS_REAL(args[1]);
+        return makeReal((a < b) ? a : b);
+    }
 }
 
 Value vmBuiltinFloor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "floor expects 1 argument."); return makeInt(0); }
-    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
     return makeInt((long long)floor(x));
 }
 
 Value vmBuiltinCeil(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "ceil expects 1 argument."); return makeInt(0); }
-    double x = (args[0].type == TYPE_INTEGER) ? (double)args[0].i_val : args[0].r_val;
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
     return makeInt((long long)ceil(x));
 }
 
 Value vmBuiltinTrunc(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "trunc expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
-    if (arg.type == TYPE_INTEGER) return makeInt(arg.i_val);
-    if (arg.type == TYPE_REAL) return makeInt((long long)arg.r_val);
+    if (IS_INTLIKE(arg)) return makeInt(AS_INTEGER(arg));
+    if (is_real_type(arg.type)) return makeInt((long long)AS_REAL(arg));
     runtimeError(vm, "trunc expects a numeric argument.");
     return makeInt(0);
 }
 
 static inline bool isOrdinalDelta(const Value* v) {
-    return v->type == TYPE_INTEGER || v->type == TYPE_BYTE || v->type == TYPE_WORD || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
+    return is_intlike_type(v->type) || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
 }
 
 static inline long long coerceDeltaToI64(const Value* v) {
@@ -1430,7 +1525,7 @@ static inline long long coerceDeltaToI64(const Value* v) {
         case TYPE_BOOLEAN:
             return v->i_val;
         case TYPE_CHAR:
-            return (unsigned char)v->c_val;
+            return v->c_val;
         default:
             return 0;
     }
@@ -1439,10 +1534,10 @@ static inline long long coerceDeltaToI64(const Value* v) {
 Value vmBuiltinOrd(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "ord expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
-    if (arg.type == TYPE_CHAR) return makeInt((unsigned char)arg.c_val);
+    if (arg.type == TYPE_CHAR) return makeInt(arg.c_val);
     if (arg.type == TYPE_BOOLEAN) return makeInt(arg.i_val);
     if (arg.type == TYPE_ENUM) return makeInt(arg.enum_val.ordinal);
-    if (arg.type == TYPE_INTEGER) return makeInt(arg.i_val);
+    if (IS_INTLIKE(arg)) return makeInt(AS_INTEGER(arg));
     runtimeError(vm, "ord expects an ordinal type argument.");
     return makeInt(0);
 }
@@ -1470,7 +1565,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
 
     switch (target->type) {
         case TYPE_INTEGER:
-            target->i_val += delta;
+            SET_INT_VALUE(target, target->i_val + delta);
             break;
 
         case TYPE_BYTE: {
@@ -1478,7 +1573,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 255) {
                 runtimeError(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
             }
-            target->i_val = (next & 0xFF);
+            SET_INT_VALUE(target, next & 0xFF);
             break;
         }
 
@@ -1487,13 +1582,19 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 65535) {
                 runtimeError(vm, "Warning: Range check error incrementing WORD to %lld.", next);
             }
-            target->i_val = (next & 0xFFFF);
+            SET_INT_VALUE(target, next & 0xFFFF);
             break;
         }
 
-        case TYPE_CHAR:
-            target->c_val = (char)((unsigned char)target->c_val + (unsigned long long)delta);
+        case TYPE_CHAR: {
+            long long next = target->c_val + delta;
+            if (next < 0 || next > PASCAL_CHAR_MAX) {
+                runtimeError(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
+            }
+            target->c_val = (int)next;
+            SET_INT_VALUE(target, target->c_val);
             break;
+        }
 
         case TYPE_ENUM:
             target->enum_val.ordinal += (int)delta;
@@ -1530,7 +1631,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
 
     switch (target->type) {
         case TYPE_INTEGER:
-            target->i_val -= delta;
+            SET_INT_VALUE(target, target->i_val - delta);
             break;
 
         case TYPE_BYTE: {
@@ -1538,7 +1639,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 255) {
                 runtimeError(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
             }
-            target->i_val = (next & 0xFF);
+            SET_INT_VALUE(target, next & 0xFF);
             break;
         }
 
@@ -1547,13 +1648,19 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
             if (next < 0 || next > 65535) {
                 runtimeError(vm, "Warning: Range check error decrementing WORD to %lld.", next);
             }
-            target->i_val = (next & 0xFFFF);
+            SET_INT_VALUE(target, next & 0xFFFF);
             break;
         }
 
-        case TYPE_CHAR:
-            target->c_val = (char)((unsigned char)target->c_val - (unsigned long long)delta);
+        case TYPE_CHAR: {
+            long long next = target->c_val - delta;
+            if (next < 0 || next > PASCAL_CHAR_MAX) {
+                runtimeError(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
+            }
+            target->c_val = (int)next;
+            SET_INT_VALUE(target, target->c_val);
             break;
+        }
 
         case TYPE_ENUM:
             target->enum_val.ordinal -= (int)delta;
@@ -1662,7 +1769,7 @@ Value vmBuiltinHigh(VM* vm, int arg_count, Value* args) {
 
     switch (t) {
         case TYPE_INTEGER: return makeInt(2147483647);
-        case TYPE_CHAR:    return makeChar((unsigned char)255);
+        case TYPE_CHAR:    return makeChar(PASCAL_CHAR_MAX);
         case TYPE_BOOLEAN: return makeBoolean(true);
         case TYPE_BYTE:    return makeInt(255);
         case TYPE_WORD:    return makeInt(65535);
@@ -1721,12 +1828,14 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
         const char* typeName = actualBaseTypeDef->token->value;
         if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "real")==0) { baseVarType=TYPE_REAL; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "real")==0 || strcasecmp(typeName, "double")==0) { baseVarType=TYPE_DOUBLE; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "float")==0) { baseVarType=TYPE_FLOAT; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "char")==0) { baseVarType=TYPE_CHAR; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "string")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "boolean")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "string")==0 || strcasecmp(typeName, "str")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "boolean")==0 || strcasecmp(typeName, "bool")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "byte")==0) { baseVarType=TYPE_BYTE; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "word")==0) { baseVarType=TYPE_WORD; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "int")==0) { baseVarType=TYPE_INT32; actualBaseTypeDef = NULL; }
         else {
             AST* lookedUpType = lookupType(typeName);
             if (!lookedUpType) { runtimeError(vm, "Cannot resolve base type '%s' in new().", typeName); return makeVoid(); }
@@ -1752,8 +1861,8 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinExit(VM* vm, int arg_count, Value* args) {
-    if (arg_count > 0) {
-        runtimeError(vm, "exit does not take any arguments.");
+    if (arg_count > 1 || (arg_count == 1 && !IS_INTLIKE(args[0]))) {
+        runtimeError(vm, "exit expects 0 or 1 integer argument.");
         return makeVoid();
     }
     // Signal the VM to unwind the current call frame on return from the builtin
@@ -1861,6 +1970,29 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinAppend(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Append requires 1 argument."); return makeVoid(); }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Append: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Append must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Append."); return makeVoid(); }
+    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+
+    FILE* f = fopen(fileVarLValue->filename, "a");
+    if (f == NULL) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+    }
+    fileVarLValue->f_val = f;
+    return makeVoid();
+}
+
 Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Close requires 1 argument."); return makeVoid(); }
     
@@ -1876,6 +2008,56 @@ Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
         fileVarLValue->f_val = NULL;
     }
     // Standard Pascal does not de-assign the filename on Close.
+    return makeVoid();
+}
+
+Value vmBuiltinRename(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) { runtimeError(vm, "Rename requires 2 arguments."); return makeVoid(); }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Rename: First argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First argument to Rename must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rename."); return makeVoid(); }
+    if (args[1].type != TYPE_STRING) { runtimeError(vm, "Second argument to Rename must be a string."); return makeVoid(); }
+    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+
+    int res = rename(fileVarLValue->filename, args[1].s_val);
+    if (res != 0) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+        free(fileVarLValue->filename);
+        fileVarLValue->filename = args[1].s_val ? strdup(args[1].s_val) : NULL;
+        if (args[1].s_val && !fileVarLValue->filename) {
+            runtimeError(vm, "Memory allocation failed for filename in Rename.");
+        }
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinErase(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) { runtimeError(vm, "Erase requires 1 argument."); return makeVoid(); }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "Erase: Argument must be a VAR file parameter.");
+        return makeVoid();
+    }
+    Value* fileVarLValue = (Value*)args[0].ptr_val;
+
+    if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Erase must be a file variable."); return makeVoid(); }
+    if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Erase."); return makeVoid(); }
+    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+
+    int res = remove(fileVarLValue->filename);
+    if (res != 0) {
+        last_io_error = errno ? errno : 1;
+    } else {
+        last_io_error = 0;
+    }
     return makeVoid();
 }
 
@@ -1954,7 +2136,8 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
         if (dst->type == TYPE_CHAR) {
             int ch = fgetc(input_stream);
             if (ch == EOF) { last_io_error = feof(input_stream) ? 0 : 1; break; }
-            dst->c_val = (char)ch;
+            dst->c_val = ch;
+            SET_INT_VALUE(dst, dst->c_val);
             continue;
         }
 
@@ -1971,23 +2154,30 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 long long v = strtoll(buffer, NULL, 10);
                 if (errno == ERANGE) { last_io_error = 1; v = 0; }
-                dst->i_val = v;
+                SET_INT_VALUE(dst, v);
+                break;
+            }
+            case TYPE_FLOAT: {
+                errno = 0;
+                float v = strtof(buffer, NULL);
+                if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
+                SET_REAL_VALUE(dst, v);
                 break;
             }
             case TYPE_REAL: {
                 errno = 0;
                 double v = strtod(buffer, NULL);
                 if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                dst->r_val = v;
+                SET_REAL_VALUE(dst, v);
                 break;
             }
             case TYPE_BOOLEAN: {
                 if (strcasecmp(buffer, "true") == 0 || strcmp(buffer, "1") == 0) {
-                    dst->i_val = 1;
+                    SET_INT_VALUE(dst, 1);
                 } else if (strcasecmp(buffer, "false") == 0 || strcmp(buffer, "0") == 0) {
-                    dst->i_val = 0;
+                    SET_INT_VALUE(dst, 0);
                 } else {
-                    dst->i_val = 0;
+                    SET_INT_VALUE(dst, 0);
                     last_io_error = 1;
                 }
                 break;
@@ -2077,29 +2267,71 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
         }
 
         switch (dst->type) {
-            case TYPE_INTEGER:
-            case TYPE_WORD:
-            case TYPE_BYTE: {
+            case TYPE_INT8:
+            case TYPE_INT16:
+            case TYPE_INT32: /* TYPE_INTEGER */
+            case TYPE_INT64: {
                 errno = 0;
                 char* endp = NULL;
                 long long v = strtoll(p, &endp, 10);
                 if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
-                dst->i_val = v;
+                SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
             }
-            case TYPE_REAL: {
+            case TYPE_UINT8:
+            case TYPE_BYTE:
+            case TYPE_UINT16:
+            case TYPE_WORD:
+            case TYPE_UINT32:
+            case TYPE_UINT64: {
                 errno = 0;
                 char* endp = NULL;
-                double v = strtod(p, &endp);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
-                dst->r_val = v;
+                unsigned long long v = strtoull(p, &endp, 10);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
             }
-            case TYPE_CHAR:
-                if (*p) { dst->c_val = *p++; } else { dst->c_val = '\0'; last_io_error = 1; }
+            case TYPE_FLOAT:
+            case TYPE_DOUBLE: /* TYPE_REAL */
+            case TYPE_LONG_DOUBLE: {
+                errno = 0;
+                char* endp = NULL;
+                long double v = strtold(p, &endp);
+                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
+                SET_REAL_VALUE(dst, v);
+                p = endp ? endp : p;
                 break;
+            }
+            case TYPE_BOOLEAN: {
+                if (strncasecmp(p, "true", 4) == 0) {
+                    SET_INT_VALUE(dst, 1);
+                    p += 4;
+                } else if (strncasecmp(p, "false", 5) == 0) {
+                    SET_INT_VALUE(dst, 0);
+                    p += 5;
+                } else {
+                    errno = 0;
+                    char* endp = NULL;
+                    long long v = strtoll(p, &endp, 10);
+                    if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                    SET_INT_VALUE(dst, v ? 1 : 0);
+                    p = endp ? endp : p;
+                }
+                break;
+            }
+            case TYPE_CHAR: {
+                if (*p) {
+                dst->c_val = (unsigned char)*p++;
+                SET_INT_VALUE(dst, dst->c_val);
+                } else {
+                    dst->c_val = '\0';
+                    SET_INT_VALUE(dst, 0);
+                    last_io_error = 1;
+                }
+                break;
+            }
 
             case TYPE_STRING: {
                 char* tmp = strdup(p);
@@ -2158,8 +2390,8 @@ Value vmBuiltinRandom(VM* vm, int arg_count, Value* args) {
     if (arg_count == 0) {
         return makeReal((double)rand() / ((double)RAND_MAX + 1.0));
     }
-    if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
-        long long n = args[0].i_val;
+    if (arg_count == 1 && IS_INTLIKE(args[0])) {
+        long long n = AS_INTEGER(args[0]);
         if (n <= 0) { runtimeError(vm, "Random argument must be > 0."); return makeInt(0); }
         return makeInt(rand() % n);
     }
@@ -2192,7 +2424,7 @@ Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinGetenvint(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING ||
-        (args[1].type != TYPE_INTEGER && args[1].type != TYPE_BYTE && args[1].type != TYPE_WORD)) {
+        !IS_INTLIKE(args[1])) {
         runtimeError(vm, "GetEnvInt expects (string, integer).");
         return makeInt(0);
     }
@@ -2227,12 +2459,12 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
 
     char* endptr = NULL;
     errno = 0;
-    if (dst->type == TYPE_REAL) {
+    if (dst->type == TYPE_REAL || dst->type == TYPE_FLOAT) {
         double r = strtod(s, &endptr);
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            dst->r_val = r;
+            SET_REAL_VALUE(dst, r);
             *code = makeInt(0);
         }
     } else {
@@ -2240,7 +2472,7 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
         if (errno != 0 || (endptr && *endptr != '\0')) {
             *code = makeInt((int)((endptr ? endptr : s) - s) + 1);
         } else {
-            dst->i_val = n;
+            SET_INT_VALUE(dst, n);
             *code = makeInt(0);
         }
     }
@@ -2249,6 +2481,17 @@ Value vmBuiltinVal(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinValreal(VM* vm, int arg_count, Value* args) {
     return vmBuiltinVal(vm, arg_count, args);
+}
+
+Value vmBuiltinVMVersion(VM* vm, int arg_count, Value* args) {
+    (void)vm; (void)args;
+    return arg_count == 0 ? makeInt(PSCAL_VM_VERSION) : makeInt(-1);
+}
+
+Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (arg_count != 0 || !vm || !vm->chunk) return makeInt(-1);
+    return makeInt(vm->chunk->version);
 }
 
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
@@ -2349,10 +2592,10 @@ Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
     Value* month = (Value*)args[1].ptr_val;
     Value* day = (Value*)args[2].ptr_val;
     Value* dow = (Value*)args[3].ptr_val;
-    if (year) year->i_val = tm_info.tm_year + 1900;
-    if (month) month->i_val = tm_info.tm_mon + 1;
-    if (day) day->i_val = tm_info.tm_mday;
-    if (dow) dow->i_val = tm_info.tm_wday;
+    if (year) { year->type = TYPE_WORD; SET_INT_VALUE(year, tm_info.tm_year + 1900); }
+    if (month) { month->type = TYPE_WORD; SET_INT_VALUE(month, tm_info.tm_mon + 1); }
+    if (day) { day->type = TYPE_WORD; SET_INT_VALUE(day, tm_info.tm_mday); }
+    if (dow) { dow->type = TYPE_WORD; SET_INT_VALUE(dow, tm_info.tm_wday); }
     return makeVoid();
 }
 
@@ -2369,10 +2612,10 @@ Value vmBuiltinDosGettime(VM* vm, int arg_count, Value* args) {
     Value* min = (Value*)args[1].ptr_val;
     Value* sec = (Value*)args[2].ptr_val;
     Value* sec100 = (Value*)args[3].ptr_val;
-    if (hour) hour->i_val = tm_info.tm_hour;
-    if (min) min->i_val = tm_info.tm_min;
-    if (sec) sec->i_val = tm_info.tm_sec;
-    if (sec100) sec100->i_val = (int)(tv.tv_usec / 10000);
+    if (hour) { hour->type = TYPE_WORD; SET_INT_VALUE(hour, tm_info.tm_hour); }
+    if (min) { min->type = TYPE_WORD; SET_INT_VALUE(min, tm_info.tm_min); }
+    if (sec) { sec->type = TYPE_WORD; SET_INT_VALUE(sec, tm_info.tm_sec); }
+    if (sec100) { sec100->type = TYPE_WORD; SET_INT_VALUE(sec100, (int)(tv.tv_usec / 10000)); }
     return makeVoid();
 }
 
@@ -2576,21 +2819,17 @@ Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
         return makeReal(0.0);
     }
     Value arg = args[0];
-    switch (arg.type) {
-        case TYPE_INTEGER:
-        case TYPE_BYTE:
-        case TYPE_WORD:
-        case TYPE_BOOLEAN:
-            return makeReal((double)arg.i_val);
-        case TYPE_CHAR:
-            return makeReal((double)arg.c_val);
-        case TYPE_REAL:
-            // Return a copy of the real value itself, it's already a real.
-            return makeReal(arg.r_val);
-        default:
-            runtimeError(vm, "Real() argument must be an Integer, Ordinal, or Real type. Got %s.", varTypeToString(arg.type));
-            return makeReal(0.0);
+    if (IS_INTLIKE(arg)) {
+        return makeReal((double)AS_INTEGER(arg));
     }
+    if (arg.type == TYPE_CHAR) {
+        return makeReal((double)arg.c_val);
+    }
+    if (is_real_type(arg.type)) {
+        return makeReal(AS_REAL(arg));
+    }
+    runtimeError(vm, "Real() argument must be an Integer, Ordinal, or Real type. Got %s.", varTypeToString(arg.type));
+    return makeReal(0.0);
 }
 
 
@@ -2598,17 +2837,12 @@ Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "IntToStr requires 1 argument."); return makeString(""); }
     Value arg = args[0];
     long long value_to_convert = 0;
-    switch (arg.type) {
-        case TYPE_INTEGER:
-        case TYPE_WORD:
-        case TYPE_BYTE:
-        case TYPE_BOOLEAN:
-            value_to_convert = arg.i_val;
-            break;
-        case TYPE_CHAR:
-            value_to_convert = (long long)arg.c_val;
-            break;
-        default: runtimeError(vm, "IntToStr requires an integer-compatible argument."); return makeString("");
+    if (IS_INTLIKE(arg)) {
+        value_to_convert = AS_INTEGER(arg);
+    } else if (arg.type == TYPE_CHAR) {
+        value_to_convert = (long long)arg.c_val;
+    } else {
+        runtimeError(vm, "IntToStr requires an integer-compatible argument."); return makeString("");
     }
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "%lld", value_to_convert);
@@ -2628,21 +2862,19 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
     }
     char buffer[64];
     switch (val.type) {
-        case TYPE_INTEGER:
-        case TYPE_WORD:
-        case TYPE_BYTE:
-        case TYPE_BOOLEAN:
-            snprintf(buffer, sizeof(buffer), "%lld", val.i_val);
-            break;
-        case TYPE_REAL:
-            snprintf(buffer, sizeof(buffer), "%f", val.r_val);
-            break;
         case TYPE_CHAR:
             snprintf(buffer, sizeof(buffer), "%c", val.c_val);
             break;
         default:
-            runtimeError(vm, "Str expects a numeric or char argument.");
-            return makeVoid();
+            if (IS_INTLIKE(val)) {
+                snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
+            } else if (is_real_type(val.type)) {
+                snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
+            } else {
+                runtimeError(vm, "Str expects a numeric or char argument.");
+                return makeVoid();
+            }
+            break;
     }
     char* new_buf = strdup(buffer);
     if (!new_buf) {
@@ -2683,16 +2915,16 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinAbs(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
-    if (args[0].type == TYPE_INTEGER) return makeInt(llabs(args[0].i_val));
-    if (args[0].type == TYPE_REAL) return makeReal(fabs(args[0].r_val));
+    if (IS_INTLIKE(args[0])) return makeInt(llabs(AS_INTEGER(args[0])));
+    if (is_real_type(args[0].type)) return makeReal(fabsl(AS_REAL(args[0])));
     runtimeError(vm, "abs expects a numeric argument.");
     return makeInt(0);
 }
 
 Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Round expects 1 argument."); return makeInt(0); }
-    if (args[0].type == TYPE_REAL) return makeInt((long long)round(args[0].r_val));
-    if (args[0].type == TYPE_INTEGER) return makeInt(args[0].i_val);
+    if (is_real_type(args[0].type)) return makeInt((long long)llround(AS_REAL(args[0])));
+    if (IS_INTLIKE(args[0])) return makeInt(AS_INTEGER(args[0]));
     runtimeError(vm, "Round expects a numeric argument.");
     return makeInt(0);
 }
@@ -2701,8 +2933,8 @@ Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     long long code = 0;
     if (arg_count == 0) {
         // No exit code supplied, default to 0.
-    } else if (arg_count == 1 && args[0].type == TYPE_INTEGER) {
-        code = args[0].i_val;
+    } else if (arg_count == 1 && IS_INTLIKE(args[0])) {
+        code = AS_INTEGER(args[0]);
     } else {
         runtimeError(vm, "Halt expects 0 or 1 integer argument.");
     }
@@ -2711,11 +2943,11 @@ Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || (args[0].type != TYPE_INTEGER && args[0].type != TYPE_WORD)) {
-        runtimeError(vm, "Delay requires an integer or word argument.");
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "Delay requires an integer argument.");
         return makeVoid();
     }
-    long long ms = args[0].i_val;
+    long long ms = AS_INTEGER(args[0]);
     if (ms > 0) usleep((useconds_t)ms * 1000);
     return makeVoid();
 }
@@ -2825,6 +3057,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcTan", AST_FUNCTION_DECL, NULL);
@@ -2903,6 +3136,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ReadKey", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Rename", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Erase", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
@@ -2940,8 +3175,10 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("TextColorE", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("BytecodeVersion", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("VMVersion", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);

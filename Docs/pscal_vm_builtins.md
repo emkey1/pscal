@@ -53,12 +53,14 @@ VM. For instructions on adding your own routines, see
 | window | (left: Integer, top: Integer, right: Integer, bottom: Integer) | void | Set output window. |
 | keypressed | () | Boolean | True if key waiting. |
 | readkey | ([var c: Char]) | Char | Read key. Optionally stores into VAR char. |
+| write | ([file: File,] ...) | void | Write values to file or console (all integer sizes, boolean, and float types incl. 80-bit). |
+| writeln | ([file: File,] ...) | void | Write values and newline (all integer sizes, boolean, and float types incl. 80-bit). |
 | read | ([file: File,] var ...) | void | Read values from file or console. |
-| readln | ([file: File,] var ...) | void | Read line from file or console. |
+| readln | ([file: File,] var ...) | void | Read line and parse into vars (all integer sizes, boolean, and float types incl. 80-bit). |
 | textcolor | (color: Integer) | void | Set text color. |
 | textbackground | (color: Integer) | void | Set background color. |
-| textcolore | (color: Integer) | void | Extended text color. |
-| textbackgrounde | (color: Integer) | void | Extended background color. |
+| textcolore | (color: Integer) | void | Set text color using 256-color palette. |
+| textbackgrounde | (color: Integer) | void | Set background color using 256-color palette. |
 | boldtext / highvideo | () | void | Enable bold text. |
 | lowvideo | () | void | Enable dim text. |
 | normalcolors / normvideo | () | void | Reset text attributes. |
@@ -76,10 +78,13 @@ VM. For instructions on adding your own routines, see
 | assign | (var f: File, name: String) | void | Bind a file variable to a name. |
 | reset | (var f: File) | void | Open file for reading. |
 | rewrite | (var f: File) | void | Open file for writing. |
+| append | (var f: File) | void | Open file for appending. |
 | close | (var f: File) | void | Close file. |
+| rename | (var f: File, newName: String) | void | Rename file. |
+| erase | (var f: File) | void | Delete file. (CLike front end calls this `remove`.) |
 | eof | ([f: File]) | Boolean | Test end of file. |
 | read | ([f: File,] var ...) | void | Read from file or console. |
-| readln | ([f: File,] var ...) | void | Read line from file or console. |
+| readln | ([f: File,] var ...) | void | Read line and parse into vars (all integer sizes, boolean, and float types incl. 80-bit). |
 | ioresult | () | Integer | Return last I/O error code. |
 
 ## Memory Streams
@@ -106,9 +111,9 @@ VM. For instructions on adding your own routines, see
 | exp | (x: Real) | Real | Exponential. |
 | ln | (x: Real) | Real | Natural logarithm. |
 | log10 | (x: Real) | Real | Base-10 logarithm. |
-| power | (base: Real, exponent: Real) | Real | Raise to power. |
-| max | (a: Real, b: Real) | Real | Maximum of two values. |
-| min | (a: Real, b: Real) | Real | Minimum of two values. |
+| power | (base: Numeric, exponent: Numeric) | Integer/Real | Raise to power. |
+| max | (a: Numeric, b: Numeric) | Integer/Real | Maximum of two values. |
+| min | (a: Numeric, b: Numeric) | Integer/Real | Minimum of two values. |
 | round | (x: Real) | Integer | Round to nearest integer. |
 | floor | (x: Real) | Integer | Floor. |
 | ceil | (x: Real) | Integer | Ceiling. |
@@ -119,6 +124,8 @@ VM. For instructions on adding your own routines, see
 | tan | (x: Real) | Real | Tangent. |
 | tanh | (x: Real) | Real | Hyperbolic tangent. |
 | trunc | (x: Real) | Integer | Truncate real to integer. |
+
+Numeric builtins preserve integer types when all inputs are integral. In particular, `power`, `max`, and `min` return integers when given only integer arguments and fall back to real otherwise.
 
 ## Random
 
@@ -138,8 +145,8 @@ VM. For instructions on adding your own routines, see
 | dos_rmdir / rmdir | (path: String) | Integer | Remove directory. |
 | dos_findfirst / findfirst | (pattern: String, attr: Integer) | Integer | Begin directory search. |
 | dos_findnext / findnext | () | Integer | Continue directory search. |
-| dos_getdate / getdate | () | Integer | Get system date packed as long. |
-| dos_gettime / gettime | () | Integer | Get system time packed as long. |
+| dos_getdate / getdate | (var Year, Month, Day, Dow: Word) | void | Retrieve system date components. |
+| dos_gettime / gettime | (var Hour, Minute, Second, Sec100: Word) | void | Retrieve system time components. |
 | dos_getfattr / getfattr | (path: String) | Integer | Get file attributes. |
 
 ## Networking

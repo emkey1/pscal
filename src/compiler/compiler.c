@@ -237,6 +237,20 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                  arg_vt == TYPE_ENUM    || arg_vt == TYPE_CHAR)) {
                 return true;
             }
+            // Permit wider integer arguments (e.g. LONGINT/INT64, CARDINAL/UINT32)
+            // to match INTEGER parameters.  Traditional Pascal routinely allows
+            // these values to be passed to routines expecting INTEGER so long as
+            // the caller explicitly requests it.  Our VM stores the value's
+            // actual type in the Value struct, so the callee will still receive
+            // the full precision.
+            if (param_actual->var_type == TYPE_INTEGER &&
+                (arg_vt == TYPE_INT64 || arg_vt == TYPE_UINT64 ||
+                 arg_vt == TYPE_UINT32)) {
+                return true;
+            }
+            if (is_real_type(param_actual->var_type) && is_intlike_type(arg_vt)) {
+                return true;
+            }
             return false;
         }
     } else if (!arg_actual) {
@@ -581,7 +595,8 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_STRING:
-            if (node->token && strlen(node->token->value) == 1) return makeChar(node->token->value[0]);
+            if (node->token && strlen(node->token->value) == 1)
+                return makeChar((unsigned char)node->token->value[0]);
             if (node->token) return makeString(node->token->value);
             break;
         case AST_BOOLEAN:
@@ -629,7 +644,7 @@ Value evaluateCompileTimeValue(AST* node) {
                 } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
                     Value arg = evaluateCompileTimeValue(node->children[0]);
                     if (arg.type == TYPE_INTEGER) {
-                        Value result = makeChar((char)arg.i_val);
+                        Value result = makeChar(arg.i_val);
                         freeValue(&arg);
                         return result;
                     }
@@ -638,7 +653,7 @@ Value evaluateCompileTimeValue(AST* node) {
                     Value arg = evaluateCompileTimeValue(node->children[0]);
                     Value result = makeVoid();
                     if (arg.type == TYPE_CHAR) {
-                        result = makeInt((unsigned char)arg.c_val);
+                        result = makeInt(arg.c_val);
                     } else if (arg.type == TYPE_BOOLEAN) {
                         result = makeInt(arg.i_val ? 1 : 0);
                     } else if (arg.type == TYPE_ENUM) {
@@ -664,9 +679,9 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (left_val.type == TYPE_REAL || right_val.type == TYPE_REAL) {
-                    double a = (left_val.type == TYPE_REAL) ? left_val.r_val : (double)left_val.i_val;
-                    double b = (right_val.type == TYPE_REAL) ? right_val.r_val : (double)right_val.i_val;
+                if (is_real_type(left_val.type) && is_real_type(right_val.type)) {
+                    double a = (double)AS_REAL(left_val);
+                    double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
                         case TOKEN_PLUS:
                             result = makeReal(a + b);
@@ -684,7 +699,7 @@ Value evaluateCompileTimeValue(AST* node) {
                                 result = makeReal(a / b);
                             }
                             break;
-                        case TOKEN_MOD:
+        case TOKEN_MOD:
                             if (b == 0.0) {
                                 fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
                             } else {
@@ -694,6 +709,8 @@ Value evaluateCompileTimeValue(AST* node) {
                         default:
                             break;
                     }
+                } else if (is_real_type(left_val.type) || is_real_type(right_val.type)) {
+                    fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
                 } else { // Both operands are integers
                     long long a = left_val.i_val;
                     long long b = right_val.i_val;
@@ -750,9 +767,10 @@ Value evaluateCompileTimeValue(AST* node) {
                     if (operand_val.type == TYPE_INTEGER) {
                         operand_val.i_val = -operand_val.i_val;
                         return operand_val; // Return the modified value
-                    } else if (operand_val.type == TYPE_REAL) {
-                        operand_val.r_val = -operand_val.r_val;
-                        return operand_val; // Return the modified value
+                    } else if (is_real_type(operand_val.type)) {
+                        double tmp = -(double)AS_REAL(operand_val);
+                        freeValue(&operand_val);
+                        return makeReal(tmp);
                     }
                 } else if (node->token->type == TOKEN_PLUS) {
                     // Unary plus is a no-op, just return the operand's value.
@@ -2108,7 +2126,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     is_var_param = true;
                 }
                 else if (calleeName && (
-                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
+                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
                     (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR
@@ -2323,7 +2341,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             // If the string literal has a length of 1, treat it as a character constant
             if (strlen(node_token->value) == 1) {
-                Value val = makeChar(node_token->value[0]);
+                /* Single-character string literals represent CHAR constants.
+                 * Cast through unsigned char so values in the 128..255 range
+                 * are preserved correctly. */
+                Value val = makeChar((unsigned char)node_token->value[0]);
                 int constIndex = addConstantToChunk(chunk, &val);
                 emitConstant(chunk, constIndex, line);
                 // The temporary char value `val` does not need `freeValue`

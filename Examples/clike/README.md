@@ -24,10 +24,11 @@ build/bin/clike Examples/Clike/<program>
 - `hello` – Hello World!
 - `module_demo` – demonstrates importing `math_utils.cl` from the clike
    library search path.
-- `sdl_multibouncingballs.cl` – SDL multi bouncing balls demo ported from Pascal.
-- `sdl_mandelbrot_row` – SDL Mandelbrot renderer using the MandelbrotRow builtin; left click to zoom in, right click to zoom out.
+- `sdl_multibouncingballs` – SDL multi bouncing balls demo ported from Pascal.
+- `sdl_mandelbrot_interactive` – SDL Mandelbrot renderer using the MandelbrotRow builtin; left click to zoom in, right click to zoom out.
 - `show_pid` – Uses an extended builtin function to show the process ID
 - `sort_string` – Shows how to copy and sort a string via a `str*` parameter
+- `vm_version_demo` – Prints VM and bytecode versions and exits on mismatch
 
 The clike front end resolves imports by first checking the directory in the
 `CLIKE_LIB_DIR` environment variable and falling back to

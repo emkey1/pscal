@@ -9,11 +9,13 @@
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in OP_CALL_HOST cast)
 #include "globals.h"
+#include "core/version.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
 // addConstantToChunk, emitShort, patchShort from your provided file.
 
 void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
+    chunk->version = PSCAL_VM_VERSION;
     chunk->count = 0;
     chunk->capacity = 0;
     chunk->code = NULL;
@@ -79,7 +81,7 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
         Value* existing = &chunk->constants[i];
         if (existing->type == value->type) {
             if (existing->type == TYPE_INTEGER && existing->i_val == value->i_val) return i;
-            if (existing->type == TYPE_REAL && existing->r_val == value->r_val) return i;
+            if (is_real_type(existing->type) && AS_REAL(*existing) == AS_REAL(*value)) return i;
             if (existing->type == TYPE_STRING && existing->s_val && value->s_val && strcmp(existing->s_val, value->s_val) == 0) return i;
             if (existing->type == TYPE_CHAR && existing->c_val == value->c_val) return i;
         }
@@ -258,7 +260,9 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
-                case TYPE_REAL:    printf("%f", constantValue.r_val); break;
+                case TYPE_FLOAT:
+                case TYPE_DOUBLE:
+                case TYPE_LONG_DOUBLE: printf("%Lf", AS_REAL(constantValue)); break;
                 case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
@@ -279,7 +283,9 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             Value constantValue = chunk->constants[constant_index];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("%lld", constantValue.i_val); break;
-                case TYPE_REAL:    printf("%f", constantValue.r_val); break;
+                case TYPE_FLOAT:
+                case TYPE_DOUBLE:
+                case TYPE_LONG_DOUBLE: printf("%Lf", AS_REAL(constantValue)); break;
                 case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
@@ -691,7 +697,9 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
             Value constantValue = chunk->constants[i];
             switch(constantValue.type) {
                 case TYPE_INTEGER: printf("INT   %lld\n", constantValue.i_val); break;
-                case TYPE_REAL:    printf("REAL  %f\n", constantValue.r_val); break;
+                case TYPE_FLOAT:
+                case TYPE_DOUBLE:
+                case TYPE_LONG_DOUBLE: printf("REAL  %Lf\n", AS_REAL(constantValue)); break;
                 case TYPE_STRING:  printf("STR   \"%s\"\n", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
                 case TYPE_CHAR:    printf("CHAR  '%c'\n", constantValue.c_val); break;
                 case TYPE_BOOLEAN: printf("BOOL  %s\n", constantValue.i_val ? "true" : "false"); break;

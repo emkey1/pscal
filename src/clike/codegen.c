@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 
 typedef struct {
     char *name;
@@ -502,42 +503,83 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else if (node->is_array) {
                 int elemNameIdx = addStringConstant(chunk, "");
+                // Compile dynamic dimension sizes before emitting the init opcode
+                if (node->array_dim_exprs) {
+                    for (int d = 0; d < node->dim_count; ++d) {
+                        if (node->array_dims[d] == 0 && node->array_dim_exprs[d]) {
+                            compileExpression(node->array_dim_exprs[d], chunk, ctx);
+                        }
+                    }
+                }
                 writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->dim_count, node->token.line);
                 for (int d = 0; d < node->dim_count; ++d) {
-                    Value lower = makeInt(0);
-                    Value upper = makeInt(node->array_dims[d] - 1);
-                    int lidx = addConstantToChunk(chunk, &lower);
-                    int uidx = addConstantToChunk(chunk, &upper);
-                    freeValue(&lower);
-                    freeValue(&upper);
-                    emitShort(chunk, (uint16_t)lidx, node->token.line);
-                    emitShort(chunk, (uint16_t)uidx, node->token.line);
+                    if (node->array_dims[d] == 0 && node->array_dim_exprs && node->array_dim_exprs[d]) {
+                        emitShort(chunk, 0xFFFF, node->token.line);
+                        emitShort(chunk, 0xFFFF, node->token.line);
+                    } else {
+                        Value lower = makeInt(0);
+                        Value upper = makeInt(node->array_dims[d] - 1);
+                        int lidx = addConstantToChunk(chunk, &lower);
+                        int uidx = addConstantToChunk(chunk, &upper);
+                        freeValue(&lower);
+                        freeValue(&upper);
+                        emitShort(chunk, (uint16_t)lidx, node->token.line);
+                        emitShort(chunk, (uint16_t)uidx, node->token.line);
+                    }
                 }
                 writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+                if (node->left && node->left->type == TCAST_STRING &&
+                    node->element_type == TYPE_CHAR && node->dim_count == 1) {
+                    char* str = tokenStringToCString(node->left->token);
+                    int slen = strlen(str);
+                    for (int i = 0; i <= slen; ++i) {
+                        char ch = (i < slen) ? str[i] : '\0';
+                        Value idxVal = makeInt(i);
+                        int idxConst = addConstantToChunk(chunk, &idxVal);
+                        freeValue(&idxVal);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)idxConst, node->token.line);
+                        writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                        writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, node->token.line);
+                        writeBytecodeChunk(chunk, 1, node->token.line);
+                        Value chVal = makeChar(ch);
+                        int chConst = addConstantToChunk(chunk, &chVal);
+                        freeValue(&chVal);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)chConst, node->token.line);
+                        writeBytecodeChunk(chunk, OP_SET_INDIRECT, node->token.line);
+                    }
+                    free(str);
+                }
             } else {
                 if (node->left) {
                     compileExpression(node->left, chunk, ctx);
                 } else {
                     Value init;
-                    switch (node->var_type) {
-                        case TYPE_REAL:
-                            init = makeReal(0.0);
-                            break;
-                        case TYPE_STRING:
-                            init = makeNil();
-                            break;
-                        case TYPE_FILE:
-                            init = makeValueForType(TYPE_FILE, NULL, NULL);
-                            break;
-                        case TYPE_MEMORYSTREAM:
-                            init = makeValueForType(TYPE_MEMORYSTREAM, NULL, NULL);
-                            break;
-                        default:
-                            init = makeInt(0);
-                            break;
+                    if (is_real_type(node->var_type)) {
+                        init = makeReal(0.0);
+                        init.type = node->var_type;
+                    } else {
+                        switch (node->var_type) {
+                            case TYPE_STRING:
+                                init = makeNil();
+                                break;
+                            case TYPE_FILE:
+                                init = makeValueForType(TYPE_FILE, NULL, NULL);
+                                break;
+                            case TYPE_MEMORYSTREAM:
+                                init = makeValueForType(TYPE_MEMORYSTREAM, NULL, NULL);
+                                break;
+                            default:
+                                init = makeInt(0);
+                                init.type = node->var_type;
+                                if (is_intlike_type(init.type)) init.u_val = 0;
+                                break;
+                        }
                     }
                     int cidx = addConstantToChunk(chunk, &init);
                     freeValue(&init);
@@ -604,14 +646,21 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             Value v;
             if (node->token.type == CLIKE_TOKEN_FLOAT_LITERAL) {
                 v = makeReal(node->token.float_val);
-            } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL ||
-                       node->var_type == TYPE_CHAR) {
-                // Treat character literals distinctly from integers so
-                // they are emitted as CHAR constants in the bytecode.
-                v = makeChar((char)node->token.int_val);
+            } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL) {
+                // Emit character literals distinctly
+                v = makeChar(node->token.int_val);
             } else {
+                // Default to 64-bit integer regardless of inferred var_type
                 v = makeInt(node->token.int_val);
             }
+            int idx = addConstantToChunk(chunk, &v);
+            writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            break;
+        }
+        case TCAST_SIZEOF: {
+            Value v = makeInt(node->token.int_val);
+            v.type = TYPE_INT64;
             int idx = addConstantToChunk(chunk, &v);
             writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -635,10 +684,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
                 case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
                 case CLIKE_TOKEN_SLASH:
-                    if (node->var_type == TYPE_INTEGER &&
+                    if (is_intlike_type(node->var_type) &&
                         node->left && node->right &&
-                        node->left->var_type == TYPE_INTEGER &&
-                        node->right->var_type == TYPE_INTEGER) {
+                        is_intlike_type(node->left->var_type) &&
+                        is_intlike_type(node->right->var_type)) {
                         /*
                          * In C, dividing two integers performs integer division
                          * (truncating toward zero).  The VM has a dedicated
@@ -830,11 +879,26 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                                 i++; // skip second %
                             } else {
                                 size_t j = i + 1;
-                                const char *specifiers = "cdiuoxXfFeEgGaAspn";
-                                while (j < flen && strchr(specifiers, fmt[j]) == NULL) {
+                                int width = 0;
+                                int precision = -1;
+                                while (j < flen && isdigit((unsigned char)fmt[j])) {
+                                    width = width * 10 + (fmt[j] - '0');
                                     j++;
                                 }
-                                if (j < flen && arg_index < node->child_count) {
+                                if (j < flen && fmt[j] == '.') {
+                                    j++;
+                                    precision = 0;
+                                    while (j < flen && isdigit((unsigned char)fmt[j])) {
+                                        precision = precision * 10 + (fmt[j] - '0');
+                                        j++;
+                                    }
+                                }
+                                const char *length_mods = "hlLjzt";
+                                while (j < flen && strchr(length_mods, fmt[j]) != NULL) {
+                                    j++;
+                                }
+                                const char *specifiers = "cdiuoxXfFeEgGaAspn";
+                                if (j < flen && strchr(specifiers, fmt[j]) != NULL && arg_index < node->child_count) {
                                     if (seglen > 0) {
                                         seg[seglen] = '\0';
                                         Value strv = makeString(seg);
@@ -846,6 +910,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                                         seglen = 0;
                                     }
                                     compileExpression(node->children[arg_index++], chunk, ctx);
+                                    if (width > 0 || precision >= 0) {
+                                        if (precision < 0) precision = PASCAL_DEFAULT_FLOAT_PRECISION;
+                                        writeBytecodeChunk(chunk, OP_FORMAT_VALUE, node->token.line);
+                                        writeBytecodeChunk(chunk, (uint8_t)width, node->token.line);
+                                        writeBytecodeChunk(chunk, (uint8_t)precision, node->token.line);
+                                    }
                                     write_arg_count++;
                                     i = j; // skip full format specifier
                                 } else {
@@ -900,8 +970,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 }
             } else if (strcasecmp(name, "assign") == 0 ||
                        strcasecmp(name, "reset") == 0 ||
+                       strcasecmp(name, "rewrite") == 0 ||
+                       strcasecmp(name, "append") == 0 ||
                        strcasecmp(name, "eof") == 0 ||
-                       strcasecmp(name, "close") == 0) {
+                       strcasecmp(name, "close") == 0 ||
+                       strcasecmp(name, "rename") == 0 ||
+                       strcasecmp(name, "remove") == 0) {
                 // File builtins take the file variable as a VAR parameter.
                 if (node->child_count > 0) {
                     compileLValue(node->children[0], chunk, ctx);
@@ -909,7 +983,9 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                         compileExpression(node->children[i], chunk, ctx);
                     }
                 }
-                int fnIndex = addStringConstant(chunk, name);
+                const char* vmName = name;
+                if (strcasecmp(name, "remove") == 0) vmName = "erase";
+                int fnIndex = addStringConstant(chunk, vmName);
                 writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)fnIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);

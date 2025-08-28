@@ -24,14 +24,15 @@ The project follows a classic compiler and virtual machine design:
 
 * **Frontends**: Each frontend is responsible for parsing its respective language (Pascal-like or C-like) and constructing an Abstract Syntax Tree (AST).
 * **Compiler**: A compiler processes the AST, performs semantic analysis (for the C-like language), and generates bytecode. The C-like frontend also includes an optimization pass to improve the generated code.
-* **Virtual Machine (VM)**: A stack-based VM executes the bytecode, providing a portable runtime environment.
 * **Symbol Table**: A hash table-based symbol table manages variables, functions, and types during compilation.
+* **Virtual Machine (VM)**: A stack-based VM executes the bytecode, providing a portable runtime environment.
 
 ---
 
 ## Key Features and Capabilities
 
 * **Dual Language Support**: The ability to compile both Pascal-like and C-like code to the same bytecode is a major feature.
+* **Rich Type System**: Signed and unsigned integers from 8 to 64 bits and floating-point types up to extended precision.
 * **Graphics and Audio**: Through SDL bindings, the language supports creating graphical applications with audio capabilities, including window creation, shape and text rendering, and sound playback.
 * **Networking**: A networking API using `libcurl` allows for making HTTP requests and handling responses.
 * **Rich Built-in Library**: A comprehensive set of built-in functions is provided for:
@@ -39,7 +40,9 @@ The project follows a classic compiler and virtual machine design:
     * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).
     * String manipulation (`copy`, `pos`, `length`).
     * System interaction (`getpid`, `dos_exec`).
-* **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified.
+* **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified. Cached bytecode carries a version tag; programs can query `VMVersion` and `BytecodeVersion` to decide how to handle mismatches. Set `PSCAL_STRICT_VM=1` to have the VM abort when bytecode targets a newer VM.
+  Example programs demonstrating these builtins are `Examples/Pascal/VMVersionDemo`
+  and `Examples/clike/vm_version_demo`.
 
 ---
 
@@ -90,11 +93,11 @@ cd Tests; ./run_all_tests
 ## Directory Layout
 
 * src/: Core compiler(s) and virtual machine sources
-    * backend_ast: Contains the backend of the compiler, focusing on the Abstract Syntax Tree (AST). It includes the code for built-in functions and interface.s
-    * clike: The complete frontend for the C-like language. 
+    * backend_ast: Contains the backend of the compiler, focusing on the Abstract Syntax Tree (AST). It includes the code for built-in functions and interfaces
+    * clike: The complete frontend for the C-like language.
     * compiler: Contains core components of the compiler that are shared across the different language frontends such as bytecode definition and the portion that translates the AST into bytecode.
     * core: Houses fundamental utilities and data structures used throughout the project. This includes implementations for lists, bytecode caching, and common type definitions.
-    * ext_builtins: The source code for additional, "external" built-in functions. This modular design allows for new features to be added to the language easily. 
+    * ext_builtins: The source code for additional, "external" built-in functions. This modular design allows for new features to be added to the language easily.
     * pascal: The Pascal-like language frontend, containing its lexer, parser, and AST implementation.
     * symbol: The implementation of the symbol table, which is a critical component for the compiler to manage identifiers such as variables and functions.
     * vm: The source code for the stack-based virtual machine that executes the bytecode produced by the front ends.

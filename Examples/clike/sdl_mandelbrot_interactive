@@ -5,7 +5,7 @@
  */
 
 int main() {
-    int width = 1600;
+    int width = 1200;
     int height = 900;
     int maxIterations = 200;
     double minRe = -2.0;

@@ -17,6 +17,9 @@ int clike_get_builtin_id(const char *name) {
     if (strcasecmp(name, "exit") == 0) {
         name = "halt";
     }
+    if (strcasecmp(name, "remove") == 0) {
+        name = "erase";
+    }
     return getBuiltinIDForCompiler(name);
 }
 
@@ -26,6 +29,7 @@ void clike_register_builtins(void) {
     registerBuiltinFunction("scanf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("itoa", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("exit", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("remove", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamloadfromfile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamsavetofile", AST_FUNCTION_DECL, NULL);

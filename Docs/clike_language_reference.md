@@ -18,6 +18,7 @@ The language is strongly typed and supports a range of features common to C and 
 The following are reserved keywords and cannot be used as identifiers:
 
 * `int`, `long`, `void`, `float`, `double`
+* the combinations `long double`, `long long`
 * `str`, `text`, `mstream`, `char`, `byte`
 * `if`, `else`, `while`, `for`, `do`, `switch`, `case`, `default`
 * `struct`, `enum`, `const`
@@ -31,6 +32,7 @@ Identifiers are used for the names of variables, functions, and user-defined typ
 #### **Literals**
 
 * **Integer Literals:** Can be decimal (e.g., `123`) or hexadecimal (e.g., `0x7B`).
+  Unsuffixed integer literals are interpreted as 64-bit signed values.
 * **Floating-Point Literals:** Written with a decimal point (e.g., `3.14`).
 * **Character Literals:** Enclosed in single quotes (e.g., `'a'`). They support standard C-style escape sequences (`\n`, `\r`, `\t`, `\\`, `\'`).
 * **String Literals:** Enclosed in double quotes (e.g., `"hello"`). They also support C-style escape sequences.
@@ -41,11 +43,17 @@ The language supports a variety of built-in data types:
 
 | Keyword | VM Type | Description |
 | :--- | :--- | :--- |
-| `int`, `long` | `TYPE_INTEGER` | 64-bit signed integer. |
-| `float`, `double` | `TYPE_REAL` | 64-bit floating-point number. |
-| `char` | `TYPE_CHAR` | 8-bit character. |
+| `int` | `TYPE_INT32` | 32-bit signed integer. |
+| `long`, `long long` | `TYPE_INT64` | 64-bit signed integer. |
+| `float` | `TYPE_FLOAT` | 32-bit floating-point number. |
+| `double` | `TYPE_DOUBLE` | 64-bit floating-point number. |
+| `long double` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
+| `char` | `TYPE_CHAR` | Unicode code point. |
 | `byte` | `TYPE_BYTE` | 8-bit unsigned integer. |
 | `str` | `TYPE_STRING` | Dynamic-length string. |
+| `text` | `TYPE_FILE` | File handle for text I/O. |
+| `mstream` | `TYPE_MEMORYSTREAM` | In-memory byte stream. |
+| `void` | `TYPE_VOID` | Absence of value (used for procedures). |
 
 ### **Variables and Constants**
 
@@ -93,7 +101,7 @@ The language supports a standard set of operators with C-like precedence.
 | 11 | `&&` | Left-to-right |
 | 12 | `||` | Left-to-right |
 | 13 | `?:` | Right-to-left |
-| 14 | `=` `+=` `-=` `*=` `/=` `%=` | Right-to-left |
+| 14 | `=` `+=` `-=` `*=` `/=` `%=` `&=` `|=` `<<=` `>>=` | Right-to-left |
 
 ### **Statements**
 

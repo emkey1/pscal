@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <time.h>
+#include <stdint.h>
 #include "list.h"
 #include <stdbool.h>
 
@@ -26,8 +27,8 @@ typedef struct FieldValue FieldValue;
 typedef enum {
     TYPE_UNKNOWN = 0,
     TYPE_VOID,
-    TYPE_INTEGER,
-    TYPE_REAL,
+    TYPE_INT32,
+    TYPE_DOUBLE,
     TYPE_STRING,
     TYPE_CHAR,
     TYPE_RECORD,
@@ -40,8 +41,33 @@ typedef enum {
     TYPE_MEMORYSTREAM,
     TYPE_SET,
     TYPE_POINTER,
+    /* Extended integer and floating-point types */
+    TYPE_INT8,
+    TYPE_UINT8,
+    TYPE_INT16,
+    TYPE_UINT16,
+    TYPE_UINT32,
+    TYPE_INT64,
+    TYPE_UINT64,
+    TYPE_FLOAT,
+    TYPE_LONG_DOUBLE,
     TYPE_NIL
 } VarType;
+
+/*
+ * Backwards compatibility aliases.
+ *
+ * Pascal traditionally exposes INTEGER and REAL as its fundamental numeric
+ * types.  The VM has been moving toward a more explicit naming scheme where
+ * the underlying sizes are part of the type name (e.g. INT32 and DOUBLE).
+ *
+ * To avoid a massive churn throughout the existing front‑ends we simply map
+ * the old identifiers to the new ones via macros.  This allows legacy code
+ * that still uses TYPE_INTEGER/TYPE_REAL to compile unchanged while the rest
+ * of the system can reason about the new INT32/DOUBLE symbols.
+ */
+#define TYPE_INTEGER TYPE_INT32
+#define TYPE_REAL    TYPE_DOUBLE
 
 typedef struct MStream {
     unsigned char *buffer;
@@ -59,12 +85,15 @@ typedef struct EnumType {
 // Forward declaration of AST
 typedef struct AST AST;
 
+typedef struct RealValue { float f32_val; double d_val; long double r_val; } RealValue;
+
 typedef struct ValueStruct {
     VarType type;
     Type *enum_meta;
+    long long i_val;
+    unsigned long long u_val;
+    RealValue real;
     union {
-        long long i_val;
-        double r_val;
         char *s_val;
         int c_val;
         FieldValue *record_val;
@@ -95,6 +124,13 @@ typedef struct ValueStruct {
         // Potentially add base_type if needed later VarType set_base_type;
     } set_val;
 } Value;
+
+/* Helpers to initialise numeric fields consistently. */
+#define SET_INT_VALUE(dest, val) \
+    do { (dest)->i_val = (long long)(val); (dest)->u_val = (unsigned long long)(val); } while(0)
+#define SET_REAL_VALUE(dest, val) \
+    do { (dest)->real.r_val = (long double)(val); (dest)->real.d_val = (double)(dest)->real.r_val; \
+         (dest)->real.f32_val = (float)(dest)->real.r_val; } while(0)
 
 typedef struct FieldValue {
     char *name;

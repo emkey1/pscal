@@ -1,6 +1,6 @@
 # C-Like Front End Overview
 
-The `clike` front end provides a small C-style language that targets the
+The `clike` front end provides a C-style language that targets the
 Pscal virtual machine.
 
 ## Core Semantics
@@ -27,8 +27,9 @@ Pscal virtual machine.
 The language aims to resemble a tiny subset of C while remaining easy to map
 to the VM:
 
-- **Types** – `int`/`long`, `float`/`double`, `char`, `byte`, `str`, arrays
-  and `struct` declarations.
+- **Types** – `byte`, `int`, `long`, `long long`, `float`, `double`,
+  `long double`, `char`, `str`, `text`, `mstream`, arrays and `struct`
+  declarations.
 - **Control flow** – `if`, `while`, `for`, `do … while` and `switch` with
   `break` and `continue`.
 - **Functions** – Defined with a return type and parameter list. Pointer

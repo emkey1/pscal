@@ -1,0 +1,6 @@
+#ifndef PSCAL_VERSION_H
+#define PSCAL_VERSION_H
+
+#define PSCAL_VM_VERSION 4
+
+#endif // PSCAL_VERSION_H

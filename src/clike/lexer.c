@@ -74,6 +74,7 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 8 && strncmp(start, "continue", 8) == 0) return makeToken(lexer, CLIKE_TOKEN_CONTINUE, start, length, column);
     if (length == 6 && strncmp(start, "return", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_RETURN, start, length, column);
     if (length == 6 && strncmp(start, "import", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_IMPORT, start, length, column);
+    if (length == 6 && strncmp(start, "sizeof", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_SIZEOF, start, length, column);
     return makeToken(lexer, CLIKE_TOKEN_IDENTIFIER, start, length, column);
 }
 
@@ -167,12 +168,22 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
             }
             case '-': {
                 if (match(lexer, '-')) return makeToken(lexer, CLIKE_TOKEN_MINUS_MINUS, start, 2, startColumn);
+                if (match(lexer, '=')) return makeToken(lexer, CLIKE_TOKEN_MINUS_EQUAL, start, 2, startColumn);
                 if (match(lexer, '>')) return makeToken(lexer, CLIKE_TOKEN_ARROW, start, 2, startColumn);
                 return makeToken(lexer, CLIKE_TOKEN_MINUS, start, 1, startColumn);
             }
-            case '*': return makeToken(lexer, CLIKE_TOKEN_STAR, start, 1, startColumn);
-            case '/': return makeToken(lexer, CLIKE_TOKEN_SLASH, start, 1, startColumn);
-            case '%': return makeToken(lexer, CLIKE_TOKEN_PERCENT, start, 1, startColumn);
+            case '*': {
+                if (match(lexer, '=')) return makeToken(lexer, CLIKE_TOKEN_STAR_EQUAL, start, 2, startColumn);
+                return makeToken(lexer, CLIKE_TOKEN_STAR, start, 1, startColumn);
+            }
+            case '/': {
+                if (match(lexer, '=')) return makeToken(lexer, CLIKE_TOKEN_SLASH_EQUAL, start, 2, startColumn);
+                return makeToken(lexer, CLIKE_TOKEN_SLASH, start, 1, startColumn);
+            }
+            case '%': {
+                if (match(lexer, '=')) return makeToken(lexer, CLIKE_TOKEN_PERCENT_EQUAL, start, 2, startColumn);
+                return makeToken(lexer, CLIKE_TOKEN_PERCENT, start, 1, startColumn);
+            }
             case '~': return makeToken(lexer, CLIKE_TOKEN_TILDE, start, 1, startColumn);
             case ';': return makeToken(lexer, CLIKE_TOKEN_SEMICOLON, start, 1, startColumn);
             case ',': return makeToken(lexer, CLIKE_TOKEN_COMMA, start, 1, startColumn);
@@ -191,23 +202,31 @@ ClikeToken clike_nextToken(ClikeLexer *lexer) {
                 return makeToken(lexer, hasEq ? CLIKE_TOKEN_EQUAL_EQUAL : CLIKE_TOKEN_EQUAL, start, hasEq ? 2 : 1, startColumn);
             }
             case '<': {
-                if (match(lexer, '<')) return makeToken(lexer, CLIKE_TOKEN_SHL, start, 2, startColumn);
+                if (match(lexer, '<')) {
+                    if (match(lexer, '=')) return makeToken(lexer, CLIKE_TOKEN_SHL_EQUAL, start, 3, startColumn);
+                    return makeToken(lexer, CLIKE_TOKEN_SHL, start, 2, startColumn);
+                }
                 bool hasEq = match(lexer, '=');
                 return makeToken(lexer, hasEq ? CLIKE_TOKEN_LESS_EQUAL : CLIKE_TOKEN_LESS, start, hasEq ? 2 : 1, startColumn);
             }
             case '>': {
-                if (match(lexer, '>')) return makeToken(lexer, CLIKE_TOKEN_SHR, start, 2, startColumn);
+                if (match(lexer, '>')) {
+                    if (match(lexer, '=')) return makeToken(lexer, CLIKE_TOKEN_SHR_EQUAL, start, 3, startColumn);
+                    return makeToken(lexer, CLIKE_TOKEN_SHR, start, 2, startColumn);
+                }
                 bool hasEq = match(lexer, '=');
                 return makeToken(lexer, hasEq ? CLIKE_TOKEN_GREATER_EQUAL : CLIKE_TOKEN_GREATER, start, hasEq ? 2 : 1, startColumn);
             }
             case '&': {
                 if (match(lexer,'&')) return makeToken(lexer, CLIKE_TOKEN_AND_AND, start, 2, startColumn);
+                if (match(lexer,'=')) return makeToken(lexer, CLIKE_TOKEN_BIT_AND_EQUAL, start, 2, startColumn);
                 return makeToken(lexer, CLIKE_TOKEN_BIT_AND, start, 1, startColumn);
             }
-              case '|': {
-                  if (match(lexer,'|')) return makeToken(lexer, CLIKE_TOKEN_OR_OR, start, 2, startColumn);
-                  return makeToken(lexer, CLIKE_TOKEN_BIT_OR, start, 1, startColumn);
-              }
+            case '|': {
+                if (match(lexer,'|')) return makeToken(lexer, CLIKE_TOKEN_OR_OR, start, 2, startColumn);
+                if (match(lexer,'=')) return makeToken(lexer, CLIKE_TOKEN_BIT_OR_EQUAL, start, 2, startColumn);
+                return makeToken(lexer, CLIKE_TOKEN_BIT_OR, start, 1, startColumn);
+            }
               case '?': return makeToken(lexer, CLIKE_TOKEN_QUESTION, start, 1, startColumn);
               case ':': return makeToken(lexer, CLIKE_TOKEN_COLON, start, 1, startColumn);
               case '.': return makeToken(lexer, CLIKE_TOKEN_DOT, start, 1, startColumn);
@@ -220,9 +239,11 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
     switch(type) {
         case CLIKE_TOKEN_INT: return "TOKEN_INT";
         case CLIKE_TOKEN_LONG: return "TOKEN_LONG";
+        case CLIKE_TOKEN_LONG_LONG: return "TOKEN_LONG_LONG";
         case CLIKE_TOKEN_VOID: return "TOKEN_VOID";
         case CLIKE_TOKEN_FLOAT: return "TOKEN_FLOAT";
         case CLIKE_TOKEN_DOUBLE: return "TOKEN_DOUBLE";
+        case CLIKE_TOKEN_LONG_DOUBLE: return "TOKEN_LONG_DOUBLE";
         case CLIKE_TOKEN_STR: return "TOKEN_STR";
         case CLIKE_TOKEN_TEXT: return "TOKEN_TEXT";
         case CLIKE_TOKEN_MSTREAM: return "TOKEN_MSTREAM";
@@ -241,6 +262,7 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_CONTINUE: return "TOKEN_CONTINUE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
         case CLIKE_TOKEN_IMPORT: return "TOKEN_IMPORT";
+        case CLIKE_TOKEN_SIZEOF: return "TOKEN_SIZEOF";
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
         case CLIKE_TOKEN_FLOAT_LITERAL: return "TOKEN_FLOAT_LITERAL";
@@ -251,16 +273,24 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_PLUS: return "+";
         case CLIKE_TOKEN_PLUS_EQUAL: return "+=";
         case CLIKE_TOKEN_MINUS: return "-";
+        case CLIKE_TOKEN_MINUS_EQUAL: return "-=";
         case CLIKE_TOKEN_PLUS_PLUS: return "++";
         case CLIKE_TOKEN_MINUS_MINUS: return "--";
         case CLIKE_TOKEN_STAR: return "*";
+        case CLIKE_TOKEN_STAR_EQUAL: return "*=";
         case CLIKE_TOKEN_SLASH: return "/";
+        case CLIKE_TOKEN_SLASH_EQUAL: return "/=";
         case CLIKE_TOKEN_PERCENT: return "%";
+        case CLIKE_TOKEN_PERCENT_EQUAL: return "%=";
         case CLIKE_TOKEN_TILDE: return "~";
         case CLIKE_TOKEN_BIT_AND: return "&";
+        case CLIKE_TOKEN_BIT_AND_EQUAL: return "&=";
         case CLIKE_TOKEN_BIT_OR: return "|";
+        case CLIKE_TOKEN_BIT_OR_EQUAL: return "|=";
         case CLIKE_TOKEN_SHL: return "<<";
+        case CLIKE_TOKEN_SHL_EQUAL: return "<<=";
         case CLIKE_TOKEN_SHR: return ">>";
+        case CLIKE_TOKEN_SHR_EQUAL: return ">>=";
         case CLIKE_TOKEN_BANG: return "!";
         case CLIKE_TOKEN_BANG_EQUAL: return "!=";
         case CLIKE_TOKEN_EQUAL: return "=";

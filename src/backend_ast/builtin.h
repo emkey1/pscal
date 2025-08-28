@@ -84,12 +84,17 @@ Value vmBuiltinValreal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWindow(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinVMVersion(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRewrite(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinAppend(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinClose(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinRename(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinErase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRead(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReadln(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinEof(struct VM_s* vm, int arg_count, Value* args);

@@ -1,0 +1,10 @@
+#!/usr/bin/env clike
+int main() {
+    printf("VM version: %d\n", vmversion());
+    printf("Bytecode version: %d\n", bytecodeversion());
+    if (vmversion() != bytecodeversion()) {
+        printf("bytecode targets newer VM\n");
+        return 1;
+    }
+    return 0;
+}
