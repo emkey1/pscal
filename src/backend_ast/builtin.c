@@ -505,9 +505,15 @@ Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinParamcount(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "ParamCount expects 0 arguments.");
-        return makeInt(0);
+        return makeInt64(0);
     }
-    return makeInt(gParamCount);
+    /*
+     * ParamCount should reflect the number of command line parameters as an
+     * integer.  Since the VM now supports multiple integer widths, use the
+     * widest standard signed integer to avoid inadvertent promotion to a
+     * floating type or other category.
+     */
+    return makeInt64(gParamCount);
 }
 
 Value vmBuiltinParamstr(VM* vm, int arg_count, Value* args) {
