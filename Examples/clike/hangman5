@@ -349,11 +349,14 @@ int main() {
     struct WordNode* words;
     int word_count;
     int playing, result, padding;
-    str input, word_file, scoreMsg, promptMsg;
+    str input, scoreMsg, promptMsg;
 
     // Use the first command line argument as the word list if provided.
-    if (paramcount() > 0) word_file = paramstr(1); else word_file = "etc/words";
-    words = load_words(word_file, &word_count, 6, 9, 2048);
+    if (paramcount() > 0) {
+        words = load_words(paramstr(1), &word_count, 6, 9, 2048);
+    } else {
+        words = load_words("etc/words", &word_count, 6, 9, 2048);
+    }
     if (word_count == 0) { printf("No words loaded.\n"); return 0; }
 
     randomize();

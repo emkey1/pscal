@@ -646,18 +646,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             Value v;
             if (node->token.type == CLIKE_TOKEN_FLOAT_LITERAL) {
                 v = makeReal(node->token.float_val);
-                v.type = TYPE_DOUBLE;
-            } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL ||
-                       node->var_type == TYPE_CHAR) {
-                // Treat character literals distinctly from integers so
-                // they are emitted as CHAR constants in the bytecode.
+            } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL) {
+                // Emit character literals distinctly
                 v = makeChar((char)node->token.int_val);
             } else {
+                // Default to 64-bit integer regardless of inferred var_type
                 v = makeInt(node->token.int_val);
-                v.type = node->var_type;
-                if (is_intlike_type(v.type)) {
-                    v.u_val = (unsigned long long)node->token.int_val;
-                }
             }
             int idx = addConstantToChunk(chunk, &v);
             writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
