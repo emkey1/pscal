@@ -25,6 +25,16 @@ int MaxY;
 
 int threadCount = 4;
 
+// Precomputed row ranges for each thread
+int threadStart[4];
+int threadEnd[4];
+
+// Wrapper functions with no parameters for thread spawning
+void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
+void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
+void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
+void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+
 void computeRows(int startY, int endY) {
     int row[1024];
     int x;
@@ -63,7 +73,10 @@ int main() {
     int endY;
     int rowsPerThread;
     int extra;
-    int tid[threadCount];
+    int tid0;
+    int tid1;
+    int tid2;
+    int tid3;
     int quit;
 
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot in CLike");
@@ -91,13 +104,22 @@ int main() {
             endY = endY + 1;
             extra = extra - 1;
         }
-        tid[i] = spawn computeRows(startY, endY);
+        threadStart[i] = startY;
+        threadEnd[i] = endY;
         startY = endY + 1;
     }
 
-    for (i = 0; i < threadCount; i++) {
-        join tid[i];
-    }
+    // Spawn one worker per precomputed range.
+    tid0 = spawn computeRowsThread0();
+    tid1 = spawn computeRowsThread1();
+    tid2 = spawn computeRowsThread2();
+    tid3 = spawn computeRowsThread3();
+
+    // Join each thread using the stored ids
+    join tid0;
+    join tid1;
+    join tid2;
+    join tid3;
 
     updatetexture(textureID, pixelData);
     cleardevice();
