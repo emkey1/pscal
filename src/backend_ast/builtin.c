@@ -30,7 +30,9 @@
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 
-static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
+// Per-thread state to keep core builtins thread-safe
+static _Thread_local DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
+static _Thread_local unsigned int rand_seed = 1;
 
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
@@ -2435,18 +2437,18 @@ Value vmBuiltinIoresult(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinRandomize(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "Randomize requires 0 arguments."); return makeVoid(); }
-    srand((unsigned int)time(NULL));
+    rand_seed = (unsigned int)time(NULL);
     return makeVoid();
 }
 
 Value vmBuiltinRandom(VM* vm, int arg_count, Value* args) {
     if (arg_count == 0) {
-        return makeReal((double)rand() / ((double)RAND_MAX + 1.0));
+        return makeReal((double)rand_r(&rand_seed) / ((double)RAND_MAX + 1.0));
     }
     if (arg_count == 1 && IS_INTLIKE(args[0])) {
         long long n = AS_INTEGER(args[0]);
         if (n <= 0) { runtimeError(vm, "Random argument must be > 0."); return makeInt(0); }
-        return makeInt(rand() % n);
+        return makeInt(rand_r(&rand_seed) % n);
     }
     runtimeError(vm, "Random requires 0 arguments, or 1 integer argument.");
     return makeVoid();
