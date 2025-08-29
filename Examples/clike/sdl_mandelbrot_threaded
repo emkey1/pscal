@@ -130,6 +130,7 @@ int main() {
             cleardevice();
             rendercopy(textureID);
             updatescreen();
+            printf("Completed row %d\n", nextRow);
             graphloop(0);
             nextRow = nextRow + 1;
         } else {
