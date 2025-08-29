@@ -28,6 +28,7 @@
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <stdio.h>   // For printf, fprintf
+#include <pthread.h>
 
 static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
 
@@ -566,11 +567,11 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
 }
 
 // --- Terminal helper for VM input routines ---
-static struct termios vm_orig_termios;
-static int vm_raw_mode = 0;
-static int vm_termios_saved = 0;
-static int vm_restore_registered = 0;
-static int vm_alt_screen_depth = 0; // Track nested alternate screen buffers
+static _Thread_local struct termios vm_orig_termios;
+static _Thread_local int vm_raw_mode = 0;
+static _Thread_local int vm_termios_saved = 0;
+static _Thread_local int vm_restore_registered = 0;
+static _Thread_local int vm_alt_screen_depth = 0; // Track nested alternate screen buffers
 
 typedef struct {
     char fg[32];
@@ -579,8 +580,8 @@ typedef struct {
 } VmColorState;
 
 #define VM_COLOR_STACK_MAX 16
-static VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
-static int vm_color_stack_depth = 0;
+static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
+static _Thread_local int vm_color_stack_depth = 0;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -588,6 +589,19 @@ static void vmPushColorState(void);
 static void vmPopColorState(void);
 static void vmRestoreColorState(void);
 static int vmQueryColor(const char *query, char *dest, size_t dest_size);
+static void vmAtExitCleanup(void);
+
+static pthread_key_t vm_thread_cleanup_key;
+static pthread_once_t vm_thread_cleanup_key_once = PTHREAD_ONCE_INIT;
+
+static void vmThreadCleanup(void *unused) {
+    (void)unused;
+    vmAtExitCleanup();
+}
+
+static void vmCreateThreadKey(void) {
+    pthread_key_create(&vm_thread_cleanup_key, vmThreadCleanup);
+}
 
 static void vmRestoreTerminal(void) {
     if (vm_termios_saved && vm_raw_mode) {
@@ -715,6 +729,9 @@ static void vmSignalHandler(int signum) {
 }
 
 static void vmSetupTermHandlers(void) {
+    pthread_once(&vm_thread_cleanup_key_once, vmCreateThreadKey);
+    pthread_setspecific(vm_thread_cleanup_key, (void *)1);
+
     if (!vm_termios_saved) {
         if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
             vm_termios_saved = 1;
