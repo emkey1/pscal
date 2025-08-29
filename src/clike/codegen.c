@@ -1122,6 +1122,18 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
 
     int address = chunk->count;
     char* fname = tokenToCString(func->token);
+    /*
+     * Symbol lookups are case-insensitive.  The symbol table stores all
+     * procedure names in lowercase, but the token text preserves the
+     * original casing.  This meant that procedures with mixed-case names
+     * (e.g. "computeRowsThread0") were inserted using their original case
+     * and later lookups using the lowercase form failed, causing instructions
+     * such as OP_THREAD_CREATE to be omitted.
+     *
+     * Normalize the function name to lowercase before inserting it into the
+     * procedure table so lookups succeed regardless of the original casing.
+     */
+    toLowerString(fname);
     Symbol* sym = malloc(sizeof(Symbol));
     memset(sym, 0, sizeof(Symbol));
     sym->name = strdup(fname);
