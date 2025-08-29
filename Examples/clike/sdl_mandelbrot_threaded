@@ -77,10 +77,8 @@ int main() {
     int endY;
     int rowsPerThread;
     int extra;
-    int tid0;
-    int tid1;
-    int tid2;
-    int tid3;
+    int threadId[4];
+    int threadJoined[4];
     int quit;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
@@ -117,10 +115,13 @@ int main() {
     }
 
     // Spawn one worker per precomputed range.
-    tid0 = spawn computeRowsThread0();
-    tid1 = spawn computeRowsThread1();
-    tid2 = spawn computeRowsThread2();
-    tid3 = spawn computeRowsThread3();
+    threadId[0] = spawn computeRowsThread0();
+    threadId[1] = spawn computeRowsThread1();
+    threadId[2] = spawn computeRowsThread2();
+    threadId[3] = spawn computeRowsThread3();
+    for (i = 0; i < threadCount; i++) {
+        threadJoined[i] = 0;
+    }
 
     // Display rows as they are computed
     int nextRow = 0;
@@ -131,18 +132,28 @@ int main() {
             rendercopy(textureID);
             updatescreen();
             printf("Completed row %d\n", nextRow);
+
+            // Join any thread whose last row just finished
+            for (i = 0; i < threadCount; i++) {
+                if (!threadJoined[i] && nextRow == threadEnd[i]) {
+                    join threadId[i];
+                    threadJoined[i] = 1;
+                }
+            }
+
             graphloop(0);
             nextRow = nextRow + 1;
         } else {
-            graphloop(16); // yield time for worker threads and handle events
+            graphloop(1); // short yield for worker threads and event handling
         }
     }
 
-    // Join each thread using the stored ids
-    join tid0;
-    join tid1;
-    join tid2;
-    join tid3;
+    // Ensure all threads are joined
+    for (i = 0; i < threadCount; i++) {
+        if (!threadJoined[i]) {
+            join threadId[i];
+        }
+    }
 
     updatetexture(textureID, pixelData);
     cleardevice();
