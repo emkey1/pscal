@@ -497,6 +497,12 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     node->dim_count = arrDecl->dim_count - node->child_count;
                     node->element_type = arrDecl->element_type;
                     node->var_type = TYPE_ARRAY;
+                    if (arrDecl->array_dims) {
+                        node->array_dims = (int*)malloc(sizeof(int) * node->dim_count);
+                        for (int i = 0; i < node->dim_count; ++i) {
+                            node->array_dims[i] = arrDecl->array_dims[i + node->child_count];
+                        }
+                    }
                 } else {
                     node->var_type = arrDecl->element_type;
                 }
