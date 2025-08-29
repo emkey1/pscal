@@ -700,6 +700,15 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printf("%-16s width:%d prec:%d\n", "OP_FORMAT_VALUE", width, (int8_t)precision);
             return offset + 3;
         }
+        case OP_THREAD_CREATE: {
+            uint16_t entry = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                       chunk->code[offset + 2]);
+            printf("%-16s %04d\n", "OP_THREAD_CREATE", entry);
+            return offset + 3;
+        }
+        case OP_THREAD_JOIN:
+            printf("OP_THREAD_JOIN\n");
+            return offset + 1;
         // NOTE: There is no OP_BREAK in your bytecode.h enum, so it cannot be disassembled.
         // The AST_BREAK node is handled by the compiler generating jump instructions.
 
