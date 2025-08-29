@@ -8,6 +8,7 @@
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "globals.h"
+#include "compiler/compiler.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -1079,7 +1080,11 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 if (sym) {
                     writeBytecodeChunk(chunk, OP_CALL, node->token.line);
                     emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                    emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
+                    if (sym->is_defined) {
+                        emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
+                    } else {
+                        emitShort(chunk, 0xFFFF, node->token.line);
+                    }
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
                 } else {
                     writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
@@ -1134,14 +1139,17 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
      * procedure table so lookups succeed regardless of the original casing.
      */
     toLowerString(fname);
-    Symbol* sym = malloc(sizeof(Symbol));
-    memset(sym, 0, sizeof(Symbol));
-    sym->name = strdup(fname);
+    Symbol* sym = hashTableLookup(procedure_table, fname);
+    if (!sym) {
+        sym = malloc(sizeof(Symbol));
+        memset(sym, 0, sizeof(Symbol));
+        sym->name = strdup(fname);
+        hashTableInsert(procedure_table, sym);
+    }
     sym->bytecode_address = address;
     sym->arity = (uint8_t)ctx.paramCount;
     sym->type = func->var_type;
     sym->is_defined = true;
-    hashTableInsert(procedure_table, sym);
 
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
@@ -1159,6 +1167,62 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     free(fname);
 }
 
+static void predeclareFunctions(ASTNodeClike *program) {
+    if (!program) return;
+    for (int i = 0; i < program->child_count; ++i) {
+        ASTNodeClike *decl = program->children[i];
+        if (decl->type != TCAST_FUN_DECL) continue;
+        char *name = tokenToCString(decl->token);
+        toLowerString(name);
+        if (!hashTableLookup(procedure_table, name)) {
+            Symbol *sym = malloc(sizeof(Symbol));
+            memset(sym, 0, sizeof(Symbol));
+            sym->name = strdup(name);
+            sym->arity = decl->left ? decl->left->child_count : 0;
+            sym->type = decl->var_type;
+            sym->is_defined = false;
+            hashTableInsert(procedure_table, sym);
+        }
+        free(name);
+    }
+}
+
+static void patchForwardCalls(BytecodeChunk *chunk) {
+    if (!procedure_table || !chunk || !chunk->code) return;
+    for (int offset = 0; offset < chunk->count; ) {
+        uint8_t opcode = chunk->code[offset];
+        if (opcode == OP_CALL) {
+            if (offset + 5 >= chunk->count) break;
+            uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
+                                          chunk->code[offset + 4]);
+            if (address == 0xFFFF) {
+                uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                                 chunk->code[offset + 2]);
+                if (name_index < chunk->constants_count &&
+                    chunk->constants[name_index].type == TYPE_STRING) {
+                    const char *proc_name = AS_STRING(chunk->constants[name_index]);
+                    char lookup[MAX_SYMBOL_LENGTH];
+                    strncpy(lookup, proc_name, sizeof(lookup) - 1);
+                    lookup[sizeof(lookup) - 1] = '\0';
+                    toLowerString(lookup);
+                    Symbol *sym = hashTableLookup(procedure_table, lookup);
+                    if (sym && sym->is_defined) {
+                        patchShort(chunk, offset + 3,
+                                   (uint16_t)sym->bytecode_address);
+                    } else {
+                        fprintf(stderr,
+                                "Compiler Error: Procedure '%s' was called but never defined.\n",
+                                proc_name);
+                    }
+                }
+            }
+            offset += 6;
+        } else {
+            offset += getInstructionLength(chunk, offset);
+        }
+    }
+}
+
 void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
     initBytecodeChunk(chunk);
     if (!program) return;
@@ -1173,6 +1237,9 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
             compileGlobalVar(decl, chunk);
         }
     }
+
+    // Predeclare all functions so forward references are recognized.
+    predeclareFunctions(program);
 
     // Emit a call to main after globals have been defined.
     writeBytecodeChunk(chunk, OP_CALL, 0);
@@ -1251,6 +1318,7 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
             EXIT_FAILURE_HANDLER();
             return;
         }
+        predeclareFunctions(modProg);
         for (int j = 0; j < modProg->child_count; ++j) {
             ASTNodeClike *decl = modProg->children[j];
             if (decl->type == TCAST_FUN_DECL) {
@@ -1279,6 +1347,8 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         patchShort(chunk, mainAddrPatch, (uint16_t)mainAddress);
         chunk->code[mainArityPatch] = mainArity;
     }
+
+    patchForwardCalls(chunk);
 
     for (int i = 0; i < clike_import_count; ++i) {
         free(clike_imports[i]);

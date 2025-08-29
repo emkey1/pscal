@@ -2835,8 +2835,8 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 }
 
                 if (symbol_to_patch && symbol_to_patch->is_defined) {
-                    // Patch the address in place. The patch offset is offset + 2.
-                    patchShort(chunk, offset + 2, (uint16_t)symbol_to_patch->bytecode_address);
+                    // Patch the address in place. The address occupies bytes offset+3 and offset+4.
+                    patchShort(chunk, offset + 3, (uint16_t)symbol_to_patch->bytecode_address);
                 } else {
                     fprintf(stderr, "Compiler Error: Procedure '%s' was called but never defined.\n", proc_name);
                     compiler_had_error = true;
