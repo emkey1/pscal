@@ -262,16 +262,32 @@ static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vm
 /* Dynamic registry for user-supplied VM built-ins. */
 static VmBuiltinMapping *extra_vm_builtins = NULL;
 static size_t num_extra_vm_builtins = 0;
+static pthread_mutex_t builtin_registry_mutex;
+static pthread_once_t builtin_registry_once = PTHREAD_ONCE_INIT;
+
+static void initBuiltinRegistryMutex(void) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&builtin_registry_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
 
 void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
     if (!name || !handler) return;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
         sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
-    if (!new_table) return;
+    if (!new_table) {
+        pthread_mutex_unlock(&builtin_registry_mutex);
+        return;
+    }
     extra_vm_builtins = new_table;
     extra_vm_builtins[num_extra_vm_builtins].name = strdup(name);
     extra_vm_builtins[num_extra_vm_builtins].handler = handler;
     num_extra_vm_builtins++;
+    pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
 /* Weak hook that external modules can override to register additional
@@ -281,16 +297,23 @@ __attribute__((weak)) void registerExtendedBuiltins(void) {}
 // This function now comes AFTER the table and comparison function it uses.
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
     if (!name) return NULL;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; i++) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-            return vmBuiltinDispatchTable[i].handler;
+            VmBuiltinFn h = vmBuiltinDispatchTable[i].handler;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return h;
         }
     }
     for (size_t i = 0; i < num_extra_vm_builtins; i++) {
         if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            return extra_vm_builtins[i].handler;
+            VmBuiltinFn h = extra_vm_builtins[i].handler;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return h;
         }
     }
+    pthread_mutex_unlock(&builtin_registry_mutex);
     return NULL;
 }
 
@@ -2984,16 +3007,22 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
 
 int getBuiltinIDForCompiler(const char *name) {
     if (!name) return -1;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; ++i) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+            pthread_mutex_unlock(&builtin_registry_mutex);
             return (int)i;
         }
     }
     for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
         if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            return (int)(num_vm_builtins + i);
+            int id = (int)(num_vm_builtins + i);
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return id;
         }
     }
+    pthread_mutex_unlock(&builtin_registry_mutex);
     return -1;
 }
 
@@ -3007,18 +3036,25 @@ static int builtin_registry_count = 0;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (int i = 0; i < builtin_registry_count; ++i) {
         if (strcasecmp(name, builtin_registry[i].name) == 0) {
             builtin_registry[i].type = (declType == AST_FUNCTION_DECL) ?
                 BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
+            pthread_mutex_unlock(&builtin_registry_mutex);
             return;
         }
     }
-    if (builtin_registry_count >= 256) return;
+    if (builtin_registry_count >= 256) {
+        pthread_mutex_unlock(&builtin_registry_mutex);
+        return;
+    }
     builtin_registry[builtin_registry_count].name = strdup(name);
     builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?
         BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
     builtin_registry_count++;
+    pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
 int isBuiltin(const char *name) {
@@ -3026,15 +3062,22 @@ int isBuiltin(const char *name) {
 }
 
 BuiltinRoutineType getBuiltinType(const char *name) {
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (int i = 0; i < builtin_registry_count; ++i) {
         if (strcasecmp(name, builtin_registry[i].name) == 0) {
-            return builtin_registry[i].type;
+            BuiltinRoutineType t = builtin_registry[i].type;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return t;
         }
     }
+    pthread_mutex_unlock(&builtin_registry_mutex);
     return BUILTIN_TYPE_NONE;
 }
 
 void registerAllBuiltins(void) {
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     /* Graphics stubs (usable even without SDL) */
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
@@ -3214,9 +3257,9 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
-
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
+    pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
 
