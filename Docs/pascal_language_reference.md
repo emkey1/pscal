@@ -226,6 +226,8 @@ The Pascal front end supports lightweight concurrency using two keywords:
 * `spawn` – starts a new thread executing a parameterless procedure and returns a thread identifier.
 * `join` – waits for the thread whose identifier is given to finish execution.
 
+Threads share global variables and are scheduled cooperatively; a `join` yields control until the target thread completes.
+
 Example:
 
 ```pascal

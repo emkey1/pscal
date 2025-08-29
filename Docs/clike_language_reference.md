@@ -202,6 +202,20 @@ int* p = &x;
 * **`#import`:** Includes another source file.
 * **`#ifdef`, `#ifndef`, `#else`, `#elif`, `#endif`:** For conditional compilation based on whether a symbol is defined.
 
+### **Threading**
+
+The language provides lightweight concurrency through two statements:
+
+* `spawn` – starts a new thread executing a parameterless function and pushes its integer thread identifier.
+* `join` – waits for the thread with the given identifier to finish execution.
+
+Example:
+
+```c
+int tid = spawn worker();
+join tid;
+```
+
 ### **Built-in Functions**
 
 The C-like front end has access to the rich set of built-in functions provided by the PSCAL VM, including file I/O, string manipulation, mathematical functions, and more. Some common C library functions are also mapped to their Pascal equivalents (e.g., `strlen` is mapped to `length`).
