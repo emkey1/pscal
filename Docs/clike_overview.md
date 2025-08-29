@@ -36,6 +36,7 @@ to the VM:
   parameters allow pass‑by‑reference semantics.
 - **Structs and pointers** – `struct` aggregates fields. `new(&node)` allocates
   dynamic storage and `->` dereferences pointer fields.
+- **Threading** – `spawn` launches a parameterless function in a new thread and returns its id; `join` waits for a thread to complete.
 
 ## Example: Sorting a String
 

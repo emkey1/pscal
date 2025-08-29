@@ -21,6 +21,7 @@ Pscal implements a substantial subset of classic Pascal:
 * **Control flow** – `if`, `case`, `for`, `while`, `repeat…until`, and `break`.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
+* **Threading** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish.
 
 Example program:
 
