@@ -1,0 +1,11 @@
+int main() {
+    printf("PID = %d\n", getpid());
+    int* a;
+    int* b;
+    new(&a); new(&b);
+    *a = 1; *b = 2;
+    swap(&a, &b);
+    printf("After Swap: a=%d b=%d\n", *a, *b);
+    dispose(&a); dispose(&b);
+    return 0;
+}
