@@ -28,17 +28,18 @@ int threadCount = 4;
 // Track completion of individual rows
 int rowDone[768];
 
+
 // Precomputed row ranges for each thread
 int threadStart[4];
 int threadEnd[4];
 
 // Wrapper functions with no parameters for thread spawning
-void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
-void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
-void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
-void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0], 0); }
+void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1], 1); }
+void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2], 2); }
+void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3], 3); }
 
-void computeRows(int startY, int endY) {
+void computeRows(int startY, int endY, int index) {
     int row[1024];
     int x;
     int y;
@@ -69,6 +70,7 @@ void computeRows(int startY, int endY) {
         }
         rowDone[y] = 1;
     }
+    threadDone[index] = 1;
 }
 
 int main() {
@@ -80,6 +82,7 @@ int main() {
     int threadId[4];
     int threadJoined[4];
     int quit;
+    int allDone;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot in CLike");
@@ -112,6 +115,10 @@ int main() {
         threadStart[i] = startY;
         threadEnd[i] = endY;
         startY = endY + 1;
+    }
+
+    for (i = 0; i < threadCount; i++) {
+        threadDone[i] = 0;
     }
 
     // Spawn one worker per precomputed range.
@@ -154,6 +161,7 @@ int main() {
             join threadId[i];
         }
     }
+
 
     updatetexture(textureID, pixelData);
     cleardevice();
