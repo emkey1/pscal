@@ -470,12 +470,46 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             return t;
         }
         case TCAST_ARRAY_ACCESS: {
-            analyzeExpr(node->left, scopes);
-            for (int i = 0; i < node->child_count; ++i) {
-                analyzeExpr(node->children[i], scopes);
+            ASTNodeClike *arrDecl = NULL;
+            if (node->left) {
+                analyzeExpr(node->left, scopes);
+                if (node->left->type == TCAST_IDENTIFIER) {
+                    char *name = tokenToCString(node->left->token);
+                    arrDecl = ss_get_decl(scopes, name);
+                    free(name);
+                } else if (node->left->is_array) {
+                    arrDecl = node->left;
+                }
             }
-            node->var_type = TYPE_UNKNOWN;
-            return TYPE_UNKNOWN;
+            for (int i = 0; i < node->child_count; ++i) {
+                VarType idxType = analyzeExpr(node->children[i], scopes);
+                if (!is_intlike_type(idxType)) {
+                    fprintf(stderr,
+                            "Type error: array index must be integer at line %d, column %d\n",
+                            node->children[i]->token.line,
+                            node->children[i]->token.column);
+                    clike_error_count++;
+                }
+            }
+            if (arrDecl && arrDecl->is_array) {
+                if (arrDecl->dim_count > node->child_count) {
+                    node->is_array = 1;
+                    node->dim_count = arrDecl->dim_count - node->child_count;
+                    node->element_type = arrDecl->element_type;
+                    node->var_type = TYPE_ARRAY;
+                    if (arrDecl->array_dims) {
+                        node->array_dims = (int*)malloc(sizeof(int) * node->dim_count);
+                        for (int i = 0; i < node->dim_count; ++i) {
+                            node->array_dims[i] = arrDecl->array_dims[i + node->child_count];
+                        }
+                    }
+                } else {
+                    node->var_type = arrDecl->element_type;
+                }
+            } else {
+                node->var_type = TYPE_UNKNOWN;
+            }
+            return node->var_type;
         }
         case TCAST_MEMBER:
             analyzeExpr(node->left, scopes);
