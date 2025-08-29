@@ -25,6 +25,9 @@ int MaxY;
 
 int threadCount = 4;
 
+// Track completion of individual rows
+int rowDone[768];
+
 // Precomputed row ranges for each thread
 int threadStart[4];
 int threadEnd[4];
@@ -64,6 +67,7 @@ void computeRows(int startY, int endY) {
             pixelData[bufferBaseIdx + 2] = B;
             pixelData[bufferBaseIdx + 3] = 255;
         }
+        rowDone[y] = 1;
     }
 }
 
@@ -79,12 +83,15 @@ int main() {
     int tid3;
     int quit;
 
+    printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot in CLike");
     textureID = createtexture(WindowWidth, WindowHeight);
     if (textureID < 0) {
         printf("Error: unable to create texture.\n");
         halt();
     }
+    cleardevice();
+    updatescreen();
 
     MaxX = getmaxx();
     MaxY = getmaxy();
@@ -114,6 +121,21 @@ int main() {
     tid1 = spawn computeRowsThread1();
     tid2 = spawn computeRowsThread2();
     tid3 = spawn computeRowsThread3();
+
+    // Display rows as they are computed
+    int nextRow = 0;
+    while (nextRow <= MaxY) {
+        if (rowDone[nextRow]) {
+            updatetexture(textureID, pixelData);
+            cleardevice();
+            rendercopy(textureID);
+            updatescreen();
+            graphloop(0);
+            nextRow = nextRow + 1;
+        } else {
+            graphloop(16); // yield time for worker threads and handle events
+        }
+    }
 
     // Join each thread using the stored ids
     join tid0;
