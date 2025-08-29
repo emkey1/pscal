@@ -25,8 +25,9 @@ int MaxY;
 
 int threadCount = 4;
 
-// Track completion of worker threads
-int threadDone[4];
+// Track completion of individual rows
+int rowDone[768];
+
 
 // Precomputed row ranges for each thread
 int threadStart[4];
@@ -67,6 +68,7 @@ void computeRows(int startY, int endY, int index) {
             pixelData[bufferBaseIdx + 2] = B;
             pixelData[bufferBaseIdx + 3] = 255;
         }
+        rowDone[y] = 1;
     }
     threadDone[index] = 1;
 }
@@ -77,10 +79,8 @@ int main() {
     int endY;
     int rowsPerThread;
     int extra;
-    int tid0;
-    int tid1;
-    int tid2;
-    int tid3;
+    int threadId[4];
+    int threadJoined[4];
     int quit;
     int allDone;
 
@@ -122,27 +122,46 @@ int main() {
     }
 
     // Spawn one worker per precomputed range.
-    tid0 = spawn computeRowsThread0();
-    tid1 = spawn computeRowsThread1();
-    tid2 = spawn computeRowsThread2();
-    tid3 = spawn computeRowsThread3();
-
-    // Display progress while workers run
-    allDone = 0;
-    while (!allDone) {
-        updatetexture(textureID, pixelData);
-        cleardevice();
-        rendercopy(textureID);
-        updatescreen();
-        graphloop(0);
-        allDone = threadDone[0] && threadDone[1] && threadDone[2] && threadDone[3];
+    threadId[0] = spawn computeRowsThread0();
+    threadId[1] = spawn computeRowsThread1();
+    threadId[2] = spawn computeRowsThread2();
+    threadId[3] = spawn computeRowsThread3();
+    for (i = 0; i < threadCount; i++) {
+        threadJoined[i] = 0;
     }
 
-    // Join each thread using the stored ids
-    join tid0;
-    join tid1;
-    join tid2;
-    join tid3;
+    // Display rows as they are computed
+    int nextRow = 0;
+    while (nextRow <= MaxY) {
+        if (rowDone[nextRow]) {
+            updatetexture(textureID, pixelData);
+            cleardevice();
+            rendercopy(textureID);
+            updatescreen();
+            printf("Completed row %d\n", nextRow);
+
+            // Join any thread whose last row just finished
+            for (i = 0; i < threadCount; i++) {
+                if (!threadJoined[i] && nextRow == threadEnd[i]) {
+                    join threadId[i];
+                    threadJoined[i] = 1;
+                }
+            }
+
+            graphloop(0);
+            nextRow = nextRow + 1;
+        } else {
+            graphloop(1); // short yield for worker threads and event handling
+        }
+    }
+
+    // Ensure all threads are joined
+    for (i = 0; i < threadCount; i++) {
+        if (!threadJoined[i]) {
+            join threadId[i];
+        }
+    }
+
 
     updatetexture(textureID, pixelData);
     cleardevice();
