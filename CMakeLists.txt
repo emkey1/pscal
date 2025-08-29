@@ -130,6 +130,7 @@ if(APPLE AND PSCAL_USE_BREW_CURL)
 endif()
 
 find_package(CURL REQUIRED)
+find_package(Threads REQUIRED)
 if(TARGET CURL::libcurl)
     message(STATUS "CURL: using imported target CURL::libcurl")
 else()
@@ -219,6 +220,7 @@ function(add_pscal_executable target_name)
     endif()
 
     list(APPEND TARGET_LINK_LIBS m) # Math library
+    list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
     # Specific options for dascal (ASan)
     if(${target_name} STREQUAL "dascal")
@@ -302,9 +304,9 @@ endif()
 
 add_executable(clike ${CLIKE_SOURCES})
 if(TARGET CURL::libcurl)
-    target_link_libraries(clike PRIVATE CURL::libcurl m)
+    target_link_libraries(clike PRIVATE CURL::libcurl m Threads::Threads)
 else()
-    target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m)
+    target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
@@ -312,9 +314,9 @@ list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
 list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
 add_executable(clike-repl ${CLIKE_REPL_SOURCES})
 if(TARGET CURL::libcurl)
-    target_link_libraries(clike-repl PRIVATE CURL::libcurl m)
+    target_link_libraries(clike-repl PRIVATE CURL::libcurl m Threads::Threads)
 else()
-    target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m)
+    target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
 
 # When SDL support is enabled, clike needs the same SDL include paths,
