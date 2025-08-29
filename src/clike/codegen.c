@@ -621,14 +621,36 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         emitShort(chunk, (uint16_t)name_idx, node->token.line);
     }
     writeBytecodeChunk(chunk, (uint8_t)node->var_type, node->token.line);
-    const char* type_name = varTypeToString(node->var_type);
-    int type_idx = addStringConstant(chunk, type_name);
-    emitShort(chunk, (uint16_t)type_idx, node->token.line);
-    if (node->var_type == TYPE_STRING) {
-        Value zero = makeInt(0);
-        int len_idx = addConstantToChunk(chunk, &zero);
-        freeValue(&zero);
-        emitShort(chunk, (uint16_t)len_idx, node->token.line);
+    if (node->var_type == TYPE_ARRAY && node->is_array) {
+        /* Emit array dimension metadata similar to OP_INIT_LOCAL_ARRAY */
+        writeBytecodeChunk(chunk, (uint8_t)node->dim_count, node->token.line);
+        for (int d = 0; d < node->dim_count; ++d) {
+            if (node->array_dims[d] > 0) {
+                Value lower = makeInt(0);
+                Value upper = makeInt(node->array_dims[d] - 1);
+                emitShort(chunk, (uint16_t)addConstantToChunk(chunk, &lower), node->token.line);
+                emitShort(chunk, (uint16_t)addConstantToChunk(chunk, &upper), node->token.line);
+                freeValue(&lower);
+                freeValue(&upper);
+            } else {
+                /* Undefined dimension size; emit zero bounds */
+                emitShort(chunk, 0, node->token.line);
+                emitShort(chunk, 0, node->token.line);
+            }
+        }
+        int elemNameIdx = addStringConstant(chunk, "");
+        writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
+        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+    } else {
+        const char* type_name = varTypeToString(node->var_type);
+        int type_idx = addStringConstant(chunk, type_name);
+        emitShort(chunk, (uint16_t)type_idx, node->token.line);
+        if (node->var_type == TYPE_STRING) {
+            Value zero = makeInt(0);
+            int len_idx = addConstantToChunk(chunk, &zero);
+            freeValue(&zero);
+            emitShort(chunk, (uint16_t)len_idx, node->token.line);
+        }
     }
     if (node->left) {
         FuncContext dummy = {0};
