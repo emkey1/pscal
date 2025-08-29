@@ -25,17 +25,20 @@ int MaxY;
 
 int threadCount = 4;
 
+// Track completion of worker threads
+int threadDone[4];
+
 // Precomputed row ranges for each thread
 int threadStart[4];
 int threadEnd[4];
 
 // Wrapper functions with no parameters for thread spawning
-void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
-void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
-void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
-void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0], 0); }
+void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1], 1); }
+void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2], 2); }
+void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3], 3); }
 
-void computeRows(int startY, int endY) {
+void computeRows(int startY, int endY, int index) {
     int row[1024];
     int x;
     int y;
@@ -65,6 +68,7 @@ void computeRows(int startY, int endY) {
             pixelData[bufferBaseIdx + 3] = 255;
         }
     }
+    threadDone[index] = 1;
 }
 
 int main() {
@@ -78,13 +82,17 @@ int main() {
     int tid2;
     int tid3;
     int quit;
+    int allDone;
 
+    printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot in CLike");
     textureID = createtexture(WindowWidth, WindowHeight);
     if (textureID < 0) {
         printf("Error: unable to create texture.\n");
         halt();
     }
+    cleardevice();
+    updatescreen();
 
     MaxX = getmaxx();
     MaxY = getmaxy();
@@ -109,11 +117,26 @@ int main() {
         startY = endY + 1;
     }
 
+    for (i = 0; i < threadCount; i++) {
+        threadDone[i] = 0;
+    }
+
     // Spawn one worker per precomputed range.
     tid0 = spawn computeRowsThread0();
     tid1 = spawn computeRowsThread1();
     tid2 = spawn computeRowsThread2();
     tid3 = spawn computeRowsThread3();
+
+    // Display progress while workers run
+    allDone = 0;
+    while (!allDone) {
+        graphloop(16); // yield time for worker threads and handle events
+        updatetexture(textureID, pixelData);
+        cleardevice();
+        rendercopy(textureID);
+        updatescreen();
+        allDone = threadDone[0] && threadDone[1] && threadDone[2] && threadDone[3];
+    }
 
     // Join each thread using the stored ids
     join tid0;
