@@ -1,3 +1,5 @@
+#!/usr/bin/env pascal
+
 program ThreadingDemo;
 
 procedure Worker1;
