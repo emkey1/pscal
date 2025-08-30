@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
 
     VM vm;
     initVM(&vm);
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table, 0);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     if (globalSymbols) freeHashTable(globalSymbols);

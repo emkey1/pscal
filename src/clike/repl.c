@@ -141,7 +141,7 @@ int main(void) {
         if (clike_error_count == 0) {
             BytecodeChunk chunk; clike_compile(prog, &chunk);
             VM vm; initVM(&vm);
-            interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+            interpretBytecode(&vm, &chunk, globalSymbols, procedure_table, 0);
             freeVM(&vm);
             freeBytecodeChunk(&chunk);
         }

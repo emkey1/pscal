@@ -33,91 +33,68 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
-// --- Thread Scheduler Helpers ---
-static void saveThreadContext(VM* vm) {
-    Thread* t = &vm->threads[vm->currentThread];
-    t->chunk = vm->chunk;
-    t->ip = vm->ip;
-    t->stackSize = (int)(vm->stackTop - vm->stack);
-    if (t->stack) {
-        memcpy(t->stack, vm->stack, sizeof(Value) * t->stackSize);
-    }
-    t->frameCount = vm->frameCount;
-    if (t->frames) {
-        memcpy(t->frames, vm->frames, sizeof(CallFrame) * t->frameCount);
-    }
-}
+// --- Threading Helpers ---
+typedef struct {
+    Thread* thread;
+    uint16_t entry;
+} ThreadStartArgs;
 
-static void loadThreadContext(VM* vm, int idx) {
-    Thread* t = &vm->threads[idx];
-    vm->chunk = t->chunk;
-    vm->ip = t->ip;
-    if (t->stack) {
-        memcpy(vm->stack, t->stack, sizeof(Value) * t->stackSize);
-    }
-    vm->stackTop = vm->stack + t->stackSize;
-    vm->frameCount = t->frameCount;
-    if (t->frames) {
-        memcpy(vm->frames, t->frames, sizeof(CallFrame) * t->frameCount);
-    }
-}
+static void* threadStart(void* arg) {
+    ThreadStartArgs* args = (ThreadStartArgs*)arg;
+    Thread* thread = args->thread;
+    VM* vm = thread->vm;
+    uint16_t entry = args->entry;
+    free(args);
 
-static void switchThread(VM* vm) {
-    if (vm->threadCount <= 1) return;
-    saveThreadContext(vm);
-    int start = vm->currentThread;
-    for (int i = 1; i <= vm->threadCount; i++) {
-        int idx = (start + i) % vm->threadCount;
-        if (vm->threads[idx].active) {
-            vm->currentThread = idx;
-            loadThreadContext(vm, idx);
-            return;
-        }
-    }
+    interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->procedureTable, entry);
+    thread->active = false;
+    return NULL;
 }
 
 static int createThread(VM* vm, uint16_t entry) {
     if (vm->threadCount >= VM_MAX_THREADS) return -1;
     Thread* t = &vm->threads[vm->threadCount];
-    t->chunk = vm->chunk;
-    t->ip = vm->chunk->code + entry;
-    t->stackSize = 0;
-    t->frameCount = 0;
-    t->active = true;
-    if (!t->stack) {
-        t->stack = malloc(sizeof(Value) * VM_STACK_MAX);
-        if (!t->stack) return -1;
+    t->vm = malloc(sizeof(VM));
+    if (!t->vm) return -1;
+    initVM(t->vm);
+    t->vm->vmGlobalSymbols = vm->vmGlobalSymbols;
+    t->vm->procedureTable = vm->procedureTable;
+    memcpy(t->vm->host_functions, vm->host_functions, sizeof(vm->host_functions));
+    t->vm->chunk = vm->chunk;
+
+    ThreadStartArgs* args = malloc(sizeof(ThreadStartArgs));
+    if (!args) {
+        free(t->vm);
+        t->vm = NULL;
+        return -1;
     }
-    if (!t->frames) {
-        t->frames = malloc(sizeof(CallFrame) * VM_CALL_STACK_MAX);
-        if (!t->frames) return -1;
+    args->thread = t;
+    args->entry = entry;
+    t->active = true;
+    if (pthread_create(&t->handle, NULL, threadStart, args) != 0) {
+        free(args);
+        free(t->vm);
+        t->vm = NULL;
+        t->active = false;
+        return -1;
     }
     int id = vm->threadCount;
     vm->threadCount++;
     return id;
 }
 
-// Join the thread with the given id. If the thread is still
-// running, yield to the scheduler and re-execute the join
-// instruction later by rewinding the instruction pointer. The
-// function returns true when the target thread has finished and
-// its resources have been freed.
-static bool joinThread(VM* vm, int id) {
-    if (id < 0 || id >= vm->threadCount) return true;
-
-    // If the thread is still active, rewind the instruction pointer so
-    // OP_THREAD_JOIN will be executed again when this thread is rescheduled.
-    if (vm->threads[id].active) {
-        if (vm->ip > vm->chunk->code) vm->ip--; // Join has no operands.
-        return false; // Yield via scheduler after this instruction
+static void joinThread(VM* vm, int id) {
+    if (id <= 0 || id >= vm->threadCount) return;
+    Thread* t = &vm->threads[id];
+    if (t->active) {
+        pthread_join(t->handle, NULL);
+        t->active = false;
     }
-
-    // Thread has finished; clean up its allocated stack and frame storage.
-    free(vm->threads[id].stack);
-    vm->threads[id].stack = NULL;
-    free(vm->threads[id].frames);
-    vm->threads[id].frames = NULL;
-    return true;
+    if (t->vm) {
+        freeVM(t->vm);
+        free(t->vm);
+        t->vm = NULL;
+    }
 }
 
 // Internal function shared by stack dump helpers
@@ -370,12 +347,10 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
     vm->exit_requested = false;
 
-    vm->threadCount = 0;
-    vm->currentThread = 0;
+    vm->threadCount = 1; // main thread occupies index 0
     for (int i = 0; i < VM_MAX_THREADS; i++) {
         vm->threads[i].active = false;
-        vm->threads[i].stack = NULL;
-        vm->threads[i].frames = NULL;
+        vm->threads[i].vm = NULL;
     }
 
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
@@ -397,11 +372,16 @@ void freeVM(VM* vm) {
         vm->vmGlobalSymbols = NULL;
     }
 
-    for (int i = 0; i < VM_MAX_THREADS; i++) {
-        free(vm->threads[i].stack);
-        vm->threads[i].stack = NULL;
-        free(vm->threads[i].frames);
-        vm->threads[i].frames = NULL;
+    for (int i = 1; i < vm->threadCount; i++) {
+        if (vm->threads[i].active) {
+            pthread_join(vm->threads[i].handle, NULL);
+            vm->threads[i].active = false;
+        }
+        if (vm->threads[i].vm) {
+            freeVM(vm->threads[i].vm);
+            free(vm->threads[i].vm);
+            vm->threads[i].vm = NULL;
+        }
     }
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
@@ -648,32 +628,14 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
 }
 
 // --- Main Interpretation Loop ---
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures) {
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
 
     vm->chunk = chunk;
-    vm->ip = vm->chunk->code;
+    vm->ip = vm->chunk->code + entry;
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->procedureTable = procedures; // <--- STORED procedureTable
-
-    // Initialize main thread context
-    vm->threadCount = 1;
-    vm->currentThread = 0;
-    Thread* mainThread = &vm->threads[0];
-    mainThread->chunk = chunk;
-    mainThread->ip = vm->ip;
-    mainThread->stackSize = 0;
-    mainThread->frameCount = 0;
-    mainThread->active = true;
-    if (!mainThread->stack) {
-        mainThread->stack = malloc(sizeof(Value) * VM_STACK_MAX);
-        if (!mainThread->stack) return INTERPRET_RUNTIME_ERROR;
-    }
-    if (!mainThread->frames) {
-        mainThread->frames = malloc(sizeof(CallFrame) * VM_CALL_STACK_MAX);
-        if (!mainThread->frames) return INTERPRET_RUNTIME_ERROR;
-    }
 
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
@@ -924,26 +886,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool halted = false;
                 InterpretResult res = returnFromCall(vm, &halted);
                 if (res != INTERPRET_OK) return res;
-                if (halted) {
-                    vm->threads[vm->currentThread].active = false;
-                    bool any = false;
-                    for (int i = 0; i < vm->threadCount; i++) if (vm->threads[i].active) { any = true; break; }
-                    if (!any) return INTERPRET_OK;
-                    switchThread(vm);
-                }
+                if (halted) return INTERPRET_OK;
                 break;
             }
             case OP_EXIT: {
                 bool halted = false;
                 InterpretResult res = returnFromCall(vm, &halted);
                 if (res != INTERPRET_OK) return res;
-                if (halted) {
-                    vm->threads[vm->currentThread].active = false;
-                    bool any = false;
-                    for (int i = 0; i < vm->threadCount; i++) if (vm->threads[i].active) { any = true; break; }
-                    if (!any) return INTERPRET_OK;
-                    switchThread(vm);
-                }
+                if (halted) return INTERPRET_OK;
                 break;
             }
             case OP_CONSTANT: {
@@ -2610,14 +2560,7 @@ comparison_error_label:
             }
 
             case OP_HALT:
-                vm->threads[vm->currentThread].active = false;
-                {
-                    bool any = false;
-                    for (int i = 0; i < vm->threadCount; i++) if (vm->threads[i].active) { any = true; break; }
-                    if (!any) return INTERPRET_OK;
-                    switchThread(vm);
-                    break;
-                }
+                return INTERPRET_OK;
             case OP_CALL_HOST: {
                 HostFunctionID host_id = READ_HOST_ID();
                 if (host_id >= HOST_FN_COUNT || vm->host_functions[host_id] == NULL) {
@@ -2650,9 +2593,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 int tid = (int)tidVal.i_val;
-                if (!joinThread(vm, tid)) {
-                    break; // Yield; retry join after other threads run
-                }
+                joinThread(vm, tid);
                 Value popped_tid = pop(vm);
                 freeValue(&popped_tid);
                 break;
@@ -2713,7 +2654,6 @@ comparison_error_label:
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;
         }
-        switchThread(vm);
         next_instruction:;
     }
     return INTERPRET_OK;
