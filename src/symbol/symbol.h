@@ -70,6 +70,7 @@ Symbol *lookupLocalSymbol(const char *name);
 void updateSymbol(const char *name, Value val);
 Symbol *lookupSymbolIn(HashTable *table, const char *name);
 void insertGlobalSymbol(const char *name, VarType type, struct AST *type_def_ast); // Use struct AST
+void insertConstGlobalSymbol(const char *name, Value val);
 Symbol *insertLocalSymbol(const char *name, VarType type, struct AST *type_def_ast, bool is_variable_declaration); // Use struct AST
 
 // --- Local Environment Management Function Prototypes ---

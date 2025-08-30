@@ -23,6 +23,7 @@ int clike_warning_count = 0;
 
 static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
+    constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
 }
@@ -123,6 +124,7 @@ int main(int argc, char **argv) {
         clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -136,6 +138,7 @@ int main(int argc, char **argv) {
         clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(clike_error_count > 255 ? 255 : clike_error_count);
     }
@@ -147,6 +150,7 @@ int main(int argc, char **argv) {
         clike_free_structs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -159,7 +163,7 @@ int main(int argc, char **argv) {
     }
 
     VM vm; initVM(&vm);
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table, 0);
+    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);
@@ -167,6 +171,7 @@ int main(int argc, char **argv) {
     free(src);
     if (pre_src) free(pre_src);
     if (globalSymbols) freeHashTable(globalSymbols);
+    if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }

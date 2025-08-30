@@ -76,8 +76,9 @@ typedef struct VM_s {
     Value* stackTop;          // Pointer to the element just above the top of the stack
                               // (i.e., where the next pushed item will go)
 
-    HashTable* vmGlobalSymbols; // VM's own symbol table for runtime global variable storage
-    HashTable* procedureTable; // store procedure table for disassembly
+    HashTable* vmGlobalSymbols;      // VM's own symbol table for runtime global variable storage
+    HashTable* vmConstGlobalSymbols; // Separate table for constant globals (read-only, no mutex)
+    HashTable* procedureTable;      // store procedure table for disassembly
     
     HostFn host_functions[MAX_HOST_FUNCTIONS];
 
@@ -103,7 +104,7 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures, uint16_t entry);
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 
 void runtimeError(VM* vm, const char* format, ...);

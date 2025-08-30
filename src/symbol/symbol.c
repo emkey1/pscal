@@ -330,6 +330,62 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     // The symbol is now owned by the hash table structure.
 }
 
+// Insert a constant symbol into constGlobalSymbols.
+// Stores a copy of the provided Value and marks the symbol as const.
+void insertConstGlobalSymbol(const char *name, Value val) {
+    if (!name || name[0] == '\0') {
+        fprintf(stderr, "[ERROR] Attempted to insert const symbol with invalid name.\n");
+        return;
+    }
+    if (!constGlobalSymbols) {
+        fprintf(stderr, "Internal error: constGlobalSymbols hash table is NULL during insertConstGlobalSymbol.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (hashTableLookup(constGlobalSymbols, name)) {
+        return; // Already inserted
+    }
+
+    Symbol *new_symbol = malloc(sizeof(Symbol));
+    if (!new_symbol) {
+        fprintf(stderr, "Memory allocation error in insertConstGlobalSymbol (Symbol struct)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    new_symbol->name = strdup(name);
+    if (!new_symbol->name) {
+        free(new_symbol);
+        fprintf(stderr, "Memory allocation error (strdup name) in insertConstGlobalSymbol\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    toLowerString(new_symbol->name);
+
+    new_symbol->type = val.type;
+    new_symbol->is_alias = false;
+    new_symbol->is_const = true;
+    new_symbol->is_local_var = false;
+    new_symbol->is_inline = false;
+    new_symbol->next = NULL;
+    new_symbol->type_def = NULL;
+    new_symbol->enclosing = NULL;
+    new_symbol->real_symbol = NULL;
+    new_symbol->is_defined = false;
+    new_symbol->bytecode_address = 0;
+    new_symbol->arity = 0;
+    new_symbol->locals_count = 0;
+    new_symbol->slot_index = 0;
+    new_symbol->upvalue_count = 0;
+
+    new_symbol->value = malloc(sizeof(Value));
+    if (!new_symbol->value) {
+        free(new_symbol->name);
+        free(new_symbol);
+        fprintf(stderr, "Memory allocation error (malloc Value) in insertConstGlobalSymbol\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    *(new_symbol->value) = makeCopyOfValue(&val);
+
+    hashTableInsert(constGlobalSymbols, new_symbol);
+}
+
 
 /**
  * Inserts a new local symbol into the local symbol table (hash table).

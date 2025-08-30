@@ -38,6 +38,7 @@ extern "C" {
 
 // --- Global Variable EXTERN Declarations ---
 extern HashTable *globalSymbols;
+extern HashTable *constGlobalSymbols;
 extern HashTable *localSymbols;
 extern Symbol *current_function_symbol;
 
