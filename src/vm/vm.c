@@ -194,7 +194,9 @@ static bool vmSetContains(const Value* setVal, const Value* itemVal) {
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
     // 1. Scan global symbols using the existing hash table helper
     if (vm->vmGlobalSymbols) {
+        pthread_mutex_lock(&globals_mutex);
         nullifyPointerAliasesByAddrValue(vm->vmGlobalSymbols, disposedAddrValue);
+        pthread_mutex_unlock(&globals_mutex);
     }
 
     // 2. Scan the entire VM value stack for local variables and parameters
@@ -639,6 +641,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
+        pthread_mutex_lock(&globals_mutex);
         Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
         if (inputSym && inputSym->value &&
             inputSym->value->type == TYPE_FILE &&
@@ -652,6 +655,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             outputSym->value->f_val == NULL) {
             outputSym->value->f_val = stdout;
         }
+        pthread_mutex_unlock(&globals_mutex);
     }
 
     // Establish a base call frame for the main program.  This allows inline
