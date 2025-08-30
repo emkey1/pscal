@@ -894,8 +894,36 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 char *name = tokenToCString(call->token);
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
                 if (sym) {
+                    /*
+                     * When a function with local variables is spawned directly,
+                     * the new thread begins execution without a call frame,
+                     * so its locals overlap the stack base.  Any POP used to
+                     * discard the assignment result then wipes out the just-
+                     * stored local, leaving it NIL (e.g. feeding NIL to
+                     * built-ins like toupper).  Generate a wrapper that
+                     * performs a normal OP_CALL so the callee runs with a
+                     * proper stack frame and separate local slot storage.
+                     */
                     writeBytecodeChunk(chunk, OP_THREAD_CREATE, call->token.line);
+                    int patch = chunk->count;
+                    emitShort(chunk, 0xFFFF, call->token.line); // placeholder for wrapper addr
+
+                    // Jump over inlined wrapper so main thread continues execution.
+                    writeBytecodeChunk(chunk, OP_JUMP, call->token.line);
+                    int jumpPatch = chunk->count;
+                    emitShort(chunk, 0xFFFF, call->token.line);
+
+                    int wrapper_addr = chunk->count;
+                    int nameIdx = addStringConstant(chunk, name);
+                    writeBytecodeChunk(chunk, OP_CALL, call->token.line);
+                    emitShort(chunk, (uint16_t)nameIdx, call->token.line);
                     emitShort(chunk, (uint16_t)sym->bytecode_address, call->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)sym->arity, call->token.line);
+                    writeBytecodeChunk(chunk, OP_RETURN, call->token.line);
+
+                    // Patch addresses: spawn target and jump over wrapper.
+                    patchShort(chunk, patch, (uint16_t)wrapper_addr);
+                    patchShort(chunk, jumpPatch, (uint16_t)(chunk->count - (jumpPatch + 2)));
                 }
                 free(name);
             }
