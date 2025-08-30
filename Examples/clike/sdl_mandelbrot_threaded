@@ -21,6 +21,7 @@ int   MaxX, MaxY;
 int threadCount = 4;
 int threadStart[4];
 int threadEnd[4];
+
 volatile int rowDone[768];
 volatile int quit = 0;
 
