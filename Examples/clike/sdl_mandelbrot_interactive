@@ -1,98 +1,155 @@
 #!/usr/bin/env clike
 /*
- * SDL Mandelbrot renderer using the MandelbrotRow builtin.
+ * SDL Mandelbrot renderer using the MandelbrotRow builtin with threading.
  * Left click to zoom in, right click to zoom out, Q to quit.
  */
 
-int main() {
-    int width = 1200;
-    int height = 900;
-    int maxIterations = 200;
-    double minRe = -2.0;
-    double maxRe = 1.0;
-    double minIm = -1.2;
-    double maxIm;
-    double reFactor;
-    double imFactor;
-    double zoomFactor = 4.0;
+const int Width = 1200;
+const int Height = 900;
+const int MaxIterations = 200;
+const int BytesPerPixel = 4;
+const int ScreenUpdateInterval = 16;
+const double ZoomFactor = 4.0;
+const int ThreadCount = 4;
 
-    int bytesPerPixel = 4;
-    int row[width];
-    byte pixelData[width * height * bytesPerPixel];
-    int textureID;
-    int screenUpdateInterval = 16; // update screen every 16 rows
-    int quit = 0;
-    int redraw = 1;
+byte pixelData[Width * Height * BytesPerPixel];
+int rowDone[Height];
+int threadStart[ThreadCount];
+int threadEnd[ThreadCount];
+
+double minRe = -2.0;
+double maxRe = 1.0;
+double minIm = -1.2;
+double maxIm;
+double reFactor;
+double imFactor;
+
+int textureID;
+int rowMutex;
+int quitMutex;
+int quit = 0;
+int redraw = 1;
+
+int getQuit() { int q; lock(quitMutex); q = quit; unlock(quitMutex); return q; }
+void setQuit(int v) { lock(quitMutex); quit = v; unlock(quitMutex); }
+
+void computeRows(int startY, int endY) {
+    int row[Width], x, y, n, R, G, B, idx;
+    double c_im;
+    for (y = startY; y <= endY && !getQuit(); y++) {
+        c_im = maxIm - y * imFactor;
+        mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
+        idx = y * Width * BytesPerPixel;
+        lock(rowMutex);
+        for (x = 0; x < Width; x++) {
+            n = row[x];
+            if (n == MaxIterations) { R = G = B = 0; }
+            else {
+                R = (n * 5) % 256;
+                G = (n * 7 + 85) % 256;
+                B = (n * 11 + 170) % 256;
+            }
+            pixelData[idx + 0] = R;
+            pixelData[idx + 1] = G;
+            pixelData[idx + 2] = B;
+            pixelData[idx + 3] = 255;
+            idx += BytesPerPixel;
+        }
+        rowDone[y] = 1;
+        unlock(rowMutex);
+    }
+}
+
+void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
+void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
+void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
+void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+
+int main() {
     int mouseX = 0, mouseY = 0, mouseButtons = 0, prevButtons = 0;
-    int ButtonLeft = 1;
-    int ButtonRight = 4;
+    int ButtonLeft = 1, ButtonRight = 4;
+    int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
-    initgraph(width, height, "Mandelbrot in CLike (builtin)");
-    textureID = createtexture(width, height);
-    if (textureID < 0) {
-        printf("Error: unable to create texture.\n");
-        halt();
-    }
-    cleardevice();
-    updatescreen();
+    initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
+    textureID = createtexture(Width, Height);
+    if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
+    cleardevice(); updatescreen();
 
-    int n,R,G,B;
+    rowMutex = mutex();
+    quitMutex = mutex();
 
-    while (!quit) {
+    while (!getQuit()) {
         if (redraw) {
-            maxIm = minIm + (maxRe - minRe) * height / width;
-            reFactor = (maxRe - minRe) / (width - 1);
-            imFactor = (maxIm - minIm) / (height - 1);
-            for (int y = 0; y < height; y++) {
-                double c_im = maxIm - y * imFactor;
-                mandelbrotrow(minRe, reFactor, c_im, maxIterations, width - 1, &row);
-                int idx = y * width * bytesPerPixel;
-                for (int x = 0; x < width; x++) {
-                    n = row[x];
-                    if (n == maxIterations) {
-                        R = 0;
-                        G = 0;
-                        B = 0;
-                    } else {
-                        R = (n * 5) % 256;
-                        G = (n * 7 + 85) % 256;
-                        B = (n * 11 + 170) % 256;
-                    }
-                    pixelData[idx + 0] = R;
-                    pixelData[idx + 1] = G;
-                    pixelData[idx + 2] = B;
-                    pixelData[idx + 3] = 255;
-                    idx += bytesPerPixel;
-                }
-                if (((y + 1) % screenUpdateInterval) == 0 || y == height - 1) {
+            maxIm = minIm + (maxRe - minRe) * Height / Width;
+            reFactor = (maxRe - minRe) / (Width - 1);
+            imFactor = (maxIm - minIm) / (Height - 1);
+            for (i = 0; i < Height; i++) rowDone[i] = 0;
+
+            rowsPerThread = Height / ThreadCount;
+            extra = Height % ThreadCount;
+            startY = 0;
+            for (i = 0; i < ThreadCount; i++) {
+                endY = startY + rowsPerThread - 1;
+                if (extra > 0) { endY++; extra--; }
+                threadStart[i] = startY;
+                threadEnd[i] = endY;
+                startY = endY + 1;
+            }
+
+            tid[0] = spawn computeRowsThread0();
+            tid[1] = spawn computeRowsThread1();
+            tid[2] = spawn computeRowsThread2();
+            tid[3] = spawn computeRowsThread3();
+
+            y = 0;
+            while (y < Height && !getQuit()) {
+                int done, update;
+                lock(rowMutex);
+                done = rowDone[y];
+                update = done && (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1);
+                if (update)
                     updatetexture(textureID, pixelData);
+                if (done)
+                    y++;
+                unlock(rowMutex);
+
+                if (update) {
                     cleardevice();
                     rendercopy(textureID);
                     updatescreen();
-                    graphloop(0);
                 }
+                if (keypressed()) {
+                    char c = readkey();
+                    if (toupper(c) == 'Q') setQuit(1);
+                }
+                if (!done || update)
+                    graphloop(0);
             }
-            updatetexture(textureID, pixelData);
-            cleardevice();
-            rendercopy(textureID);
-            updatescreen();
-            redraw = 0;
+
+            for (i = 0; i < ThreadCount; i++)
+                join tid[i];
+
+            if (!getQuit()) {
+                updatetexture(textureID, pixelData);
+                cleardevice();
+                rendercopy(textureID);
+                updatescreen();
+                redraw = 0;
+            }
         }
 
         if (keypressed()) {
             char c = readkey();
-            if (toupper(c) == 'Q') {
-                quit = 1;
-            }
+            if (toupper(c) == 'Q') { setQuit(1); continue; }
         }
 
         getmousestate(&mouseX, &mouseY, &mouseButtons);
         if (((mouseButtons & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0)) {
             double centerRe = minRe + mouseX * reFactor;
             double centerIm = maxIm - mouseY * imFactor;
-            double newWidth = (maxRe - minRe) / zoomFactor;
-            double newHeight = (maxIm - minIm) / zoomFactor;
+            double newWidth = (maxRe - minRe) / ZoomFactor;
+            double newHeight = (maxIm - minIm) / ZoomFactor;
             minRe = centerRe - newWidth / 2.0;
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
@@ -100,8 +157,8 @@ int main() {
         } else if (((mouseButtons & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0)) {
             double centerRe = minRe + mouseX * reFactor;
             double centerIm = maxIm - mouseY * imFactor;
-            double newWidth = (maxRe - minRe) * zoomFactor;
-            double newHeight = (maxIm - minIm) * zoomFactor;
+            double newWidth = (maxRe - minRe) * ZoomFactor;
+            double newHeight = (maxIm - minIm) * ZoomFactor;
             minRe = centerRe - newWidth / 2.0;
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
