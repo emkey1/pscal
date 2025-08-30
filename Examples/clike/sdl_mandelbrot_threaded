@@ -4,11 +4,11 @@
  * The window updates as rows are drawn. Press Q in the console to quit.
  */
 
-int WindowWidth = 1024;
-int WindowHeight = 768;
-int MaxIterations = 128;
-float MinRe = -2.0;
-float MaxRe = 1.0;
+const int WindowWidth = 1024;
+const int WindowHeight = 768;
+const int MaxIterations = 128;
+const float MinRe = -2.0;
+const float MaxRe = 1.0;
 // Most of the runtime is spent computing Mandelbrot rows, so increasing
 // this value has little impact on overall speed. Keep frequent updates for
 // responsiveness and adjust MaxIterations or image size for performance.
@@ -25,8 +25,8 @@ int threadCount = 4;
 int threadStart[4];
 int threadEnd[4];
 
-volatile int rowDone[768];
-volatile int quit = 0;
+int rowDone[768];
+int quit = 0;
 
 int rowMutex;
 int quitMutex;
