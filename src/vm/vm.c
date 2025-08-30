@@ -2545,9 +2545,17 @@ comparison_error_label:
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
-                    pthread_mutex_lock(&globals_mutex);
-                    Value result = handler(vm, arg_count, args);
-                    pthread_mutex_unlock(&globals_mutex);
+                    Value result;
+                    if (handler == vmBuiltinDelay) {
+                        // vmBuiltinDelay does not touch global state; calling it while holding
+                        // the globals_mutex blocks all other threads unnecessarily.  Execute it
+                        // without the lock so other threads may run during the sleep period.
+                        result = handler(vm, arg_count, args);
+                    } else {
+                        pthread_mutex_lock(&globals_mutex);
+                        result = handler(vm, arg_count, args);
+                        pthread_mutex_unlock(&globals_mutex);
+                    }
 
                     // Pop arguments from the stack and free their contents
                     // This is crucial to prevent stack corruption.
