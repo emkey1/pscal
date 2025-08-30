@@ -191,12 +191,13 @@ static bool vmSetContains(const Value* setVal, const Value* itemVal) {
 
 // Scans all global symbols and the entire VM value stack to find and nullify
 // any pointers that are aliases of a memory address that is being disposed.
+//
+// The caller must hold `globals_mutex` before invoking this function to ensure
+// thread-safe access to global interpreter state.
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
     // 1. Scan global symbols using the existing hash table helper
     if (vm->vmGlobalSymbols) {
-        pthread_mutex_lock(&globals_mutex);
         nullifyPointerAliasesByAddrValue(vm->vmGlobalSymbols, disposedAddrValue);
-        pthread_mutex_unlock(&globals_mutex);
     }
 
     // 2. Scan the entire VM value stack for local variables and parameters
