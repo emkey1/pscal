@@ -107,7 +107,16 @@ int main() {
                 int done, update;
                 lock(rowMutex);
                 done = rowDone[y];
-                update = done && (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1);
+                /*
+                 * "done" is stored as an integer in rowDone[y].  The logical
+                 * operators in CLike require both operands to be of the same
+                 * type (either both integers or both booleans).  The expression
+                 * on the right-hand side produces a boolean result, so we
+                 * explicitly compare "done" against zero to convert it to a
+                 * boolean before using the && operator.  This avoids a runtime
+                 * type error when mixing INTEGER and BOOLEAN values.
+                 */
+                update = (done != 0) && (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1);
                 if (update)
                     updatetexture(textureID, pixelData);
                 if (done)
