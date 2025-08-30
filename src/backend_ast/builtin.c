@@ -397,6 +397,14 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
         c = arg.c_val;
     } else if (IS_INTLIKE(arg)) {
         c = (int)AS_INTEGER(arg);
+    } else if (arg.type == TYPE_STRING) {
+        const char* s = AS_STRING(arg);
+        if (s && s[0] != '\0') {
+            c = (unsigned char)s[0];
+        } else {
+            runtimeError(vm, "Upcase expects a non-empty string or char argument.");
+            return makeChar('\0');
+        }
     } else {
         runtimeError(vm, "Upcase expects 1 char argument.");
         return makeChar('\0');

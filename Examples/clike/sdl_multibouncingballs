@@ -79,7 +79,7 @@ int main() {
         if (keypressed()) {
             char c;
             c = readkey();
-            if (upcase(c) == 'Q') {
+            if (topper(c) == 'Q') {
                 quit = 1;
             }
         }
