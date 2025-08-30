@@ -694,6 +694,40 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
     return INTERPRET_OK;
 }
 
+// Determine if a core VM builtin requires access to global interpreter
+// structures protected by globals_mutex. Builtins that do not touch such
+// structures can execute without acquiring the global lock.
+static bool builtinUsesGlobalStructures(const char* name) {
+    if (!name) return false;
+
+    /*
+     * Builtins listed here read or modify interpreter globals declared in
+     * Pascal/globals.c (symbol tables, IO state, CRT state, etc.). They must
+     * execute while holding globals_mutex to avoid races with other
+     * interpreter threads touching the same shared state.
+     */
+    static const char* const needs_lock[] = {
+        "append",         "assign",        "biblinktext",   "biboldtext",
+        "biclrscr",       "bilowvideo",    "binormvideo",   "biunderlinetext",
+        "biwherex",       "biwherey",      "blinktext",     "boldtext",
+        "close",          "clreol",        "clrscr",        "cursoroff",
+        "cursoron",       "deline",        "dispose",       "eof",
+        "erase",          "gotoxy",        "hidecursor",    "highvideo",
+        "ioresult",       "insline",       "invertcolors",  "lowvideo",
+        "normvideo",      "normalcolors",  "paramcount",    "paramstr",
+        "quitrequested",  "read",          "readln",        "rename",
+        "reset",          "rewrite",       "screenrows",    "screencols",
+        "showcursor",     "textbackground", "textbackgrounde","textcolor",
+        "textcolore",     "underlinetext", "window",        "wherex",
+        "wherey",
+    };
+
+    for (size_t i = 0; i < sizeof(needs_lock)/sizeof(needs_lock[0]); i++) {
+        if (strcmp(name, needs_lock[i]) == 0) return true;
+    }
+    return false;
+}
+
 // --- Main Interpretation Loop ---
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
@@ -2545,17 +2579,10 @@ comparison_error_label:
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
-                    Value result;
-                    if (handler == vmBuiltinDelay) {
-                        // vmBuiltinDelay does not touch global state; calling it while holding
-                        // the globals_mutex blocks all other threads unnecessarily.  Execute it
-                        // without the lock so other threads may run during the sleep period.
-                        result = handler(vm, arg_count, args);
-                    } else {
-                        pthread_mutex_lock(&globals_mutex);
-                        result = handler(vm, arg_count, args);
-                        pthread_mutex_unlock(&globals_mutex);
-                    }
+                    bool needs_lock = builtinUsesGlobalStructures(builtin_name_lower);
+                    if (needs_lock) pthread_mutex_lock(&globals_mutex);
+                    Value result = handler(vm, arg_count, args);
+                    if (needs_lock) pthread_mutex_unlock(&globals_mutex);
 
                     // Pop arguments from the stack and free their contents
                     // This is crucial to prevent stack corruption.
