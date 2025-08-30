@@ -152,6 +152,7 @@ int textcolore();
 int trunc();
 int underlinetext();
 int upcase();
+int topper();
 int updatescreen();
 int updatetexture();
 int val();
