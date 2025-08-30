@@ -84,6 +84,9 @@ static int createThread(VM* vm, uint16_t entry) {
 }
 
 static void joinThread(VM* vm, int id) {
+    // Thread IDs start at 1. ID 0 represents the main thread and cannot be
+    // joined through this helper. Only negative IDs or those beyond the
+    // current thread count are invalid.
     if (id <= 0 || id >= vm->threadCount) return;
     Thread* t = &vm->threads[id];
     if (t->active) {
@@ -438,7 +441,11 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
         freeValue(&safeReturnValue);
     }
 
-    if (halted) *halted = false;
+    // Signal halt when we've popped the last call frame so the caller can
+    // terminate execution gracefully.
+    if (halted) {
+        *halted = (vm->frameCount == 0);
+    }
     return INTERPRET_OK;
 }
 
