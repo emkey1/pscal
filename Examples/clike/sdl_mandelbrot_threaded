@@ -12,8 +12,8 @@ const float MaxRe = 1.0;
 // Most of the runtime is spent computing Mandelbrot rows, so increasing
 // this value has little impact on overall speed. Keep frequent updates for
 // responsiveness and adjust MaxIterations or image size for performance.
-int ScreenUpdateInterval = 1;
-int MandelBytesPerPixel = 4;
+const int ScreenUpdateInterval = 1;
+const int MandelBytesPerPixel = 4;
 
 byte  pixelData[1024 * 768 * 4];
 int   textureID;
@@ -87,12 +87,11 @@ void waitForQuit() {
                 setQuit(1);
             }
         }
-        delay(10);
     }
 }
 
 int main() {
-    int i, startY, endY, rowsPerThread, extra, tid[5], y;
+    int i, startY, endY, rowsPerThread, extra, tid[5], y, quit;
 
     printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
@@ -130,11 +129,7 @@ int main() {
 
     y = 0;
     while (y <= MaxY && !getQuit()) {
-        int done;
-        lock(rowMutex);
-        done = rowDone[y];
-        unlock(rowMutex);
-        if (done) {
+        if (rowDone[y]) {
             if (((y + 1) % ScreenUpdateInterval) == 0 || y == MaxY) {
                 updatetexture(textureID, pixelData);
                 cleardevice();
@@ -158,5 +153,6 @@ int main() {
     join tid[4];
     destroytexture(textureID); closegraph();
     return 0;
+
 }
 
