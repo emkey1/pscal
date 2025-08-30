@@ -69,5 +69,21 @@ Symbol *current_function_symbol = NULL; // Define the global variable here.
 // Note: Other global SDL/Audio variables declared in globals.h are typically
 // defined and initialized in their respective .c files (sdl.c, audio.c).
 
-// Mutex definition guarding shared global tables
-pthread_mutex_t globals_mutex = PTHREAD_MUTEX_INITIALIZER;
+// Mutex definition guarding shared global tables.  Use a recursive mutex so
+// a thread may reacquire the lock when builtins invoke helpers that also
+// touch global interpreter state.
+#if defined(PTHREAD_RECURSIVE_MUTEX_INITIALIZER)
+pthread_mutex_t globals_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+#elif defined(PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP)
+pthread_mutex_t globals_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+#else
+pthread_mutex_t globals_mutex;
+static void init_globals_mutex(void) __attribute__((constructor));
+static void init_globals_mutex(void) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&globals_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
+#endif
