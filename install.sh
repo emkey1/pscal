@@ -37,9 +37,9 @@ cp -r fonts/* /usr/local/pscal/fonts
 mkdir -p /usr/local/pscal/etc
 cp -r etc/* /usr/local/pscal/etc
 
-# Set group to executable
-chmod go+x /usr/local/bin/clike
-chmod go+x /usr/local/bin/clike-repl
-chmod go+x /usr/local/bin/dascal
-chmod go+x /usr/local/bin/pascal
-chmod go+x /usr/local/bin/pscalvm
+# Set group to executable for any installed binaries
+for bin in clike clike-repl dascal pascal pscalvm; do
+    if [ -f "/usr/local/bin/$bin" ]; then
+        chmod go+x "/usr/local/bin/$bin"
+    fi
+done
