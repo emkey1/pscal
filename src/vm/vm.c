@@ -699,7 +699,8 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
 // structures can execute without acquiring the global lock.
 static bool builtinUsesGlobalStructures(const char* name) {
     if (!name) return false;
-    return strcmp(name, "eof") == 0;
+    return strcmp(name, "eof") == 0 ||
+           strcmp(name, "dispose") == 0;
 }
 
 // --- Main Interpretation Loop ---
