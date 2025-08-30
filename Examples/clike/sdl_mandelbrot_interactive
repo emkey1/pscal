@@ -80,6 +80,13 @@ int main() {
     quitMutex = mutex();
 
     while (!getQuit()) {
+        /*
+         * Pump SDL events before handling input so mouse and keyboard state
+         * are up to date.  Previously this was done at the end of the loop,
+         * which could miss short clicks that occurred between polls.
+         */
+        graphloop(16);
+
         if (redraw) {
             maxIm = minIm + (maxRe - minRe) * Height / Width;
             reFactor = (maxRe - minRe) / (Width - 1);
@@ -174,8 +181,6 @@ int main() {
             redraw = 1;
         }
         prevButtons = mouseButtons;
-
-        graphloop(16);
     }
 
     destroytexture(textureID);
