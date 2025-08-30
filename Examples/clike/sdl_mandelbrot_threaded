@@ -21,13 +21,14 @@ int   MaxX, MaxY;
 int threadCount = 4;
 int threadStart[4];
 int threadEnd[4];
-int rowDone[768];
+volatile int rowDone[768];
+volatile int quit = 0;
 
 void computeRows(int startY, int endY) {
     int row[1024], x, y, n, R, G, B, bufferBaseIdx;
     float c_im;
 
-    for (y = startY; y <= endY; y++) {
+    for (y = startY; y <= endY && !quit; y++) {
         c_im = MaxIm - y * ImFactor;
         mandelbrotrow(MinRe, ReFactor, c_im, MaxIterations, MaxX, &row);
         for (x = 0; x <= MaxX; x++) {
@@ -54,8 +55,21 @@ void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
 void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
 void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
 
+void waitForQuit() {
+    char c;
+    while (!quit) {
+        if (keypressed()) {
+            c = readkey();
+            if (upcase(c) == 'Q') {
+                quit = 1;
+            }
+        }
+        delay(10);
+    }
+}
+
 int main() {
-    int i, startY, endY, rowsPerThread, extra, tid[4], y, quit;
+    int i, startY, endY, rowsPerThread, extra, tid[5], y;
 
     printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
@@ -86,9 +100,10 @@ int main() {
     tid[1] = spawn computeRowsThread1();
     tid[2] = spawn computeRowsThread2();
     tid[3] = spawn computeRowsThread3();
+    tid[4] = spawn waitForQuit();
 
     y = 0;
-    while (y <= MaxY) {
+    while (y <= MaxY && !quit) {
         if (rowDone[y]) {
             if (((y + 1) % ScreenUpdateInterval) == 0 || y == MaxY) {
                 updatetexture(textureID, pixelData);
@@ -107,14 +122,10 @@ int main() {
         join tid[i];
 
     printf("Mandelbrot rendered. Press Q in the console to quit.\n");
-    quit = 0;
-    while (!quit) {
-        if (keypressed()) {
-            char c = readkey();
-            if (upcase(c) == 'Q') quit = 1;
-        }
+    while (!quit)
         graphloop(16);
-    }
+
+    join tid[4];
     destroytexture(textureID); closegraph();
     return 0;
 }
