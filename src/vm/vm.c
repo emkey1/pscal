@@ -2559,6 +2559,7 @@ comparison_error_label:
                     Value result = handler(vm, arg_count, args);
                     if (needs_lock) pthread_mutex_unlock(&globals_mutex);
 
+
                     // Pop arguments from the stack and free their contents
                     // This is crucial to prevent stack corruption.
                     vm->stackTop -= arg_count;

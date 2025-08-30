@@ -29,6 +29,22 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_USER=ON/OFF
 ```
 
+## Threading considerations
+
+Extended built-ins execute inside the VM and may be called from multiple
+threads when the host application uses the interpreter concurrently.  To
+avoid race conditions or other undefined behavior:
+
+- Avoid mutable global or static state, or guard it with appropriate
+  synchronization primitives.
+- Prefer thread-safe library routines and be cautious when sharing
+  resources such as files or sockets.
+- Keep critical sections short and do not hold locks while calling back
+  into the VM.
+
+The VM itself does not provide locking for custom built-ins, so each
+extension is responsible for its own thread safety.
+
 ## Creating a new built-in
 
 1. Choose a category under `src/ext_builtins` or create a new one.  For

@@ -21,6 +21,6 @@ Start here to explore the available guides and references in this directory.
 ## Virtual machine
 - [pscal_vm_overview.md](pscal_vm_overview.md): stack-based VM architecture and opcode reference.
 - [pscal_vm_builtins.md](pscal_vm_builtins.md): catalog of built-in functions provided by the VM.
-- [extending_builtins.md](extending_builtins.md): how to add custom built-in routines.
+- [extended_builtins.md](extended_builtins.md): how to add custom built-in routines.
 - [standalone_vm_frontends.md](standalone_vm_frontends.md): writing external frontends that emit Pscal bytecode.
 
