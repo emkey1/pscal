@@ -93,6 +93,7 @@ typedef struct VM_s {
     // Mutex support
     Mutex mutexes[VM_MAX_MUTEXES];
     int mutexCount;
+    struct VM_s* mutexOwner; // VM that owns the mutex registry
 
 } VM;
 

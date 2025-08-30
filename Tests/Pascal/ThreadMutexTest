@@ -2,18 +2,28 @@ program ThreadMutexTest;
 var
   counter: integer;
   mid: integer;
+  i1: integer;
+  i2: integer;
 
-procedure Worker;
-var
-  i: integer;
+procedure Worker1;
 begin
-  i := 0;
-  while i < 100 do
+  while i1 < 100 do
   begin
     lock(mid);
     counter := counter + 1;
     unlock(mid);
-    i := i + 1;
+    i1 := i1 + 1;
+  end;
+end;
+
+procedure Worker2;
+begin
+  while i2 < 100 do
+  begin
+    lock(mid);
+    counter := counter + 1;
+    unlock(mid);
+    i2 := i2 + 1;
   end;
 end;
 
@@ -21,9 +31,11 @@ var
   t1, t2: integer;
 begin
   counter := 0;
-  mid := mutex;
-  t1 := spawn Worker;
-  t2 := spawn Worker;
+  i1 := 0;
+  i2 := 0;
+  mid := mutex();
+  t1 := spawn Worker1;
+  t2 := spawn Worker2;
   join t1;
   join t2;
   writeln(counter);

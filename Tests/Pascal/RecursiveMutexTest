@@ -14,7 +14,7 @@ end;
 var
   tid: integer;
 begin
-  mid := rcmutex;
+  mid := rcmutex();
   tid := spawn Worker;
   join tid;
   writeln('done');

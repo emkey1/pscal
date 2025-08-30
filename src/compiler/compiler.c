@@ -2042,7 +2042,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
                 }
                 writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
-                writeBytecodeChunk(chunk, OP_POP, line);
                 break;
             }
             if (strcasecmp(calleeName, "rcmutex") == 0) {
@@ -2050,7 +2049,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
                 }
                 writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
-                writeBytecodeChunk(chunk, OP_POP, line);
                 break;
             }
 

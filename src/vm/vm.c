@@ -61,6 +61,8 @@ static int createThread(VM* vm, uint16_t entry) {
     t->vm->procedureTable = vm->procedureTable;
     memcpy(t->vm->host_functions, vm->host_functions, sizeof(vm->host_functions));
     t->vm->chunk = vm->chunk;
+    t->vm->mutexOwner = vm->mutexOwner ? vm->mutexOwner : vm;
+    t->vm->mutexCount = t->vm->mutexOwner->mutexCount;
 
     ThreadStartArgs* args = malloc(sizeof(ThreadStartArgs));
     if (!args) {
@@ -102,8 +104,9 @@ static void joinThread(VM* vm, int id) {
 
 // --- Mutex Helpers ---
 static int createMutex(VM* vm, bool recursive) {
-    if (vm->mutexCount >= VM_MAX_MUTEXES) return -1;
-    Mutex* m = &vm->mutexes[vm->mutexCount];
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
+    Mutex* m = &owner->mutexes[owner->mutexCount];
     pthread_mutexattr_t attr;
     pthread_mutexattr_t* attr_ptr = NULL;
     if (recursive) {
@@ -117,19 +120,21 @@ static int createMutex(VM* vm, bool recursive) {
     }
     if (attr_ptr) pthread_mutexattr_destroy(&attr);
     m->active = true;
-    int id = vm->mutexCount;
-    vm->mutexCount++;
+    int id = owner->mutexCount;
+    owner->mutexCount++;
     return id;
 }
 
 static bool lockMutex(VM* vm, int id) {
-    if (id < 0 || id >= vm->mutexCount || !vm->mutexes[id].active) return false;
-    return pthread_mutex_lock(&vm->mutexes[id].handle) == 0;
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
+    return pthread_mutex_lock(&owner->mutexes[id].handle) == 0;
 }
 
 static bool unlockMutex(VM* vm, int id) {
-    if (id < 0 || id >= vm->mutexCount || !vm->mutexes[id].active) return false;
-    return pthread_mutex_unlock(&vm->mutexes[id].handle) == 0;
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
+    return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
 }
 
 // Internal function shared by stack dump helpers
@@ -392,6 +397,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
 
     vm->mutexCount = 0;
+    vm->mutexOwner = vm;
     for (int i = 0; i < VM_MAX_MUTEXES; i++) {
         vm->mutexes[i].active = false;
     }
@@ -427,10 +433,12 @@ void freeVM(VM* vm) {
         }
     }
 
-    for (int i = 0; i < vm->mutexCount; i++) {
-        if (vm->mutexes[i].active) {
-            pthread_mutex_destroy(&vm->mutexes[i].handle);
-            vm->mutexes[i].active = false;
+    if (vm->mutexOwner == vm) {
+        for (int i = 0; i < vm->mutexCount; i++) {
+            if (vm->mutexes[i].active) {
+                pthread_mutex_destroy(&vm->mutexes[i].handle);
+                vm->mutexes[i].active = false;
+            }
         }
     }
     // No explicit freeing of vm->host_functions array itself as it's part of
