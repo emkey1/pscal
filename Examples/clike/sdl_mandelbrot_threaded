@@ -21,8 +21,9 @@ int   MaxX, MaxY;
 int threadCount = 4;
 int threadStart[4];
 int threadEnd[4];
-int rowDone[768];
-int quit = 0;
+
+volatile int rowDone[768];
+volatile int quit = 0;
 
 void computeRows(int startY, int endY) {
     int row[1024], x, y, n, R, G, B, bufferBaseIdx;
