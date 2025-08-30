@@ -103,8 +103,8 @@ static Token* makeIdentTokenLocal(const char* s) {
 
 // Create a core AST node representing a builtin type token
 static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
-    const char* name = clike_tokenTypeToTypeName(t.type);
-    VarType vt = clike_tokenTypeToVarType(t.type);
+    const char* name = clikeTokenTypeToTypeName(t.type);
+    VarType vt = clikeTokenTypeToVarType(t.type);
     if (!name) return NULL;
     Token* tok = makeIdentTokenLocal(name);
     AST* node = newASTNode(AST_VARIABLE, tok);
@@ -486,7 +486,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     if (node->right && node->right->type == TCAST_IDENTIFIER) {
                         if (node->right->token.type == CLIKE_TOKEN_IDENTIFIER) {
                             char *tname = tokenToCString(node->right->token);
-                            base = clike_lookup_struct(tname);
+                            base = clikeLookupStruct(tname);
                             if (!base) base = lookupType(tname);
                             free(tname);
                         } else {
@@ -1259,7 +1259,7 @@ static void patchForwardCalls(BytecodeChunk *chunk) {
     }
 }
 
-void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
+void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     initBytecodeChunk(chunk);
     if (!program) return;
 
@@ -1392,6 +1392,6 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
     free(clike_imports);
     clike_imports = NULL;
     clike_import_count = 0;
-    clike_free_structs();
+    clikeFreeStructs();
 }
 

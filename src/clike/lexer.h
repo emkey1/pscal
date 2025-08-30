@@ -103,8 +103,8 @@ typedef struct {
     int column;
 } ClikeLexer;
 
-void clike_initLexer(ClikeLexer *lexer, const char *source);
-ClikeToken clike_nextToken(ClikeLexer *lexer);
+void clikeInitLexer(ClikeLexer *lexer, const char *source);
+ClikeToken clikeNextToken(ClikeLexer *lexer);
 const char* clikeTokenTypeToString(ClikeTokenType type);
 
 #endif

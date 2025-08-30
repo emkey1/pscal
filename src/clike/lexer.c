@@ -11,7 +11,7 @@ static bool isDigit(char c) {
     return c >= '0' && c <= '9';
 }
 
-void clike_initLexer(ClikeLexer *lexer, const char *source) {
+void clikeInitLexer(ClikeLexer *lexer, const char *source) {
     lexer->src = source;
     lexer->pos = 0;
     lexer->line = 1;
@@ -134,7 +134,7 @@ static ClikeToken charToken(ClikeLexer *lexer, const char *start, int column) {
     return t;
 }
 
-ClikeToken clike_nextToken(ClikeLexer *lexer) {
+ClikeToken clikeNextToken(ClikeLexer *lexer) {
     while (1) {
         char c = peek(lexer);
         if (c == '\0') return makeToken(lexer, CLIKE_TOKEN_EOF, "", 0, lexer->column);

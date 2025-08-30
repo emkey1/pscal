@@ -325,7 +325,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             size_t size = 0;
             if (node->left) {
                 ASTNodeClike *operand = node->left;
-                VarType tokenType = clike_tokenTypeToVarType(operand->token.type);
+                VarType tokenType = clikeTokenTypeToVarType(operand->token.type);
                 if (operand->type == TCAST_IDENTIFIER && tokenType != TYPE_UNKNOWN && operand->token.type != CLIKE_TOKEN_IDENTIFIER) {
                     size = varTypeSize(tokenType);
                 } else {
@@ -430,7 +430,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
 
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
-                int bid = clike_get_builtin_id(name);
+                int bid = clikeGetBuiltinID(name);
                 if (bid != -1) {
                     t = builtinReturnType(name);
                 } else {
