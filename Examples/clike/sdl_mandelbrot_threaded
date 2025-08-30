@@ -83,7 +83,7 @@ void waitForQuit() {
     while (!getQuit()) {
         if (keypressed()) {
             c = readkey();
-            if (topper(c) == 'Q') {
+            if (toupper(c) == 'Q') {
                 setQuit(1);
             }
         }

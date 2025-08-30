@@ -20,7 +20,7 @@ int clike_get_builtin_id(const char *name) {
     if (strcasecmp(name, "remove") == 0) {
         name = "erase";
     }
-    if (strcasecmp(name, "topper") == 0) {
+    if (strcasecmp(name, "toupper") == 0) {
         name = "upcase";
     }
     return getBuiltinIDForCompiler(name);
@@ -33,7 +33,7 @@ void clike_register_builtins(void) {
     registerBuiltinFunction("itoa", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("exit", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("remove", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("topper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("toupper", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamloadfromfile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamsavetofile", AST_FUNCTION_DECL, NULL);
