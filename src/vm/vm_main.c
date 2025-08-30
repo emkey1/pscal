@@ -36,7 +36,7 @@ static void initSymbolSystem(void) {
     }
     current_procedure_table = procedure_table;
 #ifdef SDL
-    InitializeTextureSystem();
+    initializeTextureSystem();
 #endif
 }
 

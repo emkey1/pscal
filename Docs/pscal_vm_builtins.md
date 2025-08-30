@@ -149,23 +149,23 @@ Numeric builtins preserve integer types when all inputs are integral. In particu
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
-| dos_getenv / getenv | (name: String) | String | Get environment variable. |
+| dosGetenv / getenv | (name: String) | String | Get environment variable. |
 | getenvint | (name: String) | Integer | Get environment variable as int. |
-| dos_exec / exec | (command: String) | Integer | Execute shell command. |
-| dos_mkdir / mkdir | (path: String) | Integer | Create directory. |
-| dos_rmdir / rmdir | (path: String) | Integer | Remove directory. |
-| dos_findfirst / findfirst | (pattern: String, attr: Integer) | Integer | Begin directory search. |
-| dos_findnext / findnext | () | Integer | Continue directory search. |
-| dos_getdate / getdate | (var Year, Month, Day, Dow: Word) | void | Retrieve system date components. |
-| dos_gettime / gettime | (var Hour, Minute, Second, Sec100: Word) | void | Retrieve system time components. |
-| dos_getfattr / getfattr | (path: String) | Integer | Get file attributes. |
+| dosExec / exec | (command: String) | Integer | Execute shell command. |
+| dosMkdir / mkdir | (path: String) | Integer | Create directory. |
+| dosRmdir / rmdir | (path: String) | Integer | Remove directory. |
+| dosFindfirst / findfirst | (pattern: String, attr: Integer) | Integer | Begin directory search. |
+| dosFindnext / findnext | () | Integer | Continue directory search. |
+| dosGetdate / getdate | (var Year, Month, Day, Dow: Word) | void | Retrieve system date components. |
+| dosGettime / gettime | (var Hour, Minute, Second, Sec100: Word) | void | Retrieve system time components. |
+| dosGetfattr / getfattr | (path: String) | Integer | Get file attributes. |
 
 ## Networking
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
-| api_send | (data: String) | Integer | Send network packet. |
-| api_receive | () | String | Receive network packet. |
+| apiSend | (data: String) | Integer | Send network packet. |
+| apiReceive | () | String | Receive network packet. |
 
 ## SDL graphics and audio
 

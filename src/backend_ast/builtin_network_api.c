@@ -59,20 +59,20 @@ static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *use
     return real_size;
 }
 
-/* Built–in function: api_send(URL, requestBody)
+/* Built–in function: apiSend(URL, requestBody)
    - URL is a string.
    - requestBody can be a string or a memory stream.
    Returns: a memory stream containing the API response.
 */
 Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2) {
-        runtimeError(vm, "api_send expects 2 arguments (URL: String, RequestBody: String/MStream).");
+        runtimeError(vm, "apiSend expects 2 arguments (URL: String, RequestBody: String/MStream).");
         return makeVoid(); // Return void on error
     }
 
     // Arg 0: URL (String)
     if (args[0].type != TYPE_STRING || args[0].s_val == NULL) {
-        runtimeError(vm, "api_send: URL argument must be a non-null string.");
+        runtimeError(vm, "apiSend: URL argument must be a non-null string.");
         return makeVoid();
     }
     const char* url = args[0].s_val;
@@ -84,20 +84,20 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     } else if (args[1].type == TYPE_MEMORYSTREAM && args[1].mstream != NULL) {
         request_body_content = (char*)args[1].mstream->buffer;
     } else {
-        runtimeError(vm, "api_send: Request body must be a string or memory stream.");
+        runtimeError(vm, "apiSend: Request body must be a string or memory stream.");
         return makeVoid();
     }
 
     // Initialize response stream
     MStream *response_stream = malloc(sizeof(MStream));
     if (!response_stream) {
-        runtimeError(vm, "api_send: Memory allocation error for response stream structure.");
+        runtimeError(vm, "apiSend: Memory allocation error for response stream structure.");
         return makeVoid();
     }
     response_stream->buffer = malloc(16); // Initial small buffer
     if (!response_stream->buffer) {
         free(response_stream);
-        runtimeError(vm, "api_send: Memory allocation error for response stream buffer.");
+        runtimeError(vm, "apiSend: Memory allocation error for response stream buffer.");
         return makeVoid();
     }
     response_stream->buffer[0] = '\0';
@@ -106,7 +106,7 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
 
     CURL *curl = curl_easy_init();
     if (!curl) {
-        runtimeError(vm, "api_send: curl initialization failed.");
+        runtimeError(vm, "apiSend: curl initialization failed.");
         free(response_stream->buffer);
         free(response_stream);
         return makeVoid();
@@ -136,14 +136,14 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        runtimeError(vm, "api_send: curl_easy_perform() failed: %s", curl_easy_strerror(res));
+        runtimeError(vm, "apiSend: curl_easy_perform() failed: %s", curl_easy_strerror(res));
         // Free response_stream here as it's an error condition
         if (response_stream->buffer) free(response_stream->buffer);
         free(response_stream);
         return makeVoid();
     }
     if (http_code >= 400) {
-        runtimeError(vm, "api_send: HTTP request failed with code %ld. Response (partial):\n%s", http_code, response_stream->buffer ? (char*)response_stream->buffer : "(empty)");
+        runtimeError(vm, "apiSend: HTTP request failed with code %ld. Response (partial):\n%s", http_code, response_stream->buffer ? (char*)response_stream->buffer : "(empty)");
         if (response_stream->buffer) free(response_stream->buffer);
         free(response_stream);
         return makeVoid();
@@ -155,13 +155,13 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinApiReceive(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
-        runtimeError(vm, "api_receive expects 1 argument (MStream).");
+        runtimeError(vm, "apiReceive expects 1 argument (MStream).");
         return makeString(""); // Return empty string on error
     }
 
     // Arg 0: MStream
     if (args[0].type != TYPE_MEMORYSTREAM || args[0].mstream == NULL) {
-        runtimeError(vm, "api_receive: Argument must be a valid MStream.");
+        runtimeError(vm, "apiReceive: Argument must be a valid MStream.");
         return makeString("");
     }
     MStream* mstream = args[0].mstream;

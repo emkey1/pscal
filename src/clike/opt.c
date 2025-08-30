@@ -6,7 +6,7 @@
 
 static int isConst(ASTNodeClike* n, double* out, int* is_float) {
     if (!n || n->type != TCAST_NUMBER) return 0;
-    if (is_real_type(n->var_type)) {
+    if (isRealType(n->var_type)) {
         if (out) *out = n->token.float_val;
         if (is_float) *is_float = 1;
     } else {

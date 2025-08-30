@@ -18,10 +18,10 @@ void setTypeValue(Value *val, VarType type) {
 VarType inferBinaryOpType(VarType left, VarType right) {
     if (left == TYPE_STRING || right == TYPE_STRING) return TYPE_STRING;
 
-    bool left_real = is_real_type(left);
-    bool right_real = is_real_type(right);
-    bool left_int = is_intlike_type(left);
-    bool right_int = is_intlike_type(right);
+    bool left_real = isRealType(left);
+    bool right_real = isRealType(right);
+    bool left_int = isIntlikeType(left);
+    bool right_int = isIntlikeType(right);
 
     if (left_real && right_int) return left;
     if (right_real && left_int) return right;

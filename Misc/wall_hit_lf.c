@@ -9,14 +9,14 @@
 #endif
 
 // Helper to write little-endian values (WAV files use little-endian)
-void write_little_endian_uint32(FILE *f, uint32_t val) {
+void writeLittleEndianUint32(FILE *f, uint32_t val) {
     fputc(val & 0xFF, f);
     fputc((val >> 8) & 0xFF, f);
     fputc((val >> 16) & 0xFF, f);
     fputc((val >> 24) & 0xFF, f);
 }
 
-void write_little_endian_uint16(FILE *f, uint16_t val) {
+void writeLittleEndianUint16(FILE *f, uint16_t val) {
     fputc(val & 0xFF, f);
     fputc((val >> 8) & 0xFF, f);
 }
@@ -108,22 +108,22 @@ int main() {
     // Write WAV Header
     fwrite("RIFF", 1, 4, fout);
     uint32_t chunk_size = 36 + data_size;
-    write_little_endian_uint32(fout, chunk_size);
+    writeLittleEndianUint32(fout, chunk_size);
     fwrite("WAVE", 1, 4, fout);
 
     fwrite("fmt ", 1, 4, fout);
-    write_little_endian_uint32(fout, 16); 
-    write_little_endian_uint16(fout, 1);  
-    write_little_endian_uint16(fout, NUM_CHANNELS);
-    write_little_endian_uint32(fout, SAMPLE_RATE);
+    writeLittleEndianUint32(fout, 16); 
+    writeLittleEndianUint16(fout, 1);  
+    writeLittleEndianUint16(fout, NUM_CHANNELS);
+    writeLittleEndianUint32(fout, SAMPLE_RATE);
     uint32_t byte_rate = SAMPLE_RATE * NUM_CHANNELS * (BITS_PER_SAMPLE / 8);
-    write_little_endian_uint32(fout, byte_rate);
+    writeLittleEndianUint32(fout, byte_rate);
     uint16_t block_align = NUM_CHANNELS * (BITS_PER_SAMPLE / 8);
-    write_little_endian_uint16(fout, block_align);
-    write_little_endian_uint16(fout, BITS_PER_SAMPLE);
+    writeLittleEndianUint16(fout, block_align);
+    writeLittleEndianUint16(fout, BITS_PER_SAMPLE);
 
     fwrite("data", 1, 4, fout);
-    write_little_endian_uint32(fout, data_size);
+    writeLittleEndianUint32(fout, data_size);
 
     size_t items_written = fwrite(audio_buffer, BITS_PER_SAMPLE / 8, num_samples * NUM_CHANNELS, fout);
     if (items_written != num_samples * NUM_CHANNELS) {

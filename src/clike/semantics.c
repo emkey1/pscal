@@ -128,14 +128,14 @@ typedef struct {
 // Holds global variable declarations so that functions can reference them.
 static VarTable globalVars = {0};
 
-static void vt_add(VarTable *t, const char *name, VarType type, ASTNodeClike *decl) {
+static void vtAdd(VarTable *t, const char *name, VarType type, ASTNodeClike *decl) {
     t->entries[t->count].name = strdup(name);
     t->entries[t->count].type = type;
     t->entries[t->count].decl = decl;
     t->count++;
 }
 
-static VarType vt_get_type(VarTable *t, const char *name) {
+static VarType vtGetType(VarTable *t, const char *name) {
     for (int i = 0; i < t->count; ++i) {
         if (strcmp(t->entries[i].name, name) == 0) {
             return t->entries[i].type;
@@ -144,7 +144,7 @@ static VarType vt_get_type(VarTable *t, const char *name) {
     return TYPE_UNKNOWN;
 }
 
-static ASTNodeClike* vt_get_decl(VarTable *t, const char *name) {
+static ASTNodeClike* vtGetDecl(VarTable *t, const char *name) {
     for (int i = 0; i < t->count; ++i) {
         if (strcmp(t->entries[i].name, name) == 0) {
             return t->entries[i].decl;
@@ -153,37 +153,37 @@ static ASTNodeClike* vt_get_decl(VarTable *t, const char *name) {
     return NULL;
 }
 
-static void vt_free(VarTable *t) {
+static void vtFree(VarTable *t) {
     for (int i = 0; i < t->count; ++i) free(t->entries[i].name);
     t->count = 0;
 }
 
-static void ss_push(ScopeStack *s) {
+static void ssPush(ScopeStack *s) {
     s->scopes[s->depth].count = 0;
     s->depth++;
 }
 
-static void ss_pop(ScopeStack *s) {
+static void ssPop(ScopeStack *s) {
     if (s->depth <= 0) return;
-    vt_free(&s->scopes[s->depth - 1]);
+    vtFree(&s->scopes[s->depth - 1]);
     s->depth--;
 }
 
-static void ss_add(ScopeStack *s, const char *name, VarType type, ASTNodeClike *decl) {
-    vt_add(&s->scopes[s->depth - 1], name, type, decl);
+static void ssAdd(ScopeStack *s, const char *name, VarType type, ASTNodeClike *decl) {
+    vtAdd(&s->scopes[s->depth - 1], name, type, decl);
 }
 
-static VarType ss_get(ScopeStack *s, const char *name) {
+static VarType ssGet(ScopeStack *s, const char *name) {
     for (int i = s->depth - 1; i >= 0; --i) {
-        VarType t = vt_get_type(&s->scopes[i], name);
+        VarType t = vtGetType(&s->scopes[i], name);
         if (t != TYPE_UNKNOWN) return t;
     }
     return TYPE_UNKNOWN;
 }
 
-static ASTNodeClike* ss_get_decl(ScopeStack *s, const char *name) {
+static ASTNodeClike* ssGetDecl(ScopeStack *s, const char *name) {
     for (int i = s->depth - 1; i >= 0; --i) {
-        ASTNodeClike *d = vt_get_decl(&s->scopes[i], name);
+        ASTNodeClike *d = vtGetDecl(&s->scopes[i], name);
         if (d) return d;
     }
     return NULL;
@@ -260,7 +260,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 node->var_type = TYPE_POINTER;
                 return TYPE_POINTER;
             }
-            VarType t = ss_get(scopes, name);
+            VarType t = ssGet(scopes, name);
             node->var_type = t;
             if (t == TYPE_UNKNOWN) {
                 fprintf(stderr,
@@ -276,11 +276,11 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_BINOP: {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
-            if (is_real_type(lt) && is_intlike_type(rt)) {
+            if (isRealType(lt) && isIntlikeType(rt)) {
                 node->var_type = lt;
-            } else if (is_real_type(rt) && is_intlike_type(lt)) {
+            } else if (isRealType(rt) && isIntlikeType(lt)) {
                 node->var_type = rt;
-            } else if (is_real_type(lt) && is_real_type(rt)) {
+            } else if (isRealType(lt) && isRealType(rt)) {
                 if (lt == TYPE_LONG_DOUBLE || rt == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                 else if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                 else node->var_type = TYPE_FLOAT;
@@ -298,11 +298,11 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             VarType ft = analyzeExpr(node->third, scopes);
-            if (is_real_type(rt) && is_intlike_type(ft)) {
+            if (isRealType(rt) && isIntlikeType(ft)) {
                 node->var_type = rt;
-            } else if (is_real_type(ft) && is_intlike_type(rt)) {
+            } else if (isRealType(ft) && isIntlikeType(rt)) {
                 node->var_type = ft;
-            } else if (is_real_type(rt) && is_real_type(ft)) {
+            } else if (isRealType(rt) && isRealType(ft)) {
                 if (rt == TYPE_LONG_DOUBLE || ft == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                 else if (rt == TYPE_DOUBLE || ft == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                 else node->var_type = TYPE_FLOAT;
@@ -332,7 +332,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     VarType t = analyzeExpr(operand, scopes);
                     if (operand->type == TCAST_IDENTIFIER) {
                         char *name = tokenToCString(operand->token);
-                        ASTNodeClike *decl = ss_get_decl(scopes, name);
+                        ASTNodeClike *decl = ssGetDecl(scopes, name);
                         free(name);
                         if (decl && decl->is_array) {
                             size = varTypeSize(decl->element_type);
@@ -357,10 +357,10 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             VarType rt = analyzeExpr(node->right, scopes);
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
             if (lt != rt &&
-                !(is_real_type(lt) && is_real_type(rt)) &&
-                !(is_real_type(lt) && is_intlike_type(rt)) &&
+                !(isRealType(lt) && isRealType(rt)) &&
+                !(isRealType(lt) && isIntlikeType(rt)) &&
                 !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
-                !(is_intlike_type(lt) && is_intlike_type(rt))) {
+                !(isIntlikeType(lt) && isIntlikeType(rt))) {
                 fprintf(stderr,
                         "Type error: cannot assign %s to %s at line %d, column %d\n",
                         varTypeToString(rt), varTypeToString(lt),
@@ -384,7 +384,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 }
                 if (node->child_count == 1) {
                     VarType at = analyzeExpr(node->children[0], scopes);
-                    if (!is_intlike_type(at)) {
+                    if (!isIntlikeType(at)) {
                         fprintf(stderr,
                                 "Type error: exit argument must be an integer at line %d, column %d\n",
                                 node->token.line,
@@ -416,7 +416,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     clike_error_count++;
                 } else {
                     VarType at = analyzeExpr(node->children[0], scopes);
-                    if (!is_intlike_type(at)) {
+                    if (!isIntlikeType(at)) {
                         fprintf(stderr,
                                 "Type error: %s argument must be integer at line %d, column %d\n",
                                 name, node->token.line, node->token.column);
@@ -507,7 +507,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 analyzeExpr(node->left, scopes);
                 if (node->left->type == TCAST_IDENTIFIER) {
                     char *name = tokenToCString(node->left->token);
-                    arrDecl = ss_get_decl(scopes, name);
+                    arrDecl = ssGetDecl(scopes, name);
                     free(name);
                 } else if (node->left->is_array) {
                     arrDecl = node->left;
@@ -515,7 +515,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             }
             for (int i = 0; i < node->child_count; ++i) {
                 VarType idxType = analyzeExpr(node->children[i], scopes);
-                if (!is_intlike_type(idxType)) {
+                if (!isIntlikeType(idxType)) {
                     fprintf(stderr,
                             "Type error: array index must be integer at line %d, column %d\n",
                             node->children[i]->token.line,
@@ -582,7 +582,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
     switch (node->type) {
         case TCAST_VAR_DECL: {
             char *name = tokenToCString(node->token);
-            ss_add(scopes, name, node->var_type, node);
+            ssAdd(scopes, name, node->var_type, node);
             free(name);
             if (node->left) {
                 VarType initType = analyzeExpr(node->left, scopes);
@@ -593,9 +593,9 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                 }
                 if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
                     if (declType != initType &&
-                        !(is_real_type(declType) && is_real_type(initType)) &&
+                        !(isRealType(declType) && isRealType(initType)) &&
                         !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
-                        !(is_intlike_type(declType) && is_intlike_type(initType))) {
+                        !(isIntlikeType(declType) && isIntlikeType(initType))) {
                         fprintf(stderr,
                                 "Type error: cannot assign %s to %s at line %d, column %d\n",
                                 varTypeToString(initType), varTypeToString(declType),
@@ -609,11 +609,11 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
         case TCAST_STRUCT_DECL:
             break;
         case TCAST_COMPOUND:
-            ss_push(scopes);
+            ssPush(scopes);
             for (int i = 0; i < node->child_count; ++i) {
                 analyzeStmt(node->children[i], scopes, retType);
             }
-            ss_pop(scopes);
+            ssPop(scopes);
             break;
         case TCAST_IF:
             analyzeExpr(node->left, scopes);
@@ -625,7 +625,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             analyzeStmt(node->right, scopes, retType);
             break;
         case TCAST_FOR:
-            ss_push(scopes);
+            ssPush(scopes);
             if (node->left) {
                 if (node->left->type == TCAST_VAR_DECL) {
                     analyzeStmt(node->left, scopes, retType);
@@ -640,7 +640,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             if (node->right) analyzeExpr(node->right, scopes);
             if (node->third) analyzeExpr(node->third, scopes);
             if (node->child_count > 0) analyzeStmt(node->children[0], scopes, retType);
-            ss_pop(scopes);
+            ssPop(scopes);
             break;
         case TCAST_DO_WHILE:
             analyzeStmt(node->right, scopes, retType);
@@ -671,8 +671,8 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                     clike_error_count++;
                 }
             } else if (t != TYPE_UNKNOWN && t != retType &&
-                       !(is_real_type(t) && is_real_type(retType)) &&
-                       !(is_intlike_type(t) && is_intlike_type(retType))) {
+                       !(isRealType(t) && isRealType(retType)) &&
+                       !(isIntlikeType(t) && isIntlikeType(retType))) {
                 fprintf(stderr,
                         "Type error: return type %s does not match %s at line %d, column %d\n",
                         varTypeToString(t), varTypeToString(retType),
@@ -687,7 +687,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
         case TCAST_THREAD_JOIN: {
             if (node->left) {
                 VarType t = analyzeExpr(node->left, scopes);
-                if (!is_intlike_type(t)) {
+                if (!isIntlikeType(t)) {
                     fprintf(stderr,
                             "Type error: join expects integer thread id at line %d, column %d\n",
                             node->left->token.line, node->left->token.column);
@@ -708,23 +708,23 @@ static void analyzeFunction(ASTNodeClike *func) {
     ScopeStack scopes = {0};
 
     // Global scope available to all functions
-    ss_push(&scopes);
+    ssPush(&scopes);
     for (int i = 0; i < globalVars.count; ++i) {
-        ss_add(&scopes, globalVars.entries[i].name, globalVars.entries[i].type, globalVars.entries[i].decl);
+        ssAdd(&scopes, globalVars.entries[i].name, globalVars.entries[i].type, globalVars.entries[i].decl);
     }
 
     // Function scope for parameters/local variables
-    ss_push(&scopes);
+    ssPush(&scopes);
     if (func->left) {
         for (int i = 0; i < func->left->child_count; ++i) {
             ASTNodeClike *p = func->left->children[i];
             char *name = tokenToCString(p->token);
-            ss_add(&scopes, name, p->var_type, p);
+            ssAdd(&scopes, name, p->var_type, p);
             free(name);
         }
     }
     analyzeStmt(func->right, &scopes, func->var_type);
-    while (scopes.depth > 0) ss_pop(&scopes);
+    while (scopes.depth > 0) ssPop(&scopes);
 }
 
 void analyzeSemanticsClike(ASTNodeClike *program) {
@@ -834,18 +834,18 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
     // Process global variable declarations so functions can reference them.
     globalVars.count = 0;
     ScopeStack globalsScope = {0};
-    ss_push(&globalsScope);
+    ssPush(&globalsScope);
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_VAR_DECL) {
             char *name = tokenToCString(decl->token);
-            ss_add(&globalsScope, name, decl->var_type, decl);
-            vt_add(&globalVars, name, decl->var_type, decl);
+            ssAdd(&globalsScope, name, decl->var_type, decl);
+            vtAdd(&globalVars, name, decl->var_type, decl);
             if (decl->left) analyzeExpr(decl->left, &globalsScope);
             free(name);
         }
     }
-    ss_pop(&globalsScope);
+    ssPop(&globalsScope);
 
     for (int i = 0; i < clike_import_count; ++i) {
         if (!modules[i].prog) continue;

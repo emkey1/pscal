@@ -40,10 +40,10 @@
 #define AS_BOOLEAN(value) ((value).i_val != 0) // Assumes i_val stores 0 for false, 1 for true
 
 // Also useful:
-#define IS_INTEGER(value) (is_intlike_type((value).type))
-#define AS_INTEGER(value) (as_i64(value))
-#define IS_REAL(value)    (is_real_type((value).type))
-#define AS_REAL(value)    (as_ld(value))
+#define IS_INTEGER(value) (isIntlikeType((value).type))
+#define AS_INTEGER(value) (asI64(value))
+#define IS_REAL(value)    (isRealType((value).type))
+#define AS_REAL(value)    (asLd(value))
 #define IS_STRING(value)  ((value).type == TYPE_STRING)
 #define AS_STRING(value)  ((value).s_val)
 #define IS_CHAR(value)    ((value).type == TYPE_CHAR)
@@ -63,7 +63,7 @@ static const int pscalToAnsiBase[8] = {
     7  // Pscal LtGray  -> ANSI White (30/40 + 7)
 };
 
-static inline bool is_intlike_type(VarType t) {
+static inline bool isIntlikeType(VarType t) {
     switch (t) {
         case TYPE_WORD:
         case TYPE_BYTE:
@@ -83,7 +83,7 @@ static inline bool is_intlike_type(VarType t) {
     }
 }
 
-static inline bool is_real_type(VarType t) {
+static inline bool isRealType(VarType t) {
     switch (t) {
         case TYPE_FLOAT:
         case TYPE_DOUBLE:
@@ -94,13 +94,13 @@ static inline bool is_real_type(VarType t) {
     }
 }
 
-static inline bool is_ordinal_type(VarType t) {
+static inline bool isOrdinalType(VarType t) {
     // Pascal ordinals: integer subranges, enumerations, char, boolean.
     // Here we treat INTEGER/BYTE/WORD/CHAR/ENUM (BOOLEAN optional) as ordinal.
-    return is_intlike_type(t) || t == TYPE_CHAR || t == TYPE_ENUM /*|| t == TYPE_BOOLEAN*/;
+    return isIntlikeType(t) || t == TYPE_CHAR || t == TYPE_ENUM /*|| t == TYPE_BOOLEAN*/;
 }
 
-static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
+static inline long long coerceToI64(const Value* v, VM* vm, const char* who) {
     switch (v->type) {
         case TYPE_UINT64:
         case TYPE_UINT32:
@@ -124,11 +124,11 @@ static inline long long coerce_to_i64(const Value* v, VM* vm, const char* who) {
     }
 }
 
-#define IS_INTLIKE(v) (is_intlike_type((v).type))
-#define IS_NUMERIC(v) (IS_INTLIKE(v) || is_real_type((v).type))
+#define IS_INTLIKE(v) (isIntlikeType((v).type))
+#define IS_NUMERIC(v) (IS_INTLIKE(v) || isRealType((v).type))
 
 // Accessors (use your existing Value layout: i_val for INTEGER/BYTE/WORD/BOOLEAN)
-static inline long long as_i64(Value v) {
+static inline long long asI64(Value v) {
     switch (v.type) {
         case TYPE_UINT64:
         case TYPE_UINT32:
@@ -141,7 +141,7 @@ static inline long long as_i64(Value v) {
             return v.i_val;
     }
 }
-static inline long double as_ld(Value v) {
+static inline long double asLd(Value v) {
     switch (v.type) {
         case TYPE_FLOAT:
             /*
@@ -161,7 +161,7 @@ static inline long double as_ld(Value v) {
         case TYPE_LONG_DOUBLE:
             return v.real.r_val;
         default:
-            return (long double)as_i64(v);
+            return (long double)asI64(v);
     }
 }
 

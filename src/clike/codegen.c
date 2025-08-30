@@ -565,7 +565,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     compileExpression(node->left, chunk, ctx);
                 } else {
                     Value init;
-                    if (is_real_type(node->var_type)) {
+                    if (isRealType(node->var_type)) {
                         init = makeReal(0.0);
                         init.type = node->var_type;
                     } else {
@@ -582,7 +582,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                             default:
                                 init = makeInt(0);
                                 init.type = node->var_type;
-                                if (is_intlike_type(init.type)) init.u_val = 0;
+                                if (isIntlikeType(init.type)) init.u_val = 0;
                                 break;
                         }
                     }
@@ -711,10 +711,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
                 case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
                 case CLIKE_TOKEN_SLASH:
-                    if (is_intlike_type(node->var_type) &&
+                    if (isIntlikeType(node->var_type) &&
                         node->left && node->right &&
-                        is_intlike_type(node->left->var_type) &&
-                        is_intlike_type(node->right->var_type)) {
+                        isIntlikeType(node->left->var_type) &&
+                        isIntlikeType(node->right->var_type)) {
                         /*
                          * In C, dividing two integers performs integer division
                          * (truncating toward zero).  The VM has a dedicated

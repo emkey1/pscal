@@ -65,7 +65,7 @@ void initSymbolSystem(void) {
     current_procedure_table = procedure_table;
     DEBUG_PRINT("[DEBUG MAIN] Created procedure hash table %p.\n", (void*)procedure_table);
 #ifdef SDL
-    InitializeTextureSystem();
+    initializeTextureSystem();
 #endif
 }
 
@@ -120,14 +120,14 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                     fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                        fprintf(stderr, "\n--- Executing Program with VM ---\n");
+                        fprintf(stderr, "\n--- executing Program with VM ---\n");
                     }
                 }
             } else {
                 fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                    fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
+                    fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
                 }
             }
 
@@ -140,7 +140,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 if (result_vm == INTERPRET_OK) {
                     overall_success_status = true;
                 } else {
-                    fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
+                    fprintf(stderr, "--- VM execution Failed (%s) ---\n",
                             result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
                     overall_success_status = false;
                     vmDumpStackInfo(&vm);
@@ -181,7 +181,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         GlobalAST = NULL;
     }
 #ifdef SDL
-    SdlCleanupAtExit();
+    sdlCleanupAtExit();
 #endif
     return overall_success_status ? EXIT_SUCCESS : EXIT_FAILURE;
 }

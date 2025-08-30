@@ -81,7 +81,7 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
         Value* existing = &chunk->constants[i];
         if (existing->type == value->type) {
             if (existing->type == TYPE_INTEGER && existing->i_val == value->i_val) return i;
-            if (is_real_type(existing->type) && AS_REAL(*existing) == AS_REAL(*value)) return i;
+            if (isRealType(existing->type) && AS_REAL(*existing) == AS_REAL(*value)) return i;
             if (existing->type == TYPE_STRING && existing->s_val && value->s_val && strcmp(existing->s_val, value->s_val) == 0) return i;
             if (existing->type == TYPE_CHAR && existing->c_val == value->c_val) return i;
         }

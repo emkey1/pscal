@@ -18,7 +18,7 @@ static size_t category_count = 0;
 static pthread_mutex_t registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Helpers below assume registry_mutex is held. */
-static ExtBuiltinCategory *find_category(const char *name) {
+static ExtBuiltinCategory *findCategory(const char *name) {
     if (!name) return NULL;
     for (size_t i = 0; i < category_count; ++i) {
         if (strcasecmp(categories[i].name, name) == 0) {
@@ -28,8 +28,8 @@ static ExtBuiltinCategory *find_category(const char *name) {
     return NULL;
 }
 
-static ExtBuiltinCategory *ensure_category(const char *name) {
-    ExtBuiltinCategory *cat = find_category(name);
+static ExtBuiltinCategory *ensureCategory(const char *name) {
+    ExtBuiltinCategory *cat = findCategory(name);
     if (cat) return cat;
     ExtBuiltinCategory *new_array = realloc(categories, sizeof(ExtBuiltinCategory) * (category_count + 1));
     if (!new_array) return NULL;
@@ -45,14 +45,14 @@ static ExtBuiltinCategory *ensure_category(const char *name) {
 void extBuiltinRegisterCategory(const char *name) {
     if (!name) return;
     pthread_mutex_lock(&registry_mutex);
-    ensure_category(name);
+    ensureCategory(name);
     pthread_mutex_unlock(&registry_mutex);
 }
 
 void extBuiltinRegisterFunction(const char *category, const char *func) {
     if (!category || !func) return;
     pthread_mutex_lock(&registry_mutex);
-    ExtBuiltinCategory *cat = ensure_category(category);
+    ExtBuiltinCategory *cat = ensureCategory(category);
     if (!cat) {
         pthread_mutex_unlock(&registry_mutex);
         return;
@@ -90,7 +90,7 @@ const char *extBuiltinGetCategoryName(size_t index) {
 
 size_t extBuiltinGetFunctionCount(const char *category) {
     pthread_mutex_lock(&registry_mutex);
-    ExtBuiltinCategory *cat = find_category(category);
+    ExtBuiltinCategory *cat = findCategory(category);
     size_t count = cat ? cat->function_count : 0;
     pthread_mutex_unlock(&registry_mutex);
     return count;
@@ -98,7 +98,7 @@ size_t extBuiltinGetFunctionCount(const char *category) {
 
 const char *extBuiltinGetFunctionName(const char *category, size_t index) {
     pthread_mutex_lock(&registry_mutex);
-    ExtBuiltinCategory *cat = find_category(category);
+    ExtBuiltinCategory *cat = findCategory(category);
     const char *name = (!cat || index >= cat->function_count) ? NULL : cat->functions[index];
     pthread_mutex_unlock(&registry_mutex);
     return name;
@@ -106,7 +106,7 @@ const char *extBuiltinGetFunctionName(const char *category, size_t index) {
 
 int extBuiltinHasFunction(const char *category, const char *func) {
     pthread_mutex_lock(&registry_mutex);
-    ExtBuiltinCategory *cat = find_category(category);
+    ExtBuiltinCategory *cat = findCategory(category);
     int present = 0;
     if (cat && func) {
         for (size_t i = 0; i < cat->function_count; ++i) {

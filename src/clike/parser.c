@@ -178,7 +178,7 @@ static void freeConstTable(void) {
     const_count = 0;
 }
 
-static inline int is_intlike_type_local(VarType t) {
+static inline int isIntlikeTypeLocal(VarType t) {
     switch (t) {
         case TYPE_WORD:
         case TYPE_BYTE:
@@ -200,7 +200,7 @@ static long long evalConstExpr(ASTNodeClike* node, int *ok) {
     if (!node) { *ok = 0; return 0; }
     switch (node->type) {
         case TCAST_NUMBER:
-            if (is_intlike_type_local(node->var_type)) { *ok = 1; return node->token.int_val; }
+            if (isIntlikeTypeLocal(node->var_type)) { *ok = 1; return node->token.int_val; }
             *ok = 0; return 0;
         case TCAST_IDENTIFIER: {
             long long val;

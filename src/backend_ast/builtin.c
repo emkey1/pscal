@@ -31,7 +31,7 @@
 #include <pthread.h>
 
 // Per-thread state to keep core builtins thread-safe
-static _Thread_local DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
+static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
 static _Thread_local unsigned int rand_seed = 1;
 
 // Terminal cursor helper
@@ -41,8 +41,8 @@ static int getCursorPosition(int *row, int *col);
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
-    {"api_receive", vmBuiltinApiReceive},
-    {"api_send", vmBuiltinApiSend},
+    {"apiReceive", vmBuiltinApiReceive},
+    {"apiSend", vmBuiltinApiSend},
     {"append", vmBuiltinAppend},
     {"arccos", vmBuiltinArccos},
     {"arcsin", vmBuiltinArcsin},
@@ -88,15 +88,15 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"destroytexture", vmBuiltinDestroytexture},
 #endif
     {"dispose", vmBuiltinDispose},
-    {"dos_exec", vmBuiltinDosExec},
-    {"dos_findfirst", vmBuiltinDosFindfirst},
-    {"dos_findnext", vmBuiltinDosFindnext},
-    {"dos_getdate", vmBuiltinDosGetdate},
-    {"dos_getenv", vmBuiltinDosGetenv},
-    {"dos_getfattr", vmBuiltinDosGetfattr},
-    {"dos_gettime", vmBuiltinDosGettime},
-    {"dos_mkdir", vmBuiltinDosMkdir},
-    {"dos_rmdir", vmBuiltinDosRmdir},
+    {"dosExec", vmBuiltinDosExec},
+    {"dosFindfirst", vmBuiltinDosFindfirst},
+    {"dosFindnext", vmBuiltinDosFindnext},
+    {"dosGetdate", vmBuiltinDosGetdate},
+    {"dosGetenv", vmBuiltinDosGetenv},
+    {"dosGetfattr", vmBuiltinDosGetfattr},
+    {"dosGettime", vmBuiltinDosGettime},
+    {"dosMkdir", vmBuiltinDosMkdir},
+    {"dosRmdir", vmBuiltinDosRmdir},
 #ifdef SDL
     {"drawcircle", vmBuiltinDrawcircle}, // Moved
     {"drawline", vmBuiltinDrawline}, // Moved
@@ -329,7 +329,7 @@ Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
     if (IS_INTLIKE(arg)) {
         long long v = AS_INTEGER(arg);
         return makeInt(v * v);
-    } else if (is_real_type(arg.type)) {
+    } else if (isRealType(arg.type)) {
         long double v = AS_REAL(arg);
         return makeReal(v * v);
     }
@@ -537,7 +537,7 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !is_real_type(args[0].type)) {
+    if (arg_count != 1 || !isRealType(args[0].type)) {
         runtimeError(vm, "RealToStr expects 1 real argument.");
         return makeString("");
     }
@@ -1572,13 +1572,13 @@ Value vmBuiltinTrunc(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "trunc expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
     if (IS_INTLIKE(arg)) return makeInt(AS_INTEGER(arg));
-    if (is_real_type(arg.type)) return makeInt((long long)AS_REAL(arg));
+    if (isRealType(arg.type)) return makeInt((long long)AS_REAL(arg));
     runtimeError(vm, "trunc expects a numeric argument.");
     return makeInt(0);
 }
 
 static inline bool isOrdinalDelta(const Value* v) {
-    return is_intlike_type(v->type) || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
+    return isIntlikeType(v->type) || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
 }
 
 static inline long long coerceDeltaToI64(const Value* v) {
@@ -2469,7 +2469,7 @@ Value vmBuiltinRandom(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGetenv(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_getenv expects 1 string argument.");
+        runtimeError(vm, "dosGetenv expects 1 string argument.");
         return makeString("");
     }
     const char* val = getenv(AS_STRING(args[0]));
@@ -2491,7 +2491,7 @@ Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinGetenvint(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING ||
         !IS_INTLIKE(args[1])) {
-        runtimeError(vm, "GetEnvInt expects (string, integer).");
+        runtimeError(vm, "getEnvInt expects (string, integer).");
         return makeInt(0);
     }
     const char* name = AS_STRING(args[0]);
@@ -2562,7 +2562,7 @@ Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
-        runtimeError(vm, "dos_exec expects 2 string arguments.");
+        runtimeError(vm, "dosExec expects 2 string arguments.");
         return makeInt(-1);
     }
     const char* path = AS_STRING(args[0]);
@@ -2570,7 +2570,7 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     size_t len = strlen(path) + strlen(cmdline) + 2;
     char* cmd = malloc(len);
     if (!cmd) {
-        runtimeError(vm, "dos_exec memory allocation failed.");
+        runtimeError(vm, "dosExec memory allocation failed.");
         return makeInt(-1);
     }
     snprintf(cmd, len, "%s %s", path, cmdline);
@@ -2581,7 +2581,7 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_mkdir expects 1 string argument.");
+        runtimeError(vm, "dosMkdir expects 1 string argument.");
         return makeInt(errno);
     }
     int rc = mkdir(AS_STRING(args[0]), 0777);
@@ -2590,7 +2590,7 @@ Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_rmdir expects 1 string argument.");
+        runtimeError(vm, "dosRmdir expects 1 string argument.");
         return makeInt(errno);
     }
     int rc = rmdir(AS_STRING(args[0]));
@@ -2599,7 +2599,7 @@ Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosFindfirst(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_findfirst expects 1 string argument.");
+        runtimeError(vm, "dosFindfirst expects 1 string argument.");
         return makeString("");
     }
     if (dos_dir) { closedir(dos_dir); dos_dir = NULL; }
@@ -2617,7 +2617,7 @@ Value vmBuiltinDosFindfirst(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosFindnext(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
-        runtimeError(vm, "dos_findnext expects 0 arguments.");
+        runtimeError(vm, "dosFindnext expects 0 arguments.");
         return makeString("");
     }
     if (!dos_dir) return makeString("");
@@ -2633,7 +2633,7 @@ Value vmBuiltinDosFindnext(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGetfattr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_getfattr expects 1 string argument.");
+        runtimeError(vm, "dosGetfattr expects 1 string argument.");
         return makeInt(0);
     }
     struct stat st;
@@ -2648,7 +2648,7 @@ Value vmBuiltinDosGetfattr(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) {
-        runtimeError(vm, "dos_getdate expects 4 var arguments.");
+        runtimeError(vm, "dosGetdate expects 4 var arguments.");
         return makeVoid();
     }
     time_t t = time(NULL);
@@ -2667,7 +2667,7 @@ Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGettime(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) {
-        runtimeError(vm, "dos_gettime expects 4 var arguments.");
+        runtimeError(vm, "dosGettime expects 4 var arguments.");
         return makeVoid();
     }
     struct timeval tv;
@@ -2891,7 +2891,7 @@ Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     if (arg.type == TYPE_CHAR) {
         return makeReal((double)arg.c_val);
     }
-    if (is_real_type(arg.type)) {
+    if (isRealType(arg.type)) {
         return makeReal(AS_REAL(arg));
     }
     runtimeError(vm, "Real() argument must be an Integer, Ordinal, or Real type. Got %s.", varTypeToString(arg.type));
@@ -2934,7 +2934,7 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
         default:
             if (IS_INTLIKE(val)) {
                 snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
-            } else if (is_real_type(val.type)) {
+            } else if (isRealType(val.type)) {
                 snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
             } else {
                 runtimeError(vm, "Str expects a numeric or char argument.");
@@ -2982,14 +2982,14 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinAbs(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
     if (IS_INTLIKE(args[0])) return makeInt(llabs(AS_INTEGER(args[0])));
-    if (is_real_type(args[0].type)) return makeReal(fabsl(AS_REAL(args[0])));
+    if (isRealType(args[0].type)) return makeReal(fabsl(AS_REAL(args[0])));
     runtimeError(vm, "abs expects a numeric argument.");
     return makeInt(0);
 }
 
 Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Round expects 1 argument."); return makeInt(0); }
-    if (is_real_type(args[0].type)) return makeInt((long long)llround(AS_REAL(args[0])));
+    if (isRealType(args[0].type)) return makeInt((long long)llround(AS_REAL(args[0])));
     if (IS_INTLIKE(args[0])) return makeInt(AS_INTEGER(args[0]));
     runtimeError(vm, "Round expects a numeric argument.");
     return makeInt(0);
@@ -3141,8 +3141,8 @@ void registerAllBuiltins(void) {
 
     /* General built-in functions and procedures */
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
@@ -3163,27 +3163,27 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("DelLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dos_exec", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_findfirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_findnext", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getenv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getfattr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_mkdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_rmdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getdate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dos_gettime", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dosExec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosFindfirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosFindnext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosGetenv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosGetfattr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosMkdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosRmdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosGetdate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dosGettime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Exec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("exec", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("FindFirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("FindNext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("findFirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("findNext", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Floor", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetDate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetEnvInt", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetFAttr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetTime", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("getDate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("getEnv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("getEnvInt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("getFAttr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("getTime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
@@ -3201,7 +3201,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Max", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Min", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("MkDir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mkDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("MStreamFree", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
@@ -3227,7 +3227,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RmDir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("rmDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SaveCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);

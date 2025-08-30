@@ -1,4 +1,4 @@
-program ApiSendReceiveTest;
+program apiSendReceiveTest;
 
 var
   ms: mstream;
@@ -7,9 +7,9 @@ var
   cwd: string;
 begin
   cwd := getenv('PWD');
-  url := 'file://' + cwd + '/Pascal/ApiSendReceiveTest.data';
-  ms := api_send(url, '');
-  response := api_receive(ms);
+  url := 'file://' + cwd + '/Pascal/apiSendReceiveTest.data';
+  ms := apiSend(url, '');
+  response := apiReceive(ms);
   if pos('Example Domain', response) = 0 then
   begin
     writeln('Unexpected API response');

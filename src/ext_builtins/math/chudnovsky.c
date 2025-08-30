@@ -11,7 +11,7 @@ static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
         runtimeError(vm, "Chudnovsky argument must be an integer.");
         return makeLongDouble(0.0L);
     }
-    long long n = as_i64(args[0]);
+    long long n = asI64(args[0]);
     if (n <= 0) {
         runtimeError(vm, "Chudnovsky argument must be positive.");
         return makeLongDouble(0.0L);

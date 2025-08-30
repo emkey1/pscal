@@ -34,9 +34,9 @@ extern bool gSdlImageInitialized;
 
 
 // System Functions
-void InitializeSdlSystems(void);
-void InitializeTextureSystem(void);
-void SdlCleanupAtExit(void);
+void initializeSdlSystems(void);
+void initializeTextureSystem(void);
+void sdlCleanupAtExit(void);
 
 // AST-based built-in handlers
 

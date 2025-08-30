@@ -5,9 +5,9 @@ var
   Year, Month, Day, DayOfWeek : Word;
   Hour, Minute, Sec, Sec100 : Word;
 begin
-  GetDate(Year, Month, Day, DayOfWeek);
-  GetTime(Hour, Minute, Sec, Sec100);
+  getDate(Year, Month, Day, DayOfWeek);
+  getTime(Hour, Minute, Sec, Sec100);
   writeln('Today is: ', Month, '/', Day, '/', Year);
   writeln('Current time is: ', Hour, ':', Minute, ':', Sec);
-  writeln('PATH environment variable is: ', GetEnv('PATH'));
+  writeln('PATH environment variable is: ', getEnv('PATH'));
 end.
