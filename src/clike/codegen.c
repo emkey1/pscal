@@ -705,7 +705,17 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         }
         case TCAST_BINOP:
             compileExpression(node->left, chunk, ctx);
+            if (node->token.type == CLIKE_TOKEN_AND_AND ||
+                node->token.type == CLIKE_TOKEN_OR_OR) {
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+            }
             compileExpression(node->right, chunk, ctx);
+            if (node->token.type == CLIKE_TOKEN_AND_AND ||
+                node->token.type == CLIKE_TOKEN_OR_OR) {
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+            }
             switch (node->token.type) {
                 case CLIKE_TOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
