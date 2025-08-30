@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
     if (dump_bytecode_flag) {
         fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
         disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-        fprintf(stderr, "\n--- Executing Program with VM ---\n");
+        fprintf(stderr, "\n--- executing Program with VM ---\n");
     }
 
     VM vm; initVM(&vm);

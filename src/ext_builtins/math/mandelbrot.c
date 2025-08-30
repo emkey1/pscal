@@ -8,18 +8,18 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
         runtimeError(vm, "MandelbrotRow expects 6 arguments.");
         return makeVoid();
     }
-    if (!is_real_type(args[0].type) || !is_real_type(args[1].type) || !is_real_type(args[2].type) ||
+    if (!isRealType(args[0].type) || !isRealType(args[1].type) || !isRealType(args[2].type) ||
         !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4]) ||
         (args[5].type != TYPE_POINTER && args[5].type != TYPE_ARRAY)) {
         runtimeError(vm, "MandelbrotRow argument types are (Real, Real, Real, Integer, Integer, VAR array).");
         return makeVoid();
     }
 
-    double minRe = (double)as_ld(args[0]);
-    double reFactor = (double)as_ld(args[1]);
-    double c_im = (double)as_ld(args[2]);
-    int maxIterations = (int)as_i64(args[3]);
-    int maxX = (int)as_i64(args[4]);
+    double minRe = (double)asLd(args[0]);
+    double reFactor = (double)asLd(args[1]);
+    double c_im = (double)asLd(args[2]);
+    int maxIterations = (int)asI64(args[3]);
+    int maxX = (int)asI64(args[4]);
 
     // Resolve the output array and validate its size and bounds.
     Value* arrVal = NULL;

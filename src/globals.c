@@ -79,8 +79,8 @@ pthread_mutex_t globals_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 pthread_mutex_t globals_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 #else
 pthread_mutex_t globals_mutex;
-static void init_globals_mutex(void) __attribute__((constructor));
-static void init_globals_mutex(void) {
+static void initGlobalsMutex(void) __attribute__((constructor));
+static void initGlobalsMutex(void) {
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);

@@ -720,8 +720,8 @@ void updateSymbol(const char *name, Value val) {
         types_compatible = true; // Exact type match
     } else {
         // Handle specific allowed coercions and promotions.
-        if (is_real_type(sym->type) && (is_real_type(val.type) || is_intlike_type(val.type))) types_compatible = true;
-        else if (sym->type == TYPE_INTEGER && is_real_type(val.type)) { types_compatible = false; } // No implicit Real to Integer
+        if (isRealType(sym->type) && (isRealType(val.type) || isIntlikeType(val.type))) types_compatible = true;
+        else if (sym->type == TYPE_INTEGER && isRealType(val.type)) { types_compatible = false; } // No implicit Real to Integer
         else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
         else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
         else if (sym->type == TYPE_INTEGER && (val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN || val.type == TYPE_CHAR)) types_compatible = true;
@@ -776,24 +776,24 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_INTEGER:
             if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) SET_INT_VALUE(sym->value, val.i_val);
             else if (val.type == TYPE_CHAR) SET_INT_VALUE(sym->value, (long long)val.c_val);
-            else if (is_real_type(val.type)) SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
+            else if (isRealType(val.type)) SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
             break;
 
         case TYPE_REAL:
-            if (is_real_type(val.type) || is_intlike_type(val.type)) {
-                SET_REAL_VALUE(sym->value, as_ld(val));
+            if (isRealType(val.type) || isIntlikeType(val.type)) {
+                SET_REAL_VALUE(sym->value, asLd(val));
             }
             break;
 
         case TYPE_FLOAT:
-            if (is_real_type(val.type) || is_intlike_type(val.type)) {
-                SET_REAL_VALUE(sym->value, as_ld(val));
+            if (isRealType(val.type) || isIntlikeType(val.type)) {
+                SET_REAL_VALUE(sym->value, asLd(val));
             }
             break;
 
         case TYPE_LONG_DOUBLE:
-            if (is_real_type(val.type) || is_intlike_type(val.type)) {
-                SET_REAL_VALUE(sym->value, as_ld(val));
+            if (isRealType(val.type) || isIntlikeType(val.type)) {
+                SET_REAL_VALUE(sym->value, asLd(val));
             }
             break;
 

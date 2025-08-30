@@ -30,14 +30,14 @@ typedef struct {
     uint32_t Subchunk2Size;  // Sampled data length
 } WavHeader;
 
-void write_little_endian_uint32(FILE *f, uint32_t val) {
+void writeLittleEndianUint32(FILE *f, uint32_t val) {
     fputc(val & 0xFF, f);
     fputc((val >> 8) & 0xFF, f);
     fputc((val >> 16) & 0xFF, f);
     fputc((val >> 24) & 0xFF, f);
 }
 
-void write_little_endian_uint16(FILE *f, uint16_t val) {
+void writeLittleEndianUint16(FILE *f, uint16_t val) {
     fputc(val & 0xFF, f);
     fputc((val >> 8) & 0xFF, f);
 }
@@ -103,24 +103,24 @@ int main() {
     // RIFF Chunk Descriptor
     fwrite("RIFF", 1, 4, fout);
     uint32_t chunk_size = 36 + data_size; // 4 (WAVE) + 8 (fmt header) + 16 (fmt data) + 8 (data header) + data_size
-    write_little_endian_uint32(fout, chunk_size);
+    writeLittleEndianUint32(fout, chunk_size);
     fwrite("WAVE", 1, 4, fout);
 
     // "fmt " sub-chunk
     fwrite("fmt ", 1, 4, fout);
-    write_little_endian_uint32(fout, 16); // Subchunk1Size for PCM
-    write_little_endian_uint16(fout, 1);  // AudioFormat (1 for PCM)
-    write_little_endian_uint16(fout, NUM_CHANNELS);
-    write_little_endian_uint32(fout, SAMPLE_RATE);
+    writeLittleEndianUint32(fout, 16); // Subchunk1Size for PCM
+    writeLittleEndianUint16(fout, 1);  // AudioFormat (1 for PCM)
+    writeLittleEndianUint16(fout, NUM_CHANNELS);
+    writeLittleEndianUint32(fout, SAMPLE_RATE);
     uint32_t byte_rate = SAMPLE_RATE * NUM_CHANNELS * (BITS_PER_SAMPLE / 8);
-    write_little_endian_uint32(fout, byte_rate);
+    writeLittleEndianUint32(fout, byte_rate);
     uint16_t block_align = NUM_CHANNELS * (BITS_PER_SAMPLE / 8);
-    write_little_endian_uint16(fout, block_align);
-    write_little_endian_uint16(fout, BITS_PER_SAMPLE);
+    writeLittleEndianUint16(fout, block_align);
+    writeLittleEndianUint16(fout, BITS_PER_SAMPLE);
 
     // "data" sub-chunk
     fwrite("data", 1, 4, fout);
-    write_little_endian_uint32(fout, data_size);
+    writeLittleEndianUint32(fout, data_size);
 
     // Write audio data
     // fwrite requires element size and count. We have 16-bit samples.

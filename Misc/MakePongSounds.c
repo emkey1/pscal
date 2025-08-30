@@ -48,7 +48,7 @@ typedef struct {
 
 
 // Function to write the WAV header to a file
-void write_wav_header(FILE* file, uint32_t data_size) {
+void writeWavHeader(FILE* file, uint32_t data_size) {
     RiffChunk riff;
     FmtChunk fmt;
     DataChunk data;
@@ -81,7 +81,7 @@ void write_wav_header(FILE* file, uint32_t data_size) {
 // num_samples: total number of samples to generate
 // frequency: desired frequency of the square wave
 // amplitude: peak amplitude (e.g., INT16_MAX / 4)
-void generate_square_wave(int16_t* buffer, uint32_t num_samples, double frequency, int amplitude) {
+void generateSquareWave(int16_t* buffer, uint32_t num_samples, double frequency, int amplitude) {
     double samples_per_cycle = (double)SAMPLE_RATE / frequency;
     for (uint32_t i = 0; i < num_samples; ++i) {
         // Determine position within the current cycle
@@ -112,7 +112,7 @@ int main() {
     }
 
     // Generate the square wave data
-    generate_square_wave(paddle_hit_buffer, paddle_hit_num_samples, paddle_hit_freq, INT16_MAX / 6); // Adjust amplitude
+    generateSquareWave(paddle_hit_buffer, paddle_hit_num_samples, paddle_hit_freq, INT16_MAX / 6); // Adjust amplitude
 
     // Open the output file for writing in binary mode
     FILE* paddle_hit_file = fopen("paddle_hit.wav", "wb");
@@ -123,7 +123,7 @@ int main() {
     }
 
     // Write the WAV header and the audio data
-    write_wav_header(paddle_hit_file, paddle_hit_data_size);
+    writeWavHeader(paddle_hit_file, paddle_hit_data_size);
     fwrite(paddle_hit_buffer, 1, paddle_hit_data_size, paddle_hit_file);
 
     // Close the file and free the buffer
@@ -144,7 +144,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    generate_square_wave(wall_hit_buffer, wall_hit_num_samples, wall_hit_freq, INT16_MAX / 8); // Adjust amplitude
+    generateSquareWave(wall_hit_buffer, wall_hit_num_samples, wall_hit_freq, INT16_MAX / 8); // Adjust amplitude
 
     FILE* wall_hit_file = fopen("wall_hit.wav", "wb");
     if (!wall_hit_file) {
@@ -153,7 +153,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    write_wav_header(wall_hit_file, wall_hit_data_size);
+    writeWavHeader(wall_hit_file, wall_hit_data_size);
     fwrite(wall_hit_buffer, 1, wall_hit_data_size, wall_hit_file);
 
     fclose(wall_hit_file);

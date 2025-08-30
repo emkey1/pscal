@@ -47,20 +47,20 @@ end;
 
 procedure DemoDateTime;
 begin
-  GetDate(year, month, day, dow);
-  GetTime(hour, minute, second, sec100);
+  getDate(year, month, day, dow);
+  getTime(hour, minute, second, sec100);
   writeln('Today is ', year, '-', month, '-', day, ' (dow=', dow, ')');
   writeln('Current time: ', hour, ':', minute, ':', second);
-  writeln('HOME env: ', GetEnv('HOME'));
+  writeln('HOME env: ', getEnv('HOME'));
 end;
 
 procedure DemoDirectory;
 begin
-  srName := FindFirst('./');
+  srName := findFirst('./');
   while srName <> '' do
   begin
-    writeln(srName, '  Attr=', GetFAttr(srName));
-    srName := FindNext;
+    writeln(srName, '  Attr=', getFAttr(srName));
+    srName := findNext;
   end;
 end;
 

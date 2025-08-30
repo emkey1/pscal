@@ -248,7 +248,7 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                  arg_vt == TYPE_UINT32)) {
                 return true;
             }
-            if (is_real_type(param_actual->var_type) && is_intlike_type(arg_vt)) {
+            if (isRealType(param_actual->var_type) && isIntlikeType(arg_vt)) {
                 return true;
             }
             return false;
@@ -679,7 +679,7 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (is_real_type(left_val.type) && is_real_type(right_val.type)) {
+                if (isRealType(left_val.type) && isRealType(right_val.type)) {
                     double a = (double)AS_REAL(left_val);
                     double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
@@ -709,7 +709,7 @@ Value evaluateCompileTimeValue(AST* node) {
                         default:
                             break;
                     }
-                } else if (is_real_type(left_val.type) || is_real_type(right_val.type)) {
+                } else if (isRealType(left_val.type) || isRealType(right_val.type)) {
                     fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
                 } else { // Both operands are integers
                     long long a = left_val.i_val;
@@ -767,7 +767,7 @@ Value evaluateCompileTimeValue(AST* node) {
                     if (operand_val.type == TYPE_INTEGER) {
                         operand_val.i_val = -operand_val.i_val;
                         return operand_val; // Return the modified value
-                    } else if (is_real_type(operand_val.type)) {
+                    } else if (isRealType(operand_val.type)) {
                         double tmp = -(double)AS_REAL(operand_val);
                         freeValue(&operand_val);
                         return makeReal(tmp);

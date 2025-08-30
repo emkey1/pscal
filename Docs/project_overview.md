@@ -39,7 +39,7 @@ The project follows a classic compiler and virtual machine design:
     * File I/O (`readln`, `writeln`, `fileexists`).
     * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).
     * String manipulation (`copy`, `pos`, `length`).
-    * System interaction (`getpid`, `dos_exec`).
+    * System interaction (`getpid`, `dosExec`).
 * **Multithreading**: Lightweight threads can be created with `spawn` and synchronized with `join` for concurrent execution within the VM.
 * **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified. Cached bytecode carries a version tag; programs can query `VMVersion` and `BytecodeVersion` to decide how to handle mismatches. Set `PSCAL_STRICT_VM=1` to have the VM abort when bytecode targets a newer VM.
   Example programs demonstrating these builtins are `Examples/Pascal/VMVersionDemo`
