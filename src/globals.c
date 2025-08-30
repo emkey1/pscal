@@ -17,6 +17,7 @@ int typeWarn = 1; // Flag to control type warning messages (e.g., 1 for enabled,
 // These will be initialized by calling createHashTable() in initSymbolSystem().
 HashTable *globalSymbols = NULL; // Global symbol table (initialized to NULL, will point to a HashTable).
 HashTable *localSymbols = NULL;  // Current local symbol table (initialized to NULL, will point to a HashTable).
+HashTable *constGlobalSymbols = NULL; // Table of global constants (read-only at runtime)
 
 // Pointer to the Symbol representing the currently executing function (for 'result' variable).
 // <<< REMOVE THE DUPLICATE DEFINITION OF current_function_symbol >>>

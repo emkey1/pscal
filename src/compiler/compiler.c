@@ -1363,6 +1363,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     sym->is_const = true;
                 }
 
+                insertConstGlobalSymbol(node->token->value, const_val);
+
                 // Constants are resolved at compile time, so no bytecode emission is needed.
                 freeValue(&const_val);
             }

@@ -46,7 +46,7 @@ static void* threadStart(void* arg) {
     uint16_t entry = args->entry;
     free(args);
 
-    interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->procedureTable, entry);
+    interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
     thread->active = false;
     return NULL;
 }
@@ -58,6 +58,7 @@ static int createThread(VM* vm, uint16_t entry) {
     if (!t->vm) return -1;
     initVM(t->vm);
     t->vm->vmGlobalSymbols = vm->vmGlobalSymbols;
+    t->vm->vmConstGlobalSymbols = vm->vmConstGlobalSymbols;
     t->vm->procedureTable = vm->procedureTable;
     memcpy(t->vm->host_functions, vm->host_functions, sizeof(vm->host_functions));
     t->vm->chunk = vm->chunk;
@@ -384,6 +385,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->chunk = NULL;
     vm->ip = NULL;
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
+    vm->vmConstGlobalSymbols = NULL;
     vm->procedureTable = NULL;
 
     vm->frameCount = 0; // <--- INITIALIZE frameCount
@@ -419,6 +421,9 @@ void freeVM(VM* vm) {
     // clear the pointer to signal that the VM no longer uses it.
     if (vm->vmGlobalSymbols) {
         vm->vmGlobalSymbols = NULL;
+    }
+    if (vm->vmConstGlobalSymbols) {
+        vm->vmConstGlobalSymbols = NULL;
     }
 
     for (int i = 1; i < vm->threadCount; i++) {
@@ -690,13 +695,14 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
 }
 
 // --- Main Interpretation Loop ---
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures, uint16_t entry) {
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
 
     vm->chunk = chunk;
     vm->ip = vm->chunk->code + entry;
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
+    vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
     // Initialize default file variables if present but not yet opened.
@@ -736,6 +742,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         printf("Stack top: %p (empty)\n", (void*)vm->stackTop);
         printf("Chunk code: %p, Chunk constants: %p\n", (void*)vm->chunk->code, (void*)vm->chunk->constants);
         printf("Global symbol table (for VM): %p\n", (void*)vm->vmGlobalSymbols);
+        printf("Const global symbol table: %p\n", (void*)vm->vmConstGlobalSymbols);
         printf("Procedure table (for disassembly): %p\n", (void*)vm->procedureTable); // Debug print
         printf("------------------------\n");
     }
@@ -1025,8 +1032,16 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makePointer(sym->value, NULL));
+                        break;
+                    }
+                }
                 pthread_mutex_lock(&globals_mutex);
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
@@ -1049,8 +1064,16 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makePointer(sym->value, NULL));
+                        break;
+                    }
+                }
                 pthread_mutex_lock(&globals_mutex);
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
@@ -2011,8 +2034,17 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makeCopyOfValue(sym->value));
+                        break;
+                    }
+                }
+
                 pthread_mutex_lock(&globals_mutex);
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
@@ -2035,8 +2067,17 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makeCopyOfValue(sym->value));
+                        break;
+                    }
+                }
+
                 pthread_mutex_lock(&globals_mutex);
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);

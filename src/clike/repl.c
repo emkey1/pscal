@@ -23,6 +23,7 @@ int clike_warning_count = 0;
 
 static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
+    constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
 }
@@ -120,6 +121,7 @@ int main(void) {
             clike_free_structs();
             free(src);
             if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
@@ -133,6 +135,7 @@ int main(void) {
             clike_free_structs();
             free(src);
             if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
@@ -141,7 +144,7 @@ int main(void) {
         if (clike_error_count == 0) {
             BytecodeChunk chunk; clike_compile(prog, &chunk);
             VM vm; initVM(&vm);
-            interpretBytecode(&vm, &chunk, globalSymbols, procedure_table, 0);
+            interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
             freeBytecodeChunk(&chunk);
         }
@@ -150,6 +153,7 @@ int main(void) {
         if (pre_src) free(pre_src);
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
         free(clike_imports); clike_imports = NULL; clike_import_count = 0;

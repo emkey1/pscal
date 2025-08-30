@@ -9,6 +9,9 @@ int WindowHeight = 768;
 int MaxIterations = 128;
 float MinRe = -2.0;
 float MaxRe = 1.0;
+// Most of the runtime is spent computing Mandelbrot rows, so increasing
+// this value has little impact on overall speed. Keep frequent updates for
+// responsiveness and adjust MaxIterations or image size for performance.
 int ScreenUpdateInterval = 1;
 int MandelBytesPerPixel = 4;
 

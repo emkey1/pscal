@@ -50,6 +50,12 @@ void initSymbolSystem(void) {
         EXIT_FAILURE_HANDLER();
     }
     DEBUG_PRINT("[DEBUG MAIN] Created global symbol table %p.\n", (void*)globalSymbols);
+
+    constGlobalSymbols = createHashTable();
+    if (!constGlobalSymbols) {
+        fprintf(stderr, "FATAL: Failed to create constant symbol hash table.\n");
+        EXIT_FAILURE_HANDLER();
+    }
     
     procedure_table = createHashTable();
     if (!procedure_table) {
@@ -128,7 +134,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             if (compilation_ok_for_vm) {
                 VM vm;
                 initVM(&vm);
-                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table, 0);
+                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                 freeVM(&vm);
                 globalSymbols = NULL;
                 if (result_vm == INTERPRET_OK) {
@@ -159,6 +165,10 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     if (globalSymbols) {
         freeHashTable(globalSymbols);
         globalSymbols = NULL;
+    }
+    if (constGlobalSymbols) {
+        freeHashTable(constGlobalSymbols);
+        constGlobalSymbols = NULL;
     }
 #ifdef DEBUG
     if (inserted_global_names) {
@@ -243,6 +253,7 @@ int main(int argc, char *argv[]) {
         perror("Error opening source file");
         // Minimal cleanup if initSymbolSystem did very little before this point
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -254,6 +265,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Memory allocation error reading file\n");
         fclose(file);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -263,6 +275,7 @@ int main(int argc, char *argv[]) {
         free(source_buffer);
         fclose(file);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
