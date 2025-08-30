@@ -388,7 +388,7 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
-        runtimeError(vm, "Upcase expects 1 char argument.");
+        runtimeError(vm, "Upcase expects 1 argument, got %d.", arg_count);
         return makeChar('\0');
     }
 
@@ -403,11 +403,14 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
         if (s && s[0] != '\0') {
             c = (unsigned char)s[0];
         } else {
-            runtimeError(vm, "Upcase expects a non-empty string or char argument.");
+            runtimeError(vm,
+                         "Upcase expects a non-empty string or char argument. Got an empty string.");
             return makeChar('\0');
         }
     } else {
-        runtimeError(vm, "Upcase expects 1 char argument.");
+        runtimeError(vm,
+                     "Upcase expects a char, int, or non-empty string argument. Got %s.",
+                     varTypeToString(arg.type));
         return makeChar('\0');
     }
     return makeChar(toupper((unsigned char)c));
