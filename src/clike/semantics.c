@@ -396,6 +396,37 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 return TYPE_VOID;
             }
 
+            if (strcasecmp(name, "mutex") == 0 || strcasecmp(name, "rcmutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr,
+                            "Type error: %s expects no arguments at line %d, column %d\n",
+                            name, node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                free(name);
+                node->var_type = TYPE_INT32;
+                return TYPE_INT32;
+            }
+            if (strcasecmp(name, "lock") == 0 || strcasecmp(name, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr,
+                            "Type error: %s expects 1 argument at line %d, column %d\n",
+                            name, node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType at = analyzeExpr(node->children[0], scopes);
+                    if (!is_intlike_type(at)) {
+                        fprintf(stderr,
+                                "Type error: %s argument must be integer at line %d, column %d\n",
+                                name, node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                free(name);
+                node->var_type = TYPE_VOID;
+                return TYPE_VOID;
+            }
+
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {
                 int bid = clike_get_builtin_id(name);

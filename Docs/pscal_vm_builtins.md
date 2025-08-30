@@ -97,6 +97,17 @@ VM. For instructions on adding your own routines, see
 | mstreamfree | (ms: MStream) | void | Release memory stream. |
 | mstreambuffer | (ms: MStream) | String | Return contents as string. |
 
+## Threading and Synchronization
+
+| Name | Parameters | Returns | Description |
+| ---- | ---------- | ------- | ----------- |
+| spawn | (address: Integer) | Integer | Start a new thread at the given bytecode address and return its id. |
+| join | (tid: Integer) | void | Wait for the specified thread to finish. |
+| mutex | () | Integer | Create a standard mutex and return its identifier. |
+| rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
+| lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
+| unlock | (mid: Integer) | void | Release the specified mutex. |
+
 ## Math
 
 | Name | Parameters | Returns | Description |

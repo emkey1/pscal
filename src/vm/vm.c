@@ -100,6 +100,38 @@ static void joinThread(VM* vm, int id) {
     }
 }
 
+// --- Mutex Helpers ---
+static int createMutex(VM* vm, bool recursive) {
+    if (vm->mutexCount >= VM_MAX_MUTEXES) return -1;
+    Mutex* m = &vm->mutexes[vm->mutexCount];
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_t* attr_ptr = NULL;
+    if (recursive) {
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        attr_ptr = &attr;
+    }
+    if (pthread_mutex_init(&m->handle, attr_ptr) != 0) {
+        if (attr_ptr) pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
+    if (attr_ptr) pthread_mutexattr_destroy(&attr);
+    m->active = true;
+    int id = vm->mutexCount;
+    vm->mutexCount++;
+    return id;
+}
+
+static bool lockMutex(VM* vm, int id) {
+    if (id < 0 || id >= vm->mutexCount || !vm->mutexes[id].active) return false;
+    return pthread_mutex_lock(&vm->mutexes[id].handle) == 0;
+}
+
+static bool unlockMutex(VM* vm, int id) {
+    if (id < 0 || id >= vm->mutexCount || !vm->mutexes[id].active) return false;
+    return pthread_mutex_unlock(&vm->mutexes[id].handle) == 0;
+}
+
 // Internal function shared by stack dump helpers
 static void vmDumpStackInternal(VM* vm, bool detailed) {
     if (!vm) return;
@@ -359,6 +391,11 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
         vm->threads[i].vm = NULL;
     }
 
+    vm->mutexCount = 0;
+    for (int i = 0; i < VM_MAX_MUTEXES; i++) {
+        vm->mutexes[i].active = false;
+    }
+
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
     }
@@ -387,6 +424,13 @@ void freeVM(VM* vm) {
             freeVM(vm->threads[i].vm);
             free(vm->threads[i].vm);
             vm->threads[i].vm = NULL;
+        }
+    }
+
+    for (int i = 0; i < vm->mutexCount; i++) {
+        if (vm->mutexes[i].active) {
+            pthread_mutex_destroy(&vm->mutexes[i].handle);
+            vm->mutexes[i].active = false;
         }
     }
     // No explicit freeing of vm->host_functions array itself as it's part of
@@ -2608,6 +2652,62 @@ comparison_error_label:
                 joinThread(vm, tid);
                 Value popped_tid = pop(vm);
                 freeValue(&popped_tid);
+                break;
+            }
+            case OP_MUTEX_CREATE: {
+                int id = createMutex(vm, false);
+                if (id < 0) {
+                    runtimeError(vm, "Mutex limit exceeded.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeInt(id));
+                break;
+            }
+            case OP_RCMUTEX_CREATE: {
+                int id = createMutex(vm, true);
+                if (id < 0) {
+                    runtimeError(vm, "Mutex limit exceeded.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeInt(id));
+                break;
+            }
+            case OP_MUTEX_LOCK: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                if (!lockMutex(vm, mid)) {
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
+                break;
+            }
+            case OP_MUTEX_UNLOCK: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                if (!unlockMutex(vm, mid)) {
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
                 break;
             }
             case OP_FORMAT_VALUE: {

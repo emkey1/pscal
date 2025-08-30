@@ -709,6 +709,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case OP_THREAD_JOIN:
             printf("OP_THREAD_JOIN\n");
             return offset + 1;
+        case OP_MUTEX_CREATE:
+            printf("OP_MUTEX_CREATE\n");
+            return offset + 1;
+        case OP_RCMUTEX_CREATE:
+            printf("OP_RCMUTEX_CREATE\n");
+            return offset + 1;
+        case OP_MUTEX_LOCK:
+            printf("OP_MUTEX_LOCK\n");
+            return offset + 1;
+        case OP_MUTEX_UNLOCK:
+            printf("OP_MUTEX_UNLOCK\n");
+            return offset + 1;
         // NOTE: There is no OP_BREAK in your bytecode.h enum, so it cannot be disassembled.
         // The AST_BREAK node is handled by the compiler generating jump instructions.
 
