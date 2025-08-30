@@ -903,6 +903,42 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         }
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
+            if (strcasecmp(name, "mutex") == 0) {
+                free(name);
+                if (node->child_count != 0) {
+                    fprintf(stderr, "Compile error: mutex expects no arguments.\n");
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "rcmutex") == 0) {
+                free(name);
+                if (node->child_count != 0) {
+                    fprintf(stderr, "Compile error: rcmutex expects no arguments.\n");
+                }
+                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "lock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "Compile error: lock expects 1 argument.\n");
+                } else {
+                    compileExpression(node->children[0], chunk, ctx);
+                }
+                free(name);
+                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "Compile error: unlock expects 1 argument.\n");
+                } else {
+                    compileExpression(node->children[0], chunk, ctx);
+                }
+                free(name);
+                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, node->token.line);
+                break;
+            }
             if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;

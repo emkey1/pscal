@@ -22,6 +22,7 @@
 
 #define VM_CALL_STACK_MAX 4096
 #define VM_MAX_THREADS 16
+#define VM_MAX_MUTEXES 64
 
 // Forward declaration
 struct VM_s;
@@ -61,6 +62,11 @@ typedef struct {
     bool active;                // Whether this thread is running
 } Thread;
 
+typedef struct {
+    pthread_mutex_t handle;
+    bool active;
+} Mutex;
+
 // --- Virtual Machine Structure ---
 typedef struct VM_s {
     BytecodeChunk* chunk;     // The chunk of bytecode to execute
@@ -83,6 +89,11 @@ typedef struct VM_s {
     // Threading support
     Thread threads[VM_MAX_THREADS];
     int threadCount;
+
+    // Mutex support
+    Mutex mutexes[VM_MAX_MUTEXES];
+    int mutexCount;
+    struct VM_s* mutexOwner; // VM that owns the mutex registry
 
 } VM;
 

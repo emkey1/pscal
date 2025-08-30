@@ -741,7 +741,9 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "wherex")    == 0 ||
         strcasecmp(name, "wherey")    == 0 ||
         strcasecmp(name, "getmaxx")   == 0 ||
-        strcasecmp(name, "getmaxy")   == 0) {
+        strcasecmp(name, "getmaxy")   == 0 ||
+        strcasecmp(name, "mutex")     == 0 ||
+        strcasecmp(name, "rcmutex")   == 0) {
         return TYPE_INTEGER;
     }
 

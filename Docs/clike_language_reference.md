@@ -202,12 +202,16 @@ int* p = &x;
 * **`#import`:** Includes another source file.
 * **`#ifdef`, `#ifndef`, `#else`, `#elif`, `#endif`:** For conditional compilation based on whether a symbol is defined.
 
-### **Threading**
+### **Threading and Synchronization**
 
-The language provides lightweight concurrency through two statements:
+The language provides lightweight concurrency and mutex primitives through the following built-ins:
 
 * `spawn` – starts a new thread executing a parameterless function and pushes its integer thread identifier.
 * `join` – waits for the thread with the given identifier to finish execution.
+* `mutex` – creates a standard mutex and pushes its integer identifier.
+* `rcmutex` – creates a recursive mutex and pushes its identifier.
+* `lock` – pops a mutex identifier and blocks until it is acquired.
+* `unlock` – releases the mutex whose identifier is on top of the stack.
 
 Example:
 

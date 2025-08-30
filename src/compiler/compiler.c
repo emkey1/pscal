@@ -1992,7 +1992,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_PROCEDURE_CALL: {
             const char* calleeName = node->token->value;
-            
+
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
             Symbol* proc_symbol_lookup = NULL;
             char callee_lower[MAX_SYMBOL_LENGTH];
@@ -2017,6 +2017,39 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
             if (proc_symbol && proc_symbol->is_alias) {
                 proc_symbol = proc_symbol->real_symbol;
+            }
+
+            if (strcasecmp(calleeName, "lock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: lock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: unlock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "mutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "rcmutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
+                break;
             }
 
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
@@ -2615,6 +2648,39 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
                 compiler_had_error = true;
                 emitConstant(chunk, addNilConstant(chunk), line);
+                break;
+            }
+
+            if (strcasecmp(functionName, "mutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
+                break;
+            }
+            if (strcasecmp(functionName, "rcmutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
+                break;
+            }
+            if (strcasecmp(functionName, "lock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: lock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, line);
+                break;
+            }
+            if (strcasecmp(functionName, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: unlock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
                 break;
             }
             
