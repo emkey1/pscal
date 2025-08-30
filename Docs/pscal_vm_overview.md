@@ -19,7 +19,7 @@ The VM's architecture is defined by the `VM` struct in `src/vm/vm.h` and consist
     * **`vmGlobalSymbols`:** A `HashTable` for runtime storage and lookup of global variables.
     * **`procedureTable`:** A `HashTable` that stores information about all compiled procedures and functions, which is used for disassembly and resolving calls.
 * **Bytecode Chunk:** A pointer (`chunk`) to the `BytecodeChunk` being executed. This chunk contains the bytecode instructions (`code`), the constant pool (`constants`), and line number information for debugging (`lines`).
-* **Thread Table:** Lightweight threads are stored in a `threads` array; each thread has its own instruction pointer, stack, and call frames. A cooperative scheduler cycles through active threads.
+* **Thread Table:** The VM spawns real OS-level threads via `pthread`. Each entry in the `threads` array holds a native thread and its own `VM` instance, allowing bytecode routines to execute in parallel.
 
 #### **Execution Flow**
 

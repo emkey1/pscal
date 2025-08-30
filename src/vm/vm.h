@@ -11,6 +11,8 @@
 #include "core/types.h"        // For Value explicitly, though bytecode.h should bring it in
 #include "symbol/symbol.h"     // For HashTable, if VM manages globals using it directly
 #include <stdbool.h>
+#include <pthread.h>
+#include <stdint.h>
 
 // --- VM Configuration ---
 #define VM_STACK_MAX 8192       // Maximum number of Values on the operand stack
@@ -54,16 +56,9 @@ typedef struct {
 
 // Thread structure representing a lightweight VM thread
 typedef struct {
-    BytecodeChunk* chunk;       // Bytecode being executed
-    uint8_t* ip;                // Instruction pointer for this thread
-    
-    Value* stack;               // Operand stack for the thread
-    int stackSize;              // Number of active values on the stack
-
-    CallFrame* frames;          // Call frames for this thread
-    int frameCount;             // Active call frames
-
-    bool active;                // Whether this thread is runnable
+    pthread_t handle;           // OS-level thread handle
+    struct VM_s* vm;            // Pointer to the VM executing on this thread
+    bool active;                // Whether this thread is running
 } Thread;
 
 // --- Virtual Machine Structure ---
@@ -88,7 +83,6 @@ typedef struct VM_s {
     // Threading support
     Thread threads[VM_MAX_THREADS];
     int threadCount;
-    int currentThread;
 
 } VM;
 
@@ -98,7 +92,7 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures);
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 
 void runtimeError(VM* vm, const char* format, ...);

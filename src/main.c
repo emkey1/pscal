@@ -128,7 +128,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             if (compilation_ok_for_vm) {
                 VM vm;
                 initVM(&vm);
-                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table, 0);
                 freeVM(&vm);
                 globalSymbols = NULL;
                 if (result_vm == INTERPRET_OK) {
