@@ -2444,9 +2444,7 @@ comparison_error_label:
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
-                    pthread_mutex_lock(&globals_mutex);
                     Value result = handler(vm, arg_count, args);
-                    pthread_mutex_unlock(&globals_mutex);
 
                     // Pop arguments from the stack and free their contents
                     // This is crucial to prevent stack corruption.
