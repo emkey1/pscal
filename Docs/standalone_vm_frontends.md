@@ -171,7 +171,7 @@ demonstrated in `src/clike/codegen.c`.
 Opcodes `OP_CALL_BUILTIN` and `OP_CALL_BUILTIN_PROC` invoke the VM's built-in
 functions and procedures. The VM exposes a large catalog of routines described in
 `Docs/pscal_vm_builtins.md`. To add your own, see
-[`extending_builtins.md`](extending_builtins.md).
+[`extended_builtins.md`](extended_builtins.md).
 
 To invoke a builtin from generated code:
 

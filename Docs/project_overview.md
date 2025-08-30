@@ -12,7 +12,7 @@ Detailed descriptions of the Pascal and C-like front ends can be found in
 [`pscal_vm_overview.md`](pscal_vm_overview.md), and instructions for building
 custom front ends or extending VM builtins are in
 [`standalone_vm_frontends.md`](standalone_vm_frontends.md) and
-[`extending_builtins.md`](extending_builtins.md).
+[`extended_builtins.md`](extended_builtins.md).
 
 All frontends generate a compact bytecode stream that is executed by the VM. This virtual machine provides a rich set of built-in routines and offers optional integrations with **SDL2** for graphics and audio, and **libcurl** for networking. The system is designed to be easily extensible, allowing for the addition of new built-in functions.
 
