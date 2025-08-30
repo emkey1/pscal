@@ -25,6 +25,9 @@ add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
+# Optionally build the debug "dascal" binary
+option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
+
 # Optionally enable SDL-based features
 option(SDL "Enable SDL-based graphics and audio" OFF)
 if(SDL)
@@ -257,7 +260,9 @@ function(add_pscal_executable target_name)
 endfunction()
 
 add_pscal_executable(pascal)
-add_pscal_executable(dascal)
+if(BUILD_DASCAL)
+    add_pscal_executable(dascal)
+endif()
 # add_pscal_executable(hscal) // Lets not build this normally
 
 # Standalone VM binary
@@ -377,8 +382,12 @@ add_subdirectory(Examples)
 
 # ---- optional install ----
 include(GNUInstallDirs)
-install(TARGETS pascal dascal pscalvm
+install(TARGETS pascal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(BUILD_DASCAL)
+    install(TARGETS dascal
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 
 add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
