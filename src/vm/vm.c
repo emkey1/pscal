@@ -719,7 +719,7 @@ static bool builtinUsesGlobalStructures(const char* name) {
         "reset",          "rewrite",       "screenrows",    "screencols",
         "showcursor",     "textbackground", "textbackgrounde","textcolor",
         "textcolore",     "underlinetext", "window",        "wherex",
-        "wherey",
+        "wherey", "pollkey", "waitkeyevent", "graphloop", 
     };
 
     for (size_t i = 0; i < sizeof(needs_lock)/sizeof(needs_lock[0]); i++) {
