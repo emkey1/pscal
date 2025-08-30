@@ -244,7 +244,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"trunc", vmBuiltinTrunc},
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
- #ifdef SDL
+    {"topper", vmBuiltinUpcase},
+#ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
