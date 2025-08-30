@@ -87,6 +87,7 @@ void waitForQuit() {
                 setQuit(1);
             }
         }
+        delay(16);
     }
 }
 
