@@ -57,8 +57,7 @@ static VarType builtinReturnType(const char* name) {
 
     if (strcasecmp(name, "readkey") == 0 ||
         strcasecmp(name, "upcase")  == 0 ||
-        strcasecmp(name, "toupper")  == 0 ||
-        strcasecmp(name, "topper")  == 0) {
+        strcasecmp(name, "toupper")  == 0) {
         return TYPE_CHAR;
     }
 

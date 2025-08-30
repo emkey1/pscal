@@ -1,4 +1,4 @@
 int main() {
-    printf("%c\n", topper('b'));
+    printf("%c\n", toupper('b'));
     return 0;
 }
