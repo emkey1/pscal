@@ -1,11 +1,11 @@
 #include "utils.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
 #include "Pascal/ast.h"
-#include "documented_units.h"
+#include "Pascal/documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
 #include "symbol.h"

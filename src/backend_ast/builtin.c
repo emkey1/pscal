@@ -6,7 +6,7 @@
 #include "backend_ast/sdl.h"
 #include "backend_ast/audio.h"
 #endif
-#include "globals.h"                  // Assuming globals.h is directly in src/
+#include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 

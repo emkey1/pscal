@@ -1,7 +1,7 @@
 // src/backend_ast/audio.c
 
 #include "audio.h"
-#include "globals.h" // For EXIT_FAILURE_HANDLER
+#include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
 #include "utils.h" // For EXIT_FAILURE_HANDLER
 #include <stdio.h>
 #include <string.h> // For strdup

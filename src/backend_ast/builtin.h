@@ -3,7 +3,7 @@
 
 #include "core/types.h"
 #include "Pascal/ast.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 
 struct VM_s;
 

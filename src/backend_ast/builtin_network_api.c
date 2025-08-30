@@ -4,7 +4,7 @@
 #include <string.h>
 #include <curl/curl.h>
 #include "backend_ast/builtin.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
 
