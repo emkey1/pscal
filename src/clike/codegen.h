@@ -4,6 +4,6 @@
 #include "clike/ast.h"
 #include "compiler/bytecode.h"
 
-void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk);
+void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk);
 
 #endif

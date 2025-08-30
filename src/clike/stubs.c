@@ -9,7 +9,7 @@
 
 AST* lookupType(const char* name) {
     // First, see if this name refers to a previously-declared struct.
-    AST* type = clike_lookup_struct(name);
+    AST* type = clikeLookupStruct(name);
     if (type) return type;
 
     // Otherwise, create a simple AST node for one of the builtin types.

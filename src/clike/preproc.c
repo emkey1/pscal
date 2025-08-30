@@ -11,7 +11,7 @@ static bool isDefined(const char *name, const char **defines, int count) {
     return false;
 }
 
-char* clike_preprocess(const char *source, const char **defines, int count) {
+char* clikePreprocess(const char *source, const char **defines, int count) {
     if (!source) return NULL;
     size_t len = strlen(source);
     char *out = (char*)malloc(len + 1);

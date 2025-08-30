@@ -19,18 +19,18 @@ typedef struct {
 void initParserClike(ParserClike *parser, const char *source);
 void freeParserClike(ParserClike *parser);
 ASTNodeClike* parseProgramClike(ParserClike *parser);
-ASTNodeClike* clike_spawnStatement(ParserClike *p);
-ASTNodeClike* clike_joinStatement(ParserClike *p);
+ASTNodeClike* clikeSpawnStatement(ParserClike *p);
+ASTNodeClike* clikeJoinStatement(ParserClike *p);
 
 extern char **clike_imports;
 extern int clike_import_count;
 
 // Struct type registration and lookup
-AST* clike_lookup_struct(const char *name);
-void clike_register_struct(const char *name, AST *ast);
-void clike_free_structs(void);
+AST* clikeLookupStruct(const char *name);
+void clikeRegisterStruct(const char *name, AST *ast);
+void clikeFreeStructs(void);
 
-VarType clike_tokenTypeToVarType(ClikeTokenType t);
-const char* clike_tokenTypeToTypeName(ClikeTokenType t);
+VarType clikeTokenTypeToVarType(ClikeTokenType t);
+const char* clikeTokenTypeToTypeName(ClikeTokenType t);
 
 #endif
