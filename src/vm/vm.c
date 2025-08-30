@@ -694,6 +694,14 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
     return INTERPRET_OK;
 }
 
+// Determine if a core VM builtin requires access to global interpreter
+// structures protected by globals_mutex. Builtins that do not touch such
+// structures can execute without acquiring the global lock.
+static bool builtinUsesGlobalStructures(const char* name) {
+    if (!name) return false;
+    return strcmp(name, "eof") == 0;
+}
+
 // --- Main Interpretation Loop ---
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
@@ -2545,9 +2553,10 @@ comparison_error_label:
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
-                    pthread_mutex_lock(&globals_mutex);
+                    bool needs_lock = builtinUsesGlobalStructures(builtin_name_lower);
+                    if (needs_lock) pthread_mutex_lock(&globals_mutex);
                     Value result = handler(vm, arg_count, args);
-                    pthread_mutex_unlock(&globals_mutex);
+                    if (needs_lock) pthread_mutex_unlock(&globals_mutex);
 
                     // Pop arguments from the stack and free their contents
                     // This is crucial to prevent stack corruption.

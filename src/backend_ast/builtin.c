@@ -2133,13 +2133,11 @@ Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
 
     if (arg_count == 0) {
         if (vm->vmGlobalSymbols) {
-            pthread_mutex_lock(&globals_mutex);
             Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
             if (inputSym && inputSym->value &&
                 inputSym->value->type == TYPE_FILE) {
                 stream = inputSym->value->f_val;
             }
-            pthread_mutex_unlock(&globals_mutex);
         }
         if (!stream) {
             // No default input file has been opened; treat as EOF
