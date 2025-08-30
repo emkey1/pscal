@@ -143,7 +143,7 @@ endif()
 
 # ---- Source Files ----
 set(PSCAL_SOURCES
-    src/main.c src/globals.c
+    src/Pascal/main.c src/Pascal/globals.c
     src/core/types.c src/core/utils.c src/core/list.c
     src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
@@ -267,7 +267,7 @@ endif()
 
 # Standalone VM binary
 set(PSCAL_VM_SOURCES ${PSCAL_SOURCES})
-list(REMOVE_ITEM PSCAL_VM_SOURCES src/main.c)
+list(REMOVE_ITEM PSCAL_VM_SOURCES src/Pascal/main.c)
 list(APPEND PSCAL_VM_SOURCES src/vm/vm_main.c)
 set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
 set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
@@ -285,7 +285,7 @@ set(CLIKE_SOURCES
     src/clike/codegen.c
     src/clike/opt.c
     src/clike/preproc.c
-    src/globals.c
+    src/Pascal/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
     src/compiler/bytecode.c
     src/vm/vm.c

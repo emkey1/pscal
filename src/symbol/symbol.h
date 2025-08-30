@@ -55,7 +55,7 @@ typedef struct SymbolTable_s HashTable;
 // --- Include globals.h AFTER defining Symbol and HashTable ---
 // This allows functions in symbol.c (prototyped below) to use macros
 // or externs from globals.h if necessary.
-#include "globals.h" // For SymbolEnvSnapshot typedef, EXIT_FAILURE_HANDLER etc.
+#include "Pascal/globals.h" // For SymbolEnvSnapshot typedef, EXIT_FAILURE_HANDLER etc.
 
 // --- Include ast.h if full AST definition is needed by prototypes below ---
 // Or if symbol.c needs it extensively.

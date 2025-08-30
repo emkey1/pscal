@@ -1,6 +1,6 @@
 #include "core/cache.h"
 #include "core/utils.h" // for Value constructors
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"

@@ -1,7 +1,7 @@
-#include "Pascal/lexer.h"
-#include "Pascal/parser.h"
-#include "Pascal/ast.h"
-#include "Pascal/opt.h"
+#include "lexer.h"
+#include "parser.h"
+#include "ast.h"
+#include "opt.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
@@ -18,7 +18,7 @@
 #include <SDL2/SDL_ttf.h>
 #endif
 #include "vm/vm.h"
-// Pascal/ast.h is already included via globals.h or directly, no need for duplicate
+// ast.h is already included via globals.h or directly, no need for duplicate
 
 /* Global variables */
 int gParamCount = 0;

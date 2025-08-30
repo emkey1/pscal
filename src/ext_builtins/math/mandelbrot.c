@@ -1,6 +1,6 @@
 #include "core/utils.h"
 #include "backend_ast/builtin.h"
-#include "globals.h" // for globals_mutex
+#include "Pascal/globals.h" // for globals_mutex
 #include <string.h>
 
 static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args) {

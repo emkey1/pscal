@@ -13,7 +13,7 @@
 #include "core/cache.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 
 int gParamCount = 0;

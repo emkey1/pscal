@@ -11,7 +11,7 @@
 #include "core/types.h"
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "Pascal/ast.h"

@@ -7,7 +7,7 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "compiler/compiler.h"
 #include <string.h>
 #include <strings.h>
