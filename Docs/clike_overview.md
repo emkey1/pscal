@@ -18,7 +18,7 @@ Pscal virtual machine.
 - **Concatenation with `+`** – The `+` operator joins strings, e.g.
   `buffer = mstreambuffer(ms) + "\n";`.
 - **Standard string helpers** – Built-ins such as `strlen`, `copy` and
-  `upcase` (also available as `topper`) aid string handling; `upcase`
+  `upcase` (also available as `toupper`) aid string handling; `upcase`
   converts a single character to uppercase.
 - **Dynamic allocation** – Use `new(&node);` to allocate structures;
   fields are accessed with the usual `->` syntax.

@@ -82,7 +82,7 @@ int main() {
 
         if (keypressed()) {
             char c = readkey();
-            if (topper(c) == 'Q') {
+            if (toupper(c) == 'Q') {
                 quit = 1;
             }
         }

@@ -26,7 +26,7 @@ VM. For instructions on adding your own routines, see
 | low | (a: Array or String) | Integer | Lowest index. |
 | high | (a: Array or String) | Integer | Highest index. |
 | succ | (x: Ordinal) | Ordinal | Successor of value. |
-| upcase | (ch: Char or String) | Char | Convert character or first character of string to uppercase. Alias: `topper`. |
+| upcase | (ch: Char or String) | Char | Convert character or first character of string to uppercase. Alias: `toupper`. |
 | pos | (sub: String or Char, s: String) | Integer | Position of substring. |
 | copy | (s: String or Char, index: Integer, count: Integer) | String | Copy substring. |
 | paramcount | () | Integer | Number of command line parameters. |
@@ -233,7 +233,7 @@ end.
 ```c
 int main() {
   printf("Random: %d\n", random(100));
-  printf("Uppercase: %c %c\n", upcase('a'), topper('b'));
+  printf("Uppercase: %c %c\n", upcase('a'), toupper('b'));
   return 0;
 }
 ```
