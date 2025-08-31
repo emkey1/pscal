@@ -153,21 +153,7 @@ void renderMandelbrot() {
         join tid[i];
 }
 
-void waitForQuit() {
-    char c;
-    while (!getQuit()) {
-        if (keypressed()) {
-            c = readkey();
-            if (toupper(c) == 'Q') {
-                setQuit(1);
-            }
-        }
-        delay(16);
-    }
-}
-
 int main() {
-    int tidQuit;
     int mouseX, mouseY, buttons, prev_buttons = 0;
 
     printf("Threaded Mandelbrot (mandelbrotrow). Left click to zoom in, right click to zoom out, middle click to reset. Press Q in the console to quit.\n");
@@ -180,13 +166,17 @@ int main() {
     rowMutex = mutex();
     quitMutex = mutex();
 
-    tidQuit = spawn waitForQuit();
-
     resetView();
     renderMandelbrot();
 
     while (!getQuit()) {
         graphloop(16);
+        if (keypressed()) {
+            char c = readkey();
+            if (toupper(c) == 'Q') {
+                setQuit(1);
+            }
+        }
         getmousestate(&mouseX, &mouseY, &buttons);
         if ((buttons & 1) && !(prev_buttons & 1)) {
             zoomAt(mouseX, mouseY, 0.5);
@@ -200,8 +190,6 @@ int main() {
         }
         prev_buttons = buttons;
     }
-
-    join tidQuit;
     destroytexture(textureID); closegraph();
     return 0;
 
