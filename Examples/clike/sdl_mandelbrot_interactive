@@ -171,6 +171,7 @@ void waitForQuit() {
     }
 }
 
+
 void captureInput() {
     int mouseX, mouseY, buttons, prev_buttons = 0;
     while (!getQuit()) {
