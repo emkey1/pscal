@@ -1098,7 +1098,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         case OP_MOD: \
                             iresult = ib == 0 ? 0 : ia % ib; \
                             break; \
-                        default: \
+        default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
@@ -1395,6 +1395,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
                         runtimeError(vm, "Runtime Error: Integer division by zero.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (ia == LLONG_MIN && ib == -1) {
+                        runtimeError(vm, "Runtime Error: Integer overflow.");
                         freeValue(&a_val); freeValue(&b_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
