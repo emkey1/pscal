@@ -51,7 +51,7 @@ void computeRows(int startY, int endY) {
 
     for (y = startY; y <= endY && !getQuit(); y++) {
         c_im = MaxIm - y * ImFactor;
-        mandelbrotrow(MinRe, ReFactor, c_im, MaxIterations, MaxX, &row);
+        mandelbrotrow(MinRe, ReFactor, c_im, MaxIterations, MaxX, row);
         for (x = 0; x <= MaxX; x++) {
             n = row[x];
             if (n == MaxIterations) { R = G = B = 0; }

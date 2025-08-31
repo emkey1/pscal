@@ -1,7 +1,5 @@
 #include "core/utils.h"
 #include "backend_ast/builtin.h"
-#include "Pascal/globals.h" // for globals_mutex
-#include <string.h>
 
 static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args) {
     if (arg_count != 6) {
@@ -73,14 +71,9 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
             n++;
         }
         Value* outPtr = &outArr[x];
-        if (outPtr->type != TYPE_INTEGER) {
-            pthread_mutex_lock(&globals_mutex);
-            freeValue(outPtr);
-            pthread_mutex_unlock(&globals_mutex);
-            memset(outPtr, 0, sizeof(Value));
-            outPtr->type = TYPE_INTEGER;
-        }
-        outPtr->i_val = n;
+        // Directly assign the iteration count without freeing uninitialized memory
+        outPtr->type = TYPE_INTEGER;
+        SET_INT_VALUE(outPtr, n);
     }
 
     return makeVoid();
