@@ -31,9 +31,9 @@ VarType inferBinaryOpType(VarType left, VarType right) {
         if (left == TYPE_DOUBLE || right == TYPE_DOUBLE) return TYPE_DOUBLE;
         return TYPE_FLOAT;
     }
-    if (left_int && right_int) return TYPE_INT32;
     if (left == TYPE_BOOLEAN && right == TYPE_BOOLEAN) return TYPE_BOOLEAN;
     if (left == TYPE_CHAR && right == TYPE_CHAR) return TYPE_STRING; // for '+'
+    if (left_int && right_int) return TYPE_INT32;
     return TYPE_VOID; // fallback
 }
 

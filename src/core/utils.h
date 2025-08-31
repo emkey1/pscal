@@ -76,6 +76,7 @@ static inline bool isIntlikeType(VarType t) {
         case TYPE_INT64:
         case TYPE_UINT64:
             return true;
+        case TYPE_BOOLEAN:
         case TYPE_CHAR:
             return true;
         default:
@@ -96,8 +97,8 @@ static inline bool isRealType(VarType t) {
 
 static inline bool isOrdinalType(VarType t) {
     // Pascal ordinals: integer subranges, enumerations, char, boolean.
-    // Here we treat INTEGER/BYTE/WORD/CHAR/ENUM (BOOLEAN optional) as ordinal.
-    return isIntlikeType(t) || t == TYPE_CHAR || t == TYPE_ENUM /*|| t == TYPE_BOOLEAN*/;
+    // Treat INTEGER/BYTE/WORD/BOOLEAN/CHAR/ENUM as ordinal.
+    return isIntlikeType(t) || t == TYPE_CHAR || t == TYPE_ENUM;
 }
 
 static inline long long coerceToI64(const Value* v, VM* vm, const char* who) {

@@ -190,6 +190,7 @@ static inline int isIntlikeTypeLocal(VarType t) {
         case TYPE_UINT32:
         case TYPE_INT64:
         case TYPE_UINT64:
+        case TYPE_BOOLEAN:
             return 1;
         default:
             return 0;
