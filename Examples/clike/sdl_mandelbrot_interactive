@@ -23,7 +23,17 @@ int main() {
     int screenUpdateInterval = 16; // update screen every 16 rows
     int quit = 0;
     int redraw = 1;
-    int mouseX = 0, mouseY = 0, mouseButtons = 0, prevButtons = 0;
+
+    // Mouse state variables must be declared individually so that the
+    // address-of operator can correctly obtain a pointer to each one.  The
+    // previous single-line declaration confused the CLike compiler and the
+    // GetMouseState builtin received a non-pointer argument, triggering a
+    // runtime error.
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    int prevButtons = 0;
+
     int ButtonLeft = 1;
     int ButtonRight = 4;
 
