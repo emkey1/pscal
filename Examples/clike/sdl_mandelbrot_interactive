@@ -34,6 +34,11 @@ int quit = 0;
 
 int rowMutex;
 int quitMutex;
+int inputMutex;
+
+int clickType;
+int clickX;
+int clickY;
 
 int getQuit() {
     int q;
@@ -144,9 +149,8 @@ void renderMandelbrot() {
             cleardevice();
             rendercopy(textureID);
             updatescreen();
-            graphloop(0);
         } else if (!done) {
-            graphloop(0);
+            delay(0);
         }
     }
 
@@ -167,9 +171,36 @@ void waitForQuit() {
     }
 }
 
+
+void captureInput() {
+    int mouseX, mouseY, buttons, prev_buttons = 0;
+    while (!getQuit()) {
+        graphloop(16);
+        getmousestate(&mouseX, &mouseY, &buttons);
+        if ((buttons & 1) && !(prev_buttons & 1)) {
+            lock(inputMutex);
+            clickType = 1;
+            clickX = mouseX;
+            clickY = mouseY;
+            unlock(inputMutex);
+        } else if ((buttons & 4) && !(prev_buttons & 4)) {
+            lock(inputMutex);
+            clickType = 2;
+            clickX = mouseX;
+            clickY = mouseY;
+            unlock(inputMutex);
+        } else if ((buttons & 2) && !(prev_buttons & 2)) {
+            lock(inputMutex);
+            clickType = 3;
+            unlock(inputMutex);
+        }
+        prev_buttons = buttons;
+    }
+}
+
 int main() {
-    int tidQuit;
-    int mouseX, mouseY, buttons, prev_buttons;
+    int tidQuit, tidInput;
+    int action, x, y;
 
     printf("Threaded Mandelbrot (mandelbrotrow). Left click to zoom in, right click to zoom out, middle click to reset. Press Q in the console to quit.\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
@@ -180,29 +211,37 @@ int main() {
 
     rowMutex = mutex();
     quitMutex = mutex();
+    inputMutex = mutex();
 
     tidQuit = spawn waitForQuit();
+    tidInput = spawn captureInput();
 
     resetView();
     renderMandelbrot();
 
-    prev_buttons = 0;
     while (!getQuit()) {
-        graphloop(16);
-        getmousestate(&mouseX, &mouseY, &buttons);
-        if ((buttons & 1) && !(prev_buttons & 1)) {
-            zoomAt(mouseX, mouseY, 0.5);
+        lock(inputMutex);
+        action = clickType;
+        x = clickX;
+        y = clickY;
+        clickType = 0;
+        unlock(inputMutex);
+
+        if (action == 1) {
+            zoomAt(x, y, 0.5);
             renderMandelbrot();
-        } else if ((buttons & 4) && !(prev_buttons & 4)) {
-            zoomAt(mouseX, mouseY, 2.0);
+        } else if (action == 2) {
+            zoomAt(x, y, 2.0);
             renderMandelbrot();
-        } else if ((buttons & 2) && !(prev_buttons & 2)) {
+        } else if (action == 3) {
             resetView();
             renderMandelbrot();
+        } else {
+            delay(16);
         }
-        prev_buttons = buttons;
     }
 
+    join tidInput;
     join tidQuit;
     destroytexture(textureID); closegraph();
     return 0;
