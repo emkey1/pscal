@@ -7,8 +7,8 @@
 const int WindowWidth = 1200;
 const int WindowHeight = 900;
 const int MaxIterations = 200;
-const double MinRe = -2.0;
-const double MaxRe = 1.0;
+const double StartMinRe = -2.0;
+const double StartMaxRe = 1.0;
 const int ScreenUpdateInterval = 16;
 const int MandelBytesPerPixel = 4;
 
@@ -16,6 +16,8 @@ byte pixelData[WindowWidth * WindowHeight * MandelBytesPerPixel];
 int textureID;
 
 double ImRange;
+double MinRe;
+double MaxRe;
 double MinIm;
 double MaxIm;
 double ReFactor;
@@ -45,6 +47,30 @@ void setQuit(int v) {
     lock(quitMutex);
     quit = v;
     unlock(quitMutex);
+}
+
+void resetView() {
+    MinRe = StartMinRe;
+    MaxRe = StartMaxRe;
+    ImRange = (MaxRe - MinRe) * MaxY / MaxX;
+    MinIm = -ImRange / 2.0;
+    MaxIm = MinIm + ImRange;
+    ReFactor = (MaxRe - MinRe) / (MaxX - 1);
+    ImFactor = (MaxIm - MinIm) / (MaxY - 1);
+}
+
+void zoomAt(int mouseX, int mouseY, double scale) {
+    double c_re = MinRe + mouseX * ReFactor;
+    double c_im = MaxIm - mouseY * ImFactor;
+    double newWidth = (MaxRe - MinRe) * scale;
+    double newHeight = (MaxIm - MinIm) * scale;
+    MinRe = c_re - newWidth / 2.0;
+    MaxRe = c_re + newWidth / 2.0;
+    MinIm = c_im - newHeight / 2.0;
+    MaxIm = c_im + newHeight / 2.0;
+    ImRange = MaxIm - MinIm;
+    ReFactor = (MaxRe - MinRe) / (MaxX - 1);
+    ImFactor = (MaxIm - MinIm) / (MaxY - 1);
 }
 
 void computeRows(int startY, int endY) {
@@ -80,33 +106,8 @@ void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
 void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
 void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
 
-void waitForQuit() {
-    char c;
-    while (!getQuit()) {
-        if (keypressed()) {
-            c = readkey();
-            if (toupper(c) == 'Q') {
-                setQuit(1);
-            }
-        }
-        delay(16);
-    }
-}
-
-int main() {
-    int i, startY, endY, rowsPerThread, extra, tid[5], y, done, needRedraw;
-
-    printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
-    initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
-    textureID = createtexture(WindowWidth, WindowHeight);
-    if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
-    cleardevice(); updatescreen();
-    MaxX = getmaxx(); MaxY = getmaxy();
-
-    ImRange = (MaxRe - MinRe) * MaxY / MaxX;
-    MinIm = -ImRange / 2.0; MaxIm = MinIm + ImRange;
-    ReFactor = (MaxRe - MinRe) / (MaxX - 1);
-    ImFactor = (MaxIm - MinIm) / (MaxY - 1);
+void renderMandelbrot() {
+    int i, startY, endY, rowsPerThread, extra, tid[4], y, done, needRedraw;
 
     for (i = 0; i <= MaxY; i++) rowDone[i] = 0;
 
@@ -117,18 +118,14 @@ int main() {
         endY = startY + rowsPerThread - 1;
         if (extra > 0) { endY++; extra--; }
         threadStart[i] = startY;
-        threadEnd[i]   = endY;
+        threadEnd[i] = endY;
         startY = endY + 1;
     }
-
-    rowMutex = mutex();
-    quitMutex = mutex();
 
     tid[0] = spawn computeRowsThread0();
     tid[1] = spawn computeRowsThread1();
     tid[2] = spawn computeRowsThread2();
     tid[3] = spawn computeRowsThread3();
-    tid[4] = spawn waitForQuit();
 
     y = 0;
     while (y <= MaxY && !getQuit()) {
@@ -155,12 +152,58 @@ int main() {
 
     for (i = 0; i < threadCount; i++)
         join tid[i];
+}
 
-    printf("Mandelbrot rendered. Press Q in the console to quit.\n");
-    while (!getQuit())
+void waitForQuit() {
+    char c;
+    while (!getQuit()) {
+        if (keypressed()) {
+            c = readkey();
+            if (toupper(c) == 'Q') {
+                setQuit(1);
+            }
+        }
+        delay(16);
+    }
+}
+
+int main() {
+    int tidQuit;
+    int mouseX, mouseY, buttons, prev_buttons;
+
+    printf("Threaded Mandelbrot (mandelbrotrow). Left click to zoom in, right click to zoom out, middle click to reset. Press Q in the console to quit.\n");
+    initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
+    textureID = createtexture(WindowWidth, WindowHeight);
+    if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
+    cleardevice(); updatescreen();
+    MaxX = getmaxx(); MaxY = getmaxy();
+
+    rowMutex = mutex();
+    quitMutex = mutex();
+
+    tidQuit = spawn waitForQuit();
+
+    resetView();
+    renderMandelbrot();
+
+    prev_buttons = 0;
+    while (!getQuit()) {
         graphloop(16);
+        getmousestate(&mouseX, &mouseY, &buttons);
+        if ((buttons & 1) && !(prev_buttons & 1)) {
+            zoomAt(mouseX, mouseY, 0.5);
+            renderMandelbrot();
+        } else if ((buttons & 4) && !(prev_buttons & 4)) {
+            zoomAt(mouseX, mouseY, 2.0);
+            renderMandelbrot();
+        } else if ((buttons & 2) && !(prev_buttons & 2)) {
+            resetView();
+            renderMandelbrot();
+        }
+        prev_buttons = buttons;
+    }
 
-    join tid[4];
+    join tidQuit;
     destroytexture(textureID); closegraph();
     return 0;
 
