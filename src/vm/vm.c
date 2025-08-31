@@ -1685,11 +1685,14 @@ comparison_error_label:
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
-                    if (!isIntlikeType(index_val.type)) {
+                    if (isIntlikeType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    } else if (isRealType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
+                    } else {
                         runtimeError(vm, "VM Error: Array index must be an integer.");
                         free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
                     }
-                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
                     freeValue(&index_val);
                 }
 
