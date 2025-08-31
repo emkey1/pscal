@@ -1080,6 +1080,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
+                    if (current_instruction_code == OP_DIVIDE && ia == LLONG_MIN && ib == -1) { \
+                        runtimeError(vm, "Runtime Error: Integer overflow."); \
+                        freeValue(&a_val_popped); \
+                        freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
                     long long iresult = 0; \
                     bool overflow = false; \
                     switch (current_instruction_code) { \
@@ -1093,7 +1099,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             overflow = __builtin_mul_overflow(ia, ib, &iresult); \
                             break; \
                         case OP_DIVIDE: \
-                            result_val = makeReal((long double)ia / (long double)ib); \
+                            iresult = ia / ib; \
                             break; \
                         case OP_MOD: \
                             iresult = ib == 0 ? 0 : ia % ib; \
@@ -1103,9 +1109,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
                     } \
-                    if (current_instruction_code == OP_DIVIDE) { \
-                        /* result_val already set for division */ \
-                    } else if (overflow) { \
+                    if (overflow) { \
                         runtimeError(vm, "Runtime Error: Integer overflow."); \
                         freeValue(&a_val_popped); \
                         freeValue(&b_val_popped); \

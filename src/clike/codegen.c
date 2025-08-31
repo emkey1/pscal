@@ -727,12 +727,11 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                         isIntlikeType(node->right->var_type)) {
                         /*
                          * In C, dividing two integers performs integer division
-                         * (truncating toward zero).  The VM has a dedicated
-                         * opcode for this behaviour (OP_INT_DIV), whereas
-                         * OP_DIVIDE always produces a real result.  Without this
-                         * check, expressions like `w / 4` would yield a real
-                         * value, which breaks APIs expecting integer arguments
-                         * (e.g. drawrect in the graphics tests).
+                         * (truncating toward zero).  Although the VM now
+                         * preserves integer types for OP_DIVIDE, emitting
+                         * OP_INT_DIV makes the intent explicit and maintains
+                         * compatibility with older bytecode that relied on the
+                         * dedicated opcode.
                          */
                         writeBytecodeChunk(chunk, OP_INT_DIV, node->token.line);
                     } else {
