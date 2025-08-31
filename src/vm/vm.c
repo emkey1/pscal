@@ -1054,8 +1054,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool a_real = IS_REAL(a_val_popped); \
                 bool b_real = IS_REAL(b_val_popped); \
                 if (a_real || b_real) { \
-                    long double fa = asLd(a_val_popped); \
-                    long double fb = asLd(b_val_popped); \
+                    /*
+                     * When an integer participates in real arithmetic, operate on
+                     * temporary copies so the original integer Value retains its
+                     * type.  This prevents implicit widening of integer operands.
+                     */ \
+                    Value a_tmp = makeCopyOfValue(&a_val_popped); \
+                    Value b_tmp = makeCopyOfValue(&b_val_popped); \
+                    long double fa = asLd(a_tmp); \
+                    long double fb = asLd(b_tmp); \
+                    freeValue(&a_tmp); \
+                    freeValue(&b_tmp); \
                     if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
                         runtimeError(vm, "Runtime Error: Division by zero."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \

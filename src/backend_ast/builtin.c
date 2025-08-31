@@ -398,6 +398,14 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
         c = arg.c_val;
     } else if (IS_INTLIKE(arg)) {
         c = (int)AS_INTEGER(arg);
+    } else if (IS_REAL(arg)) {
+        /*
+         * Some frontends currently promote integer literals or variables to a
+         * floating‑point type when used as arguments.  Accept real numbers and
+         * coerce them back to an integer so `toupper` behaves correctly even if
+         * the value was widened to a real earlier in the pipeline.
+         */
+        c = (int)AS_REAL(arg);
     } else if (arg.type == TYPE_STRING) {
         const char* s = AS_STRING(arg);
         if (s && s[0] != '\0') {
