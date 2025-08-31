@@ -54,8 +54,16 @@ static void* threadStart(void* arg) {
 }
 
 static int createThread(VM* vm, uint16_t entry) {
-    if (vm->threadCount >= VM_MAX_THREADS) return -1;
-    Thread* t = &vm->threads[vm->threadCount];
+    int id = -1;
+    for (int i = 1; i < VM_MAX_THREADS; i++) {
+        if (!vm->threads[i].active) {
+            id = i;
+            break;
+        }
+    }
+    if (id == -1) return -1;
+
+    Thread* t = &vm->threads[id];
     t->vm = malloc(sizeof(VM));
     if (!t->vm) return -1;
     initVM(t->vm);
@@ -83,8 +91,10 @@ static int createThread(VM* vm, uint16_t entry) {
         t->active = false;
         return -1;
     }
-    int id = vm->threadCount;
-    vm->threadCount++;
+
+    if (id >= vm->threadCount) {
+        vm->threadCount = id + 1;
+    }
     return id;
 }
 
@@ -102,6 +112,9 @@ static void joinThread(VM* vm, int id) {
         freeVM(t->vm);
         free(t->vm);
         t->vm = NULL;
+    }
+    while (vm->threadCount > 1 && !vm->threads[vm->threadCount - 1].active) {
+        vm->threadCount--;
     }
 }
 
