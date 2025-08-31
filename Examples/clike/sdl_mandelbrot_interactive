@@ -183,7 +183,11 @@ int main() {
                 setQuit(1);
             }
         }
-        getmousestate(&mouseX, &mouseY, &buttons);
+        // GetMouseState uses VAR parameters, so we pass the variables directly
+        // instead of their addresses. Passing pointers here prevents the
+        // returned values from updating our variables, which made mouse clicks
+        // appear unresponsive.
+        getmousestate(mouseX, mouseY, buttons);
         if ((buttons & 1) && !(prev_buttons & 1)) {
             zoomAt(mouseX, mouseY, 0.5);
             renderMandelbrot();
