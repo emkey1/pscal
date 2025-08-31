@@ -186,7 +186,7 @@ int main() {
         }
         // GetMouseState uses VAR parameters, so plain variables are passed by
         // reference automatically without the need for explicit pointers.
-        getmousestate(mouseX, mouseY, buttons);
+        getmousestate(mouseX, mouseY, &buttons);
         if ((buttons & 1) && !(prev_buttons & 1)) {
             zoomAt(mouseX, mouseY, 0.5);
             renderMandelbrot();
