@@ -1880,6 +1880,12 @@ comparison_error_label:
                         long double tmp = asLd(value_to_set);
                         SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
+                    else if (isIntlikeType(target_lvalue_ptr->type) && isRealType(value_to_set.type)) {
+                        long long tmp = (long long)AS_REAL(value_to_set);
+                        if (target_lvalue_ptr->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                        SET_INT_VALUE(target_lvalue_ptr, tmp);
+                        if (target_lvalue_ptr->type == TYPE_CHAR) target_lvalue_ptr->c_val = (int)tmp;
+                    }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
                             runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
@@ -2238,6 +2244,20 @@ comparison_error_label:
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                } else if (isIntlikeType(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        long long tmp = isRealType(value_from_stack.type)
+                                         ? (long long)AS_REAL(value_from_stack)
+                                         : asI64(value_from_stack);
+                        if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                        SET_INT_VALUE(target_slot, tmp);
+                        if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
+                                     varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                 } else {
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.
@@ -2305,6 +2325,20 @@ comparison_error_label:
                         SET_REAL_VALUE(target_slot, tmp);
                     } else {
                         runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (isIntlikeType(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        long long tmp = isRealType(value_from_stack.type)
+                                         ? (long long)AS_REAL(value_from_stack)
+                                         : asI64(value_from_stack);
+                        if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                        SET_INT_VALUE(target_slot, tmp);
+                        if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
+                                     varTypeToString(value_from_stack.type));
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
