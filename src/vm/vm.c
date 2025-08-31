@@ -2587,13 +2587,16 @@ comparison_error_label:
                     Value result = handler(vm, arg_count, args);
                     if (needs_lock) pthread_mutex_unlock(&globals_mutex);
 
-                    // Pop arguments from the stack and free their contents
-                    // This is crucial to prevent stack corruption.
+                    // Pop arguments from the stack and free their contents when safe.
+                    // Arrays and pointers reference caller-managed memory, so avoid freeing
+                    // the underlying data to prevent invalidating VAR arguments.
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        // The actual Value structs are on the stack and will be overwritten,
-                        // but we need to free any heap data they point to (like strings).
-                        freeValue(&args[i]);
+                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
+                            // The actual Value structs are on the stack and will be overwritten,
+                            // but we need to free any heap data they point to (like strings).
+                            freeValue(&args[i]);
+                        }
                     }
 
                     if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
@@ -2603,10 +2606,12 @@ comparison_error_label:
                     }
                 } else {
                     runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
-                    // Cleanup stack even on error
+                    // Cleanup stack even on error, preserving caller-owned arrays/pointers
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        freeValue(&args[i]);
+                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
+                            freeValue(&args[i]);
+                        }
                     }
                     return INTERPRET_RUNTIME_ERROR;
                 }
