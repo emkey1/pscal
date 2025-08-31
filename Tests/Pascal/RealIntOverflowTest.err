@@ -1,0 +1,2 @@
+Warning: Range check error assigning REAL 300.000000 to BYTE.
+[Error Location] Offset: 98, Line: 22
