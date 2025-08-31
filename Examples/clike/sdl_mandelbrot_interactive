@@ -136,7 +136,7 @@ int main() {
                     updatescreen();
                 }
                 if (keypressed()) {
-                    char c = readkey();
+                    int c = readkey();
                     if (toupper(c) == 'Q') setQuit(1);
                 }
                 if (!done || update)
@@ -146,17 +146,11 @@ int main() {
             for (i = 0; i < ThreadCount; i++)
                 join tid[i];
 
-            if (!getQuit()) {
-                updatetexture(textureID, pixelData);
-                cleardevice();
-                rendercopy(textureID);
-                updatescreen();
-                redraw = 0;
-            }
+            redraw = 0;
         }
 
         if (keypressed()) {
-            char c = readkey();
+            int c = readkey();
             if (toupper(c) == 'Q') { setQuit(1); continue; }
         }
 
