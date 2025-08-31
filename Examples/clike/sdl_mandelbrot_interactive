@@ -34,6 +34,11 @@ int quit = 0;
 
 int rowMutex;
 int quitMutex;
+int inputMutex;
+
+int clickType;
+int clickX;
+int clickY;
 
 int getQuit() {
     int q;
@@ -145,7 +150,7 @@ void renderMandelbrot() {
             rendercopy(textureID);
             updatescreen();
         } else if (!done) {
-            graphloop(0);
+            delay(0);
         }
     }
 
@@ -155,6 +160,7 @@ void renderMandelbrot() {
 
 int main() {
     int mouseX, mouseY, buttons, prev_buttons = 0;
+
 
     printf("Threaded Mandelbrot (mandelbrotrow). Left click to zoom in, right click to zoom out, middle click to reset. Press Q in the console to quit.\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
@@ -190,6 +196,7 @@ int main() {
         }
         prev_buttons = buttons;
     }
+
     destroytexture(textureID); closegraph();
     return 0;
 
