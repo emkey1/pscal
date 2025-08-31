@@ -30,8 +30,19 @@ int quitMutex;
 int quit = 0;
 int redraw = 1;
 
-int getQuit() { int q; lock(quitMutex); q = quit; unlock(quitMutex); return q; }
-void setQuit(int v) { lock(quitMutex); quit = v; unlock(quitMutex); }
+int getQuit() { 
+    int q; 
+    lock(quitMutex); 
+    q = quit; 
+    unlock(quitMutex); 
+    return q; 
+}
+
+void setQuit(int v) { 
+    lock(quitMutex); 
+    quit = v; 
+    unlock(quitMutex); 
+}
 
 void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
