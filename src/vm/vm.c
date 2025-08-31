@@ -5,6 +5,8 @@
 #include <stdarg.h>
 #include <stdbool.h> // For bool, true, false
 #include <pthread.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -155,6 +157,165 @@ static void vmDumpStackInternal(VM* vm, bool detailed) {
             fprintf(stderr, "] ");
         }
         fprintf(stderr, "\n");
+    }
+}
+
+static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
+    bool range_error = false;
+    switch (dest->type) {
+        case TYPE_BOOLEAN: {
+            long long tmp = (real_val != 0.0L) ? 1 : 0;
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_CHAR: {
+            int tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0;
+            } else if (real_val > (long double)UCHAR_MAX) {
+                range_error = true;
+                tmp = UCHAR_MAX;
+            } else {
+                tmp = (int)real_val;
+            }
+            dest->c_val = tmp;
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT8:
+        case TYPE_BYTE: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT8_MAX) {
+                range_error = true;
+                tmp = UINT8_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_INT8: {
+            long long tmp;
+            if (real_val < (long double)INT8_MIN) {
+                range_error = true;
+                tmp = INT8_MIN;
+            } else if (real_val > (long double)INT8_MAX) {
+                range_error = true;
+                tmp = INT8_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT16:
+        case TYPE_WORD: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT16_MAX) {
+                range_error = true;
+                tmp = UINT16_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_INT16: {
+            long long tmp;
+            if (real_val < (long double)INT16_MIN) {
+                range_error = true;
+                tmp = INT16_MIN;
+            } else if (real_val > (long double)INT16_MAX) {
+                range_error = true;
+                tmp = INT16_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT32: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT32_MAX) {
+                range_error = true;
+                tmp = UINT32_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_INT32: {
+            long long tmp;
+            if (real_val < (long double)INT32_MIN) {
+                range_error = true;
+                tmp = INT32_MIN;
+            } else if (real_val > (long double)INT32_MAX) {
+                range_error = true;
+                tmp = INT32_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT64: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT64_MAX) {
+                range_error = true;
+                tmp = UINT64_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            dest->u_val = tmp;
+            dest->i_val = (tmp <= (unsigned long long)LLONG_MAX) ? (long long)tmp : LLONG_MAX;
+            break;
+        }
+        case TYPE_INT64: {
+            long long tmp;
+            if (real_val < (long double)LLONG_MIN) {
+                range_error = true;
+                tmp = LLONG_MIN;
+            } else if (real_val > (long double)LLONG_MAX) {
+                range_error = true;
+                tmp = LLONG_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        default: {
+            long long tmp;
+            if (real_val < (long double)LLONG_MIN) {
+                range_error = true;
+                tmp = LLONG_MIN;
+            } else if (real_val > (long double)LLONG_MAX) {
+                range_error = true;
+                tmp = LLONG_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+    }
+    if (range_error) {
+        runtimeError(vm, "Warning: Range check error assigning REAL %Lf to %s.",
+                    real_val, varTypeToString(dest->type));
     }
 }
 
@@ -1880,6 +2041,9 @@ comparison_error_label:
                         long double tmp = asLd(value_to_set);
                         SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
+                    else if (isIntlikeType(target_lvalue_ptr->type) && isRealType(value_to_set.type)) {
+                        assignRealToIntChecked(vm, target_lvalue_ptr, AS_REAL(value_to_set));
+                    }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
                             runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
@@ -2238,6 +2402,22 @@ comparison_error_label:
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                } else if (isIntlikeType(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        if (isRealType(value_from_stack.type)) {
+                            assignRealToIntChecked(vm, target_slot, AS_REAL(value_from_stack));
+                        } else {
+                            long long tmp = asI64(value_from_stack);
+                            if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                            SET_INT_VALUE(target_slot, tmp);
+                            if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                        }
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
+                                     varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                 } else {
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.
@@ -2305,6 +2485,22 @@ comparison_error_label:
                         SET_REAL_VALUE(target_slot, tmp);
                     } else {
                         runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (isIntlikeType(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        if (isRealType(value_from_stack.type)) {
+                            assignRealToIntChecked(vm, target_slot, AS_REAL(value_from_stack));
+                        } else {
+                            long long tmp = asI64(value_from_stack);
+                            if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                            SET_INT_VALUE(target_slot, tmp);
+                            if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                        }
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
+                                     varTypeToString(value_from_stack.type));
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }

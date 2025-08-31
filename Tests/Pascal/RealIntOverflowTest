@@ -1,0 +1,28 @@
+program RealIntOverflowTest;
+
+type
+  PInt = ^integer;
+
+var
+  g: integer;
+  p: PInt;
+  b: byte;
+
+begin
+  g := 65;
+  g := g + 1.5;
+  writeln(upcase(chr(g)));
+  g := 1e20;
+  New(p);
+  p^ := 65;
+  p^ := p^ + 1.5;
+  writeln(upcase(chr(p^)));
+  p^ := 1e20;
+  Dispose(p);
+  b := 255.0;
+  writeln(b);
+  b := 1e20;
+  writeln(b);
+  b := 300.0;
+  halt(1);
+end.
