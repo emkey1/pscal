@@ -1,6 +1,6 @@
 #!/usr/bin/env clike
 /*
- * Simple Galaxian-style shooter using SDL graphics and sound.
+ * Simple Space style shooter using SDL graphics and sound.  WIP
  */
 int main() {
     int ScreenWidth;
@@ -41,7 +41,7 @@ int main() {
 
     ScreenWidth = 800;
     ScreenHeight = 600;
-    initgraph(ScreenWidth, ScreenHeight, "Galaxian CLike");
+    initgraph(ScreenWidth, ScreenHeight, "Space Shooter CLike(WIP)");
 
     initsoundsystem();
     ShotSound = loadsound("/usr/local/pscal/lib/sounds/paddle_hit.wav");
