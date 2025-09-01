@@ -21,7 +21,6 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
-#include "backend_ast/audio.h"
 
 #define MAX_WRITELN_ARGS_VM 32
 
@@ -153,6 +152,14 @@ static bool unlockMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
     if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
     return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
+}
+
+static bool destroyMutex(VM* vm, int id) {
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
+    if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) return false;
+    owner->mutexes[id].active = false;
+    return true;
 }
 
 // Internal function shared by stack dump helpers
@@ -3018,6 +3025,25 @@ comparison_error_label:
                 }
                 int mid = (int)midVal.i_val;
                 if (!unlockMutex(vm, mid)) {
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
+                break;
+            }
+            case OP_MUTEX_DESTROY: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                if (!destroyMutex(vm, mid)) {
                     runtimeError(vm, "Invalid mutex id %d.", mid);
                     Value popped_mid = pop(vm);
                     freeValue(&popped_mid);

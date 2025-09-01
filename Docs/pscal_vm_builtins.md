@@ -107,6 +107,7 @@ VM. For instructions on adding your own routines, see
 | rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
 | lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
 | unlock | (mid: Integer) | void | Release the specified mutex. |
+| destroy | (mid: Integer) | void | Destroy the specified mutex. |
 
 ## Math
 
