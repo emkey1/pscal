@@ -182,7 +182,11 @@ BEGIN
   // Ensure the final image is copied to the texture and presented.
   UpdateAndDisplayTextureInProgress;
 
-  GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
+  // Ensure the final image is copied to the texture and presented.
+  UpdateAndDisplayTextureInProgress;
+
+  GotoXY(1, StatusLineY); ClrEol; WriteLn('Render complete. Click, R-Click, or Q.');
+
   RedrawNeeded := False;
   RenderInProgress := False;
 END;
