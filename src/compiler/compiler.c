@@ -621,46 +621,52 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_PROCEDURE_CALL: {
-            if (node->token && isBuiltin(node->token->value)) {
-                const char* funcName = node->token->value;
+            if (node->token) {
+                char callee_lower[MAX_SYMBOL_LENGTH];
+                strncpy(callee_lower, node->token->value, sizeof(callee_lower) - 1);
+                callee_lower[sizeof(callee_lower) - 1] = '\0';
+                toLowerString(callee_lower);
+                if (!lookupProcedure(callee_lower) && isBuiltin(node->token->value)) {
+                    const char* funcName = node->token->value;
 
-                if ((strcasecmp(funcName, "low") == 0 || strcasecmp(funcName, "high") == 0) &&
-                    node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
+                    if ((strcasecmp(funcName, "low") == 0 || strcasecmp(funcName, "high") == 0) &&
+                        node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
 
-                    const char* typeName = node->children[0]->token->value;
-                    AST* typeDef = lookupType(typeName);
+                        const char* typeName = node->children[0]->token->value;
+                        AST* typeDef = lookupType(typeName);
 
-                    if (typeDef) {
-                        if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
+                        if (typeDef) {
+                            if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
 
-                        if (typeDef->type == AST_ENUM_TYPE) {
-                            if (strcasecmp(funcName, "low") == 0) {
-                                return makeEnum(typeName, 0);
-                            } else { // high
-                                return makeEnum(typeName, typeDef->child_count > 0 ? typeDef->child_count - 1 : 0);
+                            if (typeDef->type == AST_ENUM_TYPE) {
+                                if (strcasecmp(funcName, "low") == 0) {
+                                    return makeEnum(typeName, 0);
+                                } else { // high
+                                    return makeEnum(typeName, typeDef->child_count > 0 ? typeDef->child_count - 1 : 0);
+                                }
                             }
                         }
-                    }
-                } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
-                    Value arg = evaluateCompileTimeValue(node->children[0]);
-                    if (arg.type == TYPE_INTEGER) {
-                        Value result = makeChar(arg.i_val);
+                    } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
+                        Value arg = evaluateCompileTimeValue(node->children[0]);
+                        if (arg.type == TYPE_INTEGER) {
+                            Value result = makeChar(arg.i_val);
+                            freeValue(&arg);
+                            return result;
+                        }
                         freeValue(&arg);
-                        return result;
+                    } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
+                        Value arg = evaluateCompileTimeValue(node->children[0]);
+                        Value result = makeVoid();
+                        if (arg.type == TYPE_CHAR) {
+                            result = makeInt(arg.c_val);
+                        } else if (arg.type == TYPE_BOOLEAN) {
+                            result = makeInt(arg.i_val ? 1 : 0);
+                        } else if (arg.type == TYPE_ENUM) {
+                            result = makeInt(arg.enum_val.ordinal);
+                        }
+                        freeValue(&arg);
+                        if (result.type != TYPE_VOID) return result;
                     }
-                    freeValue(&arg);
-                } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
-                    Value arg = evaluateCompileTimeValue(node->children[0]);
-                    Value result = makeVoid();
-                    if (arg.type == TYPE_CHAR) {
-                        result = makeInt(arg.c_val);
-                    } else if (arg.type == TYPE_BOOLEAN) {
-                        result = makeInt(arg.i_val ? 1 : 0);
-                    } else if (arg.type == TYPE_ENUM) {
-                        result = makeInt(arg.enum_val.ordinal);
-                    }
-                    freeValue(&arg);
-                    if (result.type != TYPE_VOID) return result;
                 }
             }
             break; // Fall through to makeVoid if not a recognized compile-time function
@@ -2055,7 +2061,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
-            bool callee_is_builtin = isBuiltin(calleeName);
+            bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol;
 
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
@@ -2196,7 +2202,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
 
-            if (isBuiltin(calleeName)) {
+            if (isBuiltin(calleeName) && !proc_symbol) {
                 if (strcasecmp(calleeName, "exit") == 0) {
                     if (node->child_count > 0) {
                         fprintf(stderr, "L%d: exit does not take arguments.\n", line);
@@ -2715,7 +2721,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
+            if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
                     int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
@@ -2748,7 +2754,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            if (isBuiltin(functionName)) {
+            if (!func_symbol && isBuiltin(functionName)) {
                 BuiltinRoutineType type = getBuiltinType(functionName);
                 if (type == BUILTIN_TYPE_PROCEDURE) {
                     fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
