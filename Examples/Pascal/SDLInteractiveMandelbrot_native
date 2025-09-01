@@ -4,8 +4,8 @@ PROGRAM SDLTextureMandelbrotZoomFixed;
 USES CRT;
 
 CONST
-  MandelWindowWidth   = 640;
-  MandelWindowHeight  = 480;
+  MandelWindowWidth   = 800;
+  MandelWindowHeight  = 600;
   MandelWindowTitle   = 'Mandelbrot (Zoom Fixed - LMB:Zoom, RMB:Reset, Q:Quit)';
   MandelMaxIterations = 50;
   MandelZoomFactor    = 2.0;
