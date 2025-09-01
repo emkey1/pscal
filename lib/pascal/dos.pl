@@ -14,8 +14,6 @@ function getFAttr(Path: string): integer;
 function mkDir(Path: string): integer;
 function rmDir(Path: string): integer;
 function getEnv(VarName: string): string;
-procedure dosGetdate(var Year, Month, Day, Dow: word);
-procedure dosGettime(var Hour, Minute, Second, Sec100: word);
 procedure getDate(var Year, Month, Day, Dow: word);
 procedure getTime(var Hour, Minute, Second, Sec100: word);
 function exec(Path, Cmd: string): integer;
