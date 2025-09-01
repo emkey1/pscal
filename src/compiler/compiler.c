@@ -2182,8 +2182,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
-                    (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR
-                    || (strcasecmp(calleeName, "str") == 0 && i == 1)
+                    (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) || // Width and Height are VAR
+                    (strcasecmp(calleeName, "str") == 0 && i == 1) ||
+                    /* Date/time routines return values via VAR parameters */
+                    (strcasecmp(calleeName, "dosgetdate") == 0) ||
+                    (strcasecmp(calleeName, "dosgettime") == 0) ||
+                    (strcasecmp(calleeName, "getdate") == 0) ||
+                    (strcasecmp(calleeName, "gettime") == 0)
                 )) {
                     is_var_param = true;
                 }
