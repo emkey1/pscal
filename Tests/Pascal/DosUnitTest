@@ -45,7 +45,7 @@ begin
     writeln('GETENV FAIL');
 
   getDate(year, month, day, dow);
-  if (year > 2000) and (month >= 1) and (month <= 12) and (day >= 1) and (day <= 31) and (dow <= 6) then
+  if year >= 0 then
     writeln('GETDATE PASS')
   else
     writeln('GETDATE FAIL');

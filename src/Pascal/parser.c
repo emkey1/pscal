@@ -653,6 +653,15 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     // You will need to implement proper name construction here.
 
     char *proc_name_original = proc_decl_ast_original->token->value;
+
+    if (isBuiltin(proc_name_original)) {
+        const char* kind = (proc_decl_ast_original->type == AST_FUNCTION_DECL) ?
+                           "function" : "procedure";
+        fprintf(stderr,
+                "Warning: user-defined %s '%s' overrides builtin of the same name.\n",
+                kind, proc_name_original);
+    }
+
     char *name_for_table = strdup(proc_name_original); // Start with a copy
     if (!name_for_table) {
         fprintf(stderr, "Memory allocation error for name_for_table in addProcedure\n");
