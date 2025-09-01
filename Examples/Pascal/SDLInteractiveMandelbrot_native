@@ -11,6 +11,7 @@ CONST
   MandelZoomFactor    = 2.0;
   MandelBytesPerPixel = 4;
   MandelTextureUpdateIntervalRows = 1;
+  ThreadCount = 4;
 
   InitialMinRe  = -2.0;
   InitialMaxRe  =  1.0;
@@ -26,22 +27,23 @@ TYPE
   FlatPixelBuffer = ARRAY[0..(MandelWindowWidth * MandelWindowHeight * MandelBytesPerPixel) - 1] OF Byte;
 
 VAR
-  x0, y0, zx, zy, zxTemp : Real;
-  Iteration           : Integer;
-  R_calc, G_calc, B_calc : Byte;
-
   MinRe, MaxRe, MinIm, MaxIm : Real;
   ViewPixelWidth, ViewPixelHeight : Integer;
   ReRange, ImRange           : Real;
   ScaleRe, ScaleIm           : Real;
 
   MandelTextureID : Integer;
-  PixelData       : FlatPixelBuffer;
+  PixelData, DisplayPixelData : FlatPixelBuffer;
   QuitProgram     : Boolean;
   RedrawNeeded    : Boolean;
   RenderInProgress : Boolean;
   MouseX, MouseY, MouseButtons : Integer;
   PrevMouseButtons : Integer; // Track previous mouse button state to detect fresh clicks
+
+  ThreadStart, ThreadEnd : ARRAY[0..ThreadCount - 1] OF Integer;
+  RowDone : ARRAY[0..MandelWindowHeight - 1] OF Integer;
+  RenderThreadIDs : ARRAY[0..ThreadCount - 1] OF Integer;
+  RowMutex : Integer;
 
   NewCenterX, NewCenterY          : Real;
   CurrentViewWidthRe, CurrentViewHeightIm : Real;
@@ -87,36 +89,103 @@ END;
 
 PROCEDURE UpdateAndDisplayTextureInProgress;
 BEGIN
-  UpdateTexture(MandelTextureID, PixelData);
+  UpdateTexture(MandelTextureID, DisplayPixelData);
   ClearDevice;
   RenderCopy(MandelTextureID);
   UpdateScreen;
   GraphLoop(0);
 END;
 
-PROCEDURE FillPixelDataAndDisplayProgressively;
-VAR LocalPy, LocalPx, BufferBaseIdx : Integer;
+PROCEDURE ComputeRows(startY, endY: Integer);
+VAR LocalPy, LocalPx, BufferBaseIdx, Iteration: Integer;
+    x0, y0, zx, zy, zxTemp: Real;
+    R_calc, G_calc, B_calc: Byte;
 BEGIN
-  RenderInProgress := True;
-  GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
-  FOR LocalPy := 0 TO ViewPixelHeight - 1 DO BEGIN
+  FOR LocalPy := startY TO endY DO BEGIN
     FOR LocalPx := 0 TO ViewPixelWidth - 1 DO BEGIN
       x0 := MinRe + (LocalPx * ScaleRe); y0 := MaxIm - (LocalPy * ScaleIm);
       zx := 0.0; zy := 0.0; Iteration := 0;
-      WHILE (zx*zx + zy*zy <= 4.0) AND (Iteration < MandelMaxIterations) DO
-      BEGIN zxTemp := zx*zx - zy*zy + x0; zy := 2*zx*zy + y0; zx := zxTemp; Iteration := Iteration + 1; END;
-      IF Iteration = MandelMaxIterations THEN BEGIN R_calc := 0; G_calc := 0; B_calc := 0; END
-      ELSE BEGIN
-        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256; G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256; B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
+      WHILE (zx*zx + zy*zy <= 4.0) AND (Iteration < MandelMaxIterations) DO BEGIN
+        zxTemp := zx*zx - zy*zy + x0;
+        zy := 2*zx*zy + y0;
+        zx := zxTemp;
+        Iteration := Iteration + 1;
+      END;
+      IF Iteration = MandelMaxIterations THEN BEGIN
+        R_calc := 0; G_calc := 0; B_calc := 0;
+      END ELSE BEGIN
+        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256;
+        G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256;
+        B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
       END;
       BufferBaseIdx := (LocalPy * ViewPixelWidth + LocalPx) * MandelBytesPerPixel;
-      PixelData[BufferBaseIdx + 0] := R_calc; PixelData[BufferBaseIdx + 1] := G_calc; PixelData[BufferBaseIdx + 2] := B_calc; PixelData[BufferBaseIdx + 3] := 255;
+      PixelData[BufferBaseIdx + 0] := R_calc;
+      PixelData[BufferBaseIdx + 1] := G_calc;
+      PixelData[BufferBaseIdx + 2] := B_calc;
+      PixelData[BufferBaseIdx + 3] := 255;
     END; // Px
-    PercentDone := Trunc( (LocalPy + 1) * 100.0 / ViewPixelHeight );
-    GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', LocalPy + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
-    IF (((LocalPy + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (LocalPy = ViewPixelHeight - 1)) THEN
-    BEGIN UpdateAndDisplayTextureInProgress; END;
+    lock(RowMutex);
+    RowDone[LocalPy] := 1;
+    unlock(RowMutex);
   END; // Py
+END;
+
+PROCEDURE ComputeRowsThread0; BEGIN ComputeRows(ThreadStart[0], ThreadEnd[0]); END;
+PROCEDURE ComputeRowsThread1; BEGIN ComputeRows(ThreadStart[1], ThreadEnd[1]); END;
+PROCEDURE ComputeRowsThread2; BEGIN ComputeRows(ThreadStart[2], ThreadEnd[2]); END;
+PROCEDURE ComputeRowsThread3; BEGIN ComputeRows(ThreadStart[3], ThreadEnd[3]); END;
+
+PROCEDURE FillPixelDataAndDisplayProgressively;
+  VAR i, startY, endY, rowsPerThread, extra, y, doneFlag, bufferIdx, rowBytes, k : Integer;
+BEGIN
+  RenderInProgress := True;
+  GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
+
+  RowMutex := mutex();
+  FOR i := 0 TO ViewPixelHeight - 1 DO RowDone[i] := 0;
+  rowBytes := ViewPixelWidth * MandelBytesPerPixel;
+  FOR k := 0 TO (ViewPixelWidth * ViewPixelHeight * MandelBytesPerPixel) - 1 DO
+    DisplayPixelData[k] := 0;
+
+  rowsPerThread := ViewPixelHeight DIV ThreadCount;
+  extra := ViewPixelHeight MOD ThreadCount;
+  startY := 0;
+  FOR i := 0 TO ThreadCount - 1 DO BEGIN
+    endY := startY + rowsPerThread - 1;
+    IF extra > 0 THEN BEGIN endY := endY + 1; extra := extra - 1; END;
+    ThreadStart[i] := startY;
+    ThreadEnd[i] := endY;
+    startY := endY + 1;
+  END;
+
+  RenderThreadIDs[0] := spawn ComputeRowsThread0;
+  RenderThreadIDs[1] := spawn ComputeRowsThread1;
+  RenderThreadIDs[2] := spawn ComputeRowsThread2;
+  RenderThreadIDs[3] := spawn ComputeRowsThread3;
+
+  y := 0;
+  WHILE y < ViewPixelHeight DO BEGIN
+    lock(RowMutex);
+    doneFlag := RowDone[y];
+    IF doneFlag <> 0 THEN BEGIN
+      bufferIdx := y * rowBytes;
+      FOR k := 0 TO rowBytes - 1 DO
+        DisplayPixelData[bufferIdx + k] := PixelData[bufferIdx + k];
+    END;
+    unlock(RowMutex);
+    IF doneFlag <> 0 THEN BEGIN
+      PercentDone := Trunc( (y + 1) * 100.0 / ViewPixelHeight );
+      GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', y + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
+      IF (((y + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (y = ViewPixelHeight - 1)) THEN
+        UpdateAndDisplayTextureInProgress;
+      y := y + 1;
+    END ELSE BEGIN
+      GraphLoop(0);
+    END;
+  END;
+
+  FOR i := 0 TO ThreadCount - 1 DO join RenderThreadIDs[i];
+
   GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
   RedrawNeeded := False;
   RenderInProgress := False;
