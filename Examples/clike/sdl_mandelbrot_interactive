@@ -52,14 +52,22 @@ void pollMouse() {
     int x, y, b;
     graphloop(0);
     getmousestate(&x, &y, &b);
+
+    if (b != prevButtons)
+        printf("MouseState: x=%d y=%d b=%d prev=%d\n", x, y, b, prevButtons);
+
     if (((b & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0)) {
         clickButton = ButtonLeft;
         clickX = x;
         clickY = y;
+        printf("Left click at %d,%d\n", x, y);
+
     } else if (((b & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0)) {
         clickButton = ButtonRight;
         clickX = x;
         clickY = y;
+        printf("Right click at %d,%d\n", x, y);
+
     }
     prevButtons = b;
 }
@@ -196,6 +204,7 @@ int main() {
             minRe = centerRe - newWidth / 2.0;
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
+            printf("Zoom in at %d,%d\n", clickX, clickY);
             redraw = 1;
             clickButton = 0;
         } else if (clickButton == ButtonRight) {
@@ -206,6 +215,7 @@ int main() {
             minRe = centerRe - newWidth / 2.0;
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
+            printf("Zoom out at %d,%d\n", clickX, clickY);
             redraw = 1;
             clickButton = 0;
         }
