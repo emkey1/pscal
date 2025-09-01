@@ -2048,6 +2048,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (strcasecmp(calleeName, "destroy") == 0) {
                 if (node->child_count != 1) {
                     fprintf(stderr, "L%d: Compiler Error: destroy expects 1 argument.\n", line);
+
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
@@ -2705,6 +2706,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
                 break;
             }
+
             if (strcasecmp(functionName, "destroy") == 0) {
                 if (node->child_count != 1) {
                     fprintf(stderr, "L%d: Compiler Error: destroy expects 1 argument.\n", line);

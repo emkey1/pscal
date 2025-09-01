@@ -980,6 +980,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             if (strcasecmp(name, "destroy") == 0) {
                 if (node->child_count != 1) {
                     fprintf(stderr, "Compile error: destroy expects 1 argument.\n");
+
                 } else {
                     compileExpression(node->children[0], chunk, ctx);
                 }
