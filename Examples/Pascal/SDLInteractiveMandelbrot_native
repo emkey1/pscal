@@ -136,7 +136,8 @@ PROCEDURE ComputeRowsThread2; BEGIN ComputeRows(ThreadStart[2], ThreadEnd[2]); E
 PROCEDURE ComputeRowsThread3; BEGIN ComputeRows(ThreadStart[3], ThreadEnd[3]); END;
 
 PROCEDURE FillPixelDataAndDisplayProgressively;
-  VAR i, startY, endY, rowsPerThread, extra, y, doneFlag, bufferIdx, rowBytes, k : Integer;
+  VAR i, startY, endY, rowsPerThread, extra, y, bufferIdx, rowBytes, k, displayedRows : Integer;
+      copied : Boolean;
 BEGIN
   endy := 0;
   RenderInProgress := True;
@@ -166,22 +167,26 @@ BEGIN
   RenderThreadIDs[2] := spawn ComputeRowsThread2;
   RenderThreadIDs[3] := spawn ComputeRowsThread3;
 
-  y := 0;
-  WHILE y < ViewPixelHeight DO BEGIN
+  displayedRows := 0;
+  WHILE displayedRows < ViewPixelHeight DO BEGIN
+    copied := False;
     lock(RowMutex);
-    doneFlag := RowDone[y];
-    IF doneFlag <> 0 THEN BEGIN
-      bufferIdx := y * rowBytes;
-      FOR k := 0 TO rowBytes - 1 DO
-        DisplayPixelData[bufferIdx + k] := PixelData[bufferIdx + k];
+    FOR y := 0 TO ViewPixelHeight - 1 DO BEGIN
+      IF RowDone[y] = 1 THEN BEGIN
+        bufferIdx := y * rowBytes;
+        FOR k := 0 TO rowBytes - 1 DO
+          DisplayPixelData[bufferIdx + k] := PixelData[bufferIdx + k];
+        RowDone[y] := 2;
+        copied := True;
+        displayedRows := displayedRows + 1;
+      END;
     END;
     unlock(RowMutex);
-    IF doneFlag <> 0 THEN BEGIN
-      PercentDone := Trunc( (y + 1) * 100.0 / ViewPixelHeight );
-      GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', y + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
-      IF (((y + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (y = ViewPixelHeight - 1)) THEN
+    IF copied THEN BEGIN
+      PercentDone := Trunc( displayedRows * 100.0 / ViewPixelHeight );
+      GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', displayedRows, '/', ViewPixelHeight, '. ~', PercentDone, '%');
+      IF ((displayedRows MOD MandelTextureUpdateIntervalRows = 0) OR (displayedRows = ViewPixelHeight)) THEN
         UpdateAndDisplayTextureInProgress;
-      y := y + 1;
     END ELSE BEGIN
       GraphLoop(0);
     END;
