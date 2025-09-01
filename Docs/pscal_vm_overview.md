@@ -19,6 +19,8 @@ The VM's architecture is defined by the `VM` struct in `src/vm/vm.h` and consist
     * **`vmGlobalSymbols`:** A `HashTable` for runtime storage and lookup of global variables.
     * **`procedureTable`:** A `HashTable` that stores information about all compiled procedures and functions, which is used for disassembly and resolving calls.
 * **Bytecode Chunk:** A pointer (`chunk`) to the `BytecodeChunk` being executed. This chunk contains the bytecode instructions (`code`), the constant pool (`constants`), and line number information for debugging (`lines`).
+* **Thread Table:** The VM spawns real OS-level threads via `pthread`. Each entry in the `threads` array holds a native thread and its own `VM` instance, allowing bytecode routines to execute in parallel.
+* **Mutex Table:** Runtime-created mutex objects live in the `mutexes` array. Each slot tracks a native `pthread_mutex_t` along with whether it is active, enabling synchronization between threads.
 
 #### **Execution Flow**
 
@@ -281,6 +283,33 @@ MyFunction(a, b);
         * **`<address>`:** The bytecode address of the first instruction of `MyFunction`. The VM jumps to this address.
         * **`<arg_count>`:** The number of arguments (2 in this case). The VM knows to use the top 2 values on the stack as the arguments for the new function's stack frame.
 ---
+
+#### **Threading Opcodes**
+
+* **`OP_THREAD_CREATE`**:
+    * **Operands:** 2-byte bytecode address.
+    * **Action:** Starts a new thread at the given instruction and pushes its thread identifier.
+* **`OP_THREAD_JOIN`**:
+    * **Operands:** None.
+    * **Action:** Pops a thread identifier and waits for that thread to finish, yielding control if it is still running.
+
+#### **Synchronization Opcodes**
+
+* **`OP_MUTEX_CREATE`**:
+    * **Operands:** None.
+    * **Action:** Creates a standard mutex and pushes its integer identifier on the stack.
+* **`OP_RCMUTEX_CREATE`**:
+    * **Operands:** None.
+    * **Action:** Creates a recursive mutex and pushes its integer identifier.
+* **`OP_MUTEX_LOCK`**:
+    * **Operands:** None (uses mutex id on stack).
+    * **Action:** Pops a mutex identifier and blocks until that mutex is acquired.
+* **`OP_MUTEX_UNLOCK`**:
+    * **Operands:** None (uses mutex id on stack).
+    * **Action:** Pops a mutex identifier and releases the corresponding mutex.
+* **`OP_MUTEX_DESTROY`**:
+    * **Operands:** None (uses mutex id on stack).
+    * **Action:** Pops a mutex identifier and destroys the corresponding mutex.
 
 #### **I/O and Miscellaneous Opcodes**
 

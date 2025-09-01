@@ -1,0 +1,11 @@
+#!/usr/bin/env clike
+void worker() {
+    printf("child\n");
+}
+
+int main() {
+    int tid = spawn worker();
+    join tid;
+    printf("done\n");
+    return 0;
+}

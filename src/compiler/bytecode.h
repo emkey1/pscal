@@ -96,7 +96,18 @@ typedef enum {
                       // Operands: 2-byte name_idx, 2-byte address, 1-byte arg count
     OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
     OP_EXIT,          // Early exit from the current function without halting the VM
-    OP_FORMAT_VALUE   // Format the value on top of the stack. Operands: width (byte), precision (byte)
+    OP_FORMAT_VALUE,  // Format the value on top of the stack. Operands: width (byte), precision (byte)
+
+    // --- Threading Opcodes ---
+    OP_THREAD_CREATE,      // Create a new lightweight thread. Operand: 2-byte entry offset
+    OP_THREAD_JOIN,        // Join on a thread. Operand: none (pops thread id from stack)
+
+    // --- Mutex Opcodes ---
+    OP_MUTEX_CREATE,       // Create a standard mutex. Pushes mutex id
+    OP_RCMUTEX_CREATE,     // Create a recursive mutex. Pushes mutex id
+    OP_MUTEX_LOCK,         // Lock mutex whose id is on top of stack
+    OP_MUTEX_UNLOCK,       // Unlock mutex whose id is on top of stack
+    OP_MUTEX_DESTROY       // Destroy mutex whose id is on top of stack
 
 } OpCode;
 

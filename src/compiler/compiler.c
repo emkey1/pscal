@@ -248,7 +248,7 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                  arg_vt == TYPE_UINT32)) {
                 return true;
             }
-            if (is_real_type(param_actual->var_type) && is_intlike_type(arg_vt)) {
+            if (isRealType(param_actual->var_type) && isIntlikeType(arg_vt)) {
                 return true;
             }
             return false;
@@ -621,46 +621,52 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_PROCEDURE_CALL: {
-            if (node->token && isBuiltin(node->token->value)) {
-                const char* funcName = node->token->value;
+            if (node->token) {
+                char callee_lower[MAX_SYMBOL_LENGTH];
+                strncpy(callee_lower, node->token->value, sizeof(callee_lower) - 1);
+                callee_lower[sizeof(callee_lower) - 1] = '\0';
+                toLowerString(callee_lower);
+                if (!lookupProcedure(callee_lower) && isBuiltin(node->token->value)) {
+                    const char* funcName = node->token->value;
 
-                if ((strcasecmp(funcName, "low") == 0 || strcasecmp(funcName, "high") == 0) &&
-                    node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
+                    if ((strcasecmp(funcName, "low") == 0 || strcasecmp(funcName, "high") == 0) &&
+                        node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
 
-                    const char* typeName = node->children[0]->token->value;
-                    AST* typeDef = lookupType(typeName);
+                        const char* typeName = node->children[0]->token->value;
+                        AST* typeDef = lookupType(typeName);
 
-                    if (typeDef) {
-                        if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
+                        if (typeDef) {
+                            if (typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
 
-                        if (typeDef->type == AST_ENUM_TYPE) {
-                            if (strcasecmp(funcName, "low") == 0) {
-                                return makeEnum(typeName, 0);
-                            } else { // high
-                                return makeEnum(typeName, typeDef->child_count > 0 ? typeDef->child_count - 1 : 0);
+                            if (typeDef->type == AST_ENUM_TYPE) {
+                                if (strcasecmp(funcName, "low") == 0) {
+                                    return makeEnum(typeName, 0);
+                                } else { // high
+                                    return makeEnum(typeName, typeDef->child_count > 0 ? typeDef->child_count - 1 : 0);
+                                }
                             }
                         }
-                    }
-                } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
-                    Value arg = evaluateCompileTimeValue(node->children[0]);
-                    if (arg.type == TYPE_INTEGER) {
-                        Value result = makeChar(arg.i_val);
+                    } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
+                        Value arg = evaluateCompileTimeValue(node->children[0]);
+                        if (arg.type == TYPE_INTEGER) {
+                            Value result = makeChar(arg.i_val);
+                            freeValue(&arg);
+                            return result;
+                        }
                         freeValue(&arg);
-                        return result;
+                    } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
+                        Value arg = evaluateCompileTimeValue(node->children[0]);
+                        Value result = makeVoid();
+                        if (arg.type == TYPE_CHAR) {
+                            result = makeInt(arg.c_val);
+                        } else if (arg.type == TYPE_BOOLEAN) {
+                            result = makeInt(arg.i_val ? 1 : 0);
+                        } else if (arg.type == TYPE_ENUM) {
+                            result = makeInt(arg.enum_val.ordinal);
+                        }
+                        freeValue(&arg);
+                        if (result.type != TYPE_VOID) return result;
                     }
-                    freeValue(&arg);
-                } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
-                    Value arg = evaluateCompileTimeValue(node->children[0]);
-                    Value result = makeVoid();
-                    if (arg.type == TYPE_CHAR) {
-                        result = makeInt(arg.c_val);
-                    } else if (arg.type == TYPE_BOOLEAN) {
-                        result = makeInt(arg.i_val ? 1 : 0);
-                    } else if (arg.type == TYPE_ENUM) {
-                        result = makeInt(arg.enum_val.ordinal);
-                    }
-                    freeValue(&arg);
-                    if (result.type != TYPE_VOID) return result;
                 }
             }
             break; // Fall through to makeVoid if not a recognized compile-time function
@@ -679,7 +685,7 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (is_real_type(left_val.type) && is_real_type(right_val.type)) {
+                if (isRealType(left_val.type) && isRealType(right_val.type)) {
                     double a = (double)AS_REAL(left_val);
                     double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
@@ -709,7 +715,7 @@ Value evaluateCompileTimeValue(AST* node) {
                         default:
                             break;
                     }
-                } else if (is_real_type(left_val.type) || is_real_type(right_val.type)) {
+                } else if (isRealType(left_val.type) || isRealType(right_val.type)) {
                     fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
                 } else { // Both operands are integers
                     long long a = left_val.i_val;
@@ -767,7 +773,7 @@ Value evaluateCompileTimeValue(AST* node) {
                     if (operand_val.type == TYPE_INTEGER) {
                         operand_val.i_val = -operand_val.i_val;
                         return operand_val; // Return the modified value
-                    } else if (is_real_type(operand_val.type)) {
+                    } else if (isRealType(operand_val.type)) {
                         double tmp = -(double)AS_REAL(operand_val);
                         freeValue(&operand_val);
                         return makeReal(tmp);
@@ -1363,6 +1369,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     sym->is_const = true;
                 }
 
+                insertConstGlobalSymbol(node->token->value, const_val);
+
                 // Constants are resolved at compile time, so no bytecode emission is needed.
                 freeValue(&const_val);
             }
@@ -1620,6 +1628,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     switch (node->type) {
         case AST_BREAK: {
             addBreakJump(chunk, line);
+            break;
+        }
+        case AST_THREAD_SPAWN: {
+            compileRValue(node, chunk, line);
+            writeBytecodeChunk(chunk, OP_POP, line);
+            break;
+        }
+        case AST_THREAD_JOIN: {
+            if (node->left) {
+                compileRValue(node->left, chunk, getLine(node->left));
+            }
+            writeBytecodeChunk(chunk, OP_THREAD_JOIN, line);
             break;
         }
         case AST_WRITELN: {
@@ -1980,7 +2000,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_PROCEDURE_CALL: {
             const char* calleeName = node->token->value;
-            
+
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
             Symbol* proc_symbol_lookup = NULL;
             char callee_lower[MAX_SYMBOL_LENGTH];
@@ -2007,8 +2027,51 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
+            if (strcasecmp(calleeName, "lock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: lock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: unlock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "destroy") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: destroy expects 1 argument.\n", line);
+
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "mutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
+                break;
+            }
+            if (strcasecmp(calleeName, "rcmutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
+                break;
+            }
+
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
-            bool callee_is_builtin = isBuiltin(calleeName);
+            bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol;
 
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
@@ -2129,8 +2192,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
-                    (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) // Width and Height are VAR
-                    || (strcasecmp(calleeName, "str") == 0 && i == 1)
+                    (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) || // Width and Height are VAR
+                    (strcasecmp(calleeName, "str") == 0 && i == 1) ||
+                    /* Date/time routines return values via VAR parameters */
+                    (strcasecmp(calleeName, "dosgetdate") == 0) ||
+                    (strcasecmp(calleeName, "dosgettime") == 0) ||
+                    (strcasecmp(calleeName, "getdate") == 0) ||
+                    (strcasecmp(calleeName, "gettime") == 0)
                 )) {
                     is_var_param = true;
                 }
@@ -2149,7 +2217,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
 
-            if (isBuiltin(calleeName)) {
+            if (isBuiltin(calleeName) && !proc_symbol) {
                 if (strcasecmp(calleeName, "exit") == 0) {
                     if (node->child_count > 0) {
                         fprintf(stderr, "L%d: exit does not take arguments.\n", line);
@@ -2358,6 +2426,27 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_NIL: {
             int constIndex = addNilConstant(chunk);
             emitConstant(chunk, constIndex, line);
+            break;
+        }
+        case AST_THREAD_SPAWN: {
+            AST *call = node->left;
+            if (!call || call->type != AST_PROCEDURE_CALL) {
+                fprintf(stderr, "L%d: Compiler error: spawn expects procedure call.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+            const char *calleeName = call->token->value;
+            Symbol *proc_symbol = lookupProcedure(calleeName);
+            if (!proc_symbol || !proc_symbol->is_defined) {
+                fprintf(stderr, "L%d: Compiler error: Undefined procedure '%s' in spawn.\n", line, calleeName);
+                compiler_had_error = true;
+                break;
+            }
+            if (call->child_count > 0) {
+                fprintf(stderr, "L%d: Compiler warning: Arguments to '%s' ignored in spawn.\n", line, calleeName);
+            }
+            writeBytecodeChunk(chunk, OP_THREAD_CREATE, line);
+            emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
             break;
         }
         case AST_DEREFERENCE: {
@@ -2584,7 +2673,50 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitConstant(chunk, addNilConstant(chunk), line);
                 break;
             }
-            
+
+            if (strcasecmp(functionName, "mutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
+                break;
+            }
+            if (strcasecmp(functionName, "rcmutex") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
+                }
+                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
+                break;
+            }
+            if (strcasecmp(functionName, "lock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: lock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, line);
+                break;
+            }
+            if (strcasecmp(functionName, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: unlock expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
+                break;
+            }
+
+            if (strcasecmp(functionName, "destroy") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: destroy expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, line);
+                break;
+            }
+
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
             Symbol* func_symbol_lookup = NULL;
             char func_name_lower[MAX_SYMBOL_LENGTH];
@@ -2614,7 +2746,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            if (isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
+            if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
                 if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
                     AST* type_arg_node = node->children[0];
                     int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
@@ -2647,7 +2779,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            if (isBuiltin(functionName)) {
+            if (!func_symbol && isBuiltin(functionName)) {
                 BuiltinRoutineType type = getBuiltinType(functionName);
                 if (type == BUILTIN_TYPE_PROCEDURE) {
                     fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
@@ -2802,8 +2934,8 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 }
 
                 if (symbol_to_patch && symbol_to_patch->is_defined) {
-                    // Patch the address in place. The patch offset is offset + 2.
-                    patchShort(chunk, offset + 2, (uint16_t)symbol_to_patch->bytecode_address);
+                    // Patch the address in place. The address occupies bytes offset+3 and offset+4.
+                    patchShort(chunk, offset + 3, (uint16_t)symbol_to_patch->bytecode_address);
                 } else {
                     fprintf(stderr, "Compiler Error: Procedure '%s' was called but never defined.\n", proc_name);
                     compiler_had_error = true;

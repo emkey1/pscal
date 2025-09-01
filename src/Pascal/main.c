@@ -1,7 +1,7 @@
-#include "Pascal/lexer.h"
-#include "Pascal/parser.h"
-#include "Pascal/ast.h"
-#include "Pascal/opt.h"
+#include "lexer.h"
+#include "parser.h"
+#include "ast.h"
+#include "opt.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
@@ -18,7 +18,7 @@
 #include <SDL2/SDL_ttf.h>
 #endif
 #include "vm/vm.h"
-// Pascal/ast.h is already included via globals.h or directly, no need for duplicate
+// ast.h is already included via globals.h or directly, no need for duplicate
 
 /* Global variables */
 int gParamCount = 0;
@@ -50,6 +50,12 @@ void initSymbolSystem(void) {
         EXIT_FAILURE_HANDLER();
     }
     DEBUG_PRINT("[DEBUG MAIN] Created global symbol table %p.\n", (void*)globalSymbols);
+
+    constGlobalSymbols = createHashTable();
+    if (!constGlobalSymbols) {
+        fprintf(stderr, "FATAL: Failed to create constant symbol hash table.\n");
+        EXIT_FAILURE_HANDLER();
+    }
     
     procedure_table = createHashTable();
     if (!procedure_table) {
@@ -59,7 +65,7 @@ void initSymbolSystem(void) {
     current_procedure_table = procedure_table;
     DEBUG_PRINT("[DEBUG MAIN] Created procedure hash table %p.\n", (void*)procedure_table);
 #ifdef SDL
-    InitializeTextureSystem();
+    initializeTextureSystem();
 #endif
 }
 
@@ -114,27 +120,27 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                     fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                        fprintf(stderr, "\n--- Executing Program with VM ---\n");
+                        fprintf(stderr, "\n--- executing Program with VM ---\n");
                     }
                 }
             } else {
                 fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                    fprintf(stderr, "\n--- Executing Program with VM (cached) ---\n");
+                    fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
                 }
             }
 
             if (compilation_ok_for_vm) {
                 VM vm;
                 initVM(&vm);
-                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                 freeVM(&vm);
                 globalSymbols = NULL;
                 if (result_vm == INTERPRET_OK) {
                     overall_success_status = true;
                 } else {
-                    fprintf(stderr, "--- VM Execution Failed (%s) ---\n",
+                    fprintf(stderr, "--- VM execution Failed (%s) ---\n",
                             result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
                     overall_success_status = false;
                     vmDumpStackInfo(&vm);
@@ -160,6 +166,10 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         freeHashTable(globalSymbols);
         globalSymbols = NULL;
     }
+    if (constGlobalSymbols) {
+        freeHashTable(constGlobalSymbols);
+        constGlobalSymbols = NULL;
+    }
 #ifdef DEBUG
     if (inserted_global_names) {
         freeList(inserted_global_names);
@@ -171,7 +181,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         GlobalAST = NULL;
     }
 #ifdef SDL
-    SdlCleanupAtExit();
+    sdlCleanupAtExit();
 #endif
     return overall_success_status ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -243,6 +253,7 @@ int main(int argc, char *argv[]) {
         perror("Error opening source file");
         // Minimal cleanup if initSymbolSystem did very little before this point
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -254,6 +265,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Memory allocation error reading file\n");
         fclose(file);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -263,6 +275,7 @@ int main(int argc, char *argv[]) {
         free(source_buffer);
         fclose(file);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }

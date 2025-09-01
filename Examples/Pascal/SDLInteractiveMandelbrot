@@ -1,0 +1,233 @@
+program SDLInteractiveMandelbrot;
+
+uses
+  Graph, CRT, Threads;
+
+const
+  WindowWidth  = 640;
+  WindowHeight = 480;
+  WindowTitle  = 'Mandelbrot (L:Zoom In, R:Zoom Out, q:Quit)';
+  MaxIter      = 250;
+  ZoomFactor   = 2.0;
+  BytesPerPixel= 4;
+  ThreadCount  = 4;
+  ButtonLeft   = 1;
+  ButtonRight  = 4;
+
+type
+  TPixelBuffer = array[0..(WindowWidth * WindowHeight * BytesPerPixel) - 1] of Byte;
+
+var
+  MinRe, MaxRe, MinIm, MaxIm: Real;
+  ScaleRe, ScaleIm: Real;
+  PixelData: TPixelBuffer;
+  QuitFlag, RedrawNeeded, RenderInProgress: Boolean;
+  MouseX, MouseY, MouseButtons, PrevMouseButtons: Integer;
+  TextureID: Integer;
+  RowMutex: Integer;
+  ThreadStart, ThreadEnd: array[0..ThreadCount - 1] of Integer;
+  RenderThreads: array[0..ThreadCount - 1] of Integer;
+  RowsCompleted: Integer;
+
+procedure UpdateScaling;
+var
+  reRange: Real;
+begin
+  reRange := MaxRe - MinRe;
+  MaxIm := MinIm + reRange * WindowHeight / WindowWidth;
+  ScaleRe := reRange / (WindowWidth - 1);
+  ScaleIm := (MaxIm - MinIm) / (WindowHeight - 1);
+end;
+
+procedure InitView;
+begin
+  MinRe := -2.0;
+  MaxRe :=  1.0;
+  MinIm := -1.2;
+  UpdateScaling;
+end;
+
+procedure ComputeRows(startY, endY: Integer);
+var
+  y, x, idx, iter: Integer;
+  rowVals: array[0..WindowWidth - 1] of Integer;
+  c_im: Real;
+  r, g, b: Byte;
+begin
+  for y := startY to endY do
+  begin
+    c_im := MaxIm - y * ScaleIm;
+    MandelbrotRow(MinRe, ScaleRe, c_im, MaxIter, WindowWidth - 1, rowVals);
+    lock(RowMutex);
+    for x := 0 to WindowWidth - 1 do
+    begin
+      iter := rowVals[x];
+      if iter = MaxIter then
+      begin
+        r := 0; g := 0; b := 0;
+      end else
+      begin
+        r := (iter * 9) mod 256;
+        g := (iter * 7) mod 256;
+        b := (iter * 5) mod 256;
+      end;
+      idx := (y * WindowWidth + x) * BytesPerPixel;
+      PixelData[idx]     := r;
+      PixelData[idx + 1] := g;
+      PixelData[idx + 2] := b;
+      PixelData[idx + 3] := $FF;
+    end;
+    Inc(RowsCompleted);
+    unlock(RowMutex);
+  end;
+end;
+
+procedure ComputeRowsThread0; begin ComputeRows(ThreadStart[0], ThreadEnd[0]); end;
+procedure ComputeRowsThread1; begin ComputeRows(ThreadStart[1], ThreadEnd[1]); end;
+procedure ComputeRowsThread2; begin ComputeRows(ThreadStart[2], ThreadEnd[2]); end;
+procedure ComputeRowsThread3; begin ComputeRows(ThreadStart[3], ThreadEnd[3]); end;
+
+procedure Render;
+var
+  rowsPerThread, extra, startY, endY, i, done: Integer;
+begin
+  RenderInProgress := True;
+  RowMutex := mutex();
+  RowsCompleted := 0;
+  rowsPerThread := WindowHeight div ThreadCount;
+  extra := WindowHeight mod ThreadCount;
+  startY := 0;
+  for i := 0 to ThreadCount - 1 do
+  begin
+    endY := startY + rowsPerThread - 1;
+    if extra > 0 then
+    begin
+      Inc(endY); Dec(extra);
+    end;
+    ThreadStart[i] := startY;
+    ThreadEnd[i] := endY;
+    startY := endY + 1;
+  end;
+  RenderThreads[0] := spawn ComputeRowsThread0;
+  RenderThreads[1] := spawn ComputeRowsThread1;
+  RenderThreads[2] := spawn ComputeRowsThread2;
+  RenderThreads[3] := spawn ComputeRowsThread3;
+  while True do
+  begin
+    lock(RowMutex);
+    done := RowsCompleted;
+    UpdateTexture(TextureID, PixelData);
+    unlock(RowMutex);
+    ClearDevice;
+    RenderCopy(TextureID);
+    UpdateScreen;
+    GraphLoop(0);
+    if done >= WindowHeight then break;
+  end;
+  for i := 0 to ThreadCount - 1 do join RenderThreads[i];
+  destroy(RowMutex);
+  UpdateTexture(TextureID, PixelData);
+  ClearDevice;
+  RenderCopy(TextureID);
+  UpdateScreen;
+  RenderInProgress := False;
+  RedrawNeeded := False;
+end;
+
+procedure KeyboardThread;
+begin
+  while not QuitFlag do
+  begin
+    if KeyPressed then
+      if UpCase(ReadKey) = 'Q' then QuitFlag := True;
+    Delay(10);
+  end;
+end;
+
+procedure MouseThread;
+var
+  centerRe, centerIm, widthRe, heightIm: Real;
+begin
+  while not QuitFlag do
+  begin
+    GetMouseState(MouseX, MouseY, MouseButtons);
+    if ((MouseButtons and ButtonLeft) <> 0) and ((PrevMouseButtons and ButtonLeft) = 0) then
+    begin
+      if not RenderInProgress then
+      begin
+        centerRe := MinRe + MouseX * ScaleRe;
+        centerIm := MaxIm - MouseY * ScaleIm;
+        widthRe  := (MaxRe - MinRe) / ZoomFactor;
+        heightIm := (MaxIm - MinIm) / ZoomFactor;
+        MinRe := centerRe - widthRe / 2;
+        MaxRe := centerRe + widthRe / 2;
+        MinIm := centerIm - heightIm / 2;
+        UpdateScaling;
+        RedrawNeeded := True;
+      end;
+    end
+    else if ((MouseButtons and ButtonRight) <> 0) and ((PrevMouseButtons and ButtonRight) = 0) then
+    begin
+      if not RenderInProgress then
+      begin
+        centerRe := MinRe + MouseX * ScaleRe;
+        centerIm := MaxIm - MouseY * ScaleIm;
+        widthRe  := (MaxRe - MinRe) * ZoomFactor;
+        heightIm := (MaxIm - MinIm) * ZoomFactor;
+        MinRe := centerRe - widthRe / 2;
+        MaxRe := centerRe + widthRe / 2;
+        MinIm := centerIm - heightIm / 2;
+        UpdateScaling;
+        RedrawNeeded := True;
+      end;
+    end;
+    PrevMouseButtons := MouseButtons;
+    Delay(10);
+  end;
+end;
+
+var
+  MouseThreadID, KeyboardThreadID: Integer;
+
+begin
+  HideCursor;
+  InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  TextureID := CreateTexture(WindowWidth, WindowHeight);
+  if TextureID < 0 then
+  begin
+    CloseGraph;
+    ShowCursor;
+    WriteLn('Unable to create texture.');
+    Halt;
+  end;
+
+  WriteLn('Controls: Left-click zooms in, Right-click zooms out, press q to quit.');
+  InitView;
+  QuitFlag := False;
+  RedrawNeeded := True;
+  RenderInProgress := False;
+  PrevMouseButtons := 0;
+
+  MouseThreadID    := spawn MouseThread;
+  KeyboardThreadID := spawn KeyboardThread;
+
+  while not QuitFlag do
+  begin
+    if RedrawNeeded then
+      Render
+    else
+    begin
+      ClearDevice;
+      RenderCopy(TextureID);
+      UpdateScreen;
+      GraphLoop(20);
+    end;
+  end;
+
+  join MouseThreadID;
+  join KeyboardThreadID;
+  DestroyTexture(TextureID);
+  CloseGraph;
+  ShowCursor;
+end.
+

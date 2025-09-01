@@ -27,7 +27,7 @@ typedef struct {
 } WavHeader;
 
 // Function to write a WAV file
-void write_wav(const char* filename, uint32_t sample_rate, uint16_t bits_per_sample,
+void writeWav(const char* filename, uint32_t sample_rate, uint16_t bits_per_sample,
                const unsigned char* data, uint32_t data_size) {
     FILE *outfile = fopen(filename, "wb");
     if (!outfile) {
@@ -73,7 +73,7 @@ void write_wav(const char* filename, uint32_t sample_rate, uint16_t bits_per_sam
 #define PI 3.14159265358979323846
 
 // Generate a simple tone
-void generate_tone(unsigned char* buffer, uint32_t num_samples, float frequency, float duration_secs) {
+void generateTone(unsigned char* buffer, uint32_t num_samples, float frequency, float duration_secs) {
     for (uint32_t i = 0; i < num_samples; ++i) {
         float time = (float)i / SAMPLE_RATE;
         // Simple sine wave, scaled and offset for 8-bit unsigned PCM
@@ -84,7 +84,7 @@ void generate_tone(unsigned char* buffer, uint32_t num_samples, float frequency,
 }
 
 // Generate a decaying tone (simple attack-decay envelope)
-void generate_decaying_tone(unsigned char* buffer, uint32_t num_samples, float start_freq, float end_freq, float duration_secs) {
+void generateDecayingTone(unsigned char* buffer, uint32_t num_samples, float start_freq, float end_freq, float duration_secs) {
     for (uint32_t i = 0; i < num_samples; ++i) {
         float time = (float)i / SAMPLE_RATE;
         float progress = time / duration_secs; // 0.0 to 1.0
@@ -109,7 +109,7 @@ int main() {
     unsigned char* brick_hit_data = (unsigned char*)malloc(brick_hit_samples);
     if (!brick_hit_data) { perror("malloc brick_hit_data failed"); return 1; }
 
-    generate_decaying_tone(brick_hit_data, brick_hit_samples, 1200.0f, 800.0f, brick_hit_duration); // Higher pitch, quick decay
+    generateDecayingTone(brick_hit_data, brick_hit_samples, 1200.0f, 800.0f, brick_hit_duration); // Higher pitch, quick decay
     // Add a sharper attack (optional, more complex) - for now simple decay
     // For a sharper click, you could make the first few samples max amplitude
     for(int i=0; i < 50 && i < brick_hit_samples; ++i) { // Very short click/pop
@@ -117,7 +117,7 @@ int main() {
     }
 
 
-    write_wav("brick_hit.wav", SAMPLE_RATE, BITS_PER_SAMPLE, brick_hit_data, brick_hit_samples);
+    writeWav("brick_hit.wav", SAMPLE_RATE, BITS_PER_SAMPLE, brick_hit_data, brick_hit_samples);
     free(brick_hit_data);
 
     // --- Generate lose_life.wav ---
@@ -126,8 +126,8 @@ int main() {
     unsigned char* lose_life_data = (unsigned char*)malloc(lose_life_samples);
     if (!lose_life_data) { perror("malloc lose_life_data failed"); return 1; }
 
-    generate_decaying_tone(lose_life_data, lose_life_samples, 440.0f, 220.0f, lose_life_duration); // Descending pitch
-    write_wav("lose_life.wav", SAMPLE_RATE, BITS_PER_SAMPLE, lose_life_data, lose_life_samples);
+    generateDecayingTone(lose_life_data, lose_life_samples, 440.0f, 220.0f, lose_life_duration); // Descending pitch
+    writeWav("lose_life.wav", SAMPLE_RATE, BITS_PER_SAMPLE, lose_life_data, lose_life_samples);
     free(lose_life_data);
     
     // --- Generate paddle_hit.wav (similar to brick_hit but maybe slightly different pitch/duration) ---
@@ -136,12 +136,12 @@ int main() {
     unsigned char* paddle_hit_data = (unsigned char*)malloc(paddle_hit_samples);
     if (!paddle_hit_data) { perror("malloc paddle_hit_data failed"); return 1; }
 
-    generate_decaying_tone(paddle_hit_data, paddle_hit_samples, 1000.0f, 700.0f, paddle_hit_duration);
+    generateDecayingTone(paddle_hit_data, paddle_hit_samples, 1000.0f, 700.0f, paddle_hit_duration);
     // Add a sharper attack
     for(int i=0; i < 40 && i < paddle_hit_samples; ++i) {
         paddle_hit_data[i] = (i % 2 == 0) ? (128 + AMPLITUDE - 20) : (128 - AMPLITUDE + 20); // Slightly softer pop
     }
-    write_wav("paddle_hit.wav", SAMPLE_RATE, BITS_PER_SAMPLE, paddle_hit_data, paddle_hit_samples);
+    writeWav("paddle_hit.wav", SAMPLE_RATE, BITS_PER_SAMPLE, paddle_hit_data, paddle_hit_samples);
     free(paddle_hit_data);
 
     // --- Generate wall_hit.wav (a duller thud) ---
@@ -151,9 +151,9 @@ int main() {
     if (!wall_hit_data) { perror("malloc wall_hit_data failed"); return 1; }
 
     // Low frequency, quick decay for a thud
-    generate_decaying_tone(wall_hit_data, wall_hit_samples, 200.0f, 100.0f, wall_hit_duration * 0.5f); // Faster decay
+    generateDecayingTone(wall_hit_data, wall_hit_samples, 200.0f, 100.0f, wall_hit_duration * 0.5f); // Faster decay
     // You might mix this with some noise or a square wave for a better thud
-    write_wav("wall_hit.wav", SAMPLE_RATE, BITS_PER_SAMPLE, wall_hit_data, wall_hit_samples);
+    writeWav("wall_hit.wav", SAMPLE_RATE, BITS_PER_SAMPLE, wall_hit_data, wall_hit_samples);
     free(wall_hit_data);
 
 

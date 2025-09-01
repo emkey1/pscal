@@ -112,10 +112,10 @@ begin
   url := 'http://api.openweathermap.org/data/2.5/weather?zip=' + currentZipCode + ',us&appid=' + API_KEY + '&units=metric';
 
   // Perform the API call
-  ms := api_send(url, '');
+  ms := apiSend(url, '');
 
   // Convert the memory stream response to a string
-  response := api_receive(ms);
+  response := apiReceive(ms);
 
   // Free the memory stream - IMPORTANT if 'memorystreamfree' exists
   // memorystreamfree(ms);

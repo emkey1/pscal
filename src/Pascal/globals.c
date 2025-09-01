@@ -3,6 +3,7 @@
 
 // Include the globals header file, which declares the global variables.
 #include "globals.h" // This now includes symbol.h and defines HashTable
+#include <pthread.h>
 
 
 // --- Global Variable Definitions and Initialization ---
@@ -16,6 +17,7 @@ int typeWarn = 1; // Flag to control type warning messages (e.g., 1 for enabled,
 // These will be initialized by calling createHashTable() in initSymbolSystem().
 HashTable *globalSymbols = NULL; // Global symbol table (initialized to NULL, will point to a HashTable).
 HashTable *localSymbols = NULL;  // Current local symbol table (initialized to NULL, will point to a HashTable).
+HashTable *constGlobalSymbols = NULL; // Table of global constants (read-only at runtime)
 
 // Pointer to the Symbol representing the currently executing function (for 'result' variable).
 // <<< REMOVE THE DUPLICATE DEFINITION OF current_function_symbol >>>
@@ -67,3 +69,22 @@ Symbol *current_function_symbol = NULL; // Define the global variable here.
 
 // Note: Other global SDL/Audio variables declared in globals.h are typically
 // defined and initialized in their respective .c files (sdl.c, audio.c).
+
+// Mutex definition guarding shared global tables.  Use a recursive mutex so
+// a thread may reacquire the lock when builtins invoke helpers that also
+// touch global interpreter state.
+#if defined(PTHREAD_RECURSIVE_MUTEX_INITIALIZER)
+pthread_mutex_t globals_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+#elif defined(PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP)
+pthread_mutex_t globals_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+#else
+pthread_mutex_t globals_mutex;
+static void initGlobalsMutex(void) __attribute__((constructor));
+static void initGlobalsMutex(void) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&globals_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
+#endif

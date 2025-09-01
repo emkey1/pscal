@@ -7,7 +7,8 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
-#include "globals.h"
+#include "Pascal/globals.h"
+#include "compiler/compiler.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -102,8 +103,8 @@ static Token* makeIdentTokenLocal(const char* s) {
 
 // Create a core AST node representing a builtin type token
 static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
-    const char* name = clike_tokenTypeToTypeName(t.type);
-    VarType vt = clike_tokenTypeToVarType(t.type);
+    const char* name = clikeTokenTypeToTypeName(t.type);
+    VarType vt = clikeTokenTypeToVarType(t.type);
     if (!name) return NULL;
     Token* tok = makeIdentTokenLocal(name);
     AST* node = newASTNode(AST_VARIABLE, tok);
@@ -262,6 +263,10 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
         case TCAST_RETURN:
             if (node->left) compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, OP_RETURN, node->token.line);
+            break;
+        case TCAST_THREAD_JOIN:
+            if (node->left) compileExpression(node->left, chunk, ctx);
+            writeBytecodeChunk(chunk, OP_THREAD_JOIN, node->token.line);
             break;
         case TCAST_EXPR_STMT:
             if (node->left) {
@@ -481,7 +486,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     if (node->right && node->right->type == TCAST_IDENTIFIER) {
                         if (node->right->token.type == CLIKE_TOKEN_IDENTIFIER) {
                             char *tname = tokenToCString(node->right->token);
-                            base = clike_lookup_struct(tname);
+                            base = clikeLookupStruct(tname);
                             if (!base) base = lookupType(tname);
                             free(tname);
                         } else {
@@ -560,7 +565,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     compileExpression(node->left, chunk, ctx);
                 } else {
                     Value init;
-                    if (is_real_type(node->var_type)) {
+                    if (isRealType(node->var_type)) {
                         init = makeReal(0.0);
                         init.type = node->var_type;
                     } else {
@@ -577,7 +582,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                             default:
                                 init = makeInt(0);
                                 init.type = node->var_type;
-                                if (is_intlike_type(init.type)) init.u_val = 0;
+                                if (isIntlikeType(init.type)) init.u_val = 0;
                                 break;
                         }
                     }
@@ -617,14 +622,36 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         emitShort(chunk, (uint16_t)name_idx, node->token.line);
     }
     writeBytecodeChunk(chunk, (uint8_t)node->var_type, node->token.line);
-    const char* type_name = varTypeToString(node->var_type);
-    int type_idx = addStringConstant(chunk, type_name);
-    emitShort(chunk, (uint16_t)type_idx, node->token.line);
-    if (node->var_type == TYPE_STRING) {
-        Value zero = makeInt(0);
-        int len_idx = addConstantToChunk(chunk, &zero);
-        freeValue(&zero);
-        emitShort(chunk, (uint16_t)len_idx, node->token.line);
+    if (node->var_type == TYPE_ARRAY && node->is_array) {
+        /* Emit array dimension metadata similar to OP_INIT_LOCAL_ARRAY */
+        writeBytecodeChunk(chunk, (uint8_t)node->dim_count, node->token.line);
+        for (int d = 0; d < node->dim_count; ++d) {
+            if (node->array_dims[d] > 0) {
+                Value lower = makeInt(0);
+                Value upper = makeInt(node->array_dims[d] - 1);
+                emitShort(chunk, (uint16_t)addConstantToChunk(chunk, &lower), node->token.line);
+                emitShort(chunk, (uint16_t)addConstantToChunk(chunk, &upper), node->token.line);
+                freeValue(&lower);
+                freeValue(&upper);
+            } else {
+                /* Undefined dimension size; emit zero bounds */
+                emitShort(chunk, 0, node->token.line);
+                emitShort(chunk, 0, node->token.line);
+            }
+        }
+        int elemNameIdx = addStringConstant(chunk, "");
+        writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
+        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+    } else {
+        const char* type_name = varTypeToString(node->var_type);
+        int type_idx = addStringConstant(chunk, type_name);
+        emitShort(chunk, (uint16_t)type_idx, node->token.line);
+        if (node->var_type == TYPE_STRING) {
+            Value zero = makeInt(0);
+            int len_idx = addConstantToChunk(chunk, &zero);
+            freeValue(&zero);
+            emitShort(chunk, (uint16_t)len_idx, node->token.line);
+        }
     }
     if (node->left) {
         FuncContext dummy = {0};
@@ -678,21 +705,31 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         }
         case TCAST_BINOP:
             compileExpression(node->left, chunk, ctx);
+            if (node->token.type == CLIKE_TOKEN_AND_AND ||
+                node->token.type == CLIKE_TOKEN_OR_OR) {
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+            }
             compileExpression(node->right, chunk, ctx);
+            if (node->token.type == CLIKE_TOKEN_AND_AND ||
+                node->token.type == CLIKE_TOKEN_OR_OR) {
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+            }
             switch (node->token.type) {
                 case CLIKE_TOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
                 case CLIKE_TOKEN_STAR: writeBytecodeChunk(chunk, OP_MULTIPLY, node->token.line); break;
                 case CLIKE_TOKEN_SLASH:
-                    if (is_intlike_type(node->var_type) &&
+                    if (isIntlikeType(node->var_type) &&
                         node->left && node->right &&
-                        is_intlike_type(node->left->var_type) &&
-                        is_intlike_type(node->right->var_type)) {
+                        isIntlikeType(node->left->var_type) &&
+                        isIntlikeType(node->right->var_type)) {
                         /*
                          * In C, dividing two integers performs integer division
-                         * (truncating toward zero).  The VM has a dedicated
+                         * (truncating toward zero). The VM has a dedicated
                          * opcode for this behaviour (OP_INT_DIV), whereas
-                         * OP_DIVIDE always produces a real result.  Without this
+                         * OP_DIVIDE always produces a real result. Without this
                          * check, expressions like `w / 4` would yield a real
                          * value, which breaks APIs expecting integer arguments
                          * (e.g. drawrect in the graphics tests).
@@ -861,8 +898,96 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             }
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
             break;
+        case TCAST_THREAD_SPAWN: {
+            ASTNodeClike *call = node->left;
+            if (call && call->type == TCAST_CALL) {
+                char *name = tokenToCString(call->token);
+                Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                if (sym) {
+                    /*
+                     * When a function with local variables is spawned directly,
+                     * the new thread begins execution without a call frame,
+                     * so its locals overlap the stack base.  Any POP used to
+                     * discard the assignment result then wipes out the just-
+                     * stored local, leaving it NIL (e.g. feeding NIL to
+                     * built-ins like toupper).  Generate a wrapper that
+                     * performs a normal OP_CALL so the callee runs with a
+                     * proper stack frame and separate local slot storage.
+                     */
+                    writeBytecodeChunk(chunk, OP_THREAD_CREATE, call->token.line);
+                    int patch = chunk->count;
+                    emitShort(chunk, 0xFFFF, call->token.line); // placeholder for wrapper addr
+
+                    // Jump over inlined wrapper so main thread continues execution.
+                    writeBytecodeChunk(chunk, OP_JUMP, call->token.line);
+                    int jumpPatch = chunk->count;
+                    emitShort(chunk, 0xFFFF, call->token.line);
+
+                    int wrapper_addr = chunk->count;
+                    int nameIdx = addStringConstant(chunk, name);
+                    writeBytecodeChunk(chunk, OP_CALL, call->token.line);
+                    emitShort(chunk, (uint16_t)nameIdx, call->token.line);
+                    emitShort(chunk, (uint16_t)sym->bytecode_address, call->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)sym->arity, call->token.line);
+                    writeBytecodeChunk(chunk, OP_RETURN, call->token.line);
+
+                    // Patch addresses: spawn target and jump over wrapper.
+                    patchShort(chunk, patch, (uint16_t)wrapper_addr);
+                    patchShort(chunk, jumpPatch, (uint16_t)(chunk->count - (jumpPatch + 2)));
+                }
+                free(name);
+            }
+            break;
+        }
         case TCAST_CALL: {
             char *name = tokenToCString(node->token);
+            if (strcasecmp(name, "mutex") == 0) {
+                free(name);
+                if (node->child_count != 0) {
+                    fprintf(stderr, "Compile error: mutex expects no arguments.\n");
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "rcmutex") == 0) {
+                free(name);
+                if (node->child_count != 0) {
+                    fprintf(stderr, "Compile error: rcmutex expects no arguments.\n");
+                }
+                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "lock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "Compile error: lock expects 1 argument.\n");
+                } else {
+                    compileExpression(node->children[0], chunk, ctx);
+                }
+                free(name);
+                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "unlock") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "Compile error: unlock expects 1 argument.\n");
+                } else {
+                    compileExpression(node->children[0], chunk, ctx);
+                }
+                free(name);
+                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, node->token.line);
+                break;
+            }
+            if (strcasecmp(name, "destroy") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "Compile error: destroy expects 1 argument.\n");
+
+                } else {
+                    compileExpression(node->children[0], chunk, ctx);
+                }
+                free(name);
+                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, node->token.line);
+                break;
+            }
             if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;
@@ -1040,7 +1165,11 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 if (sym) {
                     writeBytecodeChunk(chunk, OP_CALL, node->token.line);
                     emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                    emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
+                    if (sym->is_defined) {
+                        emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
+                    } else {
+                        emitShort(chunk, 0xFFFF, node->token.line);
+                    }
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
                 } else {
                     writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
@@ -1083,14 +1212,29 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
 
     int address = chunk->count;
     char* fname = tokenToCString(func->token);
-    Symbol* sym = malloc(sizeof(Symbol));
-    memset(sym, 0, sizeof(Symbol));
-    sym->name = strdup(fname);
+    /*
+     * Symbol lookups are case-insensitive.  The symbol table stores all
+     * procedure names in lowercase, but the token text preserves the
+     * original casing.  This meant that procedures with mixed-case names
+     * (e.g. "computeRowsThread0") were inserted using their original case
+     * and later lookups using the lowercase form failed, causing instructions
+     * such as OP_THREAD_CREATE to be omitted.
+     *
+     * Normalize the function name to lowercase before inserting it into the
+     * procedure table so lookups succeed regardless of the original casing.
+     */
+    toLowerString(fname);
+    Symbol* sym = hashTableLookup(procedure_table, fname);
+    if (!sym) {
+        sym = malloc(sizeof(Symbol));
+        memset(sym, 0, sizeof(Symbol));
+        sym->name = strdup(fname);
+        hashTableInsert(procedure_table, sym);
+    }
     sym->bytecode_address = address;
     sym->arity = (uint8_t)ctx.paramCount;
     sym->type = func->var_type;
     sym->is_defined = true;
-    hashTableInsert(procedure_table, sym);
 
     compileStatement(func->right, chunk, &ctx);
     writeBytecodeChunk(chunk, OP_RETURN, func->token.line);
@@ -1108,7 +1252,63 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     free(fname);
 }
 
-void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
+static void predeclareFunctions(ASTNodeClike *program) {
+    if (!program) return;
+    for (int i = 0; i < program->child_count; ++i) {
+        ASTNodeClike *decl = program->children[i];
+        if (decl->type != TCAST_FUN_DECL) continue;
+        char *name = tokenToCString(decl->token);
+        toLowerString(name);
+        if (!hashTableLookup(procedure_table, name)) {
+            Symbol *sym = malloc(sizeof(Symbol));
+            memset(sym, 0, sizeof(Symbol));
+            sym->name = strdup(name);
+            sym->arity = decl->left ? decl->left->child_count : 0;
+            sym->type = decl->var_type;
+            sym->is_defined = false;
+            hashTableInsert(procedure_table, sym);
+        }
+        free(name);
+    }
+}
+
+static void patchForwardCalls(BytecodeChunk *chunk) {
+    if (!procedure_table || !chunk || !chunk->code) return;
+    for (int offset = 0; offset < chunk->count; ) {
+        uint8_t opcode = chunk->code[offset];
+        if (opcode == OP_CALL) {
+            if (offset + 5 >= chunk->count) break;
+            uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
+                                          chunk->code[offset + 4]);
+            if (address == 0xFFFF) {
+                uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                                 chunk->code[offset + 2]);
+                if (name_index < chunk->constants_count &&
+                    chunk->constants[name_index].type == TYPE_STRING) {
+                    const char *proc_name = AS_STRING(chunk->constants[name_index]);
+                    char lookup[MAX_SYMBOL_LENGTH];
+                    strncpy(lookup, proc_name, sizeof(lookup) - 1);
+                    lookup[sizeof(lookup) - 1] = '\0';
+                    toLowerString(lookup);
+                    Symbol *sym = hashTableLookup(procedure_table, lookup);
+                    if (sym && sym->is_defined) {
+                        patchShort(chunk, offset + 3,
+                                   (uint16_t)sym->bytecode_address);
+                    } else {
+                        fprintf(stderr,
+                                "Compiler Error: Procedure '%s' was called but never defined.\n",
+                                proc_name);
+                    }
+                }
+            }
+            offset += 6;
+        } else {
+            offset += getInstructionLength(chunk, offset);
+        }
+    }
+}
+
+void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     initBytecodeChunk(chunk);
     if (!program) return;
 
@@ -1122,6 +1322,9 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
             compileGlobalVar(decl, chunk);
         }
     }
+
+    // Predeclare all functions so forward references are recognized.
+    predeclareFunctions(program);
 
     // Emit a call to main after globals have been defined.
     writeBytecodeChunk(chunk, OP_CALL, 0);
@@ -1200,6 +1403,7 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
             EXIT_FAILURE_HANDLER();
             return;
         }
+        predeclareFunctions(modProg);
         for (int j = 0; j < modProg->child_count; ++j) {
             ASTNodeClike *decl = modProg->children[j];
             if (decl->type == TCAST_FUN_DECL) {
@@ -1229,12 +1433,14 @@ void clike_compile(ASTNodeClike *program, BytecodeChunk *chunk) {
         chunk->code[mainArityPatch] = mainArity;
     }
 
+    patchForwardCalls(chunk);
+
     for (int i = 0; i < clike_import_count; ++i) {
         free(clike_imports[i]);
     }
     free(clike_imports);
     clike_imports = NULL;
     clike_import_count = 0;
-    clike_free_structs();
+    clikeFreeStructs();
 }
 

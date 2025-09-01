@@ -3,7 +3,7 @@
 #include <string.h>
 #include <strings.h>
 
-int clike_get_builtin_id(const char *name) {
+int clikeGetBuiltinID(const char *name) {
     // The VM exposes Pascal's `length` builtin for string length.  Map the
     // C-like `strlen` to that builtin so we don't need a backend change.
     if (strcasecmp(name, "strlen") == 0) {
@@ -20,16 +20,20 @@ int clike_get_builtin_id(const char *name) {
     if (strcasecmp(name, "remove") == 0) {
         name = "erase";
     }
+    if (strcasecmp(name, "toupper") == 0) {
+        name = "upcase";
+    }
     return getBuiltinIDForCompiler(name);
 }
 
-void clike_register_builtins(void) {
+void clikeRegisterBuiltins(void) {
     registerAllBuiltins();
     registerBuiltinFunction("printf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("scanf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("itoa", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("exit", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("remove", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("toupper", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamcreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamloadfromfile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamsavetofile", AST_FUNCTION_DECL, NULL);

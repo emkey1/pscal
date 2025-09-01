@@ -55,7 +55,7 @@ typedef struct SymbolTable_s HashTable;
 // --- Include globals.h AFTER defining Symbol and HashTable ---
 // This allows functions in symbol.c (prototyped below) to use macros
 // or externs from globals.h if necessary.
-#include "globals.h" // For SymbolEnvSnapshot typedef, EXIT_FAILURE_HANDLER etc.
+#include "Pascal/globals.h" // For SymbolEnvSnapshot typedef, EXIT_FAILURE_HANDLER etc.
 
 // --- Include ast.h if full AST definition is needed by prototypes below ---
 // Or if symbol.c needs it extensively.
@@ -70,6 +70,7 @@ Symbol *lookupLocalSymbol(const char *name);
 void updateSymbol(const char *name, Value val);
 Symbol *lookupSymbolIn(HashTable *table, const char *name);
 void insertGlobalSymbol(const char *name, VarType type, struct AST *type_def_ast); // Use struct AST
+void insertConstGlobalSymbol(const char *name, Value val);
 Symbol *insertLocalSymbol(const char *name, VarType type, struct AST *type_def_ast, bool is_variable_declaration); // Use struct AST
 
 // --- Local Environment Management Function Prototypes ---

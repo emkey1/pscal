@@ -8,7 +8,7 @@
 #include "core/utils.h"    // For freeValue, varTypeToString
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in OP_CALL_HOST cast)
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "core/version.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
@@ -81,7 +81,7 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
         Value* existing = &chunk->constants[i];
         if (existing->type == value->type) {
             if (existing->type == TYPE_INTEGER && existing->i_val == value->i_val) return i;
-            if (is_real_type(existing->type) && AS_REAL(*existing) == AS_REAL(*value)) return i;
+            if (isRealType(existing->type) && AS_REAL(*existing) == AS_REAL(*value)) return i;
             if (existing->type == TYPE_STRING && existing->s_val && value->s_val && strcmp(existing->s_val, value->s_val) == 0) return i;
             if (existing->type == TYPE_CHAR && existing->c_val == value->c_val) return i;
         }
@@ -233,6 +233,36 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
     }
 }
 
+// Utility helpers to print strings and characters with escape sequences so
+// they don't introduce newlines in the disassembly output.
+static void printEscapedString(const char* str) {
+    if (!str) {
+        printf("NULL_STR");
+        return;
+    }
+    for (const char* p = str; *p; p++) {
+        switch (*p) {
+            case '\n': printf("\\n"); break;
+            case '\r': printf("\\r"); break;
+            case '\t': printf("\\t"); break;
+            case '\\': printf("\\\\"); break;
+            case '\'': printf("\\'"); break;
+            default: putchar(*p); break;
+        }
+    }
+}
+
+static void printEscapedChar(char c) {
+    switch (c) {
+        case '\n': printf("\\n"); break;
+        case '\r': printf("\\r"); break;
+        case '\t': printf("\\t"); break;
+        case '\\': printf("\\\\"); break;
+        case '\'': printf("\\'"); break;
+        default: printf("%c", c); break;
+    }
+}
+
 // This is the function declared in bytecode.h and called by disassembleBytecodeChunk
 // It was already non-static in your provided bytecode.c
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable) {
@@ -263,8 +293,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 case TYPE_FLOAT:
                 case TYPE_DOUBLE:
                 case TYPE_LONG_DOUBLE: printf("%Lf", AS_REAL(constantValue)); break;
-                case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
-                case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
+                case TYPE_STRING:
+                    if (constantValue.s_val) {
+                        printEscapedString(constantValue.s_val);
+                    } else {
+                        printf("NULL_STR");
+                    }
+                    break;
+                case TYPE_CHAR:
+                    printEscapedChar(constantValue.c_val);
+                    break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
                 case TYPE_NIL:     printf("nil"); break;
                 default:           printf("Value type %s", varTypeToString(constantValue.type)); break;
@@ -286,8 +324,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 case TYPE_FLOAT:
                 case TYPE_DOUBLE:
                 case TYPE_LONG_DOUBLE: printf("%Lf", AS_REAL(constantValue)); break;
-                case TYPE_STRING:  printf("%s", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
-                case TYPE_CHAR:    printf("%c", constantValue.c_val); break;
+                case TYPE_STRING:
+                    if (constantValue.s_val) {
+                        printEscapedString(constantValue.s_val);
+                    } else {
+                        printf("NULL_STR");
+                    }
+                    break;
+                case TYPE_CHAR:
+                    printEscapedChar(constantValue.c_val);
+                    break;
                 case TYPE_BOOLEAN: printf("%s", constantValue.i_val ? "true" : "false"); break;
                 case TYPE_NIL:     printf("nil"); break;
                 default:           printf("Value type %s", varTypeToString(constantValue.type)); break;
@@ -654,6 +700,30 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printf("%-16s width:%d prec:%d\n", "OP_FORMAT_VALUE", width, (int8_t)precision);
             return offset + 3;
         }
+        case OP_THREAD_CREATE: {
+            uint16_t entry = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                       chunk->code[offset + 2]);
+            printf("%-16s %04d\n", "OP_THREAD_CREATE", entry);
+            return offset + 3;
+        }
+        case OP_THREAD_JOIN:
+            printf("OP_THREAD_JOIN\n");
+            return offset + 1;
+        case OP_MUTEX_CREATE:
+            printf("OP_MUTEX_CREATE\n");
+            return offset + 1;
+        case OP_RCMUTEX_CREATE:
+            printf("OP_RCMUTEX_CREATE\n");
+            return offset + 1;
+        case OP_MUTEX_LOCK:
+            printf("OP_MUTEX_LOCK\n");
+            return offset + 1;
+        case OP_MUTEX_UNLOCK:
+            printf("OP_MUTEX_UNLOCK\n");
+            return offset + 1;
+        case OP_MUTEX_DESTROY:
+            printf("OP_MUTEX_DESTROY\n");
+            return offset + 1;
         // NOTE: There is no OP_BREAK in your bytecode.h enum, so it cannot be disassembled.
         // The AST_BREAK node is handled by the compiler generating jump instructions.
 
@@ -696,15 +766,37 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
             printf("  %04d: ", i);
             Value constantValue = chunk->constants[i];
             switch(constantValue.type) {
-                case TYPE_INTEGER: printf("INT   %lld\n", constantValue.i_val); break;
+                case TYPE_INTEGER:
+                    printf("INT   %lld\n", constantValue.i_val);
+                    break;
                 case TYPE_FLOAT:
                 case TYPE_DOUBLE:
-                case TYPE_LONG_DOUBLE: printf("REAL  %Lf\n", AS_REAL(constantValue)); break;
-                case TYPE_STRING:  printf("STR   \"%s\"\n", constantValue.s_val ? constantValue.s_val : "NULL_STR"); break;
-                case TYPE_CHAR:    printf("CHAR  '%c'\n", constantValue.c_val); break;
-                case TYPE_BOOLEAN: printf("BOOL  %s\n", constantValue.i_val ? "true" : "false"); break;
-                case TYPE_NIL:     printf("NIL\n"); break;
-                default: printf("Value type %s\n", varTypeToString(constantValue.type)); break;
+                case TYPE_LONG_DOUBLE:
+                    printf("REAL  %Lf\n", AS_REAL(constantValue));
+                    break;
+                case TYPE_STRING:
+                    printf("STR   \"");
+                    if (constantValue.s_val) {
+                        printEscapedString(constantValue.s_val);
+                    } else {
+                        printf("NULL_STR");
+                    }
+                    printf("\"\n");
+                    break;
+                case TYPE_CHAR:
+                    printf("CHAR  '");
+                    printEscapedChar(constantValue.c_val);
+                    printf("'\n");
+                    break;
+                case TYPE_BOOLEAN:
+                    printf("BOOL  %s\n", constantValue.i_val ? "true" : "false");
+                    break;
+                case TYPE_NIL:
+                    printf("NIL\n");
+                    break;
+                default:
+                    printf("Value type %s\n", varTypeToString(constantValue.type));
+                    break;
             }
         }
         printf("\n");

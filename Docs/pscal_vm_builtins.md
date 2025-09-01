@@ -2,7 +2,7 @@
 
 This document lists the built-in procedures and functions provided by the Pscal
 VM. For instructions on adding your own routines, see
-[`extending_builtins.md`](extending_builtins.md).
+[`extended_builtins.md`](extended_builtins.md).
 
 ## General
 
@@ -26,7 +26,7 @@ VM. For instructions on adding your own routines, see
 | low | (a: Array or String) | Integer | Lowest index. |
 | high | (a: Array or String) | Integer | Highest index. |
 | succ | (x: Ordinal) | Ordinal | Successor of value. |
-| upcase | (ch: Char) | Char | Convert character to uppercase. |
+| upcase | (ch: Char or String) | Char | Convert character or first character of string to uppercase. Alias: `toupper`. |
 | pos | (sub: String or Char, s: String) | Integer | Position of substring. |
 | copy | (s: String or Char, index: Integer, count: Integer) | String | Copy substring. |
 | paramcount | () | Integer | Number of command line parameters. |
@@ -97,6 +97,18 @@ VM. For instructions on adding your own routines, see
 | mstreamfree | (ms: MStream) | void | Release memory stream. |
 | mstreambuffer | (ms: MStream) | String | Return contents as string. |
 
+## Threading and Synchronization
+
+| Name | Parameters | Returns | Description |
+| ---- | ---------- | ------- | ----------- |
+| spawn | (address: Integer) | Integer | Start a new thread at the given bytecode address and return its id. |
+| join | (tid: Integer) | void | Wait for the specified thread to finish. |
+| mutex | () | Integer | Create a standard mutex and return its identifier. |
+| rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
+| lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
+| unlock | (mid: Integer) | void | Release the specified mutex. |
+| destroy | (mid: Integer) | void | Destroy the specified mutex. |
+
 ## Math
 
 | Name | Parameters | Returns | Description |
@@ -138,23 +150,23 @@ Numeric builtins preserve integer types when all inputs are integral. In particu
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
-| dos_getenv / getenv | (name: String) | String | Get environment variable. |
+| dosGetenv / getenv | (name: String) | String | Get environment variable. |
 | getenvint | (name: String) | Integer | Get environment variable as int. |
-| dos_exec / exec | (command: String) | Integer | Execute shell command. |
-| dos_mkdir / mkdir | (path: String) | Integer | Create directory. |
-| dos_rmdir / rmdir | (path: String) | Integer | Remove directory. |
-| dos_findfirst / findfirst | (pattern: String, attr: Integer) | Integer | Begin directory search. |
-| dos_findnext / findnext | () | Integer | Continue directory search. |
-| dos_getdate / getdate | (var Year, Month, Day, Dow: Word) | void | Retrieve system date components. |
-| dos_gettime / gettime | (var Hour, Minute, Second, Sec100: Word) | void | Retrieve system time components. |
-| dos_getfattr / getfattr | (path: String) | Integer | Get file attributes. |
+| dosExec / exec | (command: String) | Integer | Execute shell command. |
+| dosMkdir / mkdir | (path: String) | Integer | Create directory. |
+| dosRmdir / rmdir | (path: String) | Integer | Remove directory. |
+| dosFindfirst / findfirst | (pattern: String, attr: Integer) | Integer | Begin directory search. |
+| dosFindnext / findnext | () | Integer | Continue directory search. |
+| dosGetdate / getdate | (var Year, Month, Day, Dow: Word) | void | Retrieve system date components. |
+| dosGettime / gettime | (var Hour, Minute, Second, Sec100: Word) | void | Retrieve system time components. |
+| dosGetfattr / getfattr | (path: String) | Integer | Get file attributes. |
 
 ## Networking
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
-| api_send | (data: String) | Integer | Send network packet. |
-| api_receive | () | String | Receive network packet. |
+| apiSend | (data: String) | Integer | Send network packet. |
+| apiReceive | () | String | Receive network packet. |
 
 ## SDL graphics and audio
 
@@ -222,7 +234,7 @@ end.
 ```c
 int main() {
   printf("Random: %d\n", random(100));
-  printf("Uppercase: %c\n", upcase('a'));
+  printf("Uppercase: %c %c\n", upcase('a'), toupper('b'));
   return 0;
 }
 ```

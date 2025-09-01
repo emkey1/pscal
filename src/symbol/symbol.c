@@ -6,7 +6,7 @@
 //
 #include "Pascal/lexer.h"
 #include "core/utils.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
@@ -328,6 +328,62 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     hashTableInsert(globalSymbols, new_symbol);
 
     // The symbol is now owned by the hash table structure.
+}
+
+// Insert a constant symbol into constGlobalSymbols.
+// Stores a copy of the provided Value and marks the symbol as const.
+void insertConstGlobalSymbol(const char *name, Value val) {
+    if (!name || name[0] == '\0') {
+        fprintf(stderr, "[ERROR] Attempted to insert const symbol with invalid name.\n");
+        return;
+    }
+    if (!constGlobalSymbols) {
+        fprintf(stderr, "Internal error: constGlobalSymbols hash table is NULL during insertConstGlobalSymbol.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    if (hashTableLookup(constGlobalSymbols, name)) {
+        return; // Already inserted
+    }
+
+    Symbol *new_symbol = malloc(sizeof(Symbol));
+    if (!new_symbol) {
+        fprintf(stderr, "Memory allocation error in insertConstGlobalSymbol (Symbol struct)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    new_symbol->name = strdup(name);
+    if (!new_symbol->name) {
+        free(new_symbol);
+        fprintf(stderr, "Memory allocation error (strdup name) in insertConstGlobalSymbol\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    toLowerString(new_symbol->name);
+
+    new_symbol->type = val.type;
+    new_symbol->is_alias = false;
+    new_symbol->is_const = true;
+    new_symbol->is_local_var = false;
+    new_symbol->is_inline = false;
+    new_symbol->next = NULL;
+    new_symbol->type_def = NULL;
+    new_symbol->enclosing = NULL;
+    new_symbol->real_symbol = NULL;
+    new_symbol->is_defined = false;
+    new_symbol->bytecode_address = 0;
+    new_symbol->arity = 0;
+    new_symbol->locals_count = 0;
+    new_symbol->slot_index = 0;
+    new_symbol->upvalue_count = 0;
+
+    new_symbol->value = malloc(sizeof(Value));
+    if (!new_symbol->value) {
+        free(new_symbol->name);
+        free(new_symbol);
+        fprintf(stderr, "Memory allocation error (malloc Value) in insertConstGlobalSymbol\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    *(new_symbol->value) = makeCopyOfValue(&val);
+
+    hashTableInsert(constGlobalSymbols, new_symbol);
 }
 
 
@@ -664,8 +720,8 @@ void updateSymbol(const char *name, Value val) {
         types_compatible = true; // Exact type match
     } else {
         // Handle specific allowed coercions and promotions.
-        if (is_real_type(sym->type) && (is_real_type(val.type) || is_intlike_type(val.type))) types_compatible = true;
-        else if (sym->type == TYPE_INTEGER && is_real_type(val.type)) { types_compatible = false; } // No implicit Real to Integer
+        if (isRealType(sym->type) && (isRealType(val.type) || isIntlikeType(val.type))) types_compatible = true;
+        else if (sym->type == TYPE_INTEGER && isRealType(val.type)) { types_compatible = false; } // No implicit Real to Integer
         else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
         else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
         else if (sym->type == TYPE_INTEGER && (val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN || val.type == TYPE_CHAR)) types_compatible = true;
@@ -720,24 +776,24 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_INTEGER:
             if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) SET_INT_VALUE(sym->value, val.i_val);
             else if (val.type == TYPE_CHAR) SET_INT_VALUE(sym->value, (long long)val.c_val);
-            else if (is_real_type(val.type)) SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
+            else if (isRealType(val.type)) SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
             break;
 
         case TYPE_REAL:
-            if (is_real_type(val.type) || is_intlike_type(val.type)) {
-                SET_REAL_VALUE(sym->value, as_ld(val));
+            if (isRealType(val.type) || isIntlikeType(val.type)) {
+                SET_REAL_VALUE(sym->value, asLd(val));
             }
             break;
 
         case TYPE_FLOAT:
-            if (is_real_type(val.type) || is_intlike_type(val.type)) {
-                SET_REAL_VALUE(sym->value, as_ld(val));
+            if (isRealType(val.type) || isIntlikeType(val.type)) {
+                SET_REAL_VALUE(sym->value, asLd(val));
             }
             break;
 
         case TYPE_LONG_DOUBLE:
-            if (is_real_type(val.type) || is_intlike_type(val.type)) {
-                SET_REAL_VALUE(sym->value, as_ld(val));
+            if (isRealType(val.type) || isIntlikeType(val.type)) {
+                SET_REAL_VALUE(sym->value, asLd(val));
             }
             break;
 

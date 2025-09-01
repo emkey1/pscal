@@ -12,7 +12,7 @@ Detailed descriptions of the Pascal and C-like front ends can be found in
 [`pscal_vm_overview.md`](pscal_vm_overview.md), and instructions for building
 custom front ends or extending VM builtins are in
 [`standalone_vm_frontends.md`](standalone_vm_frontends.md) and
-[`extending_builtins.md`](extending_builtins.md).
+[`extended_builtins.md`](extended_builtins.md).
 
 All frontends generate a compact bytecode stream that is executed by the VM. This virtual machine provides a rich set of built-in routines and offers optional integrations with **SDL2** for graphics and audio, and **libcurl** for networking. The system is designed to be easily extensible, allowing for the addition of new built-in functions.
 
@@ -39,7 +39,8 @@ The project follows a classic compiler and virtual machine design:
     * File I/O (`readln`, `writeln`, `fileexists`).
     * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).
     * String manipulation (`copy`, `pos`, `length`).
-    * System interaction (`getpid`, `dos_exec`).
+    * System interaction (`getpid`, `dosExec`).
+* **Multithreading**: Lightweight threads can be created with `spawn` and synchronized with `join` for concurrent execution within the VM.
 * **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified. Cached bytecode carries a version tag; programs can query `VMVersion` and `BytecodeVersion` to decide how to handle mismatches. Set `PSCAL_STRICT_VM=1` to have the VM abort when bytecode targets a newer VM.
   Example programs demonstrating these builtins are `Examples/Pascal/VMVersionDemo`
   and `Examples/clike/vm_version_demo`.

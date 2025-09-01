@@ -63,6 +63,18 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     return node;
 }
 
+AST *newThreadSpawn(AST *call) {
+    AST *node = newASTNode(AST_THREAD_SPAWN, NULL);
+    setLeft(node, call);
+    return node;
+}
+
+AST *newThreadJoin(AST *expr) {
+    AST *node = newASTNode(AST_THREAD_JOIN, NULL);
+    setLeft(node, expr);
+    return node;
+}
+
 #ifdef DEBUG
 #define MAX_DEBUG_DEPTH 50
 void debugAST(AST *node, int indent) {
@@ -729,7 +741,9 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "wherex")    == 0 ||
         strcasecmp(name, "wherey")    == 0 ||
         strcasecmp(name, "getmaxx")   == 0 ||
-        strcasecmp(name, "getmaxy")   == 0) {
+        strcasecmp(name, "getmaxy")   == 0 ||
+        strcasecmp(name, "mutex")     == 0 ||
+        strcasecmp(name, "rcmutex")   == 0) {
         return TYPE_INTEGER;
     }
 

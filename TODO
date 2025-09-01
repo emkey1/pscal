@@ -1,2 +1,36 @@
-o Support goto?
-o FormattingTestSuite should be more standard
+o Support goto? (no)
+---
+o Plan to add CreateThread/WaitForThread and @ procedure pointers
+Lexical support for @
+Extend the lexer to recognize @ as a token representing the address-of operator.
+Ensure it does not conflict with existing tokens.
+Parser and AST updates
+Modify the grammar to allow @Identifier as a primary expression that yields a pointer to a routine.
+Add an AST node for addr-of expressions and ensure semantic checks confirm the identifier refers to a procedure/function.
+Procedure-pointer type system
+Introduce procedure/function pointer types (e.g., PHandler = function(data: Pointer): Integer).
+Update type-checking logic so variables of these types can store and pass procedure addresses.
+Symbol table & semantic analysis
+Treat procedure declarations as first-class entities whose addresses can be taken.
+Enforce matching signatures when assigning or passing procedure pointers.
+Thread handle type
+Define a built-in Thread type holding a runtime thread ID or handle.
+Ensure thread handles can be stored in variables and passed around.
+Built-in thread functions
+Implement CreateThread(procPtr, argPtr) and WaitForThread(threadHandle) in the runtime VM.
+CreateThread spawns a thread executing the provided routine with the supplied data pointer and returns a Thread handle.
+WaitForThread blocks until the given handle completes.
+Code generation adjustments
+Emit bytecode or IR for addr-of expressions and procedure-pointer calls.
+Support passing a pointer argument to threads and returning a result if needed.
+Backward compatibility
+Keep existing spawn/join APIs functional, possibly by internally mapping them onto the new primitives or leaving them untouched.
+Testing
+Add unit tests for @ operator semantics, procedure pointer assignments, and calls.
+Write end-to-end tests demonstrating CreateThread/WaitForThread with data passing and synchronization.
+Verify existing spawn/join tests still pass.
+Documentation & examples
+Update language reference to describe procedure pointers, @, and new threading functions.
+Provide examples mirroring the sample SDLThreadedMandelbrot program to showcase usage.
+This staged approach introduces address-of and procedure pointers, then layers a richer thread API atop the existing runtime without disrupting current programs.
+---

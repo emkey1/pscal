@@ -13,7 +13,7 @@
 #include "core/cache.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 
 int gParamCount = 0;
@@ -23,6 +23,7 @@ int clike_warning_count = 0;
 
 static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
+    constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
 }
@@ -57,7 +58,7 @@ int main(void) {
 #ifdef SDL
         defines[define_count++] = "SDL_ENABLED";
 #endif
-        char *pre_src = clike_preprocess(src, defines, define_count);
+        char *pre_src = clikePreprocess(src, defines, define_count);
 
         ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
         ASTNodeClike *prog = parseProgramClike(&parser);
@@ -104,22 +105,23 @@ int main(void) {
         if (!verifyASTClikeLinks(prog, NULL)) {
             fprintf(stderr, "AST verification failed after parsing.\n");
             freeASTClike(prog);
-            clike_free_structs();
+            clikeFreeStructs();
             free(src);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
             return vmExitWithCleanup(EXIT_FAILURE);
         }
         initSymbolSystemClike();
-        clike_register_builtins();
+        clikeRegisterBuiltins();
         analyzeSemanticsClike(prog);
 
         if (!verifyASTClikeLinks(prog, NULL)) {
             fprintf(stderr, "AST verification failed after semantic analysis.\n");
             freeASTClike(prog);
-            clike_free_structs();
+            clikeFreeStructs();
             free(src);
             if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
@@ -130,26 +132,28 @@ int main(void) {
         if (!verifyASTClikeLinks(prog, NULL)) {
             fprintf(stderr, "AST verification failed after optimization.\n");
             freeASTClike(prog);
-            clike_free_structs();
+            clikeFreeStructs();
             free(src);
             if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
             return vmExitWithCleanup(EXIT_FAILURE);
         }
         if (clike_error_count == 0) {
-            BytecodeChunk chunk; clike_compile(prog, &chunk);
+            BytecodeChunk chunk; clikeCompile(prog, &chunk);
             VM vm; initVM(&vm);
-            interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+            interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
             freeBytecodeChunk(&chunk);
         }
         freeASTClike(prog);
-        clike_free_structs();
+        clikeFreeStructs();
         if (pre_src) free(pre_src);
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
         free(clike_imports); clike_imports = NULL; clike_import_count = 0;

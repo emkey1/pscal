@@ -21,6 +21,7 @@ Pscal implements a substantial subset of classic Pascal:
 * **Control flow** – `if`, `case`, `for`, `while`, `repeat…until`, and `break`.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
+* **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish; `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
 
 Example program:
 
@@ -71,7 +72,7 @@ Builtins are implemented in C and exposed to Pascal through a lookup table【F:s
 * **Files & streams** – `assign`, `reset`, `rewrite`, `close`, `eof`, memory stream helpers (`mstreamcreate`, `mstreamloadfromfile`, etc.).
 * **Random numbers** – `randomize`, `random`.
 * **System utilities** – `paramcount`, `paramstr`, `exit`, `ioresult`.
-* **DOS compatibility** – directory and environment calls (`dos_findfirst`, `dos_getenv`, ...).
+* **DOS compatibility** – directory and environment calls (`dosFindfirst`, `dosGetenv`, ...).
 
 Example:
 
@@ -127,11 +128,11 @@ ANSI terminal control compatible with Turbo Pascal’s CRT unit【F:lib/pascal/c
 ### Dos
 Provides DOS‑style file and environment operations by wrapping builtins【F:lib/pascal/dos.pl†L1-L66】.
 
-* `FindFirst`, `FindNext`
-* `GetFAttr`, `MkDir`, `RmDir`
-* `GetEnv`
-* `GetDate`, `GetTime`
-* `Exec`
+* `findFirst`, `findNext`
+* `getFAttr`, `mkDir`, `rmDir`
+* `getEnv`
+* `getDate`, `getTime`
+* `exec`
 
 ### MathLib
 Advanced mathematical routines【F:lib/pascal/mathlib.pl†L1-L136】.

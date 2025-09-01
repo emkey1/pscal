@@ -47,8 +47,10 @@ AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
 AST *term(Parser *parser);
-AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk); 
+AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk);
 AST *enumDeclaration(Parser *parser);
+AST *spawnStatement(Parser *parser);
+AST *joinStatement(Parser *parser);
 
 // Other stuff
 void errorParser(Parser *parser, const char *msg);

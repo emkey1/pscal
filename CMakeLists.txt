@@ -25,6 +25,9 @@ add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
+# Optionally build the debug "dascal" binary
+option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
+
 # Optionally enable SDL-based features
 option(SDL "Enable SDL-based graphics and audio" OFF)
 if(SDL)
@@ -130,6 +133,7 @@ if(APPLE AND PSCAL_USE_BREW_CURL)
 endif()
 
 find_package(CURL REQUIRED)
+find_package(Threads REQUIRED)
 if(TARGET CURL::libcurl)
     message(STATUS "CURL: using imported target CURL::libcurl")
 else()
@@ -139,7 +143,7 @@ endif()
 
 # ---- Source Files ----
 set(PSCAL_SOURCES
-    src/main.c src/globals.c
+    src/Pascal/main.c src/Pascal/globals.c
     src/core/types.c src/core/utils.c src/core/list.c
     src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
@@ -219,6 +223,7 @@ function(add_pscal_executable target_name)
     endif()
 
     list(APPEND TARGET_LINK_LIBS m) # Math library
+    list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
     # Specific options for dascal (ASan)
     if(${target_name} STREQUAL "dascal")
@@ -255,12 +260,14 @@ function(add_pscal_executable target_name)
 endfunction()
 
 add_pscal_executable(pascal)
-add_pscal_executable(dascal)
+if(BUILD_DASCAL)
+    add_pscal_executable(dascal)
+endif()
 # add_pscal_executable(hscal) // Lets not build this normally
 
 # Standalone VM binary
 set(PSCAL_VM_SOURCES ${PSCAL_SOURCES})
-list(REMOVE_ITEM PSCAL_VM_SOURCES src/main.c)
+list(REMOVE_ITEM PSCAL_VM_SOURCES src/Pascal/main.c)
 list(APPEND PSCAL_VM_SOURCES src/vm/vm_main.c)
 set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
 set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
@@ -278,7 +285,7 @@ set(CLIKE_SOURCES
     src/clike/codegen.c
     src/clike/opt.c
     src/clike/preproc.c
-    src/globals.c
+    src/Pascal/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
     src/compiler/bytecode.c
     src/vm/vm.c
@@ -302,9 +309,9 @@ endif()
 
 add_executable(clike ${CLIKE_SOURCES})
 if(TARGET CURL::libcurl)
-    target_link_libraries(clike PRIVATE CURL::libcurl m)
+    target_link_libraries(clike PRIVATE CURL::libcurl m Threads::Threads)
 else()
-    target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m)
+    target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
@@ -312,9 +319,9 @@ list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
 list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
 add_executable(clike-repl ${CLIKE_REPL_SOURCES})
 if(TARGET CURL::libcurl)
-    target_link_libraries(clike-repl PRIVATE CURL::libcurl m)
+    target_link_libraries(clike-repl PRIVATE CURL::libcurl m Threads::Threads)
 else()
-    target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m)
+    target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
 
 # When SDL support is enabled, clike needs the same SDL include paths,
@@ -375,8 +382,12 @@ add_subdirectory(Examples)
 
 # ---- optional install ----
 include(GNUInstallDirs)
-install(TARGETS pascal dascal pscalvm
+install(TARGETS pascal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(BUILD_DASCAL)
+    install(TARGETS dascal
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 
 add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)

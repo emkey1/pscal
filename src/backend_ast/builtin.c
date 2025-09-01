@@ -6,7 +6,7 @@
 #include "backend_ast/sdl.h"
 #include "backend_ast/audio.h"
 #endif
-#include "globals.h"                  // Assuming globals.h is directly in src/
+#include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 
@@ -28,8 +28,11 @@
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <stdio.h>   // For printf, fprintf
+#include <pthread.h>
 
-static DIR* dos_dir = NULL; // Used by dos_findfirst/findnext
+// Per-thread state to keep core builtins thread-safe
+static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
+static _Thread_local unsigned int rand_seed = 1;
 
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
@@ -38,8 +41,8 @@ static int getCursorPosition(int *row, int *col);
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
-    {"api_receive", vmBuiltinApiReceive},
-    {"api_send", vmBuiltinApiSend},
+    {"apiReceive", vmBuiltinApiReceive},
+    {"apiSend", vmBuiltinApiSend},
     {"append", vmBuiltinAppend},
     {"arccos", vmBuiltinArccos},
     {"arcsin", vmBuiltinArcsin},
@@ -85,15 +88,15 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"destroytexture", vmBuiltinDestroytexture},
 #endif
     {"dispose", vmBuiltinDispose},
-    {"dos_exec", vmBuiltinDosExec},
-    {"dos_findfirst", vmBuiltinDosFindfirst},
-    {"dos_findnext", vmBuiltinDosFindnext},
-    {"dos_getdate", vmBuiltinDosGetdate},
-    {"dos_getenv", vmBuiltinDosGetenv},
-    {"dos_getfattr", vmBuiltinDosGetfattr},
-    {"dos_gettime", vmBuiltinDosGettime},
-    {"dos_mkdir", vmBuiltinDosMkdir},
-    {"dos_rmdir", vmBuiltinDosRmdir},
+    {"dosExec", vmBuiltinDosExec},
+    {"dosFindfirst", vmBuiltinDosFindfirst},
+    {"dosFindnext", vmBuiltinDosFindnext},
+    {"dosGetdate", vmBuiltinDosGetdate},
+    {"dosGetenv", vmBuiltinDosGetenv},
+    {"dosGetfattr", vmBuiltinDosGetfattr},
+    {"dosGettime", vmBuiltinDosGettime},
+    {"dosMkdir", vmBuiltinDosMkdir},
+    {"dosRmdir", vmBuiltinDosRmdir},
 #ifdef SDL
     {"drawcircle", vmBuiltinDrawcircle}, // Moved
     {"drawline", vmBuiltinDrawline}, // Moved
@@ -241,7 +244,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"trunc", vmBuiltinTrunc},
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
- #ifdef SDL
+    {"toupper", vmBuiltinUpcase},
+#ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
@@ -261,16 +265,32 @@ static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vm
 /* Dynamic registry for user-supplied VM built-ins. */
 static VmBuiltinMapping *extra_vm_builtins = NULL;
 static size_t num_extra_vm_builtins = 0;
+static pthread_mutex_t builtin_registry_mutex;
+static pthread_once_t builtin_registry_once = PTHREAD_ONCE_INIT;
+
+static void initBuiltinRegistryMutex(void) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&builtin_registry_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
 
 void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
     if (!name || !handler) return;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
         sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
-    if (!new_table) return;
+    if (!new_table) {
+        pthread_mutex_unlock(&builtin_registry_mutex);
+        return;
+    }
     extra_vm_builtins = new_table;
     extra_vm_builtins[num_extra_vm_builtins].name = strdup(name);
     extra_vm_builtins[num_extra_vm_builtins].handler = handler;
     num_extra_vm_builtins++;
+    pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
 /* Weak hook that external modules can override to register additional
@@ -280,16 +300,23 @@ __attribute__((weak)) void registerExtendedBuiltins(void) {}
 // This function now comes AFTER the table and comparison function it uses.
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
     if (!name) return NULL;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; i++) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-            return vmBuiltinDispatchTable[i].handler;
+            VmBuiltinFn h = vmBuiltinDispatchTable[i].handler;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return h;
         }
     }
     for (size_t i = 0; i < num_extra_vm_builtins; i++) {
         if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            return extra_vm_builtins[i].handler;
+            VmBuiltinFn h = extra_vm_builtins[i].handler;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return h;
         }
     }
+    pthread_mutex_unlock(&builtin_registry_mutex);
     return NULL;
 }
 
@@ -302,7 +329,7 @@ Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
     if (IS_INTLIKE(arg)) {
         long long v = AS_INTEGER(arg);
         return makeInt(v * v);
-    } else if (is_real_type(arg.type)) {
+    } else if (isRealType(arg.type)) {
         long double v = AS_REAL(arg);
         return makeReal(v * v);
     }
@@ -361,7 +388,7 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
-        runtimeError(vm, "Upcase expects 1 char argument.");
+        runtimeError(vm, "Upcase expects 1 argument, got %d.", arg_count);
         return makeChar('\0');
     }
 
@@ -371,8 +398,27 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
         c = arg.c_val;
     } else if (IS_INTLIKE(arg)) {
         c = (int)AS_INTEGER(arg);
+    } else if (IS_REAL(arg)) {
+        /*
+         * Some frontends currently promote integer literals or variables to a
+         * floating‑point type when used as arguments.  Accept real numbers and
+         * coerce them back to an integer so `toupper` behaves correctly even if
+         * the value was widened to a real earlier in the pipeline.
+         */
+        c = (int)AS_REAL(arg);
+    } else if (arg.type == TYPE_STRING) {
+        const char* s = AS_STRING(arg);
+        if (s && s[0] != '\0') {
+            c = (unsigned char)s[0];
+        } else {
+            runtimeError(vm,
+                         "Upcase expects a non-empty string or char argument. Got an empty string.");
+            return makeChar('\0');
+        }
     } else {
-        runtimeError(vm, "Upcase expects 1 char argument.");
+        runtimeError(vm,
+                     "Upcase expects a char, int, or non-empty string argument. Got %s.",
+                     varTypeToString(arg.type));
         return makeChar('\0');
     }
     return makeChar(toupper((unsigned char)c));
@@ -502,7 +548,7 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !is_real_type(args[0].type)) {
+    if (arg_count != 1 || !isRealType(args[0].type)) {
         runtimeError(vm, "RealToStr expects 1 real argument.");
         return makeString("");
     }
@@ -567,10 +613,11 @@ Value vmBuiltinWherey(VM* vm, int arg_count, Value* args) {
 
 // --- Terminal helper for VM input routines ---
 static struct termios vm_orig_termios;
-static int vm_raw_mode = 0;
 static int vm_termios_saved = 0;
-static int vm_restore_registered = 0;
-static int vm_alt_screen_depth = 0; // Track nested alternate screen buffers
+static pthread_mutex_t vm_term_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static _Thread_local int vm_raw_mode = 0;
+static _Thread_local int vm_alt_screen_depth = 0; // Track nested alternate screen buffers
 
 typedef struct {
     char fg[32];
@@ -579,21 +626,38 @@ typedef struct {
 } VmColorState;
 
 #define VM_COLOR_STACK_MAX 16
-static VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
-static int vm_color_stack_depth = 0;
+static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
+static _Thread_local int vm_color_stack_depth = 0;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
+static void vmRegisterRestoreHandlers(void);
 static void vmPushColorState(void);
 static void vmPopColorState(void);
 static void vmRestoreColorState(void);
 static int vmQueryColor(const char *query, char *dest, size_t dest_size);
+static void vmAtExitCleanup(void);
+
+static pthread_key_t vm_thread_cleanup_key;
+static pthread_once_t vm_thread_cleanup_key_once = PTHREAD_ONCE_INIT;
+static pthread_once_t vm_restore_once = PTHREAD_ONCE_INIT;
+
+static void vmThreadCleanup(void *unused) {
+    (void)unused;
+    vmAtExitCleanup();
+}
+
+static void vmCreateThreadKey(void) {
+    pthread_key_create(&vm_thread_cleanup_key, vmThreadCleanup);
+}
 
 static void vmRestoreTerminal(void) {
+    pthread_mutex_lock(&vm_term_mutex);
     if (vm_termios_saved && vm_raw_mode) {
         tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
         vm_raw_mode = 0;
     }
+    pthread_mutex_unlock(&vm_term_mutex);
 }
 
 // Query terminal for current color (OSC 10/11) and store result in dest
@@ -714,25 +778,32 @@ static void vmSignalHandler(int signum) {
     _exit(128 + signum);
 }
 
+static void vmRegisterRestoreHandlers(void) {
+    atexit(vmAtExitCleanup);
+    struct sigaction sa;
+    sa.sa_handler = vmSignalHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGQUIT, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+}
+
 static void vmSetupTermHandlers(void) {
+    pthread_once(&vm_thread_cleanup_key_once, vmCreateThreadKey);
+    pthread_setspecific(vm_thread_cleanup_key, (void *)1);
+
+    pthread_mutex_lock(&vm_term_mutex);
     if (!vm_termios_saved) {
         if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
             vm_termios_saved = 1;
         }
     }
-    if (!vm_restore_registered) {
-        atexit(vmAtExitCleanup);
-        struct sigaction sa;
-        sa.sa_handler = vmSignalHandler;
-        sigemptyset(&sa.sa_mask);
-        sa.sa_flags = 0;
-        sigaction(SIGINT, &sa, NULL);
-        sigaction(SIGTERM, &sa, NULL);
-        sigaction(SIGQUIT, &sa, NULL);
-        sigaction(SIGABRT, &sa, NULL);
-        sigaction(SIGSEGV, &sa, NULL);
-        vm_restore_registered = 1;
-    }
+    pthread_mutex_unlock(&vm_term_mutex);
+
+    pthread_once(&vm_restore_once, vmRegisterRestoreHandlers);
 }
 
 void vmInitTerminalState(void) {
@@ -778,8 +849,11 @@ int vmExitWithCleanup(int status) {
 
 static void vmEnableRawMode(void) {
     vmSetupTermHandlers();
-    if (vm_raw_mode)
+    pthread_mutex_lock(&vm_term_mutex);
+    if (vm_raw_mode) {
+        pthread_mutex_unlock(&vm_term_mutex);
         return;
+    }
 
     struct termios raw = vm_orig_termios;
     raw.c_lflag &= ~(ICANON | ECHO);
@@ -789,6 +863,7 @@ static void vmEnableRawMode(void) {
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
     }
+    pthread_mutex_unlock(&vm_term_mutex);
 }
 
 // Restore the terminal to a canonical, line-buffered state suitable for
@@ -1508,13 +1583,13 @@ Value vmBuiltinTrunc(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "trunc expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
     if (IS_INTLIKE(arg)) return makeInt(AS_INTEGER(arg));
-    if (is_real_type(arg.type)) return makeInt((long long)AS_REAL(arg));
+    if (isRealType(arg.type)) return makeInt((long long)AS_REAL(arg));
     runtimeError(vm, "trunc expects a numeric argument.");
     return makeInt(0);
 }
 
 static inline bool isOrdinalDelta(const Value* v) {
-    return is_intlike_type(v->type) || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
+    return isIntlikeType(v->type) || v->type == TYPE_CHAR /* || v->type == TYPE_BOOLEAN */;
 }
 
 static inline long long coerceDeltaToI64(const Value* v) {
@@ -2382,18 +2457,18 @@ Value vmBuiltinIoresult(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinRandomize(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "Randomize requires 0 arguments."); return makeVoid(); }
-    srand((unsigned int)time(NULL));
+    rand_seed = (unsigned int)time(NULL);
     return makeVoid();
 }
 
 Value vmBuiltinRandom(VM* vm, int arg_count, Value* args) {
     if (arg_count == 0) {
-        return makeReal((double)rand() / ((double)RAND_MAX + 1.0));
+        return makeReal((double)rand_r(&rand_seed) / ((double)RAND_MAX + 1.0));
     }
     if (arg_count == 1 && IS_INTLIKE(args[0])) {
         long long n = AS_INTEGER(args[0]);
         if (n <= 0) { runtimeError(vm, "Random argument must be > 0."); return makeInt(0); }
-        return makeInt(rand() % n);
+        return makeInt(rand_r(&rand_seed) % n);
     }
     runtimeError(vm, "Random requires 0 arguments, or 1 integer argument.");
     return makeVoid();
@@ -2403,7 +2478,7 @@ Value vmBuiltinRandom(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGetenv(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_getenv expects 1 string argument.");
+        runtimeError(vm, "dosGetenv expects 1 string argument.");
         return makeString("");
     }
     const char* val = getenv(AS_STRING(args[0]));
@@ -2425,7 +2500,7 @@ Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinGetenvint(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING ||
         !IS_INTLIKE(args[1])) {
-        runtimeError(vm, "GetEnvInt expects (string, integer).");
+        runtimeError(vm, "getEnvInt expects (string, integer).");
         return makeInt(0);
     }
     const char* name = AS_STRING(args[0]);
@@ -2496,7 +2571,7 @@ Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
-        runtimeError(vm, "dos_exec expects 2 string arguments.");
+        runtimeError(vm, "dosExec expects 2 string arguments.");
         return makeInt(-1);
     }
     const char* path = AS_STRING(args[0]);
@@ -2504,7 +2579,7 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     size_t len = strlen(path) + strlen(cmdline) + 2;
     char* cmd = malloc(len);
     if (!cmd) {
-        runtimeError(vm, "dos_exec memory allocation failed.");
+        runtimeError(vm, "dosExec memory allocation failed.");
         return makeInt(-1);
     }
     snprintf(cmd, len, "%s %s", path, cmdline);
@@ -2515,7 +2590,7 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_mkdir expects 1 string argument.");
+        runtimeError(vm, "dosMkdir expects 1 string argument.");
         return makeInt(errno);
     }
     int rc = mkdir(AS_STRING(args[0]), 0777);
@@ -2524,7 +2599,7 @@ Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_rmdir expects 1 string argument.");
+        runtimeError(vm, "dosRmdir expects 1 string argument.");
         return makeInt(errno);
     }
     int rc = rmdir(AS_STRING(args[0]));
@@ -2533,7 +2608,7 @@ Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosFindfirst(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_findfirst expects 1 string argument.");
+        runtimeError(vm, "dosFindfirst expects 1 string argument.");
         return makeString("");
     }
     if (dos_dir) { closedir(dos_dir); dos_dir = NULL; }
@@ -2551,7 +2626,7 @@ Value vmBuiltinDosFindfirst(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosFindnext(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
-        runtimeError(vm, "dos_findnext expects 0 arguments.");
+        runtimeError(vm, "dosFindnext expects 0 arguments.");
         return makeString("");
     }
     if (!dos_dir) return makeString("");
@@ -2567,7 +2642,7 @@ Value vmBuiltinDosFindnext(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGetfattr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dos_getfattr expects 1 string argument.");
+        runtimeError(vm, "dosGetfattr expects 1 string argument.");
         return makeInt(0);
     }
     struct stat st;
@@ -2582,7 +2657,7 @@ Value vmBuiltinDosGetfattr(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) {
-        runtimeError(vm, "dos_getdate expects 4 var arguments.");
+        runtimeError(vm, "dosGetdate expects 4 var arguments.");
         return makeVoid();
     }
     time_t t = time(NULL);
@@ -2608,7 +2683,7 @@ Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinDosGettime(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) {
-        runtimeError(vm, "dos_gettime expects 4 var arguments.");
+        runtimeError(vm, "dosGettime expects 4 var arguments.");
         return makeVoid();
     }
     struct timeval tv;
@@ -2839,7 +2914,7 @@ Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     if (arg.type == TYPE_CHAR) {
         return makeReal((double)arg.c_val);
     }
-    if (is_real_type(arg.type)) {
+    if (isRealType(arg.type)) {
         return makeReal(AS_REAL(arg));
     }
     runtimeError(vm, "Real() argument must be an Integer, Ordinal, or Real type. Got %s.", varTypeToString(arg.type));
@@ -2882,7 +2957,7 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
         default:
             if (IS_INTLIKE(val)) {
                 snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
-            } else if (is_real_type(val.type)) {
+            } else if (isRealType(val.type)) {
                 snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
             } else {
                 runtimeError(vm, "Str expects a numeric or char argument.");
@@ -2930,14 +3005,14 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
 Value vmBuiltinAbs(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
     if (IS_INTLIKE(args[0])) return makeInt(llabs(AS_INTEGER(args[0])));
-    if (is_real_type(args[0].type)) return makeReal(fabsl(AS_REAL(args[0])));
+    if (isRealType(args[0].type)) return makeReal(fabsl(AS_REAL(args[0])));
     runtimeError(vm, "abs expects a numeric argument.");
     return makeInt(0);
 }
 
 Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "Round expects 1 argument."); return makeInt(0); }
-    if (is_real_type(args[0].type)) return makeInt((long long)llround(AS_REAL(args[0])));
+    if (isRealType(args[0].type)) return makeInt((long long)llround(AS_REAL(args[0])));
     if (IS_INTLIKE(args[0])) return makeInt(AS_INTEGER(args[0]));
     runtimeError(vm, "Round expects a numeric argument.");
     return makeInt(0);
@@ -2968,16 +3043,22 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
 
 int getBuiltinIDForCompiler(const char *name) {
     if (!name) return -1;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; ++i) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+            pthread_mutex_unlock(&builtin_registry_mutex);
             return (int)i;
         }
     }
     for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
         if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            return (int)(num_vm_builtins + i);
+            int id = (int)(num_vm_builtins + i);
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return id;
         }
     }
+    pthread_mutex_unlock(&builtin_registry_mutex);
     return -1;
 }
 
@@ -2991,18 +3072,25 @@ static int builtin_registry_count = 0;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (int i = 0; i < builtin_registry_count; ++i) {
         if (strcasecmp(name, builtin_registry[i].name) == 0) {
             builtin_registry[i].type = (declType == AST_FUNCTION_DECL) ?
                 BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
+            pthread_mutex_unlock(&builtin_registry_mutex);
             return;
         }
     }
-    if (builtin_registry_count >= 256) return;
+    if (builtin_registry_count >= 256) {
+        pthread_mutex_unlock(&builtin_registry_mutex);
+        return;
+    }
     builtin_registry[builtin_registry_count].name = strdup(name);
     builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?
         BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
     builtin_registry_count++;
+    pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
 int isBuiltin(const char *name) {
@@ -3010,15 +3098,22 @@ int isBuiltin(const char *name) {
 }
 
 BuiltinRoutineType getBuiltinType(const char *name) {
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     for (int i = 0; i < builtin_registry_count; ++i) {
         if (strcasecmp(name, builtin_registry[i].name) == 0) {
-            return builtin_registry[i].type;
+            BuiltinRoutineType t = builtin_registry[i].type;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return t;
         }
     }
+    pthread_mutex_unlock(&builtin_registry_mutex);
     return BUILTIN_TYPE_NONE;
 }
 
 void registerAllBuiltins(void) {
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
     /* Graphics stubs (usable even without SDL) */
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
@@ -3069,8 +3164,8 @@ void registerAllBuiltins(void) {
 
     /* General built-in functions and procedures */
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("api_receive", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("api_send", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
@@ -3091,27 +3186,27 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("DelLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dos_exec", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_findfirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_findnext", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getenv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getfattr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_mkdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_rmdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dos_getdate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dos_gettime", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dosExec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosFindfirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosFindnext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosGetenv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosGetfattr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosMkdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosRmdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("dosGetdate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("dosGettime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Exec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("exec", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("FindFirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("FindNext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("findFirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("findNext", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Floor", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetDate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetEnv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetEnvInt", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetFAttr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetTime", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("getDate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("getEnv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("getEnvInt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("getFAttr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("getTime", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
@@ -3129,7 +3224,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Max", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Min", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("MkDir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mkDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("MStreamFree", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
@@ -3155,7 +3250,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RmDir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("rmDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SaveCursor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);
@@ -3198,9 +3293,15 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mutex", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("rcmutex", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("lock", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("unlock", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("destroy", AST_PROCEDURE_DECL, NULL);
 
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
+    pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
 

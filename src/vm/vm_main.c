@@ -2,7 +2,7 @@
 #include "core/utils.h"
 #include "core/list.h"
 #include "vm/vm.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "symbol/symbol.h"
 #include "backend_ast/builtin.h"
 #include <stdio.h>
@@ -23,6 +23,12 @@ static void initSymbolSystem(void) {
         EXIT_FAILURE_HANDLER();
     }
 
+    constGlobalSymbols = createHashTable();
+    if (!constGlobalSymbols) {
+        fprintf(stderr, "FATAL: Failed to create constant symbol hash table.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
     procedure_table = createHashTable();
     if (!procedure_table) {
         fprintf(stderr, "FATAL: Failed to create procedure hash table.\n");
@@ -30,7 +36,7 @@ static void initSymbolSystem(void) {
     }
     current_procedure_table = procedure_table;
 #ifdef SDL
-    InitializeTextureSystem();
+    initializeTextureSystem();
 #endif
 }
 
@@ -57,10 +63,11 @@ int main(int argc, char* argv[]) {
 
     VM vm;
     initVM(&vm);
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     if (globalSymbols) freeHashTable(globalSymbols);
+    if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
 
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);

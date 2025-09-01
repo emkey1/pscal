@@ -47,23 +47,26 @@ end;
 
 procedure DemoDateTime;
 begin
-  GetDate(year, month, day, dow);
-  GetTime(hour, minute, second, sec100);
+  getDate(year, month, day, dow);
+  getTime(hour, minute, second, sec100);
   writeln('Today is ', year, '-', month, '-', day, ' (dow=', dow, ')');
   writeln('Current time: ', hour, ':', minute, ':', second);
-  writeln('HOME env: ', GetEnv('HOME'));
+  writeln('HOME env: ', getEnv('HOME'));
 end;
 
 procedure DemoDirectory;
 begin
-  srName := FindFirst('./');
+  srName := findFirst('./');
   while srName <> '' do
   begin
-    writeln(srName, '  Attr=', GetFAttr(srName));
-    srName := FindNext;
+    writeln(srName, '  Attr=', getFAttr(srName));
+    srName := findNext;
   end;
 end;
 
+{ This routine intentionally shares its name with the VM's builtin
+  toupper. The compiler will warn that the user-defined version
+  overrides the builtin, and the user-defined body will be used. }
 function ToUpper(s: string): string;
 var
   res: string;

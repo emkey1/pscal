@@ -35,7 +35,9 @@ typedef enum {
     TCAST_DEREF,
     TCAST_SIZEOF,
     TCAST_CALL,
-    TCAST_STRUCT_DECL
+    TCAST_STRUCT_DECL,
+    TCAST_THREAD_SPAWN,
+    TCAST_THREAD_JOIN
 } ASTNodeTypeClike;
 
 typedef struct ASTNodeClike {
@@ -66,5 +68,9 @@ void setThirdClike(ASTNodeClike *parent, ASTNodeClike *child);
 bool verifyASTClikeLinks(ASTNodeClike *node, ASTNodeClike *expectedParent);
 void freeASTClike(ASTNodeClike *node);
 void dumpASTClikeJSON(ASTNodeClike *node, FILE *out);
+
+// Threading helpers
+ASTNodeClike *newThreadSpawnClike(ASTNodeClike *call);
+ASTNodeClike *newThreadJoinClike(ASTNodeClike *expr);
 
 #endif

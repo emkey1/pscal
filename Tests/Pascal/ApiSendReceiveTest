@@ -1,4 +1,4 @@
-program ApiSendReceiveTest;
+program apiSendReceiveTest;
 
 var
   ms: mstream;
@@ -7,9 +7,16 @@ var
   cwd: string;
 begin
   cwd := getenv('PWD');
-  url := 'file://' + cwd + '/Pascal/ApiSendReceiveTest.data';
-  ms := api_send(url, '');
-  response := api_receive(ms);
+  { Determine the correct path to the data file whether the test is
+    executed from the Tests directory or the Pascal subdirectory }
+  { The data file is named "ApiSendReceiveTest.data" (note the capital A).
+    Support running either from the Tests directory or its Pascal subdirectory. }
+  if fileexists(cwd + '/ApiSendReceiveTest.data') then
+    url := 'file://' + cwd + '/ApiSendReceiveTest.data'
+  else
+    url := 'file://' + cwd + '/Pascal/ApiSendReceiveTest.data';
+  ms := apiSend(url, '');
+  response := apiReceive(ms);
   if pos('Example Domain', response) = 0 then
   begin
     writeln('Unexpected API response');

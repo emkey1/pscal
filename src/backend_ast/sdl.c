@@ -16,7 +16,7 @@
 #include "vm/vm.h"
 
 #include "sdl.h" // This header includes SDL/SDL_ttf headers
-#include "globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
+#include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 
 // SDL Global Variable Definitions
 SDL_Window* gSdlWindow = NULL;
@@ -33,7 +33,7 @@ int gSdlTextureHeights[MAX_SDL_TEXTURES];
 bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
-void InitializeTextureSystem(void) {
+void initializeTextureSystem(void) {
     for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
         gSdlTextures[i] = NULL;
         gSdlTextureWidths[i] = 0;
@@ -51,9 +51,9 @@ int findFreeTextureID(void) {
     return -1; // No free slots
 }
 
-void SdlCleanupAtExit(void) {
+void sdlCleanupAtExit(void) {
     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] Running SdlCleanupAtExit (Final Program Exit Cleanup)...\n");
+    fprintf(stderr, "[DEBUG SDL] Running sdlCleanupAtExit (Final Program Exit Cleanup)...\n");
     #endif
 
     // --- Clean up SDL_ttf resources ---
@@ -61,14 +61,14 @@ void SdlCleanupAtExit(void) {
         TTF_CloseFont(gSdlFont);
         gSdlFont = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_CloseFont successful.\n");
+        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: TTF_CloseFont successful.\n");
         #endif
     }
     if (gSdlTtfInitialized) {
         TTF_Quit();
         gSdlTtfInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: TTF_Quit successful.\n");
+        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: TTF_Quit successful.\n");
         #endif
     }
 
@@ -77,7 +77,7 @@ void SdlCleanupAtExit(void) {
         IMG_Quit();
         gSdlImageInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: IMG_Quit successful.\n");
+        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: IMG_Quit successful.\n");
         #endif
     }
     // --- END NEW SECTION ---
@@ -88,7 +88,7 @@ void SdlCleanupAtExit(void) {
         if (gLoadedSounds[i] != NULL) {
             Mix_FreeChunk(gLoadedSounds[i]);
             gLoadedSounds[i] = NULL;
-            DEBUG_PRINT("[DEBUG AUDIO] SdlCleanupAtExit: Auto-freed sound chunk at index %d.\n", i);
+            DEBUG_PRINT("[DEBUG AUDIO] sdlCleanupAtExit: Auto-freed sound chunk at index %d.\n", i);
         }
     }
     int open_freq, open_channels;
@@ -96,16 +96,16 @@ void SdlCleanupAtExit(void) {
     if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) {
         Mix_CloseAudio();
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio successful.\n");
+        fprintf(stderr, "[DEBUG AUDIO] sdlCleanupAtExit: Mix_CloseAudio successful.\n");
         #endif
     } else {
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
+        fprintf(stderr, "[DEBUG AUDIO] sdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
         #endif
     }
     Mix_Quit();
     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG AUDIO] SdlCleanupAtExit: Mix_Quit successful.\n");
+    fprintf(stderr, "[DEBUG AUDIO] sdlCleanupAtExit: Mix_Quit successful.\n");
     #endif
     gSoundSystemInitialized = false;
 
@@ -123,26 +123,26 @@ void SdlCleanupAtExit(void) {
         SDL_DestroyRenderer(gSdlRenderer);
         gSdlRenderer = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
+        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
         #endif
     }
     if (gSdlWindow) {
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_DestroyWindow successful.\n");
+        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_DestroyWindow successful.\n");
         #endif
     }
     if (gSdlInitialized) {
         SDL_Quit();
         gSdlInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit: SDL_Quit successful.\n");
+        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_Quit successful.\n");
         #endif
     }
 
     #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] SdlCleanupAtExit finished.\n");
+    fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit finished.\n");
     #endif
 }
 
@@ -191,7 +191,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    InitializeTextureSystem();
+    initializeTextureSystem();
     
     SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(gSdlRenderer);
@@ -238,7 +238,7 @@ Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
     Value idVal = args[0];
     Value pixelDataVal = args[1];
 
-    if (!is_intlike_type(idVal.type) || pixelDataVal.type != TYPE_ARRAY) {
+    if (!isIntlikeType(idVal.type) || pixelDataVal.type != TYPE_ARRAY) {
         runtimeError(vm, "UpdateTexture argument type mismatch.");
         return makeVoid();
     }
@@ -488,7 +488,7 @@ Value vmBuiltinInittextsystem(VM* vm, int arg_count, Value* args) {
     Value fontNameVal = args[0];
     Value fontSizeVal = args[1];
 
-    if (fontNameVal.type != TYPE_STRING || !is_intlike_type(fontSizeVal.type)) {
+    if (fontNameVal.type != TYPE_STRING || !isIntlikeType(fontSizeVal.type)) {
         runtimeError(vm, "InitTextSystem argument type mismatch. Expected (String, Integer).");
         return makeVoid(); // Don't free args, they are on the VM stack
     }
@@ -641,8 +641,8 @@ Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
         FieldValue* fieldX = recordValue.record_val;
         FieldValue* fieldY = fieldX ? fieldX->next : NULL;
 
-        if (fieldX && strcasecmp(fieldX->name, "x") == 0 && is_intlike_type(fieldX->value.type) &&
-            fieldY && strcasecmp(fieldY->name, "y") == 0 && is_intlike_type(fieldY->value.type)) {
+        if (fieldX && strcasecmp(fieldX->name, "x") == 0 && isIntlikeType(fieldX->value.type) &&
+            fieldY && strcasecmp(fieldY->name, "y") == 0 && isIntlikeType(fieldY->value.type)) {
             sdlPoints[i].x = (int)AS_INTEGER(fieldX->value);
             sdlPoints[i].y = (int)AS_INTEGER(fieldY->value);
         } else { runtimeError(vm, "PointRecord does not have correct X,Y integer fields."); free(sdlPoints); return makeVoid(); }
@@ -805,7 +805,7 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
     if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2]) ||
         !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4]) || !IS_INTLIKE(args[5]) ||
         !IS_INTLIKE(args[6]) || !IS_INTLIKE(args[7]) || !IS_INTLIKE(args[8]) ||
-        !is_real_type(args[9].type) || !IS_INTLIKE(args[10]) || !IS_INTLIKE(args[11]) ||
+        !isRealType(args[9].type) || !IS_INTLIKE(args[10]) || !IS_INTLIKE(args[11]) ||
         !IS_INTLIKE(args[12])) {
         fprintf(stderr, "Runtime error: RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).\n");
         return makeVoid();
@@ -964,7 +964,7 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
     int centerX, centerY, radius;
     if (IS_INTLIKE(args[0])) {
         centerX = (int)AS_INTEGER(args[0]);
-    } else if (is_real_type(args[0].type)) {
+    } else if (isRealType(args[0].type)) {
         centerX = (int)AS_REAL(args[0]);
     } else {
         runtimeError(vm, "FillCircle argument 1 must be numeric.");
@@ -973,7 +973,7 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
 
     if (IS_INTLIKE(args[1])) {
         centerY = (int)AS_INTEGER(args[1]);
-    } else if (is_real_type(args[1].type)) {
+    } else if (isRealType(args[1].type)) {
         centerY = (int)AS_REAL(args[1]);
     } else {
         runtimeError(vm, "FillCircle argument 2 must be numeric.");
@@ -982,7 +982,7 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
 
     if (IS_INTLIKE(args[2])) {
         radius = (int)AS_INTEGER(args[2]);
-    } else if (is_real_type(args[2].type)) {
+    } else if (isRealType(args[2].type)) {
         radius = (int)AS_REAL(args[2]);
     } else {
         runtimeError(vm, "FillCircle argument 3 must be numeric.");

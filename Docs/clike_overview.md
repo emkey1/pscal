@@ -18,7 +18,8 @@ Pscal virtual machine.
 - **Concatenation with `+`** – The `+` operator joins strings, e.g.
   `buffer = mstreambuffer(ms) + "\n";`.
 - **Standard string helpers** – Built-ins such as `strlen`, `copy` and
-  `upcase` operate on `str` values.
+  `upcase` (also available as `toupper`) aid string handling; `upcase`
+  converts a single character to uppercase.
 - **Dynamic allocation** – Use `new(&node);` to allocate structures;
   fields are accessed with the usual `->` syntax.
 
@@ -36,6 +37,7 @@ to the VM:
   parameters allow pass‑by‑reference semantics.
 - **Structs and pointers** – `struct` aggregates fields. `new(&node)` allocates
   dynamic storage and `->` dereferences pointer fields.
+- **Threading and Synchronization** – `spawn` launches a parameterless function in a new thread and returns its id; `join` waits for a thread to complete; `mutex`/`rcmutex` create standard or recursive mutexes and return ids, and `lock`/`unlock`/`destroy` manage critical sections and mutex lifetime.
 
 ## Example: Sorting a String
 

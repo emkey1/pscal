@@ -1,7 +1,7 @@
 // src/backend_ast/audio.c
 
 #include "audio.h"
-#include "globals.h" // For EXIT_FAILURE_HANDLER
+#include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
 #include "utils.h" // For EXIT_FAILURE_HANDLER
 #include <stdio.h>
 #include <string.h> // For strdup
@@ -229,7 +229,7 @@ void audioQuitSystem(void) {
     DEBUG_PRINT("[DEBUG AUDIO] All user-loaded sound chunks freed by audioQuitSystem.\n");
 
     // Close the audio device. This makes sense here as the sound system is being "quit" from Pscal's perspective.
-    // SdlCleanupAtExit will also call it, but Mix_CloseAudio can be called multiple times, though only first has effect.
+    // sdlCleanupAtExit will also call it, but Mix_CloseAudio can be called multiple times, though only first has effect.
     // For safety, let's only close if it's known to be open.
     // SDL_WasInit(SDL_INIT_AUDIO) can check if the subsystem was ever inited.
     // Mix_QuerySpec can check if audio is open.
@@ -243,7 +243,7 @@ void audioQuitSystem(void) {
     }
 
 
-    // DO NOT CALL Mix_Quit() here. Let SdlCleanupAtExit handle the final Mix_Quit().
+    // DO NOT CALL Mix_Quit() here. Let sdlCleanupAtExit handle the final Mix_Quit().
     // Mix_Quit(); // <<< REMOVE OR COMMENT OUT
 
     gSoundSystemInitialized = false; // Mark as no longer initialized by Pscal logic

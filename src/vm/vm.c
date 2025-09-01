@@ -4,13 +4,16 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h> // For bool, true, false
+#include <pthread.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
 #include "core/types.h"
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "Pascal/ast.h"
@@ -18,7 +21,6 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
-#include "backend_ast/audio.h"
 
 #define MAX_WRITELN_ARGS_VM 32
 
@@ -30,6 +32,181 @@
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
+}
+
+// --- Threading Helpers ---
+typedef struct {
+    Thread* thread;
+    uint16_t entry;
+} ThreadStartArgs;
+
+// Forward declarations for helpers used by threadStart.
+static void push(VM* vm, Value value);
+static Symbol* findProcedureByAddress(HashTable* table, uint16_t address);
+
+static void* threadStart(void* arg) {
+    ThreadStartArgs* args = (ThreadStartArgs*)arg;
+    Thread* thread = args->thread;
+    VM* vm = thread->vm;
+    uint16_t entry = args->entry;
+    free(args);
+
+    Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, entry);
+    if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+
+    CallFrame* frame = &vm->frames[vm->frameCount++];
+    frame->return_address = NULL;
+    frame->slots = vm->stack;
+    frame->function_symbol = proc_symbol;
+    frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
+    frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
+    frame->upvalues = NULL;
+
+    if (proc_symbol && proc_symbol->upvalue_count > 0) {
+        frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
+        if (frame->upvalues) {
+            for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                frame->upvalues[i] = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
+        push(vm, makeNil());
+    }
+
+    interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
+    thread->active = false;
+    return NULL;
+}
+
+static int createThread(VM* vm, uint16_t entry) {
+    int id = -1;
+    for (int i = 1; i < VM_MAX_THREADS; i++) {
+        if (!vm->threads[i].active && vm->threads[i].vm == NULL) {
+            id = i;
+            break;
+        }
+    }
+    if (id == -1) return -1;
+
+    Thread* t = &vm->threads[id];
+    t->vm = malloc(sizeof(VM));
+    if (!t->vm) return -1;
+    initVM(t->vm);
+    t->vm->vmGlobalSymbols = vm->vmGlobalSymbols;
+    t->vm->vmConstGlobalSymbols = vm->vmConstGlobalSymbols;
+    t->vm->procedureTable = vm->procedureTable;
+    memcpy(t->vm->host_functions, vm->host_functions, sizeof(vm->host_functions));
+    t->vm->chunk = vm->chunk;
+    t->vm->mutexOwner = vm->mutexOwner ? vm->mutexOwner : vm;
+    t->vm->mutexCount = t->vm->mutexOwner->mutexCount;
+
+    ThreadStartArgs* args = malloc(sizeof(ThreadStartArgs));
+    if (!args) {
+        free(t->vm);
+        t->vm = NULL;
+        return -1;
+    }
+    args->thread = t;
+    args->entry = entry;
+    t->active = true;
+    if (pthread_create(&t->handle, NULL, threadStart, args) != 0) {
+        free(args);
+        free(t->vm);
+        t->vm = NULL;
+        t->active = false;
+        return -1;
+    }
+
+    if (id >= vm->threadCount) {
+        vm->threadCount = id + 1;
+    }
+    return id;
+}
+
+static void joinThread(VM* vm, int id) {
+    // Thread IDs start at 1. ID 0 represents the main thread and cannot be
+    // joined through this helper. Only negative IDs or those beyond the
+    // current thread count are invalid.
+    if (id <= 0 || id >= vm->threadCount) return;
+    Thread* t = &vm->threads[id];
+    if (t->active) {
+        pthread_join(t->handle, NULL);
+        t->active = false;
+    }
+    if (t->vm) {
+        freeVM(t->vm);
+        free(t->vm);
+        t->vm = NULL;
+    }
+    while (vm->threadCount > 1 &&
+           !vm->threads[vm->threadCount - 1].active &&
+           vm->threads[vm->threadCount - 1].vm == NULL) {
+        vm->threadCount--;
+    }
+}
+
+// --- Mutex Helpers ---
+static int createMutex(VM* vm, bool recursive) {
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    int id = -1;
+    // Look for an inactive slot to reuse.
+
+    for (int i = 0; i < owner->mutexCount; i++) {
+        if (!owner->mutexes[i].active) {
+            id = i;
+            break;
+        }
+    }
+    // If none found, append a new mutex if capacity allows.
+    if (id == -1) {
+        if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
+        id = owner->mutexCount;
+        owner->mutexCount++;
+    }
+    Mutex* m = &owner->mutexes[id];
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_t* attr_ptr = NULL;
+    if (recursive) {
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        attr_ptr = &attr;
+    }
+    if (pthread_mutex_init(&m->handle, attr_ptr) != 0) {
+        if (attr_ptr) pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
+    if (attr_ptr) pthread_mutexattr_destroy(&attr);
+    m->active = true;
+    return id;
+}
+
+static bool lockMutex(VM* vm, int id) {
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
+    return pthread_mutex_lock(&owner->mutexes[id].handle) == 0;
+}
+
+static bool unlockMutex(VM* vm, int id) {
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
+    return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
+}
+
+// Permanently frees a mutex created by mutex()/rcmutex(), making its ID unusable.
+static bool destroyMutex(VM* vm, int id) {
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
+    if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) return false;
+    owner->mutexes[id].active = false;
+
+    // If this was the highest-index mutex, shrink the count so new mutexes can reuse slots.
+    while (owner->mutexCount > 0 && !owner->mutexes[owner->mutexCount - 1].active) {
+        owner->mutexCount--;
+
+    }
+    return true;
 }
 
 // Internal function shared by stack dump helpers
@@ -49,6 +226,165 @@ static void vmDumpStackInternal(VM* vm, bool detailed) {
             fprintf(stderr, "] ");
         }
         fprintf(stderr, "\n");
+    }
+}
+
+static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
+    bool range_error = false;
+    switch (dest->type) {
+        case TYPE_BOOLEAN: {
+            long long tmp = (real_val != 0.0L) ? 1 : 0;
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_CHAR: {
+            int tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0;
+            } else if (real_val > (long double)UCHAR_MAX) {
+                range_error = true;
+                tmp = UCHAR_MAX;
+            } else {
+                tmp = (int)real_val;
+            }
+            dest->c_val = tmp;
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT8:
+        case TYPE_BYTE: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT8_MAX) {
+                range_error = true;
+                tmp = UINT8_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_INT8: {
+            long long tmp;
+            if (real_val < (long double)INT8_MIN) {
+                range_error = true;
+                tmp = INT8_MIN;
+            } else if (real_val > (long double)INT8_MAX) {
+                range_error = true;
+                tmp = INT8_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT16:
+        case TYPE_WORD: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT16_MAX) {
+                range_error = true;
+                tmp = UINT16_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_INT16: {
+            long long tmp;
+            if (real_val < (long double)INT16_MIN) {
+                range_error = true;
+                tmp = INT16_MIN;
+            } else if (real_val > (long double)INT16_MAX) {
+                range_error = true;
+                tmp = INT16_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT32: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT32_MAX) {
+                range_error = true;
+                tmp = UINT32_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_INT32: {
+            long long tmp;
+            if (real_val < (long double)INT32_MIN) {
+                range_error = true;
+                tmp = INT32_MIN;
+            } else if (real_val > (long double)INT32_MAX) {
+                range_error = true;
+                tmp = INT32_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        case TYPE_UINT64: {
+            unsigned long long tmp;
+            if (real_val < 0.0L) {
+                range_error = true;
+                tmp = 0ULL;
+            } else if (real_val > (long double)UINT64_MAX) {
+                range_error = true;
+                tmp = UINT64_MAX;
+            } else {
+                tmp = (unsigned long long)real_val;
+            }
+            dest->u_val = tmp;
+            dest->i_val = (tmp <= (unsigned long long)LLONG_MAX) ? (long long)tmp : LLONG_MAX;
+            break;
+        }
+        case TYPE_INT64: {
+            long long tmp;
+            if (real_val < (long double)LLONG_MIN) {
+                range_error = true;
+                tmp = LLONG_MIN;
+            } else if (real_val > (long double)LLONG_MAX) {
+                range_error = true;
+                tmp = LLONG_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+        default: {
+            long long tmp;
+            if (real_val < (long double)LLONG_MIN) {
+                range_error = true;
+                tmp = LLONG_MIN;
+            } else if (real_val > (long double)LLONG_MAX) {
+                range_error = true;
+                tmp = LLONG_MAX;
+            } else {
+                tmp = (long long)real_val;
+            }
+            SET_INT_VALUE(dest, tmp);
+            break;
+        }
+    }
+    if (range_error) {
+        runtimeError(vm, "Warning: Range check error assigning REAL %Lf to %s.",
+                    real_val, varTypeToString(dest->type));
     }
 }
 
@@ -126,6 +462,9 @@ static bool vmSetContains(const Value* setVal, const Value* itemVal) {
 
 // Scans all global symbols and the entire VM value stack to find and nullify
 // any pointers that are aliases of a memory address that is being disposed.
+//
+// The caller must hold `globals_mutex` before invoking this function to ensure
+// thread-safe access to global interpreter state.
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
     // 1. Scan global symbols using the existing hash table helper
     if (vm->vmGlobalSymbols) {
@@ -187,7 +526,7 @@ void runtimeError(VM* vm, const char* format, ...) {
     int start_dump_offset = (int)instruction_offset - 10; // Dump last 10 instructions
     if (start_dump_offset < 0) start_dump_offset = 0;
 
-    fprintf(stderr, "\nLast Instructions Executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
+    fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
     for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
         offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
     }
@@ -243,8 +582,6 @@ static Value pop(VM* vm) {
 
     return result; // Return the copy, which the caller is now responsible for.
 }
-
-/*
 static Value peek(VM* vm, int distance) { // Using your original name 'peek'
     if (vm->stackTop - vm->stack < distance + 1) {
         runtimeError(vm, "VM Error: Stack underflow (peek too deep).");
@@ -252,7 +589,6 @@ static Value peek(VM* vm, int distance) { // Using your original name 'peek'
     }
     return vm->stackTop[-(distance + 1)];
 }
- */
 
 // --- Host Function C Implementations ---
 static Value vmHostQuitRequested(VM* vm) {
@@ -262,7 +598,7 @@ static Value vmHostQuitRequested(VM* vm) {
 }
 
 // --- Host Function Registration ---
-bool register_host_function(VM* vm, HostFunctionID id, HostFn fn) {
+bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
     if (!vm) return false;
     if (id >= HOST_FN_COUNT || id < 0) {
         fprintf(stderr, "VM Error: HostFunctionID %d out of bounds during registration.\n", id);
@@ -279,16 +615,29 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->chunk = NULL;
     vm->ip = NULL;
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
+    vm->vmConstGlobalSymbols = NULL;
     vm->procedureTable = NULL;
 
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
     vm->exit_requested = false;
 
+    vm->threadCount = 1; // main thread occupies index 0
+    for (int i = 0; i < VM_MAX_THREADS; i++) {
+        vm->threads[i].active = false;
+        vm->threads[i].vm = NULL;
+    }
+
+    vm->mutexCount = 0;
+    vm->mutexOwner = vm;
+    for (int i = 0; i < VM_MAX_MUTEXES; i++) {
+        vm->mutexes[i].active = false;
+    }
+
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
     }
-    if (!register_host_function(vm, HOST_FN_QUIT_REQUESTED, vmHostQuitRequested)) { // from all.txt
+    if (!registerHostFunction(vm, HOST_FN_QUIT_REQUESTED, vmHostQuitRequested)) { // from all.txt
         fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
         EXIT_FAILURE_HANDLER();
     }
@@ -302,6 +651,30 @@ void freeVM(VM* vm) {
     // clear the pointer to signal that the VM no longer uses it.
     if (vm->vmGlobalSymbols) {
         vm->vmGlobalSymbols = NULL;
+    }
+    if (vm->vmConstGlobalSymbols) {
+        vm->vmConstGlobalSymbols = NULL;
+    }
+
+    for (int i = 1; i < vm->threadCount; i++) {
+        if (vm->threads[i].active) {
+            pthread_join(vm->threads[i].handle, NULL);
+            vm->threads[i].active = false;
+        }
+        if (vm->threads[i].vm) {
+            freeVM(vm->threads[i].vm);
+            free(vm->threads[i].vm);
+            vm->threads[i].vm = NULL;
+        }
+    }
+
+    if (vm->mutexOwner == vm) {
+        for (int i = 0; i < vm->mutexCount; i++) {
+            if (vm->mutexes[i].active) {
+                pthread_mutex_destroy(&vm->mutexes[i].handle);
+                vm->mutexes[i].active = false;
+            }
+        }
     }
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
@@ -355,7 +728,11 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
         freeValue(&safeReturnValue);
     }
 
-    if (halted) *halted = false;
+    // Signal halt when we've popped the last call frame so the caller can
+    // terminate execution gracefully.
+    if (halted) {
+        *halted = (vm->frameCount == 0);
+    }
     return INTERPRET_OK;
 }
 
@@ -434,7 +811,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             }
             Value lower_val = vm->chunk->constants[lower_idx];
             Value upper_val = vm->chunk->constants[upper_idx];
-            if (!is_intlike_type(lower_val.type) || !is_intlike_type(upper_val.type)) {
+            if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
                 runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
                 free(lower_bounds); free(upper_bounds);
                 return INTERPRET_RUNTIME_ERROR;
@@ -547,18 +924,54 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
     return INTERPRET_OK;
 }
 
+// Determine if a core VM builtin requires access to global interpreter
+// structures protected by globals_mutex. Builtins that do not touch such
+// structures can execute without acquiring the global lock.
+static bool builtinUsesGlobalStructures(const char* name) {
+    if (!name) return false;
+
+    /*
+     * Builtins listed here read or modify interpreter globals declared in
+     * Pascal/globals.c (symbol tables, IO state, CRT state, etc.). They must
+     * execute while holding globals_mutex to avoid races with other
+     * interpreter threads touching the same shared state.
+     */
+    static const char* const needs_lock[] = {
+        "append",         "assign",        "biblinktext",   "biboldtext",
+        "biclrscr",       "bilowvideo",    "binormvideo",   "biunderlinetext",
+        "biwherex",       "biwherey",      "blinktext",     "boldtext",
+        "close",          "clreol",        "clrscr",        "cursoroff",
+        "cursoron",       "deline",        "dispose",       "eof",
+        "erase",          "gotoxy",        "hidecursor",    "highvideo",
+        "ioresult",       "insline",       "invertcolors",  "lowvideo",
+        "normvideo",      "normalcolors",  "paramcount",    "paramstr",
+        "quitrequested",  "read",          "readln",        "rename",
+        "reset",          "rewrite",       "screenrows",    "screencols",
+        "showcursor",     "textbackground", "textbackgrounde","textcolor",
+        "textcolore",     "underlinetext", "window",        "wherex",
+        "wherey", "pollkey", "waitkeyevent", "graphloop", 
+    };
+
+    for (size_t i = 0; i < sizeof(needs_lock)/sizeof(needs_lock[0]); i++) {
+        if (strcmp(name, needs_lock[i]) == 0) return true;
+    }
+    return false;
+}
+
 // --- Main Interpretation Loop ---
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures) {
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
 
     vm->chunk = chunk;
-    vm->ip = vm->chunk->code;
+    vm->ip = vm->chunk->code + entry;
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
+    vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
     vm->procedureTable = procedures; // <--- STORED procedureTable
 
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
+        pthread_mutex_lock(&globals_mutex);
         Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
         if (inputSym && inputSym->value &&
             inputSym->value->type == TYPE_FILE &&
@@ -572,18 +985,21 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             outputSym->value->f_val == NULL) {
             outputSym->value->f_val = stdout;
         }
+        pthread_mutex_unlock(&globals_mutex);
     }
 
-    // Establish a base call frame for the main program.  This allows inline
-    // routines at the top level to utilize local variable opcodes without
-    // triggering stack underflows due to the absence of an active frame.
-    CallFrame* baseFrame = &vm->frames[vm->frameCount++];
-    baseFrame->return_address = NULL;
-    baseFrame->slots = vm->stack;
-    baseFrame->function_symbol = NULL;
-    baseFrame->locals_count = 0;
-    baseFrame->upvalue_count = 0;
-    baseFrame->upvalues = NULL;
+    // Establish a base call frame for the main program if none has been
+    // installed yet. Threads that set up their own initial frame prior to
+    // invoking the interpreter can skip this.
+    if (vm->frameCount == 0) {
+        CallFrame* baseFrame = &vm->frames[vm->frameCount++];
+        baseFrame->return_address = NULL;
+        baseFrame->slots = vm->stack;
+        baseFrame->function_symbol = NULL;
+        baseFrame->locals_count = 0;
+        baseFrame->upvalue_count = 0;
+        baseFrame->upvalues = NULL;
+    }
 
     #ifdef DEBUG
     if (dumpExec) { // from all.txt
@@ -592,6 +1008,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         printf("Stack top: %p (empty)\n", (void*)vm->stackTop);
         printf("Chunk code: %p, Chunk constants: %p\n", (void*)vm->chunk->code, (void*)vm->chunk->constants);
         printf("Global symbol table (for VM): %p\n", (void*)vm->vmGlobalSymbols);
+        printf("Const global symbol table: %p\n", (void*)vm->vmConstGlobalSymbols);
         printf("Procedure table (for disassembly): %p\n", (void*)vm->procedureTable); // Debug print
         printf("------------------------\n");
     }
@@ -662,7 +1079,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 if (a_enum_b_int || a_int_b_enum) { \
                     Value enum_val = a_enum_b_int ? a_val_popped : b_val_popped; \
                     Value int_val  = a_enum_b_int ? b_val_popped : a_val_popped; \
-                    long long delta = as_i64(int_val); \
+                    long long delta = asI64(int_val); \
                     int new_ord = enum_val.enum_val.ordinal + \
                         ((current_instruction_code == OP_ADD) ? (int)delta : -(int)delta); \
                     if (enum_val.enum_meta && \
@@ -708,8 +1125,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 bool a_real = IS_REAL(a_val_popped); \
                 bool b_real = IS_REAL(b_val_popped); \
                 if (a_real || b_real) { \
-                    long double fa = as_ld(a_val_popped); \
-                    long double fb = as_ld(b_val_popped); \
+                    /*
+                     * When an integer participates in real arithmetic, operate on
+                     * temporary copies so the original integer Value retains its
+                     * type.  This prevents implicit widening of integer operands.
+                     */ \
+                    Value a_tmp = makeCopyOfValue(&a_val_popped); \
+                    Value b_tmp = makeCopyOfValue(&b_val_popped); \
+                    long double fa = asLd(a_tmp); \
+                    long double fb = asLd(b_tmp); \
+                    freeValue(&a_tmp); \
+                    freeValue(&b_tmp); \
                     if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
                         runtimeError(vm, "Runtime Error: Division by zero."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
@@ -727,8 +1153,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             return INTERPRET_RUNTIME_ERROR; \
                     } \
                 } else { \
-                    long long ia = as_i64(a_val_popped); \
-                    long long ib = as_i64(b_val_popped); \
+                    long long ia = asI64(a_val_popped); \
+                    long long ib = asI64(b_val_popped); \
                     if (current_instruction_code == OP_DIVIDE && ib == 0) { \
                         runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
@@ -752,7 +1178,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         case OP_MOD: \
                             iresult = ib == 0 ? 0 : ia % ib; \
                             break; \
-                        default: \
+        default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
@@ -841,7 +1267,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (!is_intlike_type(index_val.type)) {
+                if (!isIntlikeType(index_val.type)) {
                     runtimeError(vm, "VM Error: String index must be an integer.");
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -881,7 +1307,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makePointer(sym->value, NULL));
+                        break;
+                    }
+                }
+                pthread_mutex_lock(&globals_mutex);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -903,7 +1339,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makePointer(sym->value, NULL));
+                        break;
+                    }
+                }
+                pthread_mutex_lock(&globals_mutex);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Global '%s' not found in symbol table.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1032,6 +1478,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         freeValue(&a_val); freeValue(&b_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                    if (ia == LLONG_MIN && ib == -1) {
+                        runtimeError(vm, "Runtime Error: Integer overflow.");
+                        freeValue(&a_val); freeValue(&b_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                     push(vm, makeInt(ia / ib));
                 } else {
                     runtimeError(vm, "Runtime Error: Operands for 'div' must be integers. Got %s and %s.",
@@ -1117,12 +1568,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 }
                 // Numeric comparison (Integers and Reals)
                 else if (IS_NUMERIC(a_val) && IS_NUMERIC(b_val)) {
-                    bool a_real = is_real_type(a_val.type);
-                    bool b_real = is_real_type(b_val.type);
+                    bool a_real = isRealType(a_val.type);
+                    bool b_real = isRealType(b_val.type);
 
                     if (a_real || b_real) {
-                        long double fa = as_ld(a_val);
-                        long double fb = as_ld(b_val);
+                        long double fa = asLd(a_val);
+                        long double fb = asLd(b_val);
                         switch (instruction_val) {
                             case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
                             case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
@@ -1133,8 +1584,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             default: goto comparison_error_label;
                         }
                     } else {
-                        long long ia = as_i64(a_val);
-                        long long ib = as_i64(b_val);
+                        long long ia = asI64(a_val);
+                        long long ib = asI64(b_val);
                         switch (instruction_val) {
                             case OP_EQUAL:         result_val = makeBoolean(ia == ib); break;
                             case OP_NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
@@ -1442,7 +1893,7 @@ comparison_error_label:
                     Value* base_val = (Value*)operand.ptr_val;
                     if (base_val && base_val->type == TYPE_STRING) {
                         Value index_val = pop(vm);
-                        if (!is_intlike_type(index_val.type)) {
+                        if (!isIntlikeType(index_val.type)) {
                             runtimeError(vm, "VM Error: String index must be an integer.");
                             freeValue(&index_val);
                             freeValue(&operand);
@@ -1480,11 +1931,14 @@ comparison_error_label:
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
-                    if (!is_intlike_type(index_val.type)) {
+                    if (isIntlikeType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    } else if (isRealType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
+                    } else {
                         runtimeError(vm, "VM Error: Array index must be an integer.");
                         free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
                     }
-                    indices[dimension_count - 1 - i] = (int)index_val.i_val;
                     freeValue(&index_val);
                 }
 
@@ -1664,13 +2118,16 @@ comparison_error_label:
                             }
                         }
                     }
-                    else if (is_real_type(target_lvalue_ptr->type) && is_real_type(value_to_set.type)) {
+                    else if (isRealType(target_lvalue_ptr->type) && isRealType(value_to_set.type)) {
                         long double tmp = AS_REAL(value_to_set);
                         SET_REAL_VALUE(target_lvalue_ptr, tmp);
                     }
-                    else if (is_real_type(target_lvalue_ptr->type) && is_intlike_type(value_to_set.type)) {
-                        long double tmp = as_ld(value_to_set);
+                    else if (isRealType(target_lvalue_ptr->type) && isIntlikeType(value_to_set.type)) {
+                        long double tmp = asLd(value_to_set);
                         SET_REAL_VALUE(target_lvalue_ptr, tmp);
+                    }
+                    else if (isIntlikeType(target_lvalue_ptr->type) && isRealType(value_to_set.type)) {
+                        assignRealToIntChecked(vm, target_lvalue_ptr, AS_REAL(value_to_set));
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
@@ -1797,7 +2254,7 @@ comparison_error_label:
                  Value index_val = pop(vm);
                  Value base_val = pop(vm); // Can be string or char
 
-                 if (!is_intlike_type(index_val.type)) {
+                 if (!isIntlikeType(index_val.type)) {
                      runtimeError(vm, "VM Error: String/Char index must be an integer.");
                      freeValue(&index_val); freeValue(&base_val);
                      return INTERPRET_RUNTIME_ERROR;
@@ -1836,13 +2293,17 @@ comparison_error_label:
              }
             case OP_DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
+                pthread_mutex_lock(&globals_mutex);
                 InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                pthread_mutex_unlock(&globals_mutex);
                 if (r != INTERPRET_OK) return r;
                 break;
             }
             case OP_DEFINE_GLOBAL16: {
                 Value varNameVal = READ_CONSTANT16();
+                pthread_mutex_lock(&globals_mutex);
                 InterpretResult r = handleDefineGlobal(vm, varNameVal);
+                pthread_mutex_unlock(&globals_mutex);
                 if (r != INTERPRET_OK) return r;
                 break;
             }
@@ -1859,7 +2320,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makeCopyOfValue(sym->value));
+                        break;
+                    }
+                }
+
+                pthread_mutex_lock(&globals_mutex);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1881,7 +2353,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                Symbol* sym = NULL;
+                if (vm->vmConstGlobalSymbols) {
+                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    if (sym && sym->value) {
+                        push(vm, makeCopyOfValue(sym->value));
+                        break;
+                    }
+                }
+
+                pthread_mutex_lock(&globals_mutex);
+                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                pthread_mutex_unlock(&globals_mutex);
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -1903,9 +2386,11 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 if (!sym) {
                     runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                    pthread_mutex_unlock(&globals_mutex);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -1920,7 +2405,7 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
                 updateSymbol(name_val->s_val, value_from_stack);
-
+                pthread_mutex_unlock(&globals_mutex);
                 break;
             }
             case OP_SET_GLOBAL16: {
@@ -1936,9 +2421,11 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
                 if (!sym) {
                     runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                    pthread_mutex_unlock(&globals_mutex);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -1953,6 +2440,7 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
                 updateSymbol(name_val->s_val, value_from_stack);
+                pthread_mutex_unlock(&globals_mutex);
                 break;
             }
             case OP_GET_LOCAL: {
@@ -1987,15 +2475,31 @@ comparison_error_label:
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
                     target_slot->s_val[target_slot->max_length] = '\0';
 
-                } else if (is_real_type(target_slot->type)) {
-                    if (is_real_type(value_from_stack.type)) {
+                } else if (isRealType(target_slot->type)) {
+                    if (isRealType(value_from_stack.type)) {
                         long double tmp = AS_REAL(value_from_stack);
                         SET_REAL_VALUE(target_slot, tmp);
-                    } else if (is_intlike_type(value_from_stack.type)) {
-                        long double tmp = as_ld(value_from_stack);
+                    } else if (isIntlikeType(value_from_stack.type)) {
+                        long double tmp = asLd(value_from_stack);
                         SET_REAL_VALUE(target_slot, tmp);
                     } else {
                         runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (isIntlikeType(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        if (isRealType(value_from_stack.type)) {
+                            assignRealToIntChecked(vm, target_slot, AS_REAL(value_from_stack));
+                        } else {
+                            long long tmp = asI64(value_from_stack);
+                            if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                            SET_INT_VALUE(target_slot, tmp);
+                            if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                        }
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
+                                     varTypeToString(value_from_stack.type));
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -2060,12 +2564,28 @@ comparison_error_label:
                     }
                     strncpy(target_slot->s_val, source_str, target_slot->max_length);
                     target_slot->s_val[target_slot->max_length] = '\0';
-                } else if (is_real_type(target_slot->type)) {
+                } else if (isRealType(target_slot->type)) {
                     if (IS_NUMERIC(value_from_stack)) {
-                        long double tmp = as_ld(value_from_stack);
+                        long double tmp = asLd(value_from_stack);
                         SET_REAL_VALUE(target_slot, tmp);
                     } else {
                         runtimeError(vm, "Type mismatch: Cannot assign %s to real.", varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (isIntlikeType(target_slot->type)) {
+                    if (IS_NUMERIC(value_from_stack)) {
+                        if (isRealType(value_from_stack.type)) {
+                            assignRealToIntChecked(vm, target_slot, AS_REAL(value_from_stack));
+                        } else {
+                            long long tmp = asI64(value_from_stack);
+                            if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
+                            SET_INT_VALUE(target_slot, tmp);
+                            if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                        }
+                    } else {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
+                                     varTypeToString(value_from_stack.type));
                         freeValue(&value_from_stack);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -2133,7 +2653,7 @@ comparison_error_label:
                 for (int i = dimension_count - 1; i >= 0; i--) {
                     if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
                         Value size_val = pop(vm);
-                        if (!is_intlike_type(size_val.type)) {
+                        if (!isIntlikeType(size_val.type)) {
                             runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
                             free(lower_bounds); free(upper_bounds);
                             free(lower_idx); free(upper_idx);
@@ -2151,7 +2671,7 @@ comparison_error_label:
                         }
                         Value lower_val = vm->chunk->constants[lower_idx[i]];
                         Value upper_val = vm->chunk->constants[upper_idx[i]];
-                        if (!is_intlike_type(lower_val.type) || !is_intlike_type(upper_val.type)) {
+                        if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
                             runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
                             free(lower_bounds); free(upper_bounds);
                             free(lower_idx); free(upper_idx);
@@ -2343,15 +2863,21 @@ comparison_error_label:
                 VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
 
                 if (handler) {
+                    bool needs_lock = builtinUsesGlobalStructures(builtin_name_lower);
+                    if (needs_lock) pthread_mutex_lock(&globals_mutex);
                     Value result = handler(vm, arg_count, args);
+                    if (needs_lock) pthread_mutex_unlock(&globals_mutex);
 
-                    // Pop arguments from the stack and free their contents
-                    // This is crucial to prevent stack corruption.
+                    // Pop arguments from the stack and free their contents when safe.
+                    // Arrays and pointers reference caller-managed memory, so avoid freeing
+                    // the underlying data to prevent invalidating VAR arguments.
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        // The actual Value structs are on the stack and will be overwritten,
-                        // but we need to free any heap data they point to (like strings).
-                        freeValue(&args[i]);
+                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
+                            // The actual Value structs are on the stack and will be overwritten,
+                            // but we need to free any heap data they point to (like strings).
+                            freeValue(&args[i]);
+                        }
                     }
 
                     if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
@@ -2361,10 +2887,12 @@ comparison_error_label:
                     }
                 } else {
                     runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
-                    // Cleanup stack even on error
+                    // Cleanup stack even on error, preserving caller-owned arrays/pointers
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        freeValue(&args[i]);
+                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
+                            freeValue(&args[i]);
+                        }
                     }
                     return INTERPRET_RUNTIME_ERROR;
                 }
@@ -2411,8 +2939,8 @@ comparison_error_label:
                     for (int i = 0; i < declared_arity; i++) {
                         AST* param_ast = proc_symbol->type_def->children[i];
                         Value* arg_val = frame->slots + i;
-                        if (is_real_type(param_ast->var_type) && is_intlike_type(arg_val->type)) {
-                            long double tmp = as_ld(*arg_val);
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
                             setTypeValue(arg_val, param_ast->var_type);
                             SET_REAL_VALUE(arg_val, tmp);
                         }
@@ -2469,8 +2997,109 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 HostFn func = vm->host_functions[host_id];
+                pthread_mutex_lock(&globals_mutex);
                 Value result = func(vm);
+                pthread_mutex_unlock(&globals_mutex);
                 push(vm, result);
+                break;
+            }
+            case OP_THREAD_CREATE: {
+                uint16_t entry = READ_SHORT(vm);
+                int id = createThread(vm, entry);
+                if (id < 0) {
+                    runtimeError(vm, "Thread limit exceeded.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeInt(id));
+                break;
+            }
+            case OP_THREAD_JOIN: {
+                Value tidVal = peek(vm, 0);
+                if (!IS_INTLIKE(tidVal)) {
+                    runtimeError(vm, "Thread id must be integer.");
+                    Value popped_tid = pop(vm);
+                    freeValue(&popped_tid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int tid = (int)tidVal.i_val;
+                joinThread(vm, tid);
+                Value popped_tid = pop(vm);
+                freeValue(&popped_tid);
+                break;
+            }
+            case OP_MUTEX_CREATE: {
+                int id = createMutex(vm, false);
+                if (id < 0) {
+                    runtimeError(vm, "Mutex limit exceeded.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeInt(id));
+                break;
+            }
+            case OP_RCMUTEX_CREATE: {
+                int id = createMutex(vm, true);
+                if (id < 0) {
+                    runtimeError(vm, "Mutex limit exceeded.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeInt(id));
+                break;
+            }
+            case OP_MUTEX_LOCK: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                if (!lockMutex(vm, mid)) {
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
+                break;
+            }
+            case OP_MUTEX_UNLOCK: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                if (!unlockMutex(vm, mid)) {
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
+                break;
+            }
+            case OP_MUTEX_DESTROY: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                if (!destroyMutex(vm, mid)) {
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
                 break;
             }
             case OP_FORMAT_VALUE: {
@@ -2483,7 +3112,7 @@ comparison_error_label:
                 char buf[DEFAULT_STRING_CAPACITY];
                 buf[0] = '\0';
 
-                if (is_real_type(raw_val.type)) {
+                if (isRealType(raw_val.type)) {
                     long double rv = AS_REAL(raw_val);
                     if (precision >= 0) {
                         snprintf(buf, sizeof(buf), "%*.*Lf", width, precision, rv);
@@ -2492,7 +3121,10 @@ comparison_error_label:
                     }
                 } else if (raw_val.type == TYPE_CHAR) {
                     snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);
-                } else if (is_intlike_type(raw_val.type)) {
+                } else if (raw_val.type == TYPE_BOOLEAN) {
+                    const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
+                    snprintf(buf, sizeof(buf), "%*s", width, bool_str);
+                } else if (isIntlikeType(raw_val.type)) {
                     if (raw_val.type == TYPE_UINT64 || raw_val.type == TYPE_UINT32 ||
                         raw_val.type == TYPE_UINT16 || raw_val.type == TYPE_UINT8 ||
                         raw_val.type == TYPE_WORD   || raw_val.type == TYPE_BYTE) {
@@ -2512,9 +3144,6 @@ comparison_error_label:
                     size_t len = strlen(source_str);
                     int prec = (width > 0 && (size_t)width < len) ? width : (int)len;
                     snprintf(buf, sizeof(buf), "%*.*s", width, prec, source_str);
-                } else if (raw_val.type == TYPE_BOOLEAN) {
-                    const char* bool_str = raw_val.i_val ? "TRUE" : "FALSE";
-                    snprintf(buf, sizeof(buf), "%*s", width, bool_str);
                 } else {
                     snprintf(buf, sizeof(buf), "%*s", width, "?");
                 }

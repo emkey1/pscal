@@ -11,7 +11,7 @@
 // retrieving an element by index, checking for containment, and freeing the list.
 
 #include "list.h"
-#include "globals.h" // For EXIT_FAILURE_HANDLER
+#include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
 #include <stdlib.h>  // For malloc, free, EXIT_FAILURE
 #include <string.h>  // For strdup, strcmp, strcasecmp
 #include <stdio.h>   // For fprintf, stderr

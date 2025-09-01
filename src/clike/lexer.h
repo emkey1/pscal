@@ -29,6 +29,8 @@ typedef enum {
     CLIKE_TOKEN_CONTINUE,
     CLIKE_TOKEN_RETURN,
     CLIKE_TOKEN_IMPORT,
+    CLIKE_TOKEN_SPAWN,
+    CLIKE_TOKEN_JOIN,
     CLIKE_TOKEN_SIZEOF,
     CLIKE_TOKEN_IDENTIFIER,
     CLIKE_TOKEN_NUMBER,
@@ -101,8 +103,8 @@ typedef struct {
     int column;
 } ClikeLexer;
 
-void clike_initLexer(ClikeLexer *lexer, const char *source);
-ClikeToken clike_nextToken(ClikeLexer *lexer);
+void clikeInitLexer(ClikeLexer *lexer, const char *source);
+ClikeToken clikeNextToken(ClikeLexer *lexer);
 const char* clikeTokenTypeToString(ClikeTokenType type);
 
 #endif

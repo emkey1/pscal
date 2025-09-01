@@ -1,6 +1,6 @@
 #include "core/cache.h"
 #include "core/utils.h" // for Value constructors
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
@@ -19,7 +19,7 @@
 #define CACHE_VERSION PSCAL_VM_VERSION /* doubles as VM bytecode version */
 
 
-static unsigned long hash_path(const char* path) {
+static unsigned long hashPath(const char* path) {
     uint32_t hash = 2166136261u;
     for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
         hash ^= *p;
@@ -28,7 +28,7 @@ static unsigned long hash_path(const char* path) {
     return (unsigned long)hash;
 }
 
-static char* build_cache_path(const char* source_path) {
+static char* buildCachePath(const char* source_path) {
     const char* home = getenv("HOME");
     if (!home) return NULL;
     size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
@@ -37,7 +37,7 @@ static char* build_cache_path(const char* source_path) {
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
     mkdir(dir, 0777); // ensure directory exists
 
-    unsigned long h = hash_path(source_path);
+    unsigned long h = hashPath(source_path);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
@@ -46,7 +46,7 @@ static char* build_cache_path(const char* source_path) {
     return full;
 }
 
-static bool is_cache_fresh(const char* cache_path, const char* source_path) {
+static bool isCacheFresh(const char* cache_path, const char* source_path) {
     struct stat src_stat, cache_stat;
     if (stat(source_path, &src_stat) != 0) return false;
     if (stat(cache_path, &cache_stat) != 0) return false;
@@ -68,7 +68,7 @@ static bool is_cache_fresh(const char* cache_path, const char* source_path) {
 }
 
 // ----- AST serialization helpers -----
-static bool write_token(FILE* f, const Token* tok) {
+static bool writeToken(FILE* f, const Token* tok) {
     int has = (tok != NULL);
     fwrite(&has, sizeof(has), 1, f);
     if (!has) return true;
@@ -79,7 +79,7 @@ static bool write_token(FILE* f, const Token* tok) {
     return true;
 }
 
-static Token* read_token(FILE* f) {
+static Token* readToken(FILE* f) {
     int has = 0;
     if (fread(&has, sizeof(has), 1, f) != 1) return NULL;
     if (!has) return NULL;
@@ -102,25 +102,25 @@ static Token* read_token(FILE* f) {
     return tok;
 }
 
-static bool write_ast(FILE* f, const AST* node) {
+static bool writeAst(FILE* f, const AST* node) {
     int has = (node != NULL);
     fwrite(&has, sizeof(has), 1, f);
     if (!has) return true;
     fwrite(&node->type, sizeof(node->type), 1, f);
     fwrite(&node->var_type, sizeof(node->var_type), 1, f);
-    write_token(f, node->token);
+    writeToken(f, node->token);
     fwrite(&node->i_val, sizeof(node->i_val), 1, f);
-    write_ast(f, node->left);
-    write_ast(f, node->right);
-    write_ast(f, node->extra);
+    writeAst(f, node->left);
+    writeAst(f, node->right);
+    writeAst(f, node->extra);
     fwrite(&node->child_count, sizeof(node->child_count), 1, f);
     for (int i = 0; i < node->child_count; i++) {
-        write_ast(f, node->children[i]);
+        writeAst(f, node->children[i]);
     }
     return true;
 }
 
-static AST* read_ast(FILE* f) {
+static AST* readAst(FILE* f) {
     int has = 0;
     if (fread(&has, sizeof(has), 1, f) != 1) return NULL;
     if (!has) return NULL;
@@ -128,16 +128,16 @@ static AST* read_ast(FILE* f) {
     VarType vt;
     if (fread(&t, sizeof(t), 1, f) != 1) return NULL;
     if (fread(&vt, sizeof(vt), 1, f) != 1) return NULL;
-    Token* tok = read_token(f);
+    Token* tok = readToken(f);
     int i_val = 0;
     if (fread(&i_val, sizeof(i_val), 1, f) != 1) { if (tok) freeToken(tok); return NULL; }
     AST* node = newASTNode(t, tok);
     if (node) {
         setTypeAST(node, vt);
         node->i_val = i_val;
-        node->left = read_ast(f); if (node->left) node->left->parent = node;
-        node->right = read_ast(f); if (node->right) node->right->parent = node;
-        node->extra = read_ast(f); if (node->extra) node->extra->parent = node;
+        node->left = readAst(f); if (node->left) node->left->parent = node;
+        node->right = readAst(f); if (node->right) node->right->parent = node;
+        node->extra = readAst(f); if (node->extra) node->extra->parent = node;
         int child_count = 0;
         if (fread(&child_count, sizeof(child_count), 1, f) != 1) { freeAST(node); return NULL; }
         if (child_count > 0) {
@@ -146,7 +146,7 @@ static AST* read_ast(FILE* f) {
             node->child_count = child_count;
             node->child_capacity = child_count;
             for (int i = 0; i < child_count; i++) {
-                node->children[i] = read_ast(f);
+                node->children[i] = readAst(f);
                 if (node->children[i]) node->children[i]->parent = node;
             }
         }
@@ -155,7 +155,7 @@ static AST* read_ast(FILE* f) {
 }
 
 
-static bool write_value(FILE* f, const Value* v) {
+static bool writeValue(FILE* f, const Value* v) {
     fwrite(&v->type, sizeof(v->type), 1, f);
     switch (v->type) {
         case TYPE_INTEGER:
@@ -200,7 +200,7 @@ static bool write_value(FILE* f, const Value* v) {
     return true;
 }
 
-static bool read_value(FILE* f, Value* out) {
+static bool readValue(FILE* f, Value* out) {
     if (fread(&out->type, sizeof(out->type), 1, f) != 1) return false;
     switch (out->type) {
         case TYPE_INTEGER:
@@ -277,7 +277,7 @@ static bool read_value(FILE* f, Value* out) {
 }
 
 bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
-    char* cache_path = build_cache_path(source_path);
+    char* cache_path = buildCachePath(source_path);
     if (!cache_path) return false;
     if (chunk && chunk->count > 0) {
         free(cache_path);
@@ -287,7 +287,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     int const_count = 0;
     int read_consts = 0;
 
-    if (!is_cache_fresh(cache_path, source_path)) {
+    if (!isCacheFresh(cache_path, source_path)) {
         free(cache_path);
         return false;
     }
@@ -328,7 +328,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                             fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
                             ok = true;
                             for (read_consts = 0; read_consts < const_count; ++read_consts) {
-                                if (!read_value(f, &chunk->constants[read_consts])) { ok = false; break; }
+                                if (!readValue(f, &chunk->constants[read_consts])) { ok = false; break; }
                             }
                             if (ok) {
                                 int proc_count = 0;
@@ -400,7 +400,7 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
 
                                                 Value val = {0};
 
-                                                if (!read_value(f, &val)) { free(name); ok = false; break; }
+                                                if (!readValue(f, &val)) { free(name); ok = false; break; }
                                                 insertGlobalSymbol(name, type, NULL);
                                                 Symbol* sym = lookupGlobalSymbol(name);
                                                 if (sym && sym->value) {
@@ -485,7 +485,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                         fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
                         ok = true;
                         for (read_consts = 0; read_consts < const_count; ++read_consts) {
-                            if (!read_value(f, &chunk->constants[read_consts])) { ok = false; break; }
+                            if (!readValue(f, &chunk->constants[read_consts])) { ok = false; break; }
                         }
                         if (ok) {
                             int proc_count = 0;
@@ -557,7 +557,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                             if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
 
                                             Value val = {0};
-                                            if (!read_value(f, &val)) { free(name); ok = false; break; }
+                                            if (!readValue(f, &val)) { free(name); ok = false; break; }
                                             insertGlobalSymbol(name, type, NULL);
                                             Symbol* sym = lookupGlobalSymbol(name);
                                             if (sym && sym->value) {
@@ -583,7 +583,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                             if (!name) { ok = false; break; }
                                             if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
                                             name[name_len] = '\0';
-                                            AST* type_ast = read_ast(f);
+                                            AST* type_ast = readAst(f);
                                             if (!type_ast) { free(name); ok = false; break; }
                                             insertType(name, type_ast);
                                             freeAST(type_ast);
@@ -617,7 +617,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
 }
 
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
-    char* cache_path = build_cache_path(source_path);
+    char* cache_path = buildCachePath(source_path);
     if (!cache_path) return;
     FILE* f = fopen(cache_path, "wb");
     if (!f) { free(cache_path); return; }
@@ -629,7 +629,7 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     fwrite(chunk->code, 1, chunk->count, f);
     fwrite(chunk->lines, sizeof(int), chunk->count, f);
     for (int i = 0; i < chunk->constants_count; ++i) {
-        if (!write_value(f, &chunk->constants[i])) { break; }
+        if (!writeValue(f, &chunk->constants[i])) { break; }
     }
     int proc_count = 0;
     if (procedure_table) {
@@ -676,10 +676,10 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
                 fwrite(sym->name, 1, name_len, f);
                 fwrite(&sym->type, sizeof(sym->type), 1, f);
                 if (sym->value) {
-                    write_value(f, sym->value);
+                    writeValue(f, sym->value);
                 } else {
                     Value tmp = makeVoid();
-                    write_value(f, &tmp);
+                    writeValue(f, &tmp);
                 }
             }
         }
@@ -692,7 +692,7 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
         int name_len = (int)strlen(entry->name);
         fwrite(&name_len, sizeof(name_len), 1, f);
         fwrite(entry->name, 1, name_len, f);
-        write_ast(f, entry->typeAST);
+        writeAst(f, entry->typeAST);
     }
     fclose(f);
     free(cache_path);

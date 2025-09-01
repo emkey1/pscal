@@ -4,13 +4,14 @@ PROGRAM SDLTextureMandelbrotZoomFixed;
 USES CRT;
 
 CONST
-  MandelWindowWidth   = 640;
-  MandelWindowHeight  = 480;
+  MandelWindowWidth   = 800;
+  MandelWindowHeight  = 600;
   MandelWindowTitle   = 'Mandelbrot (Zoom Fixed - LMB:Zoom, RMB:Reset, Q:Quit)';
   MandelMaxIterations = 50;
   MandelZoomFactor    = 2.0;
   MandelBytesPerPixel = 4;
   MandelTextureUpdateIntervalRows = 1;
+  ThreadCount = 4;
 
   InitialMinRe  = -2.0;
   InitialMaxRe  =  1.0;
@@ -26,26 +27,32 @@ TYPE
   FlatPixelBuffer = ARRAY[0..(MandelWindowWidth * MandelWindowHeight * MandelBytesPerPixel) - 1] OF Byte;
 
 VAR
-  x0, y0, zx, zy, zxTemp : Real;
-  Iteration           : Integer;
-  R_calc, G_calc, B_calc : Byte;
-
   MinRe, MaxRe, MinIm, MaxIm : Real;
   ViewPixelWidth, ViewPixelHeight : Integer;
   ReRange, ImRange           : Real;
   ScaleRe, ScaleIm           : Real;
 
   MandelTextureID : Integer;
-  PixelData       : FlatPixelBuffer;
+  PixelData, DisplayPixelData : FlatPixelBuffer;
   QuitProgram     : Boolean;
   RedrawNeeded    : Boolean;
+  RenderInProgress : Boolean;
   MouseX, MouseY, MouseButtons : Integer;
   PrevMouseButtons : Integer; // Track previous mouse button state to detect fresh clicks
+
+  ThreadStart, ThreadEnd : ARRAY[0..ThreadCount - 1] OF Integer;
+  RowDone : ARRAY[0..MandelWindowHeight - 1] OF Integer;
+  RenderThreadIDs : ARRAY[0..ThreadCount - 1] OF Integer;
+  WorkReady : ARRAY[0..ThreadCount - 1] OF Integer;
+  WorkerShutdown : Boolean;
+  RowMutex : Integer;
 
   NewCenterX, NewCenterY          : Real;
   CurrentViewWidthRe, CurrentViewHeightIm : Real;
   NewViewWidthRe, NewViewHeightIm     : Real;
   PercentDone : Integer;
+  MouseThreadID, KeyboardThreadID : Integer;
+  i : Integer;
 
 // This procedure recalculates MaxIm and scaling factors based on CURRENT MinRe, MaxRe, MinIm
 PROCEDURE UpdateScalingAndDependentViewParams;
@@ -85,36 +92,166 @@ END;
 
 PROCEDURE UpdateAndDisplayTextureInProgress;
 BEGIN
-  UpdateTexture(MandelTextureID, PixelData);
+  UpdateTexture(MandelTextureID, DisplayPixelData);
   ClearDevice;
   RenderCopy(MandelTextureID);
   UpdateScreen;
   GraphLoop(0);
 END;
 
-PROCEDURE FillPixelDataAndDisplayProgressively;
-VAR LocalPy, LocalPx, BufferBaseIdx : Integer;
+PROCEDURE ComputeRows(startY, endY: Integer);
+VAR LocalPy, LocalPx, BufferBaseIdx, Iteration: Integer;
+    x0, y0, zx, zy, zxTemp: Real;
+    R_calc, G_calc, B_calc: Byte;
 BEGIN
-  GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
-  FOR LocalPy := 0 TO ViewPixelHeight - 1 DO BEGIN
+  FOR LocalPy := startY TO endY DO BEGIN
     FOR LocalPx := 0 TO ViewPixelWidth - 1 DO BEGIN
       x0 := MinRe + (LocalPx * ScaleRe); y0 := MaxIm - (LocalPy * ScaleIm);
       zx := 0.0; zy := 0.0; Iteration := 0;
-      WHILE (zx*zx + zy*zy <= 4.0) AND (Iteration < MandelMaxIterations) DO
-      BEGIN zxTemp := zx*zx - zy*zy + x0; zy := 2*zx*zy + y0; zx := zxTemp; Iteration := Iteration + 1; END;
-      IF Iteration = MandelMaxIterations THEN BEGIN R_calc := 0; G_calc := 0; B_calc := 0; END
-      ELSE BEGIN
-        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256; G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256; B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
+      WHILE (zx*zx + zy*zy <= 4.0) AND (Iteration < MandelMaxIterations) DO BEGIN
+        zxTemp := zx*zx - zy*zy + x0;
+        zy := 2*zx*zy + y0;
+        zx := zxTemp;
+        Iteration := Iteration + 1;
+      END;
+      IF Iteration = MandelMaxIterations THEN BEGIN
+        R_calc := 0; G_calc := 0; B_calc := 0;
+      END ELSE BEGIN
+        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256;
+        G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256;
+        B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
       END;
       BufferBaseIdx := (LocalPy * ViewPixelWidth + LocalPx) * MandelBytesPerPixel;
-      PixelData[BufferBaseIdx + 0] := R_calc; PixelData[BufferBaseIdx + 1] := G_calc; PixelData[BufferBaseIdx + 2] := B_calc; PixelData[BufferBaseIdx + 3] := 255;
+      PixelData[BufferBaseIdx + 0] := R_calc;
+      PixelData[BufferBaseIdx + 1] := G_calc;
+      PixelData[BufferBaseIdx + 2] := B_calc;
+      PixelData[BufferBaseIdx + 3] := 255;
     END; // Px
-    PercentDone := Trunc( (LocalPy + 1) * 100.0 / ViewPixelHeight );
-    GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', LocalPy + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
-    IF (((LocalPy + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (LocalPy = ViewPixelHeight - 1)) THEN
-    BEGIN UpdateAndDisplayTextureInProgress; END;
+    lock(RowMutex);
+    RowDone[LocalPy] := 1;
+    unlock(RowMutex);
   END; // Py
+END;
+
+PROCEDURE WorkerLoop(id: Integer);
+BEGIN
+  WHILE NOT WorkerShutdown DO BEGIN
+    IF WorkReady[id] = 1 THEN BEGIN
+      ComputeRows(ThreadStart[id], ThreadEnd[id]);
+      WorkReady[id] := 0;
+    END ELSE
+      Delay(0);
+  END;
+END;
+
+PROCEDURE WorkerThread0; BEGIN WorkerLoop(0); END;
+PROCEDURE WorkerThread1; BEGIN WorkerLoop(1); END;
+PROCEDURE WorkerThread2; BEGIN WorkerLoop(2); END;
+PROCEDURE WorkerThread3; BEGIN WorkerLoop(3); END;
+
+PROCEDURE FillPixelDataAndDisplayProgressively;
+  VAR i, startY, endY, rowsPerThread, extra, y, bufferIdx, rowBytes, k, displayedRows : Integer;
+      copied : Boolean;
+BEGIN
+  endy := 0;
+  RenderInProgress := True;
+  GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
+
+  RowMutex := mutex();
+  FOR i := 0 TO ViewPixelHeight - 1 DO RowDone[i] := 0;
+  rowBytes := ViewPixelWidth * MandelBytesPerPixel;
+  FOR k := 0 TO (ViewPixelWidth * ViewPixelHeight * MandelBytesPerPixel) - 1 DO
+    DisplayPixelData[k] := 0;
+
+  rowsPerThread := ViewPixelHeight DIV ThreadCount;
+  extra := ViewPixelHeight MOD ThreadCount;
+  startY := 0;
+  FOR i := 0 TO ThreadCount - 1 DO BEGIN
+    gotoxy(1,12 + i);
+    writeln('Setup Render Thread: ', i, ', endY = ', endY);
+    endY := startY + rowsPerThread - 1;
+    IF extra > 0 THEN BEGIN endY := endY + 1; extra := extra - 1; END;
+    ThreadStart[i] := startY;
+    ThreadEnd[i] := endY;
+    startY := endY + 1;
+    WorkReady[i] := 1;
+  END;
+
+  displayedRows := 0;
+  WHILE displayedRows < ViewPixelHeight DO BEGIN
+    copied := False;
+    lock(RowMutex);
+    FOR y := 0 TO ViewPixelHeight - 1 DO BEGIN
+      IF RowDone[y] = 1 THEN BEGIN
+        bufferIdx := y * rowBytes;
+        FOR k := 0 TO rowBytes - 1 DO
+          DisplayPixelData[bufferIdx + k] := PixelData[bufferIdx + k];
+        RowDone[y] := 2;
+        copied := True;
+        displayedRows := displayedRows + 1;
+      END;
+    END;
+    unlock(RowMutex);
+    IF copied THEN BEGIN
+      PercentDone := Trunc( displayedRows * 100.0 / ViewPixelHeight );
+      GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', displayedRows, '/', ViewPixelHeight, '. ~', PercentDone, '%');
+      IF ((displayedRows MOD MandelTextureUpdateIntervalRows = 0) OR (displayedRows = ViewPixelHeight)) THEN
+        UpdateAndDisplayTextureInProgress;
+    END ELSE BEGIN
+      GraphLoop(0);
+    END;
+  END;
+
+  FOR i := 0 TO ThreadCount - 1 DO
+    WHILE WorkReady[i] <> 0 DO Delay(0);
+
+  // Make sure the final frame is copied to the SDL texture and shown.
+  // Without this call, the window may stay black once rendering finishes
+  // because the last few rows might not yet have been uploaded to the GPU
+  // when the worker threads complete.
+  UpdateAndDisplayTextureInProgress;
+
   GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
+  RedrawNeeded := False;
+  RenderInProgress := False;
+END;
+
+PROCEDURE KeyboardInputThread;
+BEGIN
+  WHILE NOT QuitProgram DO BEGIN
+    IF KeyPressed THEN BEGIN
+      IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True;
+    END;
+  END;
+END;
+
+PROCEDURE MouseInputThread;
+BEGIN
+  WHILE NOT QuitProgram DO BEGIN
+    GetMouseState(MouseX, MouseY, MouseButtons);
+    IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
+      IF NOT RedrawNeeded THEN BEGIN
+        WHILE RenderInProgress DO Delay(0);
+        NewCenterX := MinRe + (MouseX * ScaleRe); NewCenterY := MaxIm - (MouseY * ScaleIm);
+        CurrentViewWidthRe  := MaxRe - MinRe; CurrentViewHeightIm := MaxIm - MinIm;
+        NewViewWidthRe  := CurrentViewWidthRe / MandelZoomFactor; NewViewHeightIm := CurrentViewHeightIm / MandelZoomFactor;
+        MinRe := NewCenterX - (NewViewWidthRe / 2.0); MaxRe := NewCenterX + (NewViewWidthRe / 2.0);
+        MinIm := NewCenterY - (NewViewHeightIm / 2.0);
+        UpdateScalingAndDependentViewParams;
+        RedrawNeeded := True;
+        GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', MouseX, ',', MouseY, ')');
+      END;
+    END
+    ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
+      IF NOT RedrawNeeded THEN BEGIN
+        WHILE RenderInProgress DO Delay(0);
+        ResetViewToInitial;
+        RedrawNeeded := True;
+        GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
+      END;
+    END;
+    PrevMouseButtons := MouseButtons;
+  END;
 END;
 
 BEGIN // Main Program
@@ -127,49 +264,52 @@ BEGIN // Main Program
   GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
 
   InitGraph(MandelWindowWidth, MandelWindowHeight, MandelWindowTitle);
+  MouseThreadID := spawn MouseInputThread;
+  KeyboardThreadID := spawn KeyboardInputThread;
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);
-  IF MandelTextureID < 0 THEN BEGIN GotoXY(1, StatusLineY); WriteLn('Error: No Texture! Halting.'); ReadKey; CloseGraph; NormVideo; ShowCursor; HALT; END;
+  IF MandelTextureID < 0 THEN
+  BEGIN
+    GotoXY(1, StatusLineY);
+    WriteLn('Error: No Texture! Halting.');
+    ReadKey;
+    CloseGraph;
+    NormVideo;
+    ShowCursor;
+    HALT;
+  END;
+
+  WorkerShutdown := False;
+  FOR i := 0 TO ThreadCount - 1 DO WorkReady[i] := 0;
+  RenderThreadIDs[0] := spawn WorkerThread0;
+  RenderThreadIDs[1] := spawn WorkerThread1;
+  RenderThreadIDs[2] := spawn WorkerThread2;
+  RenderThreadIDs[3] := spawn WorkerThread3;
 
   ResetViewToInitial; // Sets MinRe,MaxRe,MinIm to defaults AND calculates scales/MaxIm
   RedrawNeeded := True;
   QuitProgram  := False;
   PrevMouseButtons := 0;
+  RenderInProgress := False;
 
   WHILE NOT QuitProgram DO BEGIN
     IF RedrawNeeded THEN BEGIN
       FillPixelDataAndDisplayProgressively;
-      RedrawNeeded := False;
     END ELSE BEGIN // If not redrawing, ensure screen is still updated and events processed
       ClearDevice; RenderCopy(MandelTextureID); UpdateScreen;
       GraphLoop(20);
     END;
-
-    IF KeyPressed THEN BEGIN IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True; END;
-    GetMouseState(MouseX, MouseY, MouseButtons);
-
-    // Respond only to new button presses (transition from up to down)
-    IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
-      IF NOT RedrawNeeded THEN BEGIN
-        NewCenterX := MinRe + (MouseX * ScaleRe); NewCenterY := MaxIm - (MouseY * ScaleIm);
-        CurrentViewWidthRe  := MaxRe - MinRe; CurrentViewHeightIm := MaxIm - MinIm;
-        NewViewWidthRe  := CurrentViewWidthRe / MandelZoomFactor; NewViewHeightIm := CurrentViewHeightIm / MandelZoomFactor;
-        MinRe := NewCenterX - (NewViewWidthRe / 2.0); MaxRe := NewCenterX + (NewViewWidthRe / 2.0);
-        MinIm := NewCenterY - (NewViewHeightIm / 2.0);
-        UpdateScalingAndDependentViewParams; // <<<< CALL THE CORRECT PROCEDURE HERE
-        RedrawNeeded := True;
-        GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', MouseX, ',', MouseY, ')');
-      END;
-    END
-    ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
-      IF NOT RedrawNeeded THEN BEGIN
-        ResetViewToInitial; // <<<< CALL THE CORRECT PROCEDURE HERE
-        RedrawNeeded := True;
-        GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
-      END;
-    END;
-    PrevMouseButtons := MouseButtons;
   END; // WHILE
 
+  WorkerShutdown := True;
+  FOR i := 0 TO ThreadCount - 1 DO join RenderThreadIDs[i];
+  join MouseThreadID;
+  join KeyboardThreadID;
+
   DestroyTexture(MandelTextureID); CloseGraph;
-  GotoXY(1, StatusLineY + 2); ClrEol; NormVideo; ShowCursor; WriteLn; WriteLn('Program terminated.');
+  GotoXY(1, StatusLineY + 8);
+  ClrEol;
+  NormVideo;
+  ShowCursor;
+  WriteLn;
+  WriteLn('Program terminated.');
 END.

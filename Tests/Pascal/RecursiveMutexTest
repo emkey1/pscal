@@ -1,0 +1,22 @@
+program RecursiveMutexTest;
+var
+  mid: integer;
+
+procedure Worker;
+begin
+  lock(mid);
+  lock(mid);
+  writeln('inside');
+  unlock(mid);
+  unlock(mid);
+end;
+
+var
+  tid: integer;
+begin
+  mid := rcmutex();
+  tid := spawn Worker;
+  join tid;
+  destroy(mid);
+  writeln('done');
+end.

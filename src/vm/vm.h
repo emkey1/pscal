@@ -11,6 +11,8 @@
 #include "core/types.h"        // For Value explicitly, though bytecode.h should bring it in
 #include "symbol/symbol.h"     // For HashTable, if VM manages globals using it directly
 #include <stdbool.h>
+#include <pthread.h>
+#include <stdint.h>
 
 // --- VM Configuration ---
 #define VM_STACK_MAX 8192       // Maximum number of Values on the operand stack
@@ -19,6 +21,8 @@
 #define MAX_HOST_FUNCTIONS 4096
 
 #define VM_CALL_STACK_MAX 4096
+#define VM_MAX_THREADS 16
+#define VM_MAX_MUTEXES 64
 
 // Forward declaration
 struct VM_s;
@@ -51,8 +55,20 @@ typedef struct {
     Value** upvalues;
 } CallFrame;
 
+// Thread structure representing a lightweight VM thread
+typedef struct {
+    pthread_t handle;           // OS-level thread handle
+    struct VM_s* vm;            // Pointer to the VM executing on this thread
+    bool active;                // Whether this thread is running
+} Thread;
+
+typedef struct {
+    pthread_mutex_t handle;
+    bool active;
+} Mutex;
+
 // --- Virtual Machine Structure ---
-typedef struct VM_s { 
+typedef struct VM_s {
     BytecodeChunk* chunk;     // The chunk of bytecode to execute
     uint8_t* ip;              // Instruction Pointer: points to the *next* byte to be read
 
@@ -60,8 +76,9 @@ typedef struct VM_s {
     Value* stackTop;          // Pointer to the element just above the top of the stack
                               // (i.e., where the next pushed item will go)
 
-    HashTable* vmGlobalSymbols; // VM's own symbol table for runtime global variable storage
-    HashTable* procedureTable; // store procedure table for disassembly
+    HashTable* vmGlobalSymbols;      // VM's own symbol table for runtime global variable storage
+    HashTable* vmConstGlobalSymbols; // Separate table for constant globals (read-only, no mutex)
+    HashTable* procedureTable;      // store procedure table for disassembly
     
     HostFn host_functions[MAX_HOST_FUNCTIONS];
 
@@ -69,6 +86,15 @@ typedef struct VM_s {
     int frameCount;
 
     bool exit_requested;      // Indicates a builtin requested early exit from the current frame
+
+    // Threading support
+    Thread threads[VM_MAX_THREADS];
+    int threadCount;
+
+    // Mutex support
+    Mutex mutexes[VM_MAX_MUTEXES];
+    int mutexCount;
+    struct VM_s* mutexOwner; // VM that owns the mutex registry
 
 } VM;
 
@@ -78,7 +104,7 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.
-InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* procedures);
+InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 
 void runtimeError(VM* vm, const char* format, ...);

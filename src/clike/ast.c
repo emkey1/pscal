@@ -23,6 +23,18 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     return node;
 }
 
+ASTNodeClike *newThreadSpawnClike(ASTNodeClike *call) {
+    ASTNodeClike *node = newASTNodeClike(TCAST_THREAD_SPAWN, (ClikeToken){0});
+    setLeftClike(node, call);
+    return node;
+}
+
+ASTNodeClike *newThreadJoinClike(ASTNodeClike *expr) {
+    ASTNodeClike *node = newASTNodeClike(TCAST_THREAD_JOIN, (ClikeToken){0});
+    setLeftClike(node, expr);
+    return node;
+}
+
 void addChildClike(ASTNodeClike *parent, ASTNodeClike *child) {
     if (!parent || !child) return;
     ASTNodeClike **new_children = (ASTNodeClike**)realloc(
@@ -144,6 +156,9 @@ static const char* nodeTypeToString(ASTNodeTypeClike type) {
         case TCAST_IDENTIFIER: return "IDENTIFIER";
         case TCAST_ARRAY_ACCESS: return "ARRAY_ACCESS";
         case TCAST_CALL: return "CALL";
+        case TCAST_STRUCT_DECL: return "STRUCT_DECL";
+        case TCAST_THREAD_SPAWN: return "THREAD_SPAWN";
+        case TCAST_THREAD_JOIN: return "THREAD_JOIN";
         default: return "UNKNOWN";
     }
 }

@@ -31,9 +31,10 @@ cmake ..            # add -DSDL=ON to enable SDL support
 make
 ```
 
-Binaries are written to `build/bin` (e.g. `pascal` and `dascal`).
+Binaries are written to `build/bin` (e.g. `pascal`).
+To also build the debugging-oriented `dascal` binary, configure CMake with `-DBUILD_DASCAL=ON`.
 
-The `dascal` binary has very verbose debugging enabled
+The `dascal` binary has very verbose debugging enabled and is not built by default.
 
 To build without SDL explicitly:
 
@@ -105,7 +106,7 @@ sudo ./install.sh
 Additional VM builtin functions can be linked in by dropping C source files into
 `src/ext_builtins`.  Each file should implement a `registerExtendedBuiltins`
 function that registers its routines.  See
-[Docs/extending_builtins.md](Docs/extending_builtins.md) for details and an
+[Docs/extended_builtins.md](Docs/extended_builtins.md) for details and an
 example that exposes the host process ID in `src/ext_builtins/getpid.c`.
 
 ## License

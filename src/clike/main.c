@@ -12,7 +12,7 @@
 #include "core/cache.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 
 int gParamCount = 0;
@@ -23,6 +23,7 @@ int clike_warning_count = 0;
 
 static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
+    constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
 }
@@ -84,7 +85,7 @@ int main(int argc, char **argv) {
 #ifdef SDL
     defines[define_count++] = "SDL_ENABLED";
 #endif
-    char *pre_src = clike_preprocess(src, defines, define_count);
+    char *pre_src = clikePreprocess(src, defines, define_count);
 
     ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
     ASTNodeClike *prog = parseProgramClike(&parser);
@@ -93,7 +94,7 @@ int main(int argc, char **argv) {
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after parsing.\n");
         freeASTClike(prog);
-        clike_free_structs();
+        clikeFreeStructs();
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -103,7 +104,7 @@ int main(int argc, char **argv) {
         dumpASTClikeJSON(prog, stdout);
         fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");
         freeASTClike(prog);
-        clike_free_structs();
+        clikeFreeStructs();
         free(src);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
@@ -114,15 +115,16 @@ int main(int argc, char **argv) {
     }
 
     initSymbolSystemClike();
-    clike_register_builtins();
+    clikeRegisterBuiltins();
     analyzeSemanticsClike(prog);
 
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after semantic analysis.\n");
         freeASTClike(prog);
-        clike_free_structs();
+        clikeFreeStructs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -133,9 +135,10 @@ int main(int argc, char **argv) {
     if (clike_error_count > 0) {
         fprintf(stderr, "Compilation halted with %d error(s).\n", clike_error_count);
         freeASTClike(prog);
-        clike_free_structs();
+        clikeFreeStructs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(clike_error_count > 255 ? 255 : clike_error_count);
     }
@@ -144,29 +147,31 @@ int main(int argc, char **argv) {
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after optimization.\n");
         freeASTClike(prog);
-        clike_free_structs();
+        clikeFreeStructs();
         free(src);
         if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
 
-    BytecodeChunk chunk; clike_compile(prog, &chunk);
+    BytecodeChunk chunk; clikeCompile(prog, &chunk);
     if (dump_bytecode_flag) {
         fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
         disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-        fprintf(stderr, "\n--- Executing Program with VM ---\n");
+        fprintf(stderr, "\n--- executing Program with VM ---\n");
     }
 
     VM vm; initVM(&vm);
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, procedure_table);
+    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);
-    clike_free_structs();
+    clikeFreeStructs();
     free(src);
     if (pre_src) free(pre_src);
     if (globalSymbols) freeHashTable(globalSymbols);
+    if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }

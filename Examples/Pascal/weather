@@ -13,7 +13,7 @@ type
 
 var
   response: string;
-  ms: mstream; // Assumed type, adjust if necessary based on api_send return type
+  ms: mstream; // Assumed type, adjust if necessary based on apiSend return type
   url: string;
   location, description, tempStr, humidityStr, windStr: string;
   startPos, endPos, searchPos: integer; // searchPos reused for different searches
@@ -229,10 +229,10 @@ begin
   // { DEBUG: URL debug lines removed }
 
   // Perform the API call
-  ms := api_send(url, '');
+  ms := apiSend(url, '');
 
   // Convert the memory stream response to a string
-  response := api_receive(ms);
+  response := apiReceive(ms);
   // { DEBUG: Raw response debug lines removed }
 
   // Free the memory stream (if applicable)

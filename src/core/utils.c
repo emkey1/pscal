@@ -1,11 +1,11 @@
 #include "utils.h"
-#include "globals.h"
+#include "Pascal/globals.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
 #include "Pascal/ast.h"
-#include "documented_units.h"
+#include "Pascal/documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
 #include "symbol.h"
@@ -122,9 +122,11 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_BREAK:         return "BREAK";
         case TOKEN_OUT:           return "OUT";
         case TOKEN_SET:           return "SET";
-        case TOKEN_CARET:         return "CARET";   
-        case TOKEN_NIL:           return "NIL";    
-        case TOKEN_INLINE:       return "INLINE"; 
+        case TOKEN_CARET:         return "CARET";
+        case TOKEN_NIL:           return "NIL";
+        case TOKEN_INLINE:       return "INLINE";
+        case TOKEN_SPAWN:        return "SPAWN";
+        case TOKEN_JOIN:         return "JOIN";
         default:
             // Create a small buffer to handle potentially large unknown enum values
             // Although, this function should ideally cover all defined TokenType values.
@@ -182,6 +184,8 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_SET:            return "SET";
         case AST_ARRAY_LITERAL:  return "ARRAY_LITERAL";
         case AST_BREAK:          return "BREAK";
+        case AST_THREAD_SPAWN:   return "THREAD_SPAWN";
+        case AST_THREAD_JOIN:    return "THREAD_JOIN";
         case AST_POINTER_TYPE:   return "POINTER_TYPE";
         case AST_DEREFERENCE:    return "DEREFERENCE";
         case AST_NIL:            return "NIL";

@@ -11,7 +11,7 @@ static bool isDigit(char c) {
     return c >= '0' && c <= '9';
 }
 
-void clike_initLexer(ClikeLexer *lexer, const char *source) {
+void clikeInitLexer(ClikeLexer *lexer, const char *source) {
     lexer->src = source;
     lexer->pos = 0;
     lexer->line = 1;
@@ -74,6 +74,8 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 8 && strncmp(start, "continue", 8) == 0) return makeToken(lexer, CLIKE_TOKEN_CONTINUE, start, length, column);
     if (length == 6 && strncmp(start, "return", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_RETURN, start, length, column);
     if (length == 6 && strncmp(start, "import", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_IMPORT, start, length, column);
+    if (length == 5 && strncmp(start, "spawn", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_SPAWN, start, length, column);
+    if (length == 4 && strncmp(start, "join", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_JOIN, start, length, column);
     if (length == 6 && strncmp(start, "sizeof", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_SIZEOF, start, length, column);
     return makeToken(lexer, CLIKE_TOKEN_IDENTIFIER, start, length, column);
 }
@@ -132,7 +134,7 @@ static ClikeToken charToken(ClikeLexer *lexer, const char *start, int column) {
     return t;
 }
 
-ClikeToken clike_nextToken(ClikeLexer *lexer) {
+ClikeToken clikeNextToken(ClikeLexer *lexer) {
     while (1) {
         char c = peek(lexer);
         if (c == '\0') return makeToken(lexer, CLIKE_TOKEN_EOF, "", 0, lexer->column);
@@ -262,6 +264,8 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_CONTINUE: return "TOKEN_CONTINUE";
         case CLIKE_TOKEN_RETURN: return "TOKEN_RETURN";
         case CLIKE_TOKEN_IMPORT: return "TOKEN_IMPORT";
+        case CLIKE_TOKEN_SPAWN: return "TOKEN_SPAWN";
+        case CLIKE_TOKEN_JOIN: return "TOKEN_JOIN";
         case CLIKE_TOKEN_SIZEOF: return "TOKEN_SIZEOF";
         case CLIKE_TOKEN_IDENTIFIER: return "TOKEN_IDENTIFIER";
         case CLIKE_TOKEN_NUMBER: return "TOKEN_NUMBER";
