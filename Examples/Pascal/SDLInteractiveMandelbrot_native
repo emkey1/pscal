@@ -186,6 +186,12 @@ BEGIN
 
   FOR i := 0 TO ThreadCount - 1 DO join RenderThreadIDs[i];
 
+  // Make sure the final frame is copied to the SDL texture and shown.
+  // Without this call, the window may stay black once rendering finishes
+  // because the last few rows might not yet have been uploaded to the GPU
+  // when the worker threads complete.
+  UpdateAndDisplayTextureInProgress;
+
   GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
   RedrawNeeded := False;
   RenderInProgress := False;
