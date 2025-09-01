@@ -150,6 +150,7 @@ static void joinThread(VM* vm, int id) {
 // --- Mutex Helpers ---
 static int createMutex(VM* vm, bool recursive) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
     int id = -1;
     // Look for an inactive slot to reuse.
 
@@ -161,7 +162,10 @@ static int createMutex(VM* vm, bool recursive) {
     }
     // If none found, append a new mutex if capacity allows.
     if (id == -1) {
-        if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
+        if (owner->mutexCount >= VM_MAX_MUTEXES) {
+            pthread_mutex_unlock(&owner->mutexRegistryLock);
+            return -1;
+        }
         id = owner->mutexCount;
         owner->mutexCount++;
     }
@@ -175,30 +179,51 @@ static int createMutex(VM* vm, bool recursive) {
     }
     if (pthread_mutex_init(&m->handle, attr_ptr) != 0) {
         if (attr_ptr) pthread_mutexattr_destroy(&attr);
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
         return -1;
     }
     if (attr_ptr) pthread_mutexattr_destroy(&attr);
     m->active = true;
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
     return id;
 }
 
 static bool lockMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
-    return pthread_mutex_lock(&owner->mutexes[id].handle) == 0;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
+    Mutex* m = &owner->mutexes[id];
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
+    return pthread_mutex_lock(&m->handle) == 0;
 }
 
 static bool unlockMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
-    return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
+    Mutex* m = &owner->mutexes[id];
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
+    return pthread_mutex_unlock(&m->handle) == 0;
 }
 
 // Permanently frees a mutex created by mutex()/rcmutex(), making its ID unusable.
 static bool destroyMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
-    if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) return false;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
+    if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
     owner->mutexes[id].active = false;
 
     // If this was the highest-index mutex, shrink the count so new mutexes can reuse slots.
@@ -206,6 +231,7 @@ static bool destroyMutex(VM* vm, int id) {
         owner->mutexCount--;
 
     }
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
     return true;
 }
 
@@ -629,6 +655,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
 
     vm->mutexCount = 0;
+    pthread_mutex_init(&vm->mutexRegistryLock, NULL);
     vm->mutexOwner = vm;
     for (int i = 0; i < VM_MAX_MUTEXES; i++) {
         vm->mutexes[i].active = false;
@@ -676,6 +703,7 @@ void freeVM(VM* vm) {
             }
         }
     }
+    pthread_mutex_destroy(&vm->mutexRegistryLock);
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
     // additional handling.
