@@ -35,7 +35,7 @@ VAR
   ScaleRe, ScaleIm           : Real;
 
   MandelTextureID : Integer;
-  PixelData, DisplayPixelData : FlatPixelBuffer;
+  PixelData : FlatPixelBuffer;
   QuitProgram     : Boolean;
   RedrawNeeded    : Boolean;
   RenderInProgress : Boolean;
@@ -91,7 +91,9 @@ END;
 
 PROCEDURE UpdateAndDisplayTextureInProgress;
 BEGIN
-  UpdateTexture(MandelTextureID, DisplayPixelData);
+  lock(RowMutex);
+  UpdateTexture(MandelTextureID, PixelData);
+  unlock(RowMutex);
   ClearDevice;
   RenderCopy(MandelTextureID);
   UpdateScreen;
@@ -107,6 +109,7 @@ END;
     FOR LocalPy := startY TO endY DO BEGIN
       c_im := MaxIm - (LocalPy * ScaleIm);
       MandelbrotRow(MinRe, ScaleRe, c_im, MandelMaxIterations, ViewPixelWidth - 1, RowVals);
+      lock(RowMutex);
       FOR LocalPx := 0 TO ViewPixelWidth - 1 DO BEGIN
         Iteration := RowVals[LocalPx];
         IF Iteration = MandelMaxIterations THEN BEGIN
@@ -122,7 +125,6 @@ END;
         PixelData[BufferBaseIdx + 2] := B_calc;
         PixelData[BufferBaseIdx + 3] := 255;
       END; // Px
-      lock(RowMutex);
       RowDone[LocalPy] := 1;
       unlock(RowMutex);
     END; // Py
@@ -134,16 +136,13 @@ PROCEDURE ComputeRowsThread2; BEGIN ComputeRows(ThreadStart[2], ThreadEnd[2]); E
 PROCEDURE ComputeRowsThread3; BEGIN ComputeRows(ThreadStart[3], ThreadEnd[3]); END;
 
 PROCEDURE FillPixelDataAndDisplayProgressively;
-  VAR i, startY, endY, rowsPerThread, extra, y, doneFlag, bufferIdx, rowBytes, k : Integer;
+  VAR i, startY, endY, rowsPerThread, extra, y, doneFlag : Integer;
 BEGIN
   RenderInProgress := True;
   GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
 
   RowMutex := mutex();
   FOR i := 0 TO ViewPixelHeight - 1 DO RowDone[i] := 0;
-  rowBytes := ViewPixelWidth * MandelBytesPerPixel;
-  FOR k := 0 TO (ViewPixelWidth * ViewPixelHeight * MandelBytesPerPixel) - 1 DO
-    DisplayPixelData[k] := 0;
 
   rowsPerThread := ViewPixelHeight DIV ThreadCount;
   extra := ViewPixelHeight MOD ThreadCount;
@@ -165,11 +164,6 @@ BEGIN
   WHILE y < ViewPixelHeight DO BEGIN
     lock(RowMutex);
     doneFlag := RowDone[y];
-    IF doneFlag <> 0 THEN BEGIN
-      bufferIdx := y * rowBytes;
-      FOR k := 0 TO rowBytes - 1 DO
-        DisplayPixelData[bufferIdx + k] := PixelData[bufferIdx + k];
-    END;
     unlock(RowMutex);
     IF doneFlag <> 0 THEN BEGIN
       PercentDone := Trunc( (y + 1) * 100.0 / ViewPixelHeight );
@@ -189,9 +183,11 @@ BEGIN
 
   // Ensure the final image is copied to the texture and presented.
   UpdateAndDisplayTextureInProgress;
+
   GraphLoop(0);
 
   GotoXY(1, StatusLineY); ClrEol; WriteLn('Render complete. Click, R-Click, or Q.');
+
   RedrawNeeded := False;
   RenderInProgress := False;
 END;
