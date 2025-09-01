@@ -212,7 +212,7 @@ These built-ins are available when Pscal is built with SDL support.
 | issoundplaying | (sound: Sound) | Boolean | Query if sound playing. |
 | inittextsystem | () | void | Initialize text subsystem. |
 | quittextsystem | () | void | Shut down text subsystem. |
-| getmousestate | () | (x: Integer, y: Integer, buttons: Integer) | Query mouse position and buttons. |
+| getmousestate | (var x: Integer, var y: Integer, var buttons: Integer) | void | Query mouse position and buttons. |
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
 

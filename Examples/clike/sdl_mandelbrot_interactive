@@ -30,26 +30,15 @@ int quitMutex;
 int quit = 0;
 int redraw = 1;
 
-int getQuit() { 
-    int q; 
-    lock(quitMutex); 
-    q = quit; 
-    unlock(quitMutex); 
-    return q; 
-}
-
-void setQuit(int v) { 
-    lock(quitMutex); 
-    quit = v; 
-    unlock(quitMutex); 
-}
+int getQuit() { int q; lock(quitMutex); q = quit; unlock(quitMutex); return q; }
+void setQuit(int v) { lock(quitMutex); quit = v; unlock(quitMutex); }
 
 void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
     double c_im;
     for (y = startY; y <= endY && !getQuit(); y++) {
         c_im = maxIm - y * imFactor;
-        mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, row);
+        mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
         lock(rowMutex);
         for (x = 0; x < Width; x++) {
@@ -79,7 +68,7 @@ void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
 int main() {
     int mouseX = 0, mouseY = 0, mouseButtons = 0, prevButtons = 0;
     int ButtonLeft = 1, ButtonRight = 4;
-    int tid[ThreadCount], i, y, rowsPerThread, startY, endY;
+    int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
@@ -104,23 +93,15 @@ int main() {
             imFactor = (maxIm - minIm) / (Height - 1);
             for (i = 0; i < Height; i++) rowDone[i] = 0;
 
-            /*
-             * Divide the work as evenly as possible between threads.  Any
-             * threads that would start past the last row simply end before
-             * they begin so they exit immediately.
-             */
-            rowsPerThread = (Height + ThreadCount - 1) / ThreadCount; /* ceil */
+            rowsPerThread = Height / ThreadCount;
+            extra = Height % ThreadCount;
+            startY = 0;
             for (i = 0; i < ThreadCount; i++) {
-                startY = i * rowsPerThread;
                 endY = startY + rowsPerThread - 1;
-                if (startY >= Height) {
-                    startY = Height;        /* thread does nothing */
-                    endY = Height - 1;
-                }
-                if (endY >= Height)
-                    endY = Height - 1;
+                if (extra > 0) { endY++; extra--; }
                 threadStart[i] = startY;
                 threadEnd[i] = endY;
+                startY = endY + 1;
             }
 
             tid[0] = spawn computeRowsThread0();
@@ -143,14 +124,13 @@ int main() {
                  * type error when mixing INTEGER and BOOLEAN values.
                  */
                 update = ((done != 0) && (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1)) ? 1 : 0;
+                if (update)
+                    updatetexture(textureID, pixelData);
                 if (done)
                     y++;
                 unlock(rowMutex);
 
                 if (update) {
-                    lock(rowMutex);
-                    updatetexture(textureID, pixelData);
-                    unlock(rowMutex);
                     cleardevice();
                     rendercopy(textureID);
                     updatescreen();

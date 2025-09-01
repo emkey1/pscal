@@ -2662,7 +2662,14 @@ Value vmBuiltinDosGetdate(VM* vm, int arg_count, Value* args) {
     }
     time_t t = time(NULL);
     struct tm tm_info;
-    localtime_r(&t, &tm_info);
+#if defined(_WIN32) && !defined(__CYGWIN__)
+    localtime_s(&tm_info, &t);
+#else
+    if (!localtime_r(&t, &tm_info)) {
+        struct tm *tmp = localtime(&t);
+        if (tmp) tm_info = *tmp; else memset(&tm_info, 0, sizeof(tm_info));
+    }
+#endif
     Value* year = (Value*)args[0].ptr_val;
     Value* month = (Value*)args[1].ptr_val;
     Value* day = (Value*)args[2].ptr_val;
@@ -2682,7 +2689,14 @@ Value vmBuiltinDosGettime(VM* vm, int arg_count, Value* args) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     struct tm tm_info;
-    localtime_r(&tv.tv_sec, &tm_info);
+#if defined(_WIN32) && !defined(__CYGWIN__)
+    localtime_s(&tm_info, &tv.tv_sec);
+#else
+    if (!localtime_r(&tv.tv_sec, &tm_info)) {
+        struct tm *tmp = localtime(&tv.tv_sec);
+        if (tmp) tm_info = *tmp; else memset(&tm_info, 0, sizeof(tm_info));
+    }
+#endif
     Value* hour = (Value*)args[0].ptr_val;
     Value* min = (Value*)args[1].ptr_val;
     Value* sec = (Value*)args[2].ptr_val;
