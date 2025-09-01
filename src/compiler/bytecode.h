@@ -106,7 +106,8 @@ typedef enum {
     OP_MUTEX_CREATE,       // Create a standard mutex. Pushes mutex id
     OP_RCMUTEX_CREATE,     // Create a recursive mutex. Pushes mutex id
     OP_MUTEX_LOCK,         // Lock mutex whose id is on top of stack
-    OP_MUTEX_UNLOCK        // Unlock mutex whose id is on top of stack
+    OP_MUTEX_UNLOCK,       // Unlock mutex whose id is on top of stack
+    OP_MUTEX_DESTROY       // Destroy mutex whose id is on top of stack
 
 } OpCode;
 
