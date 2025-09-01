@@ -64,7 +64,7 @@ begin
   end;
 end;
 
-function ToUpper(s: string): string;
+function StrToUpper(s: string): string;
 var
   res: string;
   idx: integer;
@@ -77,10 +77,10 @@ begin
     else
       res := res + s[idx];
   end;
-  ToUpper := res;
+  StrToUpper := res;
 end;
 
-function ToLower(s: string): string;
+function StrToLower(s: string): string;
 var
   res: string;
   idx: integer;
@@ -93,7 +93,7 @@ begin
     else
       res := res + s[idx];
   end;
-  ToLower := res;
+  StrToLower := res;
 end;
 
 function TrimSpaces(s: string): string;
@@ -118,8 +118,8 @@ begin
   write('Enter text: ');
   readln(input);
   writeln('Trimmed: "', TrimSpaces(input), '"');
-  writeln('UpperCase: ', ToUpper(input));
-  writeln('LowerCase: ', ToLower(input));
+  writeln('UpperCase: ', StrToUpper(input));
+  writeln('LowerCase: ', StrToLower(input));
   writeln('Reversed: ', ReverseString(input));
 end;
 
