@@ -454,15 +454,35 @@ class tinyCompiler:
 # ---------------------------------------------------------------------------
 
 CACHE_MAGIC = 0x50534243  # 'PSBC'
-CACHE_VERSION = 4  # doubles as VM bytecode version
 
 
-def write_bytecode(builder: BytecodeBuilder, path: Path) -> None:
+def load_vm_version(root: Path) -> int:
+    """Parse ``version.h`` to obtain the VM bytecode version.
+
+    The tiny compiler needs to embed the same version number as the VM uses
+    when writing bytecode files. Previously this value was hard-coded and could
+    fall out of sync with the VM, leading to warnings about "stale" bytecode.
+    By loading the version dynamically we ensure the tiny frontend always
+    targets the correct VM version without manual updates when the core VM
+    version changes.
+    """
+
+    version_header = root / "src" / "core" / "version.h"
+    pattern = re.compile(r"#define\s+PSCAL_VM_VERSION\s+(\d+)")
+    with open(version_header, "r", encoding="utf-8") as f:
+        for line in f:
+            m = pattern.search(line)
+            if m:
+                return int(m.group(1))
+    raise RuntimeError("Unable to determine PSCAL_VM_VERSION")
+
+
+def write_bytecode(builder: BytecodeBuilder, path: Path, version: int) -> None:
     code = bytes(builder.code)
     lines = [0] * len(code)
     consts = builder.constants
     with open(path, "wb") as f:
-        f.write(struct.pack("<II", CACHE_MAGIC, CACHE_VERSION))
+        f.write(struct.pack("<II", CACHE_MAGIC, version))
         f.write(struct.pack("<ii", len(code), len(consts)))
         f.write(code)
         f.write(struct.pack("<" + "i" * len(lines), *lines))
@@ -500,7 +520,8 @@ def main(argv: List[str]) -> int:
     program = Parser(tokens).parse()
     compiler = tinyCompiler(Path(__file__).resolve().parent.parent)
     builder = compiler.compile(program)
-    write_bytecode(builder, out_path)
+    version = load_vm_version(compiler.root)
+    write_bytecode(builder, out_path, version)
     return 0
 
 if __name__ == "__main__":
