@@ -3297,7 +3297,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("lock", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("unlock", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("destroyMutex", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("destroy", AST_PROCEDURE_DECL, NULL);
+
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
     pthread_mutex_unlock(&builtin_registry_mutex);

@@ -408,7 +408,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 node->var_type = TYPE_INT32;
                 return TYPE_INT32;
             }
-            if (strcasecmp(name, "lock") == 0 || strcasecmp(name, "unlock") == 0) {
+            if (strcasecmp(name, "lock") == 0 || strcasecmp(name, "unlock") == 0 || strcasecmp(name, "destroy") == 0) {
                 if (node->child_count != 1) {
                     fprintf(stderr,
                             "Type error: %s expects 1 argument at line %d, column %d\n",

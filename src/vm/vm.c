@@ -21,7 +21,6 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
-#include "backend_ast/audio.h"
 
 #define MAX_WRITELN_ARGS_VM 32
 
@@ -152,15 +151,19 @@ static void joinThread(VM* vm, int id) {
 static int createMutex(VM* vm, bool recursive) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
     int id = -1;
+    // Look for an inactive slot to reuse.
+
     for (int i = 0; i < owner->mutexCount; i++) {
         if (!owner->mutexes[i].active) {
             id = i;
             break;
         }
     }
+    // If none found, append a new mutex if capacity allows.
     if (id == -1) {
         if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
-        id = owner->mutexCount++;
+        id = owner->mutexCount;
+        owner->mutexCount++;
     }
     Mutex* m = &owner->mutexes[id];
     pthread_mutexattr_t attr;
@@ -191,15 +194,17 @@ static bool unlockMutex(VM* vm, int id) {
     return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
 }
 
+// Permanently frees a mutex created by mutex()/rcmutex(), making its ID unusable.
 static bool destroyMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
     if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
     if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) return false;
     owner->mutexes[id].active = false;
-    if (id == owner->mutexCount - 1) {
-        while (owner->mutexCount > 0 && !owner->mutexes[owner->mutexCount - 1].active) {
-            owner->mutexCount--;
-        }
+
+    // If this was the highest-index mutex, shrink the count so new mutexes can reuse slots.
+    while (owner->mutexCount > 0 && !owner->mutexes[owner->mutexCount - 1].active) {
+        owner->mutexCount--;
+
     }
     return true;
 }
@@ -3088,7 +3093,7 @@ comparison_error_label:
                 }
                 int mid = (int)midVal.i_val;
                 if (!destroyMutex(vm, mid)) {
-                    runtimeError(vm, "Failed to destroy mutex %d.", mid);
+                    runtimeError(vm, "Invalid mutex id %d.", mid);
                     Value popped_mid = pop(vm);
                     freeValue(&popped_mid);
                     return INTERPRET_RUNTIME_ERROR;

@@ -229,6 +229,7 @@ The Pascal front end supports lightweight concurrency and mutex primitives using
 * `rcmutex` – creates a recursive mutex and returns its identifier.
 * `lock` – takes a mutex identifier and waits until the mutex is acquired.
 * `unlock` – releases a previously acquired mutex.
+* `destroy` – permanently frees a mutex so its identifier can no longer be used.
 
 Threads share global variables and are scheduled cooperatively; a `join` yields control until the target thread completes.
 

@@ -38,5 +38,6 @@ begin
   t2 := spawn Worker2;
   join t1;
   join t2;
+  destroy(mid);
   writeln(counter);
 end.

@@ -17,5 +17,6 @@ begin
   mid := rcmutex();
   tid := spawn Worker;
   join tid;
+  destroy(mid);
   writeln('done');
 end.

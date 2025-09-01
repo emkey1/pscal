@@ -977,9 +977,10 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, node->token.line);
                 break;
             }
-            if (strcasecmp(name, "destroymutex") == 0) {
+            if (strcasecmp(name, "destroy") == 0) {
                 if (node->child_count != 1) {
-                    fprintf(stderr, "Compile error: destroyMutex expects 1 argument.\n");
+                    fprintf(stderr, "Compile error: destroy expects 1 argument.\n");
+
                 } else {
                     compileExpression(node->children[0], chunk, ctx);
                 }

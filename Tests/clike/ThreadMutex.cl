@@ -30,6 +30,7 @@ int main() {
     int t2 = spawn worker2();
     join t1;
     join t2;
+    destroy(mid);
     printf("%d\n", counter);
     return 0;
 }
