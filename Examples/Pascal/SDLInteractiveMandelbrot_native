@@ -138,6 +138,7 @@ PROCEDURE ComputeRowsThread3; BEGIN ComputeRows(ThreadStart[3], ThreadEnd[3]); E
 PROCEDURE FillPixelDataAndDisplayProgressively;
   VAR i, startY, endY, rowsPerThread, extra, y, doneFlag, bufferIdx, rowBytes, k : Integer;
 BEGIN
+  endy := 0;
   RenderInProgress := True;
   GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
 
@@ -151,6 +152,8 @@ BEGIN
   extra := ViewPixelHeight MOD ThreadCount;
   startY := 0;
   FOR i := 0 TO ThreadCount - 1 DO BEGIN
+    gotoxy(1,12 + i);
+    writeln('Setup Render Thread: ', i, ', endY = ', endY);
     endY := startY + rowsPerThread - 1;
     IF extra > 0 THEN BEGIN endY := endY + 1; extra := extra - 1; END;
     ThreadStart[i] := startY;
@@ -248,7 +251,16 @@ BEGIN // Main Program
   MouseThreadID := spawn MouseInputThread;
   KeyboardThreadID := spawn KeyboardInputThread;
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);
-  IF MandelTextureID < 0 THEN BEGIN GotoXY(1, StatusLineY); WriteLn('Error: No Texture! Halting.'); ReadKey; CloseGraph; NormVideo; ShowCursor; HALT; END;
+  IF MandelTextureID < 0 THEN 
+  BEGIN 
+    GotoXY(1, StatusLineY); 
+    WriteLn('Error: No Texture! Halting.'); 
+    ReadKey; 
+    CloseGraph; 
+    NormVideo; 
+    ShowCursor; 
+    HALT; 
+  END;
 
   ResetViewToInitial; // Sets MinRe,MaxRe,MinIm to defaults AND calculates scales/MaxIm
   RedrawNeeded := True;
@@ -269,5 +281,10 @@ BEGIN // Main Program
   join KeyboardThreadID;
 
   DestroyTexture(MandelTextureID); CloseGraph;
-  GotoXY(1, StatusLineY + 2); ClrEol; NormVideo; ShowCursor; WriteLn; WriteLn('Program terminated.');
+  GotoXY(1, StatusLineY + 8); 
+  ClrEol; 
+  NormVideo; 
+  ShowCursor; 
+  WriteLn; 
+  WriteLn('Program terminated.');
 END.
