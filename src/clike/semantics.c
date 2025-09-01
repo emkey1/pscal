@@ -427,6 +427,25 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 node->var_type = TYPE_VOID;
                 return TYPE_VOID;
             }
+            if (strcasecmp(name, "destroymutex") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr,
+                            "Type error: %s expects 1 argument at line %d, column %d\n",
+                            name, node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType at = analyzeExpr(node->children[0], scopes);
+                    if (!isIntlikeType(at)) {
+                        fprintf(stderr,
+                                "Type error: %s argument must be integer at line %d, column %d\n",
+                                name, node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                free(name);
+                node->var_type = TYPE_VOID;
+                return TYPE_VOID;
+            }
 
             VarType t = getFunctionType(name);
             if (t == TYPE_UNKNOWN) {

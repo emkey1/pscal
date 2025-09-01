@@ -2045,6 +2045,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
                 break;
             }
+            if (strcasecmp(calleeName, "destroymutex") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: destroyMutex expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, line);
+                break;
+            }
             if (strcasecmp(calleeName, "mutex") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
@@ -2694,6 +2703,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
                 writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
+                break;
+            }
+            if (strcasecmp(functionName, "destroymutex") == 0) {
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: destroyMutex expects 1 argument.\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, line);
                 break;
             }
             

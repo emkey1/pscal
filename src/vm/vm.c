@@ -41,12 +41,40 @@ typedef struct {
     uint16_t entry;
 } ThreadStartArgs;
 
+// Forward declarations for helpers used by threadStart.
+static void push(VM* vm, Value value);
+static Symbol* findProcedureByAddress(HashTable* table, uint16_t address);
+
 static void* threadStart(void* arg) {
     ThreadStartArgs* args = (ThreadStartArgs*)arg;
     Thread* thread = args->thread;
     VM* vm = thread->vm;
     uint16_t entry = args->entry;
     free(args);
+
+    Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, entry);
+    if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+
+    CallFrame* frame = &vm->frames[vm->frameCount++];
+    frame->return_address = NULL;
+    frame->slots = vm->stack;
+    frame->function_symbol = proc_symbol;
+    frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
+    frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
+    frame->upvalues = NULL;
+
+    if (proc_symbol && proc_symbol->upvalue_count > 0) {
+        frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
+        if (frame->upvalues) {
+            for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                frame->upvalues[i] = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
+        push(vm, makeNil());
+    }
 
     interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
     thread->active = false;
@@ -123,8 +151,18 @@ static void joinThread(VM* vm, int id) {
 // --- Mutex Helpers ---
 static int createMutex(VM* vm, bool recursive) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
-    Mutex* m = &owner->mutexes[owner->mutexCount];
+    int id = -1;
+    for (int i = 0; i < owner->mutexCount; i++) {
+        if (!owner->mutexes[i].active) {
+            id = i;
+            break;
+        }
+    }
+    if (id == -1) {
+        if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
+        id = owner->mutexCount++;
+    }
+    Mutex* m = &owner->mutexes[id];
     pthread_mutexattr_t attr;
     pthread_mutexattr_t* attr_ptr = NULL;
     if (recursive) {
@@ -138,8 +176,6 @@ static int createMutex(VM* vm, bool recursive) {
     }
     if (attr_ptr) pthread_mutexattr_destroy(&attr);
     m->active = true;
-    int id = owner->mutexCount;
-    owner->mutexCount++;
     return id;
 }
 
@@ -153,6 +189,18 @@ static bool unlockMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
     if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
     return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
+}
+
+static void destroyMutex(VM* vm, int id) {
+    VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return;
+    pthread_mutex_destroy(&owner->mutexes[id].handle);
+    owner->mutexes[id].active = false;
+    if (id == owner->mutexCount - 1) {
+        while (owner->mutexCount > 0 && !owner->mutexes[owner->mutexCount - 1].active) {
+            owner->mutexCount--;
+        }
+    }
 }
 
 // Internal function shared by stack dump helpers
@@ -934,16 +982,18 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         pthread_mutex_unlock(&globals_mutex);
     }
 
-    // Establish a base call frame for the main program.  This allows inline
-    // routines at the top level to utilize local variable opcodes without
-    // triggering stack underflows due to the absence of an active frame.
-    CallFrame* baseFrame = &vm->frames[vm->frameCount++];
-    baseFrame->return_address = NULL;
-    baseFrame->slots = vm->stack;
-    baseFrame->function_symbol = NULL;
-    baseFrame->locals_count = 0;
-    baseFrame->upvalue_count = 0;
-    baseFrame->upvalues = NULL;
+    // Establish a base call frame for the main program if none has been
+    // installed yet. Threads that set up their own initial frame prior to
+    // invoking the interpreter can skip this.
+    if (vm->frameCount == 0) {
+        CallFrame* baseFrame = &vm->frames[vm->frameCount++];
+        baseFrame->return_address = NULL;
+        baseFrame->slots = vm->stack;
+        baseFrame->function_symbol = NULL;
+        baseFrame->locals_count = 0;
+        baseFrame->upvalue_count = 0;
+        baseFrame->upvalues = NULL;
+    }
 
     #ifdef DEBUG
     if (dumpExec) { // from all.txt
@@ -3023,6 +3073,20 @@ comparison_error_label:
                     freeValue(&popped_mid);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                Value popped_mid = pop(vm);
+                freeValue(&popped_mid);
+                break;
+            }
+            case OP_MUTEX_DESTROY: {
+                Value midVal = peek(vm, 0);
+                if (!IS_INTLIKE(midVal)) {
+                    runtimeError(vm, "Mutex id must be integer.");
+                    Value popped_mid = pop(vm);
+                    freeValue(&popped_mid);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                int mid = (int)midVal.i_val;
+                destroyMutex(vm, mid);
                 Value popped_mid = pop(vm);
                 freeValue(&popped_mid);
                 break;
