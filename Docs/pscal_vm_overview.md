@@ -307,6 +307,9 @@ MyFunction(a, b);
 * **`OP_MUTEX_UNLOCK`**:
     * **Operands:** None (uses mutex id on stack).
     * **Action:** Pops a mutex identifier and releases the corresponding mutex.
+* **`OP_MUTEX_DESTROY`**:
+    * **Operands:** None (uses mutex id on stack).
+    * **Action:** Pops a mutex identifier and destroys the corresponding mutex.
 
 #### **I/O and Miscellaneous Opcodes**
 

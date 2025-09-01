@@ -212,6 +212,7 @@ The language provides lightweight concurrency and mutex primitives through the f
 * `rcmutex` – creates a recursive mutex and pushes its identifier.
 * `lock` – pops a mutex identifier and blocks until it is acquired.
 * `unlock` – releases the mutex whose identifier is on top of the stack.
+* `destroy` – pops a mutex identifier and permanently frees the mutex.
 
 Example:
 
