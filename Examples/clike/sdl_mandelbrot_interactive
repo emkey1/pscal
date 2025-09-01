@@ -11,6 +11,8 @@ const int BytesPerPixel = 4;
 const int ScreenUpdateInterval = 16;
 const double ZoomFactor = 2.0;
 const int ThreadCount = 4;
+const int ButtonLeft = 1;
+const int ButtonRight = 4;
 
 byte pixelData[Width * Height * BytesPerPixel];
 int rowDone[Height];
@@ -29,19 +31,41 @@ int rowMutex;
 int quitMutex;
 int quit = 0;
 int redraw = 1;
+int prevButtons = 0;
+int clickButton = 0, clickX = 0, clickY = 0;
 
-int getQuit() { 
-    int q; 
-    lock(quitMutex); 
-    q = quit; 
-    unlock(quitMutex); 
-    return q; 
+int getQuit() {
+    int q;
+    lock(quitMutex);
+    q = quit;
+    unlock(quitMutex);
+    return q;
 }
 
-void setQuit(int v) { 
-    lock(quitMutex); 
-    quit = v; 
-    unlock(quitMutex); 
+void setQuit(int v) {
+    lock(quitMutex);
+    quit = v;
+    unlock(quitMutex);
+}
+
+void pollMouse() {
+    int x, y, b;
+    graphloop(0);
+    getmousestate(&x, &y, &b);
+    if (b != prevButtons)
+        printf("MouseState: x=%d y=%d b=%d prev=%d\n", x, y, b, prevButtons);
+    if (((b & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0)) {
+        clickButton = ButtonLeft;
+        clickX = x;
+        clickY = y;
+        printf("Left click at %d,%d\n", x, y);
+    } else if (((b & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0)) {
+        clickButton = ButtonRight;
+        clickX = x;
+        clickY = y;
+        printf("Right click at %d,%d\n", x, y);
+    }
+    prevButtons = b;
 }
 
 void computeRows(int startY, int endY) {
@@ -77,8 +101,6 @@ void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
 void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
 
 int main() {
-    int mouseX = 0, mouseY = 0, mouseButtons = 0, prevButtons = 0;
-    int ButtonLeft = 1, ButtonRight = 4;
     int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
@@ -91,12 +113,7 @@ int main() {
     quitMutex = mutex();
 
     while (!getQuit()) {
-        /*
-         * Pump SDL events before handling input so mouse and keyboard state
-         * are up to date.  Previously this was done at the end of the loop,
-         * which could miss short clicks that occurred between polls.
-         */
-        graphloop(16);
+        pollMouse();
 
         if (redraw) {
             maxIm = minIm + (maxRe - minRe) * Height / Width;
@@ -155,7 +172,7 @@ int main() {
                     if (toupper(c) == 'Q') setQuit(1);
                 }
                 if (!done || update)
-                    graphloop(0);
+                    pollMouse();
             }
 
             for (i = 0; i < ThreadCount; i++)
@@ -175,29 +192,30 @@ int main() {
             if (toupper(c) == 'Q') { setQuit(1); continue; }
         }
 
-        getmousestate(&mouseX, &mouseY, &mouseButtons);
-        if (((mouseButtons & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0)) {
-            double centerRe = minRe + mouseX * reFactor;
-            double centerIm = maxIm - mouseY * imFactor;
+        if (clickButton == ButtonLeft) {
+            double centerRe = minRe + clickX * reFactor;
+            double centerIm = maxIm - clickY * imFactor;
             double newWidth = (maxRe - minRe) / ZoomFactor;
             double newHeight = (maxIm - minIm) / ZoomFactor;
             minRe = centerRe - newWidth / 2.0;
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
+            printf("Zoom in at %d,%d\n", clickX, clickY);
             redraw = 1;
-        } else if (((mouseButtons & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0)) {
-            double centerRe = minRe + mouseX * reFactor;
-            double centerIm = maxIm - mouseY * imFactor;
+            clickButton = 0;
+        } else if (clickButton == ButtonRight) {
+            double centerRe = minRe + clickX * reFactor;
+            double centerIm = maxIm - clickY * imFactor;
             double newWidth = (maxRe - minRe) * ZoomFactor;
             double newHeight = (maxIm - minIm) * ZoomFactor;
             minRe = centerRe - newWidth / 2.0;
             maxRe = centerRe + newWidth / 2.0;
             minIm = centerIm - newHeight / 2.0;
+            printf("Zoom out at %d,%d\n", clickX, clickY);
             redraw = 1;
+            clickButton = 0;
         }
-        prevButtons = mouseButtons;
     }
-
     destroytexture(textureID);
     closegraph();
     return 0;
