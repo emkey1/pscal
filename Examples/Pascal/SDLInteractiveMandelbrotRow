@@ -100,6 +100,7 @@ BEGIN
   ClearDevice;
   RenderCopy(MandelTextureID);
   UpdateScreen;
+  GraphLoop(0);
 END;
 
   // Compute rows using the MandelbrotRow extended builtin.
@@ -178,11 +179,10 @@ BEGIN
     IF doneFlag <> 0 THEN BEGIN
       PercentDone := Trunc( (y + 1) * 100.0 / ViewPixelHeight );
       GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', y + 1, '/', ViewPixelHeight, '. ~', PercentDone, '%');
-      IF (((y + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (y = ViewPixelHeight - 1)) THEN
-      BEGIN
-        UpdateAndDisplayTextureInProgress;
-        GraphLoop(0);
-      END;
+        IF (((y + 1) MOD MandelTextureUpdateIntervalRows = 0) OR (y = ViewPixelHeight - 1)) THEN
+        BEGIN
+          UpdateAndDisplayTextureInProgress;
+        END;
       y := y + 1;
     END ELSE BEGIN
       GraphLoop(0);
@@ -193,9 +193,7 @@ BEGIN
     WHILE WorkReady[i] <> 0 DO Delay(0);
 
   // Ensure the final image is copied to the texture and presented.
-  UpdateAndDisplayTextureInProgress;
-
-  GraphLoop(0);
+    UpdateAndDisplayTextureInProgress;
 
   GotoXY(1, StatusLineY); ClrEol; WriteLn('Render complete. Click, R-Click, or Q.');
 
