@@ -46,6 +46,7 @@ VAR
   CurrentViewWidthRe, CurrentViewHeightIm : Real;
   NewViewWidthRe, NewViewHeightIm     : Real;
   PercentDone : Integer;
+  MouseThreadID, KeyboardThreadID : Integer;
 
 // This procedure recalculates MaxIm and scaling factors based on CURRENT MinRe, MaxRe, MinIm
 PROCEDURE UpdateScalingAndDependentViewParams;
@@ -117,6 +118,44 @@ BEGIN
   GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
 END;
 
+PROCEDURE KeyboardInputThread;
+BEGIN
+  WHILE NOT QuitProgram DO BEGIN
+    IF KeyPressed THEN BEGIN
+      IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True;
+    END;
+    Delay(10);
+  END;
+END;
+
+PROCEDURE MouseInputThread;
+BEGIN
+  WHILE NOT QuitProgram DO BEGIN
+    GetMouseState(MouseX, MouseY, MouseButtons);
+    IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
+      IF NOT RedrawNeeded THEN BEGIN
+        NewCenterX := MinRe + (MouseX * ScaleRe); NewCenterY := MaxIm - (MouseY * ScaleIm);
+        CurrentViewWidthRe  := MaxRe - MinRe; CurrentViewHeightIm := MaxIm - MinIm;
+        NewViewWidthRe  := CurrentViewWidthRe / MandelZoomFactor; NewViewHeightIm := CurrentViewHeightIm / MandelZoomFactor;
+        MinRe := NewCenterX - (NewViewWidthRe / 2.0); MaxRe := NewCenterX + (NewViewWidthRe / 2.0);
+        MinIm := NewCenterY - (NewViewHeightIm / 2.0);
+        UpdateScalingAndDependentViewParams;
+        RedrawNeeded := True;
+        GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', MouseX, ',', MouseY, ')');
+      END;
+    END
+    ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
+      IF NOT RedrawNeeded THEN BEGIN
+        ResetViewToInitial;
+        RedrawNeeded := True;
+        GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
+      END;
+    END;
+    PrevMouseButtons := MouseButtons;
+    Delay(10);
+  END;
+END;
+
 BEGIN // Main Program
   HideCursor; ClrScr;
   GotoXY(1, 1); Write('Pscal Texture Mandelbrot (Zoom Fixed)');
@@ -134,6 +173,8 @@ BEGIN // Main Program
   RedrawNeeded := True;
   QuitProgram  := False;
   PrevMouseButtons := 0;
+  MouseThreadID := spawn MouseInputThread;
+  KeyboardThreadID := spawn KeyboardInputThread;
 
   WHILE NOT QuitProgram DO BEGIN
     IF RedrawNeeded THEN BEGIN
@@ -143,32 +184,10 @@ BEGIN // Main Program
       ClearDevice; RenderCopy(MandelTextureID); UpdateScreen;
       GraphLoop(20);
     END;
-
-    IF KeyPressed THEN BEGIN IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True; END;
-    GetMouseState(MouseX, MouseY, MouseButtons);
-
-    // Respond only to new button presses (transition from up to down)
-    IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
-      IF NOT RedrawNeeded THEN BEGIN
-        NewCenterX := MinRe + (MouseX * ScaleRe); NewCenterY := MaxIm - (MouseY * ScaleIm);
-        CurrentViewWidthRe  := MaxRe - MinRe; CurrentViewHeightIm := MaxIm - MinIm;
-        NewViewWidthRe  := CurrentViewWidthRe / MandelZoomFactor; NewViewHeightIm := CurrentViewHeightIm / MandelZoomFactor;
-        MinRe := NewCenterX - (NewViewWidthRe / 2.0); MaxRe := NewCenterX + (NewViewWidthRe / 2.0);
-        MinIm := NewCenterY - (NewViewHeightIm / 2.0);
-        UpdateScalingAndDependentViewParams; // <<<< CALL THE CORRECT PROCEDURE HERE
-        RedrawNeeded := True;
-        GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', MouseX, ',', MouseY, ')');
-      END;
-    END
-    ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
-      IF NOT RedrawNeeded THEN BEGIN
-        ResetViewToInitial; // <<<< CALL THE CORRECT PROCEDURE HERE
-        RedrawNeeded := True;
-        GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
-      END;
-    END;
-    PrevMouseButtons := MouseButtons;
   END; // WHILE
+
+  join MouseThreadID;
+  join KeyboardThreadID;
 
   DestroyTexture(MandelTextureID); CloseGraph;
   GotoXY(1, StatusLineY + 2); ClrEol; NormVideo; ShowCursor; WriteLn; WriteLn('Program terminated.');
