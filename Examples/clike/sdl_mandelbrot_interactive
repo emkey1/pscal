@@ -30,8 +30,19 @@ int quitMutex;
 int quit = 0;
 int redraw = 1;
 
-int getQuit() { int q; lock(quitMutex); q = quit; unlock(quitMutex); return q; }
-void setQuit(int v) { lock(quitMutex); quit = v; unlock(quitMutex); }
+int getQuit() { 
+    int q; 
+    lock(quitMutex); 
+    q = quit; 
+    unlock(quitMutex); 
+    return q; 
+}
+
+void setQuit(int v) { 
+    lock(quitMutex); 
+    quit = v; 
+    unlock(quitMutex); 
+}
 
 void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
@@ -98,7 +109,11 @@ int main() {
             startY = 0;
             for (i = 0; i < ThreadCount; i++) {
                 endY = startY + rowsPerThread - 1;
-                if (extra > 0) { endY++; extra--; }
+                if (extra > 0) { 
+                    endY++; 
+                    extra--; 
+                }
+                //printf("Thread(%d): startY: %d endY: %d\n", i, startY, endY);
                 threadStart[i] = startY;
                 threadEnd[i] = endY;
                 startY = endY + 1;
@@ -187,4 +202,3 @@ int main() {
     closegraph();
     return 0;
 }
-
