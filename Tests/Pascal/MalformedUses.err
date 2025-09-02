@@ -1,0 +1,1 @@
+Parser error at line 2, column 9: Expected token SEMICOLON, got INTEGER_CONST (found token: INTEGER_CONST)

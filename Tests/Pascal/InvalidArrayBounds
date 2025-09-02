@@ -1,0 +1,7 @@
+program InvalidArrayBounds;
+var
+  a: array['a'..'z'] of integer;  { invalid: char bounds }
+begin
+  writeln('unreachable');
+end.
+
