@@ -387,27 +387,54 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    // Ensure SDL's event state is up to date before querying the mouse
-    SDL_PumpEvents();
-
     int mse_x = 0, mse_y = 0;
     Uint32 sdl_buttons = 0;
 
-    // Prefer window-relative state when our window has mouse focus.
+#ifdef __APPLE__
+    // On macOS avoid SDL_PumpEvents from non-main threads. Use global mouse
+    // state and convert to window-relative coordinates with border and HiDPI
+    // adjustments.
+    int global_x = 0, global_y = 0;
+    sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
+
+    int win_x = 0, win_y = 0;
+    SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
+#if SDL_VERSION_ATLEAST(2,0,5)
+    int border_top = 0, border_left = 0, border_bottom = 0, border_right = 0;
+    if (SDL_GetWindowBordersSize(gSdlWindow, &border_top, &border_left,
+                                 &border_bottom, &border_right) == 0) {
+        win_x += border_left;
+        win_y += border_top;
+    }
+#endif
+    mse_x = global_x - win_x;
+    mse_y = global_y - win_y;
+
+    int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+    int out_w = 0, out_h = 0; SDL_GetRendererOutputSize(gSdlRenderer, &out_w, &out_h);
+    if (win_w > 0 && win_h > 0 && (out_w != win_w || out_h != win_h)) {
+        double sx = (double)out_w / (double)win_w;
+        double sy = (double)out_h / (double)win_h;
+        mse_x = (int)((double)mse_x * sx);
+        mse_y = (int)((double)mse_y * sy);
+    }
+
+    if (mse_x < 0) mse_x = 0; if (mse_y < 0) mse_y = 0;
+    if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
+    if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
+#else
+    // Update SDL state and prefer window-relative coordinates when we have focus.
+    SDL_PumpEvents();
     SDL_Window* focus_window = SDL_GetMouseFocus();
     if (focus_window == gSdlWindow) {
         sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
     } else {
-        // When our window is not focused, query global coordinates and convert
-        // to window space so callers still get stable results (useful during
-        // drags that leave the window bounds on macOS/Wayland).
         int global_x = 0, global_y = 0;
         sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
         int win_x = 0, win_y = 0; SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
         mse_x = global_x - win_x;
         mse_y = global_y - win_y;
 
-        // Adjust for HiDPI scaling if the renderer output size differs from window size.
         int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
         int out_w = 0, out_h = 0; SDL_GetRendererOutputSize(gSdlRenderer, &out_w, &out_h);
         if (win_w > 0 && win_h > 0 && (out_w != win_w || out_h != win_h)) {
@@ -417,11 +444,11 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
             mse_y = (int)((double)mse_y * sy);
         }
 
-        // Clip to the current logical drawable area to avoid negative/huge values
         if (mse_x < 0) mse_x = 0; if (mse_y < 0) mse_y = 0;
         if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
         if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
     }
+#endif
 
     // Improve drag reliability by capturing the mouse while a button is held.
     // This keeps event coordinates updating even when the cursor leaves the window.
