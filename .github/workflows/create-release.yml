@@ -1,0 +1,27 @@
+name: Create GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g., v2.1-beta)"
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: Pscal ${{ github.event.inputs.tag }}
+          body_path: RELEASE_NOTES_${{ github.event.inputs.tag }}.md
+          prerelease: ${{ contains(github.event.inputs.tag, 'beta') || contains(github.event.inputs.tag, 'alpha') || contains(github.event.inputs.tag, 'rc') }}
+
