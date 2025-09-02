@@ -13,7 +13,7 @@ int main() {
     int prevButtons = 0;
 
     printf("Move the mouse inside the window. Press Q to quit.\n");
-    initgraph(640, 480, "getmousestate demo");
+    initgraph(800, 600, "getmousestate demo");
 
     while (1) {
         graphloop(1);

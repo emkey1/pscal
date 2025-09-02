@@ -390,6 +390,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     int mse_x = 0, mse_y = 0;
     Uint32 sdl_buttons = 0;
     bool inside_window = false;
+    bool has_focus = false;
 
 #ifdef __APPLE__
     // On macOS avoid SDL_PumpEvents from non-main threads. Use global mouse
@@ -413,6 +414,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
     inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
                      global_y >= win_y && global_y < (win_y + win_h));
+    has_focus = (SDL_GetMouseFocus() == gSdlWindow);
 
     // Do NOT scale to renderer output size here; the rest of the VM and
     // examples operate in window pixel coordinates (texture and drawing use
@@ -435,6 +437,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
         sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
         int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
         inside_window = (mse_x >= 0 && mse_x < win_w && mse_y >= 0 && mse_y < win_h);
+        has_focus = true;
     } else {
         int global_x = 0, global_y = 0;
         sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
@@ -444,7 +447,8 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
         int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
         inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
                          global_y >= win_y && global_y < (win_y + win_h));
-
+        has_focus = false;
+        
         if (mse_x < 0) {
             mse_x = 0;
         }
@@ -456,8 +460,8 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     }
 #endif
 
-    // Ignore new clicks outside the window bounds.
-    if (!inside_window) {
+    // Ignore buttons if the window is not focused or the pointer is outside it.
+    if (!inside_window || !has_focus) {
         sdl_buttons = 0;
     }
     

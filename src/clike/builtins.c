@@ -65,4 +65,17 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("min", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("floor", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ceil", AST_FUNCTION_DECL, NULL);
+
+    /* C-like cast helpers */
+    registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("float", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("char", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("bool", AST_FUNCTION_DECL, NULL);
+    /* synonyms to avoid parser conflicts with type tokens */
+    registerBuiltinFunction("toint", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("todouble", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tofloat", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tochar", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
 }
