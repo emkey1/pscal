@@ -13,6 +13,11 @@ const double ZoomFactor = 2.0;
 const int ThreadCount = 4;
 const int ButtonLeft = 1;
 const int ButtonRight = 4;
+/* SDL keycodes for arrow keys */
+const int KEY_LEFT = 1073741904;
+const int KEY_RIGHT = 1073741903;
+const int KEY_UP = 1073741906;
+const int KEY_DOWN = 1073741905;
 
 byte pixelData[Width * Height * BytesPerPixel];
 int rowDone[Height];
@@ -49,27 +54,51 @@ void setQuit(int v) {
     unlock(quitMutex);
 }
 
+/*
+ * Poll SDL briefly and detect a fresh left/right click that occurred inside
+ * the window. Click coordinates are clamped to [0..Width-1]/[0..Height-1].
+ * Sets (clickButton, clickX, clickY) when a new click is found.
+ */
 void pollMouse() {
-    int x, y, b;
-    /* Pump SDL events so getmousestate sees fresh input. */
-    graphloop(1);
+    int x = 0, y = 0, b = 0;
+    graphloop(1);           /* Pump events */
     getmousestate(&x, &y, &b);
 
-    if (b != prevButtons)
-        printf("MouseState: x=%d y=%d b=%d prev=%d\n", x, y, b, prevButtons);
+    /* Fresh press detection: bit goes from 0 -> 1 */
+    int freshLeft  = ((b & ButtonLeft)  != 0) && ((prevButtons & ButtonLeft)  == 0);
+    int freshRight = ((b & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0);
 
-    if (((b & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0)) {
+    /* Use actual window dimensions to validate click is inside the window */
+    int winW = getmaxx() + 1;  /* getmaxx returns max index */
+    int winH = getmaxy() + 1;
+    int inside = (x >= 0 && x < winW && y >= 0 && y < winH);
+    if (!inside) {
+        prevButtons = b;
+        return; /* ignore clicks outside */
+    }
+
+    /* Map from window coordinates to texture coordinates if sizes differ */
+    if (winW != Width && winW > 0) {
+        x = (x * Width) / winW;
+        if (x >= Width) x = Width - 1;
+    }
+    if (winH != Height && winH > 0) {
+        y = (y * Height) / winH;
+        if (y >= Height) y = Height - 1;
+    }
+
+    if (freshLeft) {
         clickButton = ButtonLeft;
         clickX = x;
         clickY = y;
-        printf("Left click at %d,%d\n", x, y);
-
-    } else if (((b & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0)) {
+        printf("DBG click: LEFT raw=(%d,%d) win=(%d,%d) scaled=(%d,%d) b=%d prev=%d\n",
+               x, y, winW, winH, clickX, clickY, b, prevButtons);
+    } else if (freshRight) {
         clickButton = ButtonRight;
         clickX = x;
         clickY = y;
-        printf("Right click at %d,%d\n", x, y);
-
+        printf("DBG click: RIGHT raw=(%d,%d) win=(%d,%d) scaled=(%d,%d) b=%d prev=%d\n",
+               x, y, winW, winH, clickX, clickY, b, prevButtons);
     }
     prevButtons = b;
 }
@@ -194,34 +223,61 @@ int main() {
                 redraw = 0;
             }
         }
-
-        if (keypressed()) {
-            char c = readkey();
-            if (toupper(c) == 'Q') { setQuit(1); continue; }
+        /* Keyboard controls: Q to quit, arrows to pan by half a screen */
+        {
+            int key = pollkey();
+            if (key != 0) {
+                if (key == 'q' || key == 'Q') {
+                    setQuit(1);
+                    continue;
+                }
+                double widthRe = (maxRe - minRe);
+                double heightIm = (maxIm - minIm);
+                double dx = widthRe * 0.5;
+                double dy = heightIm * 0.5;
+                if (key == KEY_LEFT) {
+                    minRe -= dx; maxRe -= dx; redraw = 1;
+                } else if (key == KEY_RIGHT) {
+                    minRe += dx; maxRe += dx; redraw = 1;
+                } else if (key == KEY_UP) {
+                    /* Move view up in complex plane: increase both Im bounds */
+                    minIm += dy; maxIm += dy; redraw = 1;
+                } else if (key == KEY_DOWN) {
+                    /* Move view down: decrease both Im bounds */
+                    minIm -= dy; maxIm -= dy; redraw = 1;
+                }
+            }
         }
 
-        if (clickButton == ButtonLeft) {
-            double centerRe = minRe + clickX * reFactor;
-            double centerIm = maxIm - clickY * imFactor;
-            double newWidth = (maxRe - minRe) / ZoomFactor;
-            double newHeight = (maxIm - minIm) / ZoomFactor;
-            minRe = centerRe - newWidth / 2.0;
-            maxRe = centerRe + newWidth / 2.0;
-            minIm = centerIm - newHeight / 2.0;
-            printf("Zoom in at %d,%d\n", clickX, clickY);
+        if (clickButton == ButtonLeft || clickButton == ButtonRight) {
+            /* Map pixel -> complex plane using current factors (center of pixel) */
+            double centerRe = minRe + (clickX + 0.5) * reFactor;
+            double centerIm = maxIm - (clickY + 0.5) * imFactor;
+            double widthRe  = (maxRe - minRe);
+            double heightIm = (maxIm - minIm);
+
+            printf("DBG zoom: button=%s click=(%d,%d) reFactor=%0.9f imFactor=%0.9f\n",
+                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY, reFactor, imFactor);
+            printf("DBG zoom: before minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
+                   minRe, maxRe, minIm, maxIm);
+            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f widthRe=%0.9f heightIm=%0.9f\n",
+                   centerRe, centerIm, widthRe, heightIm);
+
+            if (clickButton == ButtonLeft) {
+                widthRe  /= ZoomFactor;
+                heightIm /= ZoomFactor;
+            } else {
+                widthRe  *= ZoomFactor;
+                heightIm *= ZoomFactor;
+            }
+            minRe = centerRe - widthRe / 2.0;
+            maxRe = centerRe + widthRe / 2.0;
+            minIm = centerIm - heightIm / 2.0;
+            printf("DBG zoom: after  minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
+                   minRe, maxRe, minIm, maxIm);
+
             redraw = 1;
-            clickButton = 0;
-        } else if (clickButton == ButtonRight) {
-            double centerRe = minRe + clickX * reFactor;
-            double centerIm = maxIm - clickY * imFactor;
-            double newWidth = (maxRe - minRe) * ZoomFactor;
-            double newHeight = (maxIm - minIm) * ZoomFactor;
-            minRe = centerRe - newWidth / 2.0;
-            maxRe = centerRe + newWidth / 2.0;
-            minIm = centerIm - newHeight / 2.0;
-            printf("Zoom out at %d,%d\n", clickX, clickY);
-            redraw = 1;
-            clickButton = 0;
+            clickButton = 0; /* consume click */
         }
     }
     destroytexture(textureID);
