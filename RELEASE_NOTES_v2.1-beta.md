@@ -8,6 +8,9 @@ This release delivers substantial improvements to the CLike front-end, adds comp
 - New flags for compile-only workflows:
   - `--dump-bytecode`: compile and disassemble, then execute.
   - `--dump-bytecode-only`: compile and disassemble, then exit (no execution).
+- VM concurrency:
+  - Lightweight threads with spawn/join exposed via both front-ends.
+  - Mutexes (standard and recursive) with create/lock/unlock/destroy APIs for safe synchronization.
 - CLike semantics:
   - Short-circuit logical `&&` and `||`.
   - Shift operators `<<` and `>>` with standard precedence and left-associativity.
@@ -47,6 +50,7 @@ build/bin/clike --dump-bytecode-only Examples/clike/hello
 
 ## Changes Since v2.0
 - Front-ends: new compile-only flags in Pascal and CLike.
+- VM: added/lightened support for concurrency with threads and mutexes (including recursive mutexes). Tests demonstrate spawn/join and mutex id reuse.
 - CLike: parser/codegen upgraded for shifts and short-circuit; improved `~` for integers.
 - Tests: added CLike and Pascal cases; VM-oriented checks.
 - Examples: fixed `chudnovsky_native` constant literal typing.
@@ -58,4 +62,3 @@ build/bin/clike --dump-bytecode-only Examples/clike/hello
 - Shifts are supported for integer-like types; shifting real values is not meaningful and should be avoided.
 
 Enjoy!
-

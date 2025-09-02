@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 Highlights
 - New compile-only flags for both front-ends: `--dump-bytecode` and `--dump-bytecode-only`.
+- Concurrency: lightweight threads (spawn/join) and mutexes (standard and recursive) available across front-ends.
 - CLike: short-circuit `&&` and `||`, shift operator precedence (`<<`, `>>`), improved `~` behavior on integers.
 - Tests and CI: expanded regression coverage and CI now compiles all Examples in dump-only mode.
 
@@ -13,6 +14,8 @@ Added
 - Front-end flags:
   - CLike: `--dump-bytecode`, `--dump-bytecode-only`.
   - Pascal: `--dump-bytecode`, `--dump-bytecode-only`.
+- VM concurrency APIs:
+  - Thread spawn/join, mutex create/lock/unlock/destroy (including recursive mutex option).
 - CLike language features:
   - Parser support for shift operators, placed between additive and relational precedence.
   - Short-circuit code generation for logical `&&` and `||`.
@@ -35,4 +38,3 @@ Fixed
 Notes
 - SDL: When built with `-DSDL=ON`, `SDL_ENABLED` is defined for CLike (`#ifdef SDL_ENABLED`). Test runners default to dummy drivers unless `RUN_SDL=1` is set.
 - VM bytecode cache version: `PSCAL_VM_VERSION = 5`.
-
