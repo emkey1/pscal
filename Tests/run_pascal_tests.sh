@@ -55,7 +55,9 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   echo "---- $test_name ----"
 
   set +e
-  if [ -f "$in_file" ]; then
+  if [ "$test_name" = "SDLFeaturesTest" ]; then
+    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+  elif [ -f "$in_file" ]; then
     (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
   else
     (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
