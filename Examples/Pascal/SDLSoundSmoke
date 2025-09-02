@@ -1,0 +1,6 @@
+program SDLSoundSmoke;
+begin
+  InitSoundSystem;
+  QuitSoundSystem;
+end.
+

@@ -1,0 +1,49 @@
+name: SDL Smoke Tests (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libcurl4-openssl-dev \
+              libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+              xvfb
+
+      - name: Configure (SDL ON)
+        run: cmake -S . -B build -DSDL=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run SDL graphics smoke (Pascal)
+        env:
+          SDL_VIDEODRIVER: x11
+          SDL_AUDIODRIVER: dummy
+          RUN_SDL: "1"
+        run: |
+          xvfb-run -s "-screen 0 1024x768x24" build/bin/pascal Examples/Pascal/SDLSmoke
+
+      - name: Run SDL sound smoke (Pascal)
+        env:
+          SDL_VIDEODRIVER: x11
+          SDL_AUDIODRIVER: dummy
+          RUN_SDL: "1"
+        run: |
+          xvfb-run -s "-screen 0 1024x768x24" build/bin/pascal Examples/Pascal/SDLSoundSmoke
+
+      - name: Run SDL graphics smoke (CLike)
+        env:
+          SDL_VIDEODRIVER: x11
+          SDL_AUDIODRIVER: dummy
+          RUN_SDL: "1"
+        run: |
+          xvfb-run -s "-screen 0 1024x768x24" build/bin/clike Examples/clike/sdl_smoke
+

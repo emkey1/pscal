@@ -1,0 +1,6 @@
+program SDLSmoke;
+begin
+  InitGraph(320, 240, 'SDL Smoke');
+  CloseGraph;
+end.
+
