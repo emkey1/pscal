@@ -1,0 +1,10 @@
+program MutexReuseTest;
+var id1,id2: integer;
+begin
+  id1 := mutex();
+  destroy(id1);
+  id2 := mutex();
+  destroy(id2);
+  writeln(id1, ' ', id2);
+end.
+
