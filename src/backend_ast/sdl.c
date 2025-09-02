@@ -389,6 +389,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 
     int mse_x = 0, mse_y = 0;
     Uint32 sdl_buttons = 0;
+    bool inside_window = false;
 
 #ifdef __APPLE__
     // On macOS avoid SDL_PumpEvents from non-main threads. Use global mouse
@@ -409,6 +410,9 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 #endif
     mse_x = global_x - win_x;
     mse_y = global_y - win_y;
+    int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+    inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
+                     global_y >= win_y && global_y < (win_y + win_h));
 
     // Do NOT scale to renderer output size here; the rest of the VM and
     // examples operate in window pixel coordinates (texture and drawing use
@@ -429,14 +433,17 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     SDL_Window* focus_window = SDL_GetMouseFocus();
     if (focus_window == gSdlWindow) {
         sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+        inside_window = (mse_x >= 0 && mse_x < win_w && mse_y >= 0 && mse_y < win_h);
     } else {
         int global_x = 0, global_y = 0;
         sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
         int win_x = 0, win_y = 0; SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
         mse_x = global_x - win_x;
         mse_y = global_y - win_y;
-
-        // Do NOT scale to renderer output size for the same reason as above.
+        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+        inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
+                         global_y >= win_y && global_y < (win_y + win_h));
 
         if (mse_x < 0) {
             mse_x = 0;
@@ -449,12 +456,9 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     }
 #endif
 
-    // Improve drag reliability by capturing the mouse while a button is held.
-    // This keeps event coordinates updating even when the cursor leaves the window.
-    if (sdl_buttons != 0) {
-        SDL_CaptureMouse(SDL_TRUE);
-    } else {
-        SDL_CaptureMouse(SDL_FALSE);
+    // Ignore new clicks outside the window bounds.
+    if (!inside_window) {
+        sdl_buttons = 0;
     }
     
     int pscal_buttons = 0;
