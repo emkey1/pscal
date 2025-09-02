@@ -718,19 +718,56 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             break;
         }
-        case TCAST_BINOP:
+        case TCAST_BINOP: {
+            // Short-circuit semantics for logical AND/OR
+            if (node->token.type == CLIKE_TOKEN_AND_AND) {
+                // if (!left) goto pushFalse; result = !!right; goto end; pushFalse: result=false; end:
+                compileExpression(node->left, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+                int jFalse = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
+                compileExpression(node->right, chunk, ctx);
+                // coerce to boolean
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+                int jEnd = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
+                // false path target
+                uint16_t offFalse = (uint16_t)(chunk->count - (jFalse + 2));
+                patchShort(chunk, jFalse, offFalse);
+                Value fv = makeBoolean(0);
+                int cFalse = addConstantToChunk(chunk, &fv); freeValue(&fv);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)cFalse, node->token.line);
+                uint16_t offEnd = (uint16_t)(chunk->count - (jEnd + 2));
+                patchShort(chunk, jEnd, offEnd);
+                break;
+            } else if (node->token.type == CLIKE_TOKEN_OR_OR) {
+                // if (!left) eval right else pushTrue; result at end
+                compileExpression(node->left, chunk, ctx);
+                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
+                int jEvalRight = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
+                // left was true: push true and jump end
+                Value tv = makeBoolean(1);
+                int cTrue = addConstantToChunk(chunk, &tv); freeValue(&tv);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)cTrue, node->token.line);
+                writeBytecodeChunk(chunk, OP_JUMP, node->token.line);
+                int jEnd2 = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
+                // evalRight target
+                uint16_t offEval = (uint16_t)(chunk->count - (jEvalRight + 2));
+                patchShort(chunk, jEvalRight, offEval);
+                compileExpression(node->right, chunk, ctx);
+                // coerce to boolean
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                uint16_t offEnd2 = (uint16_t)(chunk->count - (jEnd2 + 2));
+                patchShort(chunk, jEnd2, offEnd2);
+                break;
+            }
+
+            // Default binary operators
             compileExpression(node->left, chunk, ctx);
-            if (node->token.type == CLIKE_TOKEN_AND_AND ||
-                node->token.type == CLIKE_TOKEN_OR_OR) {
-                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
-                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
-            }
             compileExpression(node->right, chunk, ctx);
-            if (node->token.type == CLIKE_TOKEN_AND_AND ||
-                node->token.type == CLIKE_TOKEN_OR_OR) {
-                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
-                writeBytecodeChunk(chunk, OP_NOT, node->token.line);
-            }
             switch (node->token.type) {
                 case CLIKE_TOKEN_PLUS: writeBytecodeChunk(chunk, OP_ADD, node->token.line); break;
                 case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line); break;
@@ -770,6 +807,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 default: break;
             }
             break;
+        }
         case TCAST_TERNARY: {
             compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, node->token.line);
@@ -789,10 +827,25 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
         case TCAST_UNOP:
             compileExpression(node->left, chunk, ctx);
             switch (node->token.type) {
-                case CLIKE_TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, node->token.line); break;
-                case CLIKE_TOKEN_BANG: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
-                case CLIKE_TOKEN_TILDE: writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
-                default: break;
+                case CLIKE_TOKEN_MINUS:
+                    writeBytecodeChunk(chunk, OP_NEGATE, node->token.line); break;
+                case CLIKE_TOKEN_BANG:
+                    writeBytecodeChunk(chunk, OP_NOT, node->token.line); break;
+                case CLIKE_TOKEN_TILDE:
+                    // If int-like, emulate bitwise NOT as (-x - 1); otherwise fall back to logical NOT
+                    if (node->left && isIntlikeType(node->left->var_type)) {
+                        writeBytecodeChunk(chunk, OP_NEGATE, node->token.line);
+                        Value one = makeInt(1);
+                        int c1 = addConstantToChunk(chunk, &one); freeValue(&one);
+                        writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)c1, node->token.line);
+                        writeBytecodeChunk(chunk, OP_SUBTRACT, node->token.line);
+                    } else {
+                        writeBytecodeChunk(chunk, OP_NOT, node->token.line);
+                    }
+                    break;
+                default:
+                    break;
             }
             break;
         case TCAST_ADDR:
