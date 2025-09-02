@@ -32,8 +32,8 @@ else
   SDL_ENABLED=0
 fi
 
-# If SDL is enabled, use dummy drivers to avoid macOS GUI service chatter
-if [ "$SDL_ENABLED" -eq 1 ]; then
+# Headless-friendly defaults unless RUN_SDL=1 is explicitly set by the caller
+if [ "${RUN_SDL:-0}" != "1" ] && [ "$SDL_ENABLED" -eq 1 ]; then
   export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-dummy}
   export SDL_AUDIODRIVER=${SDL_AUDIODRIVER:-dummy}
 fi
@@ -46,8 +46,8 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   if [[ "$test_name" == *.* ]]; then
     continue
   fi
-  # Skip SDL-dependent test if SDL is disabled or using dummy video driver
-  if { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
+  # Skip SDL-dependent test unless RUN_SDL=1 forces it
+  if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
     echo "Skipping $test_name (SDL disabled)"
     echo
     continue
