@@ -5,6 +5,7 @@
  */
 
 int main() {
+#ifdef SDL_ENABLED
     int WindowWidth;
     int WindowHeight;
     int TargetFPS;
@@ -192,4 +193,8 @@ int main() {
     closegraph();
     printf("Demo finished.\n");
     return 0;
+#else
+    printf("SDL support not enabled.\n");
+    return 1;
+#endif
 }

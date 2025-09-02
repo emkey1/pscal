@@ -34,6 +34,7 @@ int redraw = 1;
 int prevButtons = 0;
 int clickButton = 0, clickX = 0, clickY = 0;
 
+#ifdef SDL_ENABLED
 int getQuit() {
     int q;
     lock(quitMutex);
@@ -103,8 +104,10 @@ void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
 void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
 void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
 void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+#endif
 
 int main() {
+#ifdef SDL_ENABLED
     int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
@@ -223,4 +226,8 @@ int main() {
     destroytexture(textureID);
     closegraph();
     return 0;
+#else
+    printf("SDL support not enabled.\n");
+    return 1;
+#endif
 }

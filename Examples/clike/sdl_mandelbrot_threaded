@@ -92,6 +92,7 @@ void waitForQuit() {
 }
 
 int main() {
+#ifdef SDL_ENABLED
     int i, startY, endY, rowsPerThread, extra, tid[5], y, quit;
 
     printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
@@ -154,6 +155,9 @@ int main() {
     join tid[4];
     destroytexture(textureID); closegraph();
     return 0;
-
+#else
+    printf("SDL support not enabled.\n");
+    return 1;
+#endif
 }
 
