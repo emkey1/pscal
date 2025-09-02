@@ -1393,8 +1393,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_GET_LOCAL_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                if (slot >= frame->locals_count) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (locals=%u).", slot, frame->locals_count);
+                size_t frame_window = (size_t)(vm->stackTop - frame->slots); // args + locals
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makePointer(&frame->slots[slot], NULL));
@@ -2482,8 +2483,9 @@ comparison_error_label:
             case OP_GET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                if (slot >= frame->locals_count) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (locals=%u).", slot, frame->locals_count);
+                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makeCopyOfValue(&frame->slots[slot]));
@@ -2492,8 +2494,9 @@ comparison_error_label:
             case OP_SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                if (slot >= frame->locals_count) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (locals=%u).", slot, frame->locals_count);
+                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value* target_slot = &frame->slots[slot];
