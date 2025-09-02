@@ -40,9 +40,15 @@ jobs:
           set -e
           export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
           export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
+          SDL_ENABLED=$(grep -q '^SDL:BOOL=ON$' build/CMakeCache.txt && echo 1 || echo 0)
           for f in Examples/Pascal/*; do
             bn=$(basename "$f")
             if [ -f "$f" ]; then
+              # Skip SDL-dependent examples when SDL is not enabled in the build
+              if [ "$SDL_ENABLED" -ne 1 ] && echo "$bn" | grep -qiE '(^SDL|SDL|mandoSDL)'; then
+                echo "Skipping SDL example (SDL disabled): $bn"
+                continue
+              fi
               echo "Pascal example: $bn"
               build/bin/pascal --dump-bytecode-only "$f" >/dev/null
             fi
