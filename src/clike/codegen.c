@@ -143,6 +143,11 @@ static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArra
 }
 
 static void registerGlobal(const char* name, VarType type, int name_idx) {
+    if (globalVarCount >= (int)(sizeof(globalVars)/sizeof(globalVars[0]))) {
+        fprintf(stderr, "CLike codegen error: too many globals (limit %zu)\n",
+                sizeof(globalVars)/sizeof(globalVars[0]));
+        return;
+    }
     globalVars[globalVarCount].name = strdup(name);
     globalVars[globalVarCount].type = type;
     globalVars[globalVarCount].name_idx = name_idx;
@@ -154,6 +159,16 @@ static int resolveGlobal(const char* name) {
         if (strcmp(globalVars[i].name, name) == 0) return globalVars[i].name_idx;
     }
     return -1;
+}
+
+// Return the constant-pool index of the global's name string. If the global
+// was previously registered during compilation we reuse its name index;
+// otherwise we add the name as a new string constant so the VM can resolve it
+// at runtime when the definition is encountered.
+static int getGlobalNameConstIndex(BytecodeChunk* chunk, const char* name) {
+    int gidx = resolveGlobal(name);
+    if (gidx >= 0) return gidx; // already present in globals registry
+    return addStringConstant(chunk, name);
 }
 
 static int resolveLocal(FuncContext* ctx, const char* name) {
@@ -180,13 +195,13 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
             writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->token.line);
             writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
         } else {
-            int gidx = resolveGlobal(name);
-            if (gidx < 256) {
+            int nameIdx = getGlobalNameConstIndex(chunk, name);
+            if (nameIdx < 256) {
                 writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)gidx, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->token.line);
             } else {
                 writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS16, node->token.line);
-                emitShort(chunk, (uint16_t)gidx, node->token.line);
+                emitShort(chunk, (uint16_t)nameIdx, node->token.line);
             }
         }
         free(name);
@@ -201,13 +216,13 @@ static void compileLValue(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext*
                 writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, node->left->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
             } else {
-                int gidx = resolveGlobal(name);
-                if (gidx < 256) {
+                int nameIdx = getGlobalNameConstIndex(chunk, name);
+                if (nameIdx < 256) {
                     writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS, node->left->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)gidx, node->left->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->left->token.line);
                 } else {
                     writeBytecodeChunk(chunk, OP_GET_GLOBAL_ADDRESS16, node->left->token.line);
-                    emitShort(chunk, (uint16_t)gidx, node->left->token.line);
+                    emitShort(chunk, (uint16_t)nameIdx, node->left->token.line);
                 }
             }
             free(name);
@@ -799,13 +814,14 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     if (idx >= 0) {
                         writeBytecodeChunk(chunk, OP_SET_LOCAL, node->token.line);
                         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
-                    } else if (gidx >= 0) {
-                        if (gidx < 256) {
+                    } else {
+                        int nameIdx = getGlobalNameConstIndex(chunk, name);
+                        if (nameIdx < 256) {
                             writeBytecodeChunk(chunk, OP_SET_GLOBAL, node->token.line);
-                            writeBytecodeChunk(chunk, (uint8_t)gidx, node->token.line);
+                            writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->token.line);
                         } else {
                             writeBytecodeChunk(chunk, OP_SET_GLOBAL16, node->token.line);
-                            emitShort(chunk, (uint16_t)gidx, node->token.line);
+                            emitShort(chunk, (uint16_t)nameIdx, node->token.line);
                         }
                     }
                     free(name);
@@ -866,13 +882,13 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else {
-                int gidx = resolveGlobal(name);
-                if (gidx < 256) {
+                int nameIdx = getGlobalNameConstIndex(chunk, name);
+                if (nameIdx < 256) {
                     writeBytecodeChunk(chunk, OP_GET_GLOBAL, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)gidx, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->token.line);
                 } else {
                     writeBytecodeChunk(chunk, OP_GET_GLOBAL16, node->token.line);
-                    emitShort(chunk, (uint16_t)gidx, node->token.line);
+                    emitShort(chunk, (uint16_t)nameIdx, node->token.line);
                 }
             }
             free(name);
@@ -1246,8 +1262,10 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
     if (declaredLocals > needed) needed = declaredLocals;
     sym->locals_count = (uint8_t)needed;
 
-    for (int i = 0; i < ctx.paramCount; i++) {
+    // Free any remaining local metadata (params are at [0..paramCount-1]).
+    for (int i = 0; i < ctx.localCount; i++) {
         free(ctx.locals[i].name);
+        free(ctx.locals[i].arrayDims);
     }
     free(fname);
 }
@@ -1443,4 +1461,3 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     clike_import_count = 0;
     clikeFreeStructs();
 }
-
