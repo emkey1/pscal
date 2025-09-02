@@ -415,7 +415,12 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     // window dimensions), so returning window-relative coordinates preserves
     // 1:1 mapping with drawing code even on HiDPI displays.
 
-    if (mse_x < 0) mse_x = 0; if (mse_y < 0) mse_y = 0;
+    if (mse_x < 0) {
+        mse_x = 0;
+    }
+    if (mse_y < 0) {
+        mse_y = 0;
+    }
     if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
     if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
 #else
@@ -433,7 +438,12 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 
         // Do NOT scale to renderer output size for the same reason as above.
 
-        if (mse_x < 0) mse_x = 0; if (mse_y < 0) mse_y = 0;
+        if (mse_x < 0) {
+            mse_x = 0;
+        }
+        if (mse_y < 0) {
+            mse_y = 0;
+        }
         if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
         if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
     }
