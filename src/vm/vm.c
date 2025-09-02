@@ -533,12 +533,14 @@ void runtimeError(VM* vm, const char* format, ...) {
 
     // --- NEW: Dump crash context (instructions and full stack) ---
     fprintf(stderr, "\n--- VM Crash Context ---\n");
-    fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
-    fprintf(stderr, "Code Base: %p\n", (void*)vm->chunk->code);
+    if (vm) {
+        fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
+        fprintf(stderr, "Code Base: %p\n", vm && vm->chunk ? (void*)vm->chunk->code : (void*)NULL);
+    }
 
     // Dump current instruction (at vm->ip)
     fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
-    if (vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
+    if (vm && vm->chunk && vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
         // disassembleInstruction will advance vm->ip temporarily.
         // We want to disassemble at vm->ip's current position.
         // Temporarily store vm->ip and restore it if disassembleInstruction modifies it.
@@ -553,15 +555,17 @@ void runtimeError(VM* vm, const char* format, ...) {
     if (start_dump_offset < 0) start_dump_offset = 0;
 
     fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
-    for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
-        offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+    if (vm && vm->chunk) {
+        for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
+            offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+        }
     }
     if (start_dump_offset == (int)instruction_offset) {
         fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
     }
 
     // Dump full stack contents
-    vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
+    if (vm) vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
 
     // --- END NEW DUMP ---
 
@@ -1389,6 +1393,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_GET_LOCAL_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->locals_count) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (locals=%u).", slot, frame->locals_count);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
@@ -2474,12 +2482,20 @@ comparison_error_label:
             case OP_GET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->locals_count) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (locals=%u).", slot, frame->locals_count);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 push(vm, makeCopyOfValue(&frame->slots[slot]));
                 break;
             }
             case OP_SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                if (slot >= frame->locals_count) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (locals=%u).", slot, frame->locals_count);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value* target_slot = &frame->slots[slot];
                 Value value_from_stack = pop(vm);
 
