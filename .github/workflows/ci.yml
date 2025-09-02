@@ -22,3 +22,28 @@ jobs:
         run: Tests/run_clike_tests.sh
       - name: Run Pascal tests
         run: Tests/run_pascal_tests.sh
+      - name: Compile CLike examples (dump-only)
+        run: |
+          set -e
+          export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+          export CLIKE_LIB_DIR="$GITHUB_WORKSPACE/Examples/clike"
+          for f in Examples/clike/*; do
+            bn=$(basename "$f");
+            case "$bn" in README.md|builtins.h|mbt.save|typescript) continue;; esac
+            if [ -f "$f" ]; then
+              echo "CLike example: $bn"
+              build/bin/clike --dump-bytecode-only "$f" >/dev/null
+            fi
+          done
+      - name: Compile Pascal examples (dump-only)
+        run: |
+          set -e
+          export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+          export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
+          for f in Examples/Pascal/*; do
+            bn=$(basename "$f")
+            if [ -f "$f" ]; then
+              echo "Pascal example: $bn"
+              build/bin/pascal --dump-bytecode-only "$f" >/dev/null
+            fi
+          done

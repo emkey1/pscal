@@ -116,6 +116,12 @@ Options and semantics:
 - SDL feature detection:
   - When built with `-DSDL=ON`, the CLike preprocessor defines `SDL_ENABLED` so you can guard code with `#ifdef SDL_ENABLED`.
 
+Environment variables:
+
+- `CLIKE_LIB_DIR`: search directory for CLike `import "..."` modules.
+- `PASCAL_LIB_DIR`: root directory for Pascal units (`.pl` files). The test runner stages a copy under this path.
+- `SDL_VIDEODRIVER`, `SDL_AUDIODRIVER`: set to `dummy` by default in headless runs; set `RUN_SDL=1` to execute SDL examples/tests.
+
 An interactive session is also available via `build/bin/clike-repl`, which
 reads a single line of C-like code, wraps it in `int main() { ... }`, and
 executes it immediately. For details see

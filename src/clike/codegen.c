@@ -860,8 +860,6 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 if (node->left->type == TCAST_IDENTIFIER) {
                     char* name = tokenToCString(node->left->token);
                     int idx = resolveLocal(ctx, name);
-                    int gidx = -1;
-                    if (idx < 0) gidx = resolveGlobal(name);
                     compileExpression(node->right, chunk, ctx);
                     writeBytecodeChunk(chunk, OP_DUP, node->token.line);
                     if (idx >= 0) {
