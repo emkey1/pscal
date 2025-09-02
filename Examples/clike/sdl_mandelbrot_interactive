@@ -50,7 +50,8 @@ void setQuit(int v) {
 
 void pollMouse() {
     int x, y, b;
-    graphloop(0);
+    /* Pump SDL events so getmousestate sees fresh input. */
+    graphloop(1);
     getmousestate(&x, &y, &b);
 
     if (b != prevButtons)

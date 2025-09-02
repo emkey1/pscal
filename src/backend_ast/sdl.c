@@ -379,6 +379,14 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     }
     // --- END SAFETY CHECKS ---
 
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+        runtimeError(vm, "Graphics system not initialized for GetMouseState.");
+        return makeVoid();
+    }
+
+    // Ensure SDL's event state is up to date before querying the mouse
+    SDL_PumpEvents();
+
     int mse_x, mse_y;
     Uint32 sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
     

@@ -1,0 +1,38 @@
+#!/usr/bin/env clike
+/*
+ * SDL demo showcasing the getmousestate builtin.
+ * Displays mouse coordinates and button state while the window is open.
+ * Press Q to quit.
+ */
+
+int main() {
+#ifdef SDL_ENABLED
+    int x, y, buttons;
+    int prevX = -1;
+    int prevY = -1;
+    int prevButtons = 0;
+
+    printf("Move the mouse inside the window. Press Q to quit.\n");
+    initgraph(640, 480, "getmousestate demo");
+
+    while (1) {
+        graphloop(1);
+        getmousestate(&x, &y, &buttons);
+        if (x != prevX || y != prevY || buttons != prevButtons) {
+            printf("Mouse: x=%d y=%d buttons=%d\n", x, y, buttons);
+            prevX = x;
+            prevY = y;
+            prevButtons = buttons;
+        }
+        if (keypressed()) {
+            char c = readkey();
+            if (toupper(c) == 'Q')
+                break;
+        }
+    }
+    closegraph();
+#else
+    printf("SDL support not enabled.\n");
+#endif
+    return 0;
+}
