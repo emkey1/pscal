@@ -1,6 +1,6 @@
-# Pscal Project Overview
+# PSCAL Project Overview
 
-Pscal is an extensible virtual machine and compiler suite implemented in C. The project ships with multiple frontends that all target the shared, stack-based virtual machine:
+PSCAL is an extensible virtual machine and compiler suite implemented in C. The project ships with multiple frontends that all target the shared, stack-based virtual machine:
 
 * **Pascal compiler**: A frontend for a Pascal-like language with a hand-written lexer and parser.
 * **Clike compiler**: A compact, C-style language frontend that includes its own preprocessor and a REPL for interactive sessions.
