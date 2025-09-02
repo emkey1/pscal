@@ -1,17 +1,13 @@
-# Pascal Front End Overview
-
-## Core Architecture
-
-Pscal follows a traditional compiler pipeline composed of a front end, a bytecode compiler, and a virtual machine.
+# Pascal Overview
 
 ### Front End
-The front end tokenises source text with a hand‑written lexer that recognises Pascal keywords such as `begin`, `record`, `set`, `while` and `writeln`【F:src/Pascal/lexer.c†L10-L33】. The parser builds an abstract syntax tree (AST) for programs, units, and type declarations, supporting constructs like enums and records.
+The Pascal front end tokenises source text with a hand‑written lexer that recognises keywords such as `begin`, `record`, `set`, `while` and `writeln`【F:src/Pascal/lexer.c†L10-L33】. The parser builds an abstract syntax tree (AST) for programs, units, and type declarations, supporting constructs like enums and records.
 
 ### Bytecode Compiler
 The compiler walks the AST and emits bytecode instructions into a `BytecodeChunk`. It maintains scope information for locals, loop handling, and constant pools【F:src/compiler/compiler.c†L1-L72】.
 
 ### Virtual Machine
-The VM executes bytecode on a stack-based interpreter. It provides helper routines for stack management and debugging and integrates with built‑in procedures through a dispatch table【F:src/vm/vm.c†L1-L78】【F:src/backend_ast/builtin.c†L35-L77】.
+The VM executes the bytecode on a stack-based interpreter. It provides helper routines for stack management and debugging and integrates with built‑in procedures through a dispatch table【F:src/vm/vm.c†L1-L78】【F:src/backend_ast/builtin.c†L35-L77】.
 
 ## The Language
 
