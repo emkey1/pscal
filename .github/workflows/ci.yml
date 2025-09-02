@@ -16,5 +16,47 @@ jobs:
         run: cmake -S . -B build
       - name: Build
         run: cmake --build build
-      - name: Test
+      - name: CTest
         run: cd build && ctest --output-on-failure
+      - name: Run CLike tests
+        run: Tests/run_clike_tests.sh
+      - name: Run Pascal tests
+        run: Tests/run_pascal_tests.sh
+      - name: Compile CLike examples (dump-only)
+        run: |
+          set -e
+          export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+          export CLIKE_LIB_DIR="$GITHUB_WORKSPACE/Examples/clike"
+          for f in Examples/clike/*; do
+            bn=$(basename "$f");
+            case "$bn" in README.md|builtins.h|mbt.save|typescript) continue;; esac
+            if [ -f "$f" ]; then
+              echo "CLike example: $bn"
+              build/bin/clike --dump-bytecode-only "$f" >/dev/null
+            fi
+          done
+      - name: Compile Pascal examples (dump-only)
+        run: |
+          set -e
+          export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+          export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
+          SDL_ENABLED=$(grep -q '^SDL:BOOL=ON$' build/CMakeCache.txt && echo 1 || echo 0)
+          for f in Examples/Pascal/*; do
+            bn=$(basename "$f")
+            if [ -f "$f" ]; then
+              # Skip SDL-dependent examples when SDL is not enabled in the build
+              if [ "$SDL_ENABLED" -ne 1 ]; then
+                # Heuristic: skip if the name suggests SDL, or if the file references SDL graphics/sound builtins
+                if echo "$bn" | grep -qiE '(^SDL|SDL|mandoSDL)'; then
+                  echo "Skipping SDL example (SDL disabled): $bn"
+                  continue
+                fi
+                if grep -qiE '(initsoundsystem|loadsound|playsound|issoundplaying|freesound|quitsoundsystem|initgraph|closegraph|updatescreen|rendercopyex|outtextxy|setrgbcolor|drawline|fillrect|fillcircle|inittextsystem|graphloop|createtexture|destroytexture|updatetexture)' "$f"; then
+                  echo "Skipping SDL-dependent example (SDL disabled): $bn"
+                  continue
+                fi
+              fi
+              echo "Pascal example: $bn"
+              build/bin/pascal --dump-bytecode-only "$f" >/dev/null
+            fi
+          done

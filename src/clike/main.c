@@ -32,18 +32,20 @@ static const char *CLIKE_USAGE =
     "Usage: clike <options> <source.cl> [program_parameters...]\n"
     "   Options:\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
-    "     --dump-bytecode             Dump compiled bytecode before execution.\n";
+    "     --dump-bytecode             Dump compiled bytecode before execution.\n"
+    "     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n";
 
 int main(int argc, char **argv) {
-    vmInitTerminalState();
+    // Keep terminal untouched for clike: no raw mode or color push
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
+    int dump_bytecode_only_flag = 0;
     const char *path = NULL;
     int clike_params_start = 0;
 
     if (argc == 1) {
         fprintf(stderr, "%s\n", CLIKE_USAGE);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     for (int i = 1; i < argc; ++i) {
@@ -51,9 +53,12 @@ int main(int argc, char **argv) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
+        } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
+            dump_bytecode_flag = 1;
+            dump_bytecode_only_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], CLIKE_USAGE);
-            return vmExitWithCleanup(EXIT_FAILURE);
+            return EXIT_FAILURE;
         } else {
             path = argv[i];
             clike_params_start = i + 1;
@@ -63,20 +68,20 @@ int main(int argc, char **argv) {
 
     if (!path) {
         fprintf(stderr, "Error: No source file specified.\n%s\n", CLIKE_USAGE);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     FILE *f = fopen(path, "rb");
-    if (!f) { perror("open"); return vmExitWithCleanup(EXIT_FAILURE); }
+    if (!f) { perror("open"); return EXIT_FAILURE; }
     fseek(f, 0, SEEK_END); long len = ftell(f); rewind(f);
     char *src = (char*)malloc(len + 1);
-    if (!src) { fclose(f); return vmExitWithCleanup(EXIT_FAILURE); }
+    if (!src) { fclose(f); return EXIT_FAILURE; }
     size_t bytes_read = fread(src,1,len,f);
     if (bytes_read != (size_t)len) {
         fprintf(stderr, "Error reading source file '%s'\n", path);
         free(src);
         fclose(f);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
     src[len]='\0'; fclose(f);
 
@@ -106,7 +111,7 @@ int main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        return EXIT_SUCCESS;
     }
 
     if (clike_params_start < argc) {
@@ -126,7 +131,7 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     if (clike_warning_count > 0) {
@@ -140,7 +145,7 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return vmExitWithCleanup(clike_error_count > 255 ? 255 : clike_error_count);
+        return clike_error_count > 255 ? 255 : clike_error_count;
     }
     prog = optimizeClikeAST(prog);
 
@@ -152,14 +157,29 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     BytecodeChunk chunk; clikeCompile(prog, &chunk);
     if (dump_bytecode_flag) {
         fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
         disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-        fprintf(stderr, "\n--- executing Program with VM ---\n");
+        if (!dump_bytecode_only_flag) {
+            fprintf(stderr, "\n--- executing Program with VM ---\n");
+        }
+    }
+
+    if (dump_bytecode_only_flag) {
+        // Cleanup and exit without executing
+        freeBytecodeChunk(&chunk);
+        freeASTClike(prog);
+        clikeFreeStructs();
+        free(src);
+        if (pre_src) free(pre_src);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return EXIT_SUCCESS;
     }
 
     VM vm; initVM(&vm);
@@ -173,6 +193,5 @@ int main(int argc, char **argv) {
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
-    return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
+    return result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-

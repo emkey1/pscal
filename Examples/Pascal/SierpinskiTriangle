@@ -58,7 +58,7 @@ begin
   maxX := ScreenCols; 
 
   writeln('Drawing Sierpinski Triangle (Level ', MaxLevel, ')...');
-  Delay(1000); // Pause briefly before drawing
+  Delay(100); // Pause briefly before drawing
 
   // Define the initial large triangle corners
   // Centered horizontally, near the top/bottom vertically

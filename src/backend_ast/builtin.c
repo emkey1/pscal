@@ -37,6 +37,114 @@ static _Thread_local unsigned int rand_seed = 1;
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
 
+// ---- CLike-style conversion helpers (Phase 1) ----
+static Value vmBuiltinToInt(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "int(x) expects 1 argument.");
+        return makeInt(0);
+    }
+    Value v = args[0];
+    long long i = 0;
+    if (isRealType(v.type)) {
+        long double d = AS_REAL(v);
+        i = (long long)d; // truncate toward zero like C cast
+    } else if (IS_INTLIKE(v)) {
+        i = AS_INTEGER(v);
+    } else if (v.type == TYPE_BOOLEAN) {
+        i = v.i_val ? 1 : 0;
+    } else if (v.type == TYPE_CHAR) {
+        i = v.c_val;
+    } else {
+        i = 0;
+    }
+    return makeInt(i);
+}
+
+static Value vmBuiltinToDouble(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "double(x) expects 1 argument.");
+        return makeReal(0.0);
+    }
+    Value v = args[0];
+    long double d = 0.0L;
+    if (isRealType(v.type)) {
+        d = AS_REAL(v);
+    } else if (IS_INTLIKE(v)) {
+        d = (long double)AS_INTEGER(v);
+    } else if (v.type == TYPE_BOOLEAN) {
+        d = v.i_val ? 1.0L : 0.0L;
+    } else if (v.type == TYPE_CHAR) {
+        d = (long double)v.c_val;
+    } else {
+        d = 0.0L;
+    }
+    return makeReal(d);
+}
+
+static Value vmBuiltinToFloat(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "float(x) expects 1 argument.");
+        return makeFloat(0.0f);
+    }
+    Value v = args[0];
+    float f = 0.0f;
+    if (isRealType(v.type)) {
+        f = (float)AS_REAL(v);
+    } else if (IS_INTLIKE(v)) {
+        f = (float)AS_INTEGER(v);
+    } else if (v.type == TYPE_BOOLEAN) {
+        f = v.i_val ? 1.0f : 0.0f;
+    } else if (v.type == TYPE_CHAR) {
+        f = (float)v.c_val;
+    } else {
+        f = 0.0f;
+    }
+    return makeFloat(f);
+}
+
+static Value vmBuiltinToChar(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "char(x) expects 1 argument.");
+        return makeChar('\0');
+    }
+    Value v = args[0];
+    unsigned char c = 0;
+    if (isRealType(v.type)) {
+        long double d = AS_REAL(v);
+        c = (unsigned char)((long long)d); // truncate then narrow
+    } else if (IS_INTLIKE(v)) {
+        c = (unsigned char)AS_INTEGER(v);
+    } else if (v.type == TYPE_BOOLEAN) {
+        c = v.i_val ? 1 : 0;
+    } else if (v.type == TYPE_CHAR) {
+        c = (unsigned char)v.c_val;
+    } else {
+        c = 0;
+    }
+    return makeChar((int)c);
+}
+
+static Value vmBuiltinToBool(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "bool(x) expects 1 argument.");
+        return makeBoolean(0);
+    }
+    Value v = args[0];
+    int truth = 0;
+    if (isRealType(v.type)) {
+        truth = (AS_REAL(v) != 0.0L);
+    } else if (IS_INTLIKE(v)) {
+        truth = (AS_INTEGER(v) != 0);
+    } else if (v.type == TYPE_BOOLEAN) {
+        truth = v.i_val ? 1 : 0;
+    } else if (v.type == TYPE_CHAR) {
+        truth = (v.c_val != 0);
+    } else {
+        truth = 0;
+    }
+    return makeBoolean(truth);
+}
+
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
 static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
@@ -258,6 +366,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"window", vmBuiltinWindow},
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
+    {"to be filled", NULL}
 };
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
@@ -3301,7 +3410,17 @@ void registerAllBuiltins(void) {
 
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
+    /* CLike-style cast helpers (exposed as lowercase names): */
+    registerVmBuiltin("int",     vmBuiltinToInt);
+    registerVmBuiltin("double",  vmBuiltinToDouble);
+    registerVmBuiltin("float",   vmBuiltinToFloat);
+    registerVmBuiltin("char",    vmBuiltinToChar);
+    registerVmBuiltin("bool",    vmBuiltinToBool);
+    /* synonyms for CLike to avoid keyword collisions */
+    registerVmBuiltin("toint",    vmBuiltinToInt);
+    registerVmBuiltin("todouble", vmBuiltinToDouble);
+    registerVmBuiltin("tofloat",  vmBuiltinToFloat);
+    registerVmBuiltin("tochar",   vmBuiltinToChar);
+    registerVmBuiltin("tobool",   vmBuiltinToBool);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
-
-

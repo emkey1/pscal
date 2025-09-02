@@ -150,6 +150,7 @@ static void joinThread(VM* vm, int id) {
 // --- Mutex Helpers ---
 static int createMutex(VM* vm, bool recursive) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
     int id = -1;
     // Look for an inactive slot to reuse.
 
@@ -161,7 +162,10 @@ static int createMutex(VM* vm, bool recursive) {
     }
     // If none found, append a new mutex if capacity allows.
     if (id == -1) {
-        if (owner->mutexCount >= VM_MAX_MUTEXES) return -1;
+        if (owner->mutexCount >= VM_MAX_MUTEXES) {
+            pthread_mutex_unlock(&owner->mutexRegistryLock);
+            return -1;
+        }
         id = owner->mutexCount;
         owner->mutexCount++;
     }
@@ -175,30 +179,51 @@ static int createMutex(VM* vm, bool recursive) {
     }
     if (pthread_mutex_init(&m->handle, attr_ptr) != 0) {
         if (attr_ptr) pthread_mutexattr_destroy(&attr);
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
         return -1;
     }
     if (attr_ptr) pthread_mutexattr_destroy(&attr);
     m->active = true;
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
     return id;
 }
 
 static bool lockMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
-    return pthread_mutex_lock(&owner->mutexes[id].handle) == 0;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
+    Mutex* m = &owner->mutexes[id];
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
+    return pthread_mutex_lock(&m->handle) == 0;
 }
 
 static bool unlockMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
-    return pthread_mutex_unlock(&owner->mutexes[id].handle) == 0;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
+    Mutex* m = &owner->mutexes[id];
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
+    return pthread_mutex_unlock(&m->handle) == 0;
 }
 
 // Permanently frees a mutex created by mutex()/rcmutex(), making its ID unusable.
 static bool destroyMutex(VM* vm, int id) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
-    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) return false;
-    if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) return false;
+    pthread_mutex_lock(&owner->mutexRegistryLock);
+    if (id < 0 || id >= owner->mutexCount || !owner->mutexes[id].active) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
+    if (pthread_mutex_destroy(&owner->mutexes[id].handle) != 0) {
+        pthread_mutex_unlock(&owner->mutexRegistryLock);
+        return false;
+    }
     owner->mutexes[id].active = false;
 
     // If this was the highest-index mutex, shrink the count so new mutexes can reuse slots.
@@ -206,6 +231,7 @@ static bool destroyMutex(VM* vm, int id) {
         owner->mutexCount--;
 
     }
+    pthread_mutex_unlock(&owner->mutexRegistryLock);
     return true;
 }
 
@@ -507,12 +533,14 @@ void runtimeError(VM* vm, const char* format, ...) {
 
     // --- NEW: Dump crash context (instructions and full stack) ---
     fprintf(stderr, "\n--- VM Crash Context ---\n");
-    fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
-    fprintf(stderr, "Code Base: %p\n", (void*)vm->chunk->code);
+    if (vm) {
+        fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
+        fprintf(stderr, "Code Base: %p\n", vm && vm->chunk ? (void*)vm->chunk->code : (void*)NULL);
+    }
 
     // Dump current instruction (at vm->ip)
     fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
-    if (vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
+    if (vm && vm->chunk && vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
         // disassembleInstruction will advance vm->ip temporarily.
         // We want to disassemble at vm->ip's current position.
         // Temporarily store vm->ip and restore it if disassembleInstruction modifies it.
@@ -527,15 +555,17 @@ void runtimeError(VM* vm, const char* format, ...) {
     if (start_dump_offset < 0) start_dump_offset = 0;
 
     fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
-    for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
-        offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+    if (vm && vm->chunk) {
+        for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
+            offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+        }
     }
     if (start_dump_offset == (int)instruction_offset) {
         fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
     }
 
     // Dump full stack contents
-    vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
+    if (vm) vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
 
     // --- END NEW DUMP ---
 
@@ -629,6 +659,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
 
     vm->mutexCount = 0;
+    pthread_mutex_init(&vm->mutexRegistryLock, NULL);
     vm->mutexOwner = vm;
     for (int i = 0; i < VM_MAX_MUTEXES; i++) {
         vm->mutexes[i].active = false;
@@ -676,6 +707,7 @@ void freeVM(VM* vm) {
             }
         }
     }
+    pthread_mutex_destroy(&vm->mutexRegistryLock);
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
     // additional handling.
@@ -1361,6 +1393,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case OP_GET_LOCAL_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t frame_window = (size_t)(vm->stackTop - frame->slots); // args + locals
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
@@ -2446,12 +2483,22 @@ comparison_error_label:
             case OP_GET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 push(vm, makeCopyOfValue(&frame->slots[slot]));
                 break;
             }
             case OP_SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value* target_slot = &frame->slots[slot];
                 Value value_from_stack = pop(vm);
 

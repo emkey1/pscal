@@ -5,6 +5,7 @@
  */
 
 int main() {
+#ifdef SDL_ENABLED
     int WindowWidth;
     int WindowHeight;
     int MaxIterations;
@@ -46,7 +47,7 @@ int main() {
     MandelBytesPerPixel = 4;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
-    initgraph(WindowWidth, WindowHeight, "Mandelbrot in CLike");
+    initgraph(WindowWidth, WindowHeight, "Mandelbrot in CLike (No Acceleration)");
     textureID = createtexture(WindowWidth, WindowHeight);
     if (textureID < 0) {
         printf("Error: unable to create texture.\n");
@@ -127,4 +128,8 @@ int main() {
     destroytexture(textureID);
     closegraph();
     return 0;
+#else
+    printf("SDL support not enabled.\n");
+    return 1;
+#endif
 }

@@ -114,6 +114,7 @@ static ASTNodeClike* bitwiseOr(ParserClike *p);
 static ASTNodeClike* bitwiseAnd(ParserClike *p);
 static ASTNodeClike* equality(ParserClike *p);
 static ASTNodeClike* relational(ParserClike *p);
+static ASTNodeClike* shift(ParserClike *p);
 static ASTNodeClike* additive(ParserClike *p);
 static ASTNodeClike* term(ParserClike *p);
 static ASTNodeClike* unary(ParserClike *p);
@@ -1092,9 +1093,23 @@ static ASTNodeClike* equality(ParserClike *p) {
 }
 
 static ASTNodeClike* relational(ParserClike *p) {
-    ASTNodeClike *node = additive(p);
+    ASTNodeClike *node = shift(p);
     while (p->current.type == CLIKE_TOKEN_LESS || p->current.type == CLIKE_TOKEN_LESS_EQUAL ||
            p->current.type == CLIKE_TOKEN_GREATER || p->current.type == CLIKE_TOKEN_GREATER_EQUAL) {
+        ClikeToken op = p->current; advanceParser(p);
+        ASTNodeClike *rhs = shift(p);
+        ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, op);
+        setLeftClike(bin, node);
+        setRightClike(bin, rhs);
+        node = bin;
+    }
+    return node;
+}
+
+// Shift expressions: handles '<<' and '>>' with lower precedence than additive
+static ASTNodeClike* shift(ParserClike *p) {
+    ASTNodeClike *node = additive(p);
+    while (p->current.type == CLIKE_TOKEN_SHL || p->current.type == CLIKE_TOKEN_SHR) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *rhs = additive(p);
         ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, op);

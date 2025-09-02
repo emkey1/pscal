@@ -1,7 +1,7 @@
 #!/usr/bin/env clike
 // In reality, 2 iterations reaches the maximum resolution for 80 bit float
 long double chudnovsky_native(long n) {
-    const long double C3 = 262537412640768000; // 640320^3
+    const long double C3 = 262537412640768000.0; // 640320^3
     long double sum = 13591409.0;
     long double term = 1.0;
     for (long k = 1; k < n; k++) {

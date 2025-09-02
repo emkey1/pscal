@@ -1,0 +1,4 @@
+program MalformedUses;
+uses 123;
+begin
+end.

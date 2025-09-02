@@ -32,6 +32,12 @@ else
   SDL_ENABLED=0
 fi
 
+# Headless-friendly defaults unless RUN_SDL=1 is explicitly set by the caller
+if [ "${RUN_SDL:-0}" != "1" ] && [ "$SDL_ENABLED" -eq 1 ]; then
+  export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-dummy}
+  export SDL_AUDIODRIVER=${SDL_AUDIODRIVER:-dummy}
+fi
+
 EXIT_CODE=0
 
 # Iterate over Pascal test sources (files without extensions)
@@ -40,7 +46,8 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   if [[ "$test_name" == *.* ]]; then
     continue
   fi
-  if [ "$SDL_ENABLED" -eq 0 ] && [ "$test_name" = "SDLFeaturesTest" ]; then
+  # Skip SDL-dependent test unless RUN_SDL=1 forces it
+  if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
     echo "Skipping $test_name (SDL disabled)"
     echo
     continue
@@ -55,7 +62,9 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   echo "---- $test_name ----"
 
   set +e
-  if [ -f "$in_file" ]; then
+  if [ "$test_name" = "SDLFeaturesTest" ]; then
+    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+  elif [ -f "$in_file" ]; then
     (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
   else
     (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")

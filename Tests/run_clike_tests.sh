@@ -5,6 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CLIKE_BIN="$ROOT_DIR/build/bin/clike"
 
+# Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
+if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
+  if [ "${RUN_SDL:-0}" != "1" ]; then
+    export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-dummy}
+    export SDL_AUDIODRIVER=${SDL_AUDIODRIVER:-dummy}
+  fi
+fi
+
 if [ ! -x "$CLIKE_BIN" ]; then
   echo "clike binary not found at $CLIKE_BIN" >&2
   exit 1
@@ -22,6 +30,13 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   err_file="$SCRIPT_DIR/clike/$test_name.err"
   actual_out=$(mktemp)
   actual_err=$(mktemp)
+  # Skip SDL-dependent clike tests unless RUN_SDL=1 forces them
+  if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ] && [ "$test_name" = "graphics" ]; then
+    echo "Skipping $test_name (SDL dummy driver)"
+    echo
+    continue
+  fi
+
   echo "---- $test_name ----"
 
   set +e

@@ -159,6 +159,9 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
             return makeVoid();
         }
         gSdlInitialized = true;
+
+        // Allow clicks to focus the window on macOS and avoid dropped initial events
+        SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     }
 
     if (gSdlWindow || gSdlRenderer) {
@@ -379,8 +382,88 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     }
     // --- END SAFETY CHECKS ---
 
-    int mse_x, mse_y;
-    Uint32 sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+        runtimeError(vm, "Graphics system not initialized for GetMouseState.");
+        return makeVoid();
+    }
+
+    int mse_x = 0, mse_y = 0;
+    Uint32 sdl_buttons = 0;
+    bool inside_window = false;
+    bool has_focus = false;
+
+#ifdef __APPLE__
+    // On macOS avoid SDL_PumpEvents from non-main threads. Use global mouse
+    // state and convert to window-relative coordinates with border and HiDPI
+    // adjustments.
+    int global_x = 0, global_y = 0;
+    sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
+
+    int win_x = 0, win_y = 0;
+    SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
+#if SDL_VERSION_ATLEAST(2,0,5)
+    int border_top = 0, border_left = 0, border_bottom = 0, border_right = 0;
+    if (SDL_GetWindowBordersSize(gSdlWindow, &border_top, &border_left,
+                                 &border_bottom, &border_right) == 0) {
+        win_x += border_left;
+        win_y += border_top;
+    }
+#endif
+    mse_x = global_x - win_x;
+    mse_y = global_y - win_y;
+    int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+    inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
+                     global_y >= win_y && global_y < (win_y + win_h));
+    has_focus = (SDL_GetMouseFocus() == gSdlWindow);
+
+    // Do NOT scale to renderer output size here; the rest of the VM and
+    // examples operate in window pixel coordinates (texture and drawing use
+    // window dimensions), so returning window-relative coordinates preserves
+    // 1:1 mapping with drawing code even on HiDPI displays.
+
+    if (mse_x < 0) {
+        mse_x = 0;
+    }
+    if (mse_y < 0) {
+        mse_y = 0;
+    }
+    if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
+    if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
+#else
+    // Update SDL state and prefer window-relative coordinates when we have focus.
+    SDL_PumpEvents();
+    SDL_Window* focus_window = SDL_GetMouseFocus();
+    if (focus_window == gSdlWindow) {
+        sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+        inside_window = (mse_x >= 0 && mse_x < win_w && mse_y >= 0 && mse_y < win_h);
+        has_focus = true;
+    } else {
+        int global_x = 0, global_y = 0;
+        sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
+        int win_x = 0, win_y = 0; SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
+        mse_x = global_x - win_x;
+        mse_y = global_y - win_y;
+        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
+        inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
+                         global_y >= win_y && global_y < (win_y + win_h));
+        has_focus = false;
+        
+        if (mse_x < 0) {
+            mse_x = 0;
+        }
+        if (mse_y < 0) {
+            mse_y = 0;
+        }
+        if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
+        if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
+    }
+#endif
+
+    // Ignore buttons if the window is not focused or the pointer is outside it.
+    if (!inside_window || !has_focus) {
+        sdl_buttons = 0;
+    }
     
     int pscal_buttons = 0;
     if (sdl_buttons & SDL_BUTTON_LMASK) pscal_buttons |= 1;

@@ -1,0 +1,42 @@
+program FileOfRecordRoundTrip;
+
+var
+  f: file;
+  name: string;
+  age: integer;
+  n1, n2: string;
+  a1, a2: integer;
+
+procedure AssertEqualInt(expected, actual: integer; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then writeln('PASS')
+  else writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+procedure AssertEqualStr(expected, actual: string; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then writeln('PASS')
+  else writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+begin
+  assign(f, '/tmp/pscal_people.txt'); rewrite(f);
+  name := 'Alice'; age := 30; writeln(f, name, ',', age);
+  name := 'Bob';   age := 25; writeln(f, name, ',', age);
+  close(f);
+
+  assign(f, '/tmp/pscal_people.txt'); reset(f);
+  readln(f, n1);
+  readln(f, n2);
+  close(f);
+
+  // Parse ages from the comma-separated lines using pos/copy
+  a1 := pos(',', n1);
+  AssertEqualStr('Alice', copy(n1, 1, a1-1), 'First name');
+  AssertEqualStr('30', copy(n1, a1+1, 99), 'First age');
+  a2 := pos(',', n2);
+  AssertEqualStr('Bob', copy(n2, 1, a2-1), 'Second name');
+  AssertEqualStr('25', copy(n2, a2+1, 99), 'Second age');
+end.

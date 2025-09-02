@@ -353,25 +353,31 @@ Token *stringLiteral(Lexer *lexer) {
 }
 
 Token *getNextToken(Lexer *lexer) {
-    int start_line = lexer->line;     // Capture at start
-    int start_column = lexer->column; // Capture at start
+    int start_line = lexer->line;
+    int start_column = lexer->column;
 #ifdef DEBUG
     fprintf(stderr, "LEXER_DEBUG: getNextToken\n"); fflush(stderr);
 #endif
     DEBUG_PRINT("getNextToken: Entry. Current char: '%c' (ASCII: %d) at line %d, col %d\n", lexer->current_char, lexer->current_char, lexer->line, lexer->column);
     while (lexer->current_char) {
-        // Skip whitespace
+        // Skip whitespace first
         if (isspace((unsigned char)lexer->current_char)) {
             skipWhitespace(lexer);
-            continue;
         }
 
-        // Skip single-line comments (// ...)
-        if (lexer->current_char == '/' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '/') {
+        // Establish token start position AFTER skipping whitespace/comments
+        start_line = lexer->line;
+        start_column = lexer->column;
+
+        // Skip single-line comments (// ...) — after skipping whitespace, reset start position
+        if (lexer->current_char == '/' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == '/') {
             while (lexer->current_char && lexer->current_char != '\n')
                 advance(lexer);
             if (lexer->current_char == '\n') // Consume the newline as well
                 advance(lexer);
+            // After skipping comment, update token start and continue scanning
+            start_line = lexer->line;
+            start_column = lexer->column;
             continue;
         }
 
@@ -395,22 +401,25 @@ Token *getNextToken(Lexer *lexer) {
                   fprintf(stderr, "Lexer error at line %d, column %d: Unterminated brace comment.\n", lexer->line, lexer->column);
                   // Optionally return an error token or advance past the problematic char
              }
+            // After skipping comment, update token start and continue scanning
+            start_line = lexer->line;
+            start_column = lexer->column;
             continue; // Resume token search
-        }
+         }
         
         DEBUG_PRINT("getNextToken: After skip WS/Comment. Current char: '%c' (ASCII: %d)\n", lexer->current_char, lexer->current_char);
 
          // Skip parenthesis/star comments (* ... *) - Added Nested Handling
-         if (lexer->current_char == '(' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '*') {
+         if (lexer->current_char == '(' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == '*') {
              advance(lexer); // Skip '('
              advance(lexer); // Skip '*'
              int comment_level = 1;
              while (lexer->current_char && comment_level > 0) {
-                 if (lexer->current_char == '*' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == ')') {
+                 if (lexer->current_char == '*' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == ')') {
                       comment_level--;
                       advance(lexer); // Skip '*'
                       advance(lexer); // Skip ')'
-                 } else if (lexer->current_char == '(' && lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '*') { // Detect nested start
+                 } else if (lexer->current_char == '(' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == '*') { // Detect nested start
                       comment_level++;
                       advance(lexer); // Skip '('
                       advance(lexer); // Skip '*'
@@ -601,7 +610,7 @@ Token *getNextToken(Lexer *lexer) {
         // Handle Not Equal (!=)
         if (lexer->current_char == '!') {
             // Check if the next character is '='
-            if (lexer->pos + 1 < strlen(lexer->text) && lexer->text[lexer->pos + 1] == '=') {
+            if (lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == '=') {
                 advance(lexer); // Consume '!'
                 advance(lexer); // Consume '='
                 return newToken(TOKEN_NOT_EQUAL, "!=", start_line, start_column); // Recognize !=
@@ -611,12 +620,11 @@ Token *getNextToken(Lexer *lexer) {
             }
         }
 
-        // If character is not recognized by any rule above
-        char unknown_char_str[2] = {lexer->current_char, '\0'};
-        fprintf(stderr, "Lexer error at line %d, column %d: Unrecognized character '%s'\n",
-                lexer->line, lexer->column, unknown_char_str);
-        advance(lexer); // Consume the unknown character to prevent infinite loop
-        return newToken(TOKEN_UNKNOWN, unknown_char_str, start_line, start_column); // Return an UNKNOWN token
+        // If character is not recognized by any rule above, skip it silently.
+        // Some files may contain stray non-ASCII whitespace or editor markers.
+        // Treat them as whitespace to keep the lexer tolerant.
+        advance(lexer);
+        continue; // Resume token search
 
     } // End while (lexer->current_char)
 

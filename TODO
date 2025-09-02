@@ -1,6 +1,7 @@
-o Support goto? (no)
+Support goto? (no)
 ---
-o Plan to add CreateThread/WaitForThread and @ procedure pointers
+Plan to add CreateThread/WaitForThread and @ procedure pointers
+
 Lexical support for @
 Extend the lexer to recognize @ as a token representing the address-of operator.
 Ensure it does not conflict with existing tokens.
@@ -34,3 +35,4 @@ Update language reference to describe procedure pointers, @, and new threading f
 Provide examples mirroring the sample SDLThreadedMandelbrot program to showcase usage.
 This staged approach introduces address-of and procedure pointers, then layers a richer thread API atop the existing runtime without disrupting current programs.
 ---
+Provide ability to query threads and thread states
