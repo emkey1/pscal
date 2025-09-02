@@ -29,7 +29,7 @@ static void initSymbolSystemClike(void) {
 }
 
 int main(void) {
-    vmInitTerminalState();
+    // Do not change terminal state for clike REPL; rely on normal TTY buffering
 
     struct termios raw_termios;
     tcgetattr(STDIN_FILENO, &raw_termios);
@@ -109,7 +109,7 @@ int main(void) {
             free(src);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            return vmExitWithCleanup(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
         initSymbolSystemClike();
         clikeRegisterBuiltins();
@@ -125,7 +125,7 @@ int main(void) {
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            return vmExitWithCleanup(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
         prog = optimizeClikeAST(prog);
 
@@ -139,7 +139,7 @@ int main(void) {
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            return vmExitWithCleanup(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
         if (clike_error_count == 0) {
             BytecodeChunk chunk; clikeCompile(prog, &chunk);
@@ -160,5 +160,5 @@ int main(void) {
         clike_error_count = 0;
         clike_warning_count = 0;
     }
-    return vmExitWithCleanup(EXIT_SUCCESS);
+    return EXIT_SUCCESS;
 }
