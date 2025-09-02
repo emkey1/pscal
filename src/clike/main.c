@@ -32,12 +32,14 @@ static const char *CLIKE_USAGE =
     "Usage: clike <options> <source.cl> [program_parameters...]\n"
     "   Options:\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
-    "     --dump-bytecode             Dump compiled bytecode before execution.\n";
+    "     --dump-bytecode             Dump compiled bytecode before execution.\n"
+    "     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n";
 
 int main(int argc, char **argv) {
     // Keep terminal untouched for clike: no raw mode or color push
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
+    int dump_bytecode_only_flag = 0;
     const char *path = NULL;
     int clike_params_start = 0;
 
@@ -51,6 +53,9 @@ int main(int argc, char **argv) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
+        } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
+            dump_bytecode_flag = 1;
+            dump_bytecode_only_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], CLIKE_USAGE);
             return EXIT_FAILURE;
@@ -159,7 +164,22 @@ int main(int argc, char **argv) {
     if (dump_bytecode_flag) {
         fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
         disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-        fprintf(stderr, "\n--- executing Program with VM ---\n");
+        if (!dump_bytecode_only_flag) {
+            fprintf(stderr, "\n--- executing Program with VM ---\n");
+        }
+    }
+
+    if (dump_bytecode_only_flag) {
+        // Cleanup and exit without executing
+        freeBytecodeChunk(&chunk);
+        freeASTClike(prog);
+        clikeFreeStructs();
+        free(src);
+        if (pre_src) free(pre_src);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        return EXIT_SUCCESS;
     }
 
     VM vm; initVM(&vm);

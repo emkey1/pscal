@@ -38,6 +38,7 @@ const char *PASCAL_USAGE =
     "     -v                          Display version.\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
+    "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
 void initSymbolSystem(void) {
@@ -69,7 +70,7 @@ void initSymbolSystem(void) {
 #endif
 }
 
-int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int dump_bytecode_flag) {
+int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -120,18 +121,25 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                     fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                        fprintf(stderr, "\n--- executing Program with VM ---\n");
+                        if (!dump_bytecode_only_flag) {
+                            fprintf(stderr, "\n--- executing Program with VM ---\n");
+                        }
                     }
                 }
             } else {
                 fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
-                    fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
+                    if (!dump_bytecode_only_flag) {
+                        fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
+                    }
                 }
             }
 
             if (compilation_ok_for_vm) {
+                if (dump_bytecode_only_flag) {
+                    overall_success_status = true;
+                } else {
                 VM vm;
                 initVM(&vm);
                 InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
@@ -144,6 +152,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                             result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
                     overall_success_status = false;
                     vmDumpStackInfo(&vm);
+                }
                 }
             } else {
                 fprintf(stderr, "Compilation failed with errors.\n");
@@ -191,6 +200,7 @@ int main(int argc, char *argv[]) {
     vmInitTerminalState();
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
+    int dump_bytecode_only_flag = 0;
     const char *sourceFile = NULL;
     const char *programName = argv[0]; // Default program name to executable name
     int pscal_params_start_index = 0; // Will be set after source file is identified
@@ -211,6 +221,9 @@ int main(int argc, char *argv[]) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
+        } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
+            dump_bytecode_flag = 1;
+            dump_bytecode_only_flag = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "%s\n", PASCAL_USAGE);
@@ -292,7 +305,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag);
+    int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
     free(source_buffer); // Free the source code buffer
     return vmExitWithCleanup(result);
 }
