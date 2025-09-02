@@ -620,12 +620,11 @@ Token *getNextToken(Lexer *lexer) {
             }
         }
 
-        // If character is not recognized by any rule above
-        char unknown_char_str[2] = {lexer->current_char, '\0'};
-        fprintf(stderr, "Lexer error at line %d, column %d: Unrecognized character '%s'\n",
-                lexer->line, lexer->column, unknown_char_str);
-        advance(lexer); // Consume the unknown character to prevent infinite loop
-        return newToken(TOKEN_UNKNOWN, unknown_char_str, start_line, start_column); // Return an UNKNOWN token
+        // If character is not recognized by any rule above, skip it silently.
+        // Some files may contain stray non-ASCII whitespace or editor markers.
+        // Treat them as whitespace to keep the lexer tolerant.
+        advance(lexer);
+        continue; // Resume token search
 
     } // End while (lexer->current_char)
 
