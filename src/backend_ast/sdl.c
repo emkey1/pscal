@@ -384,11 +384,25 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    // Ensure SDL's event state is up to date before querying the mouse
-    SDL_PumpEvents();
-
     int mse_x, mse_y;
-    Uint32 sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+    Uint32 sdl_buttons;
+
+#ifdef __APPLE__
+    // On macOS SDL_PumpEvents must run on the main thread.  Calling it from
+    // the VM worker thread causes a crash.  SDL_GetGlobalMouseState queries the
+    // OS directly and avoids the need to pump events here.
+    int global_x, global_y;
+    sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
+
+    int win_x = 0, win_y = 0;
+    SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
+    mse_x = global_x - win_x;
+    mse_y = global_y - win_y;
+#else
+    // Keep existing behaviour on other platforms by updating SDL's state first.
+    SDL_PumpEvents();
+    sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
+#endif
     
     int pscal_buttons = 0;
     if (sdl_buttons & SDL_BUTTON_LMASK) pscal_buttons |= 1;
