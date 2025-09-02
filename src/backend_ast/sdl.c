@@ -410,14 +410,10 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     mse_x = global_x - win_x;
     mse_y = global_y - win_y;
 
-    int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
-    int out_w = 0, out_h = 0; SDL_GetRendererOutputSize(gSdlRenderer, &out_w, &out_h);
-    if (win_w > 0 && win_h > 0 && (out_w != win_w || out_h != win_h)) {
-        double sx = (double)out_w / (double)win_w;
-        double sy = (double)out_h / (double)win_h;
-        mse_x = (int)((double)mse_x * sx);
-        mse_y = (int)((double)mse_y * sy);
-    }
+    // Do NOT scale to renderer output size here; the rest of the VM and
+    // examples operate in window pixel coordinates (texture and drawing use
+    // window dimensions), so returning window-relative coordinates preserves
+    // 1:1 mapping with drawing code even on HiDPI displays.
 
     if (mse_x < 0) mse_x = 0; if (mse_y < 0) mse_y = 0;
     if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
@@ -435,14 +431,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
         mse_x = global_x - win_x;
         mse_y = global_y - win_y;
 
-        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
-        int out_w = 0, out_h = 0; SDL_GetRendererOutputSize(gSdlRenderer, &out_w, &out_h);
-        if (win_w > 0 && win_h > 0 && (out_w != win_w || out_h != win_h)) {
-            double sx = (double)out_w / (double)win_w;
-            double sy = (double)out_h / (double)win_h;
-            mse_x = (int)((double)mse_x * sx);
-            mse_y = (int)((double)mse_y * sy);
-        }
+        // Do NOT scale to renderer output size for the same reason as above.
 
         if (mse_x < 0) mse_x = 0; if (mse_y < 0) mse_y = 0;
         if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
