@@ -1122,12 +1122,24 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         SDL_Event event;
 
         while (SDL_GetTicks() < targetTime) {
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_QUIT) {
-                    break_requested = 1;
-                    return makeVoid(); // Exit immediately on quit event
-                }
+            SDL_PumpEvents();
+
+            /*
+             * Earlier versions of GraphLoop consumed the entire SDL event
+             * queue.  This meant that key press events – including the 'q'
+             * used by many demos to exit – were removed before routines such
+             * as PollKey had a chance to inspect them.  As a result, pressing
+             * 'q' or 'Q' would have no effect.
+             *
+             * Here we only remove SDL_QUIT events (which request application
+             * shutdown) and leave all other events untouched so that front-end
+             * code can process them on the next iteration.
+             */
+            if (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_QUIT, SDL_QUIT) > 0) {
+                break_requested = 1;
+                return makeVoid();
             }
+
             SDL_Delay(1); // Prevent 100% CPU usage
         }
     }
