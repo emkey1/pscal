@@ -1544,6 +1544,7 @@ typedef struct HttpAsyncJob_s {
 
 #define MAX_HTTP_ASYNC 32
 static HttpAsyncJob g_http_async[MAX_HTTP_ASYNC];
+static pthread_mutex_t g_http_async_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Now that HttpAsyncJob is defined, provide helpers that reference it */
 static size_t headerAccumJob(char *buffer, size_t size, size_t nitems, void *userdata) {
@@ -1581,13 +1582,16 @@ static int progressCallback(void* clientp, double dltotal, double dlnow, double 
 #endif
 
 static int httpAllocAsync(void) {
+    pthread_mutex_lock(&g_http_async_mutex);
     for (int i = 0; i < MAX_HTTP_ASYNC; i++) {
         if (!g_http_async[i].active) {
             memset(&g_http_async[i], 0, sizeof(HttpAsyncJob));
             g_http_async[i].active = 1;
+            /* Keep mutex locked for caller to initialize job safely */
             return i;
         }
     }
+    pthread_mutex_unlock(&g_http_async_mutex);
     return -1;
 }
 
@@ -1887,7 +1891,7 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
     }
     int id = httpAllocAsync();
     if (id < 0) { runtimeError(vm, "httpRequestAsync: no free slots."); return makeInt(-1); }
-    HttpAsyncJob* job = &g_http_async[id];
+    HttpAsyncJob* job = &g_http_async[id]; /* g_http_async_mutex is locked */
     job->session = (int)AS_INTEGER(args[0]);
     job->method = strdup(args[1].s_val ? args[1].s_val : "GET");
     job->url = strdup(args[2].s_val ? args[2].s_val : "");
@@ -1968,9 +1972,11 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         if (job->headers_slist) curl_slist_free_all(job->headers_slist);
         if (job->resolve_slist) curl_slist_free_all(job->resolve_slist);
         job->active = 0;
+        pthread_mutex_unlock(&g_http_async_mutex);
         runtimeError(vm, "httpRequestAsync: pthread_create failed.");
         return makeInt(-1);
     }
+    pthread_mutex_unlock(&g_http_async_mutex);
     return makeInt(id);
 }
 
@@ -1982,7 +1988,7 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
     }
     int id = httpAllocAsync();
     if (id < 0) { runtimeError(vm, "httpRequestAsyncToFile: no free slots."); return makeInt(-1); }
-    HttpAsyncJob* job = &g_http_async[id];
+    HttpAsyncJob* job = &g_http_async[id]; /* g_http_async_mutex is locked */
     job->session = (int)AS_INTEGER(args[0]);
     job->method = strdup(args[1].s_val ? args[1].s_val : "GET");
     job->url = strdup(args[2].s_val ? args[2].s_val : "");
@@ -2003,6 +2009,7 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         // free partial
         if (job->method) free(job->method); if (job->url) free(job->url); if (job->body) free(job->body);
         job->active = 0;
+        pthread_mutex_unlock(&g_http_async_mutex);
         return makeInt(-1);
     }
     job->out_file = strdup(args[4].s_val);
@@ -2050,9 +2057,11 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         if (job->out_file) free(job->out_file);
         if (job->headers_slist) curl_slist_free_all(job->headers_slist);
         job->active = 0;
+        pthread_mutex_unlock(&g_http_async_mutex);
         runtimeError(vm, "httpRequestAsyncToFile: pthread_create failed.");
         return makeInt(-1);
     }
+    pthread_mutex_unlock(&g_http_async_mutex);
     return makeInt(id);
 }
 
@@ -2064,9 +2073,12 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     }
     int id = (int)AS_INTEGER(args[0]);
     if (id < 0 || id >= MAX_HTTP_ASYNC) { runtimeError(vm, "httpAwait: invalid id."); return makeInt(-1); }
+    pthread_mutex_lock(&g_http_async_mutex);
     HttpAsyncJob* job = &g_http_async[id];
-    if (!job->active) { runtimeError(vm, "httpAwait: job not active."); return makeInt(-1); }
+    if (!job->active) { pthread_mutex_unlock(&g_http_async_mutex); runtimeError(vm, "httpAwait: job not active."); return makeInt(-1); }
+    pthread_mutex_unlock(&g_http_async_mutex);
     pthread_join(job->th, NULL);
+    pthread_mutex_lock(&g_http_async_mutex);
     int status = (int)job->status;
     // Copy result into provided mstream
     if (job->result && job->result->buffer) {
@@ -2115,6 +2127,7 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     if (job->last_headers) free(job->last_headers);
     if (job->last_error_msg) free(job->last_error_msg);
     memset(job, 0, sizeof(HttpAsyncJob));
+    pthread_mutex_unlock(&g_http_async_mutex);
     return makeInt(status);
 }
 
@@ -2126,13 +2139,14 @@ Value vmBuiltinHttpTryAwait(VM* vm, int arg_count, Value* args) {
     }
     int id = (int)AS_INTEGER(args[0]);
     if (id < 0 || id >= MAX_HTTP_ASYNC) { runtimeError(vm, "httpTryAwait: invalid id."); return makeInt(-1); }
+    pthread_mutex_lock(&g_http_async_mutex);
     HttpAsyncJob* job = &g_http_async[id];
-    if (!job->active) { runtimeError(vm, "httpTryAwait: job not active."); return makeInt(-1); }
-    if (!job->done) {
-        return makeInt(-2); // pending
-    }
+    if (!job->active) { pthread_mutex_unlock(&g_http_async_mutex); runtimeError(vm, "httpTryAwait: job not active."); return makeInt(-1); }
+    if (!job->done) { pthread_mutex_unlock(&g_http_async_mutex); return makeInt(-2); }
+    pthread_mutex_unlock(&g_http_async_mutex);
     // Same as await: join and harvest
     pthread_join(job->th, NULL);
+    pthread_mutex_lock(&g_http_async_mutex);
     int status = (int)job->status;
     if (job->result && job->result->buffer) {
         MStream* out = args[1].mstream;
@@ -2173,6 +2187,7 @@ Value vmBuiltinHttpTryAwait(VM* vm, int arg_count, Value* args) {
     if (job->last_headers) free(job->last_headers);
     if (job->last_error_msg) free(job->last_error_msg);
     memset(job, 0, sizeof(HttpAsyncJob));
+    pthread_mutex_unlock(&g_http_async_mutex);
     return makeInt(status);
 }
 
@@ -2184,9 +2199,12 @@ Value vmBuiltinHttpIsDone(VM* vm, int arg_count, Value* args) {
     }
     int id = (int)AS_INTEGER(args[0]);
     if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    pthread_mutex_lock(&g_http_async_mutex);
     HttpAsyncJob* job = &g_http_async[id];
-    if (!job->active) return makeInt(0);
-    return makeInt(job->done ? 1 : 0);
+    if (!job->active) { pthread_mutex_unlock(&g_http_async_mutex); return makeInt(0); }
+    int done = job->done ? 1 : 0;
+    pthread_mutex_unlock(&g_http_async_mutex);
+    return makeInt(done);
 }
 
 // HttpCancel(asyncId): Integer (1 on success, 0 otherwise)
@@ -2197,9 +2215,11 @@ Value vmBuiltinHttpCancel(VM* vm, int arg_count, Value* args) {
     }
     int id = (int)AS_INTEGER(args[0]);
     if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    pthread_mutex_lock(&g_http_async_mutex);
     HttpAsyncJob* job = &g_http_async[id];
-    if (!job->active) return makeInt(0);
+    if (!job->active) { pthread_mutex_unlock(&g_http_async_mutex); return makeInt(0); }
     job->cancel_requested = 1;
+    pthread_mutex_unlock(&g_http_async_mutex);
     return makeInt(1);
 }
 
@@ -2211,9 +2231,12 @@ Value vmBuiltinHttpGetAsyncProgress(VM* vm, int arg_count, Value* args) {
     }
     int id = (int)AS_INTEGER(args[0]);
     if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    pthread_mutex_lock(&g_http_async_mutex);
     HttpAsyncJob* job = &g_http_async[id];
-    if (!job->active) return makeInt(0);
-    return makeInt((int)job->dl_now);
+    if (!job->active) { pthread_mutex_unlock(&g_http_async_mutex); return makeInt(0); }
+    int progress = (int)job->dl_now;
+    pthread_mutex_unlock(&g_http_async_mutex);
+    return makeInt(progress);
 }
 
 // httpGetAsyncTotal(asyncId): Integer (total bytes expected; 0 if unknown)
@@ -2224,9 +2247,12 @@ Value vmBuiltinHttpGetAsyncTotal(VM* vm, int arg_count, Value* args) {
     }
     int id = (int)AS_INTEGER(args[0]);
     if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    pthread_mutex_lock(&g_http_async_mutex);
     HttpAsyncJob* job = &g_http_async[id];
-    if (!job->active) return makeInt(0);
-    return makeInt((int)job->dl_total);
+    if (!job->active) { pthread_mutex_unlock(&g_http_async_mutex); return makeInt(0); }
+    int total = (int)job->dl_total;
+    pthread_mutex_unlock(&g_http_async_mutex);
+    return makeInt(total);
 }
 
 // HttpLastError(session): String
