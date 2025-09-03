@@ -37,7 +37,7 @@ begin
     Particles[j].g := Random(255);
     Particles[j].b := Random(255);
   end;
-  if boom <> -1 then
+  if (boom <> -1) and not IsSoundPlaying() then
     PlaySound(boom);   { play once when spawning }
 end;
 
