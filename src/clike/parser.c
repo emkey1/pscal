@@ -132,6 +132,7 @@ static ASTNodeClike* returnStatement(ParserClike *p);
 static ASTNodeClike* switchStatement(ParserClike *p);
 ASTNodeClike* clikeSpawnStatement(ParserClike *p);
 ASTNodeClike* clikeJoinStatement(ParserClike *p);
+static ClikeToken parseStringLiteral(ParserClike *p);
 
 char **clike_imports = NULL;
 int clike_import_count = 0;
@@ -162,6 +163,31 @@ static void addConst(const char *name, size_t len, long long value) {
     const_table[const_count].name = copyName(name, len);
     const_table[const_count].value = value;
     const_count++;
+}
+
+// Parse one or more adjacent string literals, concatenating their contents.
+static ClikeToken parseStringLiteral(ParserClike *p) {
+    ClikeToken str = p->current;
+    if (str.type != CLIKE_TOKEN_STRING) {
+        expectToken(p, CLIKE_TOKEN_STRING, "string literal");
+        return str;
+    }
+    advanceParser(p);
+    if (p->current.type != CLIKE_TOKEN_STRING) return str;
+    size_t total = str.length;
+    char *buf = copyName(str.lexeme, str.length);
+    while (p->current.type == CLIKE_TOKEN_STRING) {
+        char *newbuf = (char*)realloc(buf, total + p->current.length + 1);
+        if (!newbuf) break;
+        buf = newbuf;
+        memcpy(buf + total, p->current.lexeme, p->current.length);
+        total += p->current.length;
+        buf[total] = '\0';
+        advanceParser(p);
+    }
+    str.lexeme = buf;
+    str.length = (int)total;
+    return str;
 }
 
 static int getConst(const char *name, size_t len, long long *out) {
@@ -352,8 +378,7 @@ ASTNodeClike* parseProgramClike(ParserClike *p) {
     while (p->current.type != CLIKE_TOKEN_EOF) {
         if (p->current.type == CLIKE_TOKEN_IMPORT) {
             advanceParser(p);
-            ClikeToken pathTok = p->current;
-            expectToken(p, CLIKE_TOKEN_STRING, "module path");
+            ClikeToken pathTok = parseStringLiteral(p);
             queueImportPath(p, pathTok);
             expectToken(p, CLIKE_TOKEN_SEMICOLON, ";");
             continue;
@@ -1256,7 +1281,7 @@ static ASTNodeClike* factor(ParserClike *p) {
         return n;
     }
     if (p->current.type == CLIKE_TOKEN_STRING) {
-        ClikeToken str = p->current; advanceParser(p);
+        ClikeToken str = parseStringLiteral(p);
         ASTNodeClike *n = newASTNodeClike(TCAST_STRING, str);
         n->var_type = TYPE_STRING;
         return n;
