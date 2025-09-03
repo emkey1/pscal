@@ -1,0 +1,14 @@
+program HttpFetchDataURL;
+
+var s, code: integer;
+    ms: mstream;
+begin
+  s := HttpSession();
+  HttpSetHeader(s, 'Accept', 'text/plain');
+  ms := mstreamcreate();
+  code := HttpRequest(s, 'GET', 'data:text/plain,hello%20world', nil, ms);
+  writeln(mstreambuffer(ms));
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+
