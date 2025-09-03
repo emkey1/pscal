@@ -103,6 +103,8 @@ VM. For instructions on adding your own routines, see
 | ---- | ---------- | ------- | ----------- |
 | spawn | (address: Integer) | Integer | Start a new thread at the given bytecode address and return its id. |
 | join | (tid: Integer) | void | Wait for the specified thread to finish. |
+| CreateThread | (procAddr: Pointer, arg: Pointer = nil) | Thread | Start a new thread invoking the given routine with `arg`. Backward-compatible with 1-arg form. |
+| WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete. |
 | mutex | () | Integer | Create a standard mutex and return its identifier. |
 | rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
 | lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
@@ -238,4 +240,3 @@ int main() {
   return 0;
 }
 ```
-

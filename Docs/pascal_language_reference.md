@@ -63,6 +63,7 @@ The language supports a variety of built-in data types:
 | `String` | `TYPE_STRING` | Dynamic-length or fixed-length string. |
 | `Boolean` | `TYPE_BOOLEAN` | `True` or `False`. |
 | `Text`, `File` | `TYPE_FILE` | Represents a file handle. |
+| `Thread` | `TYPE_THREAD` | A handle identifying a VM thread. |
 | `MStream` | `TYPE_MEMORYSTREAM` | A dynamic in-memory stream of bytes. |
 
 ### **Variables and Constants**
@@ -244,6 +245,13 @@ Semantics and notes
 - Recursive mutexes are useful when helpers invoked under a lock need to acquire the same mutex.
 - A typical pattern is: create → lock/unlock as needed → destroy.
 
+Extended helpers (procedure pointers)
+
+In addition to `spawn`/`join`, the following helpers support passing data to a new thread:
+
+- `CreateThread(@Proc, argPtr: Pointer = nil): Thread` – spawn a new thread that calls `Proc`, passing `argPtr` as its first (and only) parameter.
+- `WaitForThread(t: Thread): Integer` – wait for completion of the given thread handle (returns 0).
+
 Examples
 
 Spawn and join:
@@ -292,3 +300,40 @@ begin
   WriteLn('Hello, World!');
 end.
 ```
+Address-of (`@`)
+
+The `@` operator yields the address of a procedure or function identifier as a pointer value. Example:
+
+```pascal
+procedure Handler; begin end;
+var p: pointer;
+begin
+  p := @Handler;
+end.
+```
+
+Currently `@` is intended for taking routine addresses. Using `@` with non-routine identifiers is not supported.
+
+Procedure and function pointers
+
+Declare procedure/function pointer types using `procedure (...)` or `function (...): <Type>` in a type definition. Assign with `@Name` and call indirectly:
+
+```pascal
+type
+  PProc = procedure();
+  PInc  = function(x: Integer): Integer;
+
+procedure Hello; begin writeln('hi'); end;
+function Inc1(x: Integer): Integer; begin Inc1 := x + 1; end;
+
+var p: PProc; f: PInc; n: Integer;
+begin
+  p := @Hello; p();  // or just p; for parameterless
+  f := @Inc1; n := f(41); writeln(n);
+end.
+```
+
+Assignments and parameter passing perform signature checks (arity and simple parameter/return types).
+
+See also
+- A compact, runnable demo combining procedure/function pointers (including indirect calls) with the new thread helpers is available at `Examples/Pascal/ThreadsProcPtrDemo`.

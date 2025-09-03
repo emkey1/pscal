@@ -21,7 +21,12 @@ Pscal implements a substantial subset of classic Pascal:
 * **Control flow** – `if`, `case`, `for`, `while`, `repeat…until`, and `break`.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
-* **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish; `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
+* **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish. Prefer `CreateThread(@Proc, arg)` and `WaitForThread(t)` when you need to pass a pointer argument. `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
+
+Examples
+- See `Examples/Pascal/ThreadsProcPtrDemo` for a compact demonstration of:
+  - Procedure/function pointers (including indirect calls), and
+  - `CreateThread(@Worker, argPtr)`/`WaitForThread(t)` passing a pointer argument.
 
 Example program:
 

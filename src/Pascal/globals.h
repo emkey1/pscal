@@ -76,6 +76,7 @@ extern List *inserted_global_names;
 
 extern int break_requested;
 extern int exit_requested; // Flag set by builtin 'exit' to unwind the current routine
+extern int pascal_semantic_error_count; // Count of semantic/type errors during analysis
 
 // Mutex protecting shared global tables
 extern pthread_mutex_t globals_mutex;

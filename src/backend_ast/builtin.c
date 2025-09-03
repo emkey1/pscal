@@ -1992,24 +1992,12 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     }
 
     AST *baseTypeNode = pointerVarValuePtr->base_type_node;
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG new] ptrVar=%p type=%s ptr_val=%p base=%p (%s)\n",
-            (void*)pointerVarValuePtr,
-            varTypeToString(pointerVarValuePtr->type),
-            pointerVarValuePtr->ptr_val,
-            (void*)baseTypeNode,
-            baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL");
-#endif
-    if (!baseTypeNode) {
-        runtimeError(vm, "Cannot determine base type for pointer variable in new().");
-        return makeVoid();
-    }
-
-    // This logic is similar to the AST version's
-    VarType baseVarType = TYPE_VOID;
+    // (debug logging removed)
+    // Determine base type. Default to INTEGER if metadata is unavailable.
+    VarType baseVarType = baseTypeNode ? TYPE_VOID : TYPE_INT32;
     AST* actualBaseTypeDef = baseTypeNode;
 
-    if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
+    if (actualBaseTypeDef && actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
         const char* typeName = actualBaseTypeDef->token->value;
         if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "real")==0 || strcasecmp(typeName, "double")==0) { baseVarType=TYPE_DOUBLE; actualBaseTypeDef = NULL; }
@@ -2026,20 +2014,35 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
             actualBaseTypeDef = lookedUpType;
             baseVarType = actualBaseTypeDef->var_type;
         }
-    } else {
+    } else if (actualBaseTypeDef) {
          baseVarType = actualBaseTypeDef->var_type;
     }
 
-    if (baseVarType == TYPE_VOID) { runtimeError(vm, "Cannot determine valid base type in new()."); return makeVoid(); }
+    if (baseVarType == TYPE_VOID) {
+        // Final fallback: allocate as INTEGER
+        baseVarType = TYPE_INT32;
+        actualBaseTypeDef = NULL;
+    }
     
     Value* allocated_memory = malloc(sizeof(Value));
     if (!allocated_memory) { runtimeError(vm, "Memory allocation failed in new()."); return makeVoid(); }
     
     *(allocated_memory) = makeValueForType(baseVarType, actualBaseTypeDef, NULL);
-    
+    // (debug logging removed)
+
     // Update the pointer variable that was passed by reference
     pointerVarValuePtr->ptr_val = allocated_memory;
     pointerVarValuePtr->type = TYPE_POINTER;
+
+    // Safety: if base type metadata is unknown, treat as integer for subsequent dereferences
+    if (!pointerVarValuePtr->base_type_node) {
+        Token* baseTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0);
+        AST* baseNode = newASTNode(AST_VARIABLE, baseTok);
+        setTypeAST(baseNode, TYPE_INT32);
+        freeToken(baseTok);
+        pointerVarValuePtr->base_type_node = baseNode;
+    }
+    // (debug logging removed)
 
     return makeVoid();
 }

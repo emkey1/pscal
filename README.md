@@ -66,6 +66,24 @@ cd Tests;./run_all_tests
 
 Note: On macOS, you may see benign LaunchServices/XPC warnings on stderr when running SDL tests in some environments.
 
+## Running the new example (threads + procedure pointers)
+
+Two convenient ways to run the demo that exercises procedure/function pointers (including indirect calls) and the new `CreateThread(@Proc, arg)`/`WaitForThread(t)` APIs:
+
+1) CMake custom target:
+
+```sh
+cmake --build build --target run_threads_procptr_demo
+```
+
+2) Makefile in `Examples/`:
+
+```sh
+make -C Examples threads-procptr-demo
+```
+
+The example source lives at `Examples/Pascal/ThreadsProcPtrDemo`.
+
 ## Tiny language front end (Written in Python)
 
 A minimal compiler for a small educational language, often called *tiny*, is

@@ -1117,9 +1117,15 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             // This now correctly handles ALL non-array types, including simple types,
                             // records, dynamic strings, and fixed-length strings.
                             const char* type_name = "";
-                            if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
+                            if (node->var_type == TYPE_POINTER) {
+                                AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
+                                if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE && ptr_ast->right && ptr_ast->right->token) {
+                                    type_name = ptr_ast->right->token->value; // emit base type name
+                                }
+                            }
+                            if (type_name[0] == '\0' && type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
                                 type_name = type_specifier_node->token->value;
-                            } else if (actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
+                            } else if (type_name[0] == '\0' && actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
                                 /*
                                  * For user-defined enum types the copied type specifier may not carry
                                  * a token with the enum's name.  Falling back to the resolved type
@@ -1268,10 +1274,20 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
 
                         const char* type_name = "";
-                        if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
-                            type_name = type_specifier_node->token->value;
-                        } else if (actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
-                            type_name = actual_type_def_node->token->value;
+                        // Prefer the base type name for pointer types so the VM can resolve it.
+                        AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
+                        if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE) {
+                            AST* base = ptr_ast->right;
+                            if (base && base->token && base->token->value) {
+                                type_name = base->token->value;
+                            }
+                        }
+                        if (type_name[0] == '\0') {
+                            if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
+                                type_name = type_specifier_node->token->value;
+                            } else if (actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
+                                type_name = actual_type_def_node->token->value;
+                            }
                         }
                         emitConstantIndex16(chunk, addStringConstant(chunk, type_name), getLine(varNameNode));
                     }
@@ -2273,8 +2289,44 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     writeBytecodeChunk(chunk, OP_POP, line);
                 }
             } else {
-                fprintf(stderr, "L%d: Compiler Error: Undefined procedure or function '%s'.\n", line, calleeName);
-                compiler_had_error = true;
+                // Fallback: map known host-threading helpers by name
+                if (strcasecmp(calleeName, "createthread") == 0) {
+                    // New signature: CreateThread(procAddr, argPtr)
+                    // Backward compatible: if only 1 arg given, push NIL for argPtr
+                    if (node->child_count < 1 || node->child_count > 2) {
+                        fprintf(stderr, "L%d: Compiler Error: CreateThread expects 1 or 2 arguments.\n", line);
+                    }
+                    if (node->child_count >= 1) {
+                        compileRValue(node->children[0], chunk, getLine(node->children[0])); // proc addr
+                    } else {
+                        emitConstant(chunk, addIntConstant(chunk, 0), line); // push 0 as fallback addr
+                    }
+                    if (node->child_count >= 2) {
+                        compileRValue(node->children[1], chunk, getLine(node->children[1])); // arg ptr/value
+                    } else {
+                        emitConstant(chunk, addNilConstant(chunk), line); // default arg = nil
+                    }
+                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_THREAD_ADDR, line);
+                } else if (strcasecmp(calleeName, "waitforthread") == 0) {
+                    if (node->child_count != 1) {
+                        fprintf(stderr, "L%d: Compiler Error: WaitForThread expects 1 argument (thread id).\n", line);
+                    } else {
+                        compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                    }
+                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_WAIT_THREAD, line);
+                } else {
+                    // Indirect call through a procedure pointer variable: arguments are already on stack.
+                    // Push callee address value and emit indirect call-for-statement.
+                    AST tmpVar;
+                    memset(&tmpVar, 0, sizeof(AST));
+                    tmpVar.type = AST_VARIABLE;
+                    tmpVar.token = node->token; // reference only; compileRValue copies token if needed
+                    compileRValue(&tmpVar, chunk, line);
+                    writeBytecodeChunk(chunk, OP_PROC_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                }
             }
             break;
         }
@@ -2425,6 +2477,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_NIL: {
             int constIndex = addNilConstant(chunk);
+            emitConstant(chunk, constIndex, line);
+            break;
+        }
+        case AST_ADDR_OF: {
+            // Address-of routines: push procedure bytecode address as integer constant
+            int addr = 0;
+            if (node->left && node->left->token && node->left->token->value) {
+                const char* pname = node->left->token->value;
+                Symbol* psym = lookupProcedure(pname);
+                if (psym) addr = psym->bytecode_address;
+            }
+            int constIndex = addIntConstant(chunk, addr);
             emitConstant(chunk, constIndex, line);
             break;
         }
@@ -2674,6 +2738,36 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
+            if (strcasecmp(functionName, "createthread") == 0) {
+                // New signature: CreateThread(procAddr, argPtr). If only 1 arg, default arg=nil.
+                if (node->child_count < 1 || node->child_count > 2) {
+                    fprintf(stderr, "L%d: Compiler Error: CreateThread expects 1 or 2 arguments.\n", line);
+                }
+                if (node->child_count >= 1) {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0])); // proc addr
+                } else {
+                    emitConstant(chunk, addIntConstant(chunk, 0), line);
+                }
+                if (node->child_count >= 2) {
+                    compileRValue(node->children[1], chunk, getLine(node->children[1])); // arg ptr
+                } else {
+                    emitConstant(chunk, addNilConstant(chunk), line); // default arg
+                }
+                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_THREAD_ADDR, line);
+                break;
+            }
+            if (strcasecmp(functionName, "waitforthread") == 0) {
+                // Expects 1 arg: integer thread id
+                if (node->child_count != 1) {
+                    fprintf(stderr, "L%d: Compiler Error: WaitForThread expects 1 argument (thread id).\n", line);
+                } else {
+                    compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                }
+                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_WAIT_THREAD, line);
+                break;
+            }
             if (strcasecmp(functionName, "mutex") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
@@ -2688,6 +2782,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
                 break;
             }
+            // (indirect function pointer calls are handled later in the fallback path)
             if (strcasecmp(functionName, "lock") == 0) {
                 if (node->child_count != 1) {
                     fprintf(stderr, "L%d: Compiler Error: lock expects 1 argument.\n", line);
@@ -2796,10 +2891,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     emitShort(chunk, (uint16_t)nameIndex, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 } else {
-                     fprintf(stderr, "L%d: Compiler Error: '%s' is not a recognized built-in function for expression context.\n", line, functionName);
-                    compiler_had_error = true;
-                    for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                    emitConstant(chunk, addNilConstant(chunk), line);
+                    // Fallback to indirect function pointer call: use variable's value as address.
+                    AST tmpVar; memset(&tmpVar, 0, sizeof(AST));
+                    tmpVar.type = AST_VARIABLE; tmpVar.token = node->token;
+                    // Arguments are already compiled (above) and on the stack; now push callee address
+                    compileRValue(&tmpVar, chunk, line);
+                    writeBytecodeChunk(chunk, OP_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 }
             } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
@@ -2841,10 +2939,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                     }
                 } else {
-                     fprintf(stderr, "L%d: Compiler Error: Undefined function '%s'.\n", line, original_display_name);
-                     compiler_had_error = true;
-                     for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
-                     emitConstant(chunk, addNilConstant(chunk), line);
+                    // Fallback to indirect function pointer call: push callee address and perform indirect call
+                    AST tmpVar; memset(&tmpVar, 0, sizeof(AST));
+                    tmpVar.type = AST_VARIABLE; tmpVar.token = node->token;
+                    compileRValue(&tmpVar, chunk, line);
+                    writeBytecodeChunk(chunk, OP_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 }
             }
             break;

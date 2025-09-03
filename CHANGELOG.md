@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Enhancements
+- Pascal: Introduced address-of operator `@` for routines and first-class procedure/function pointer types.
+- Pascal: Added indirect procedure-pointer calls in both expression and statement contexts.
+- Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1-arg form.
+- VM: Implemented indirect call opcodes and end-to-end support for passing an initial pointer argument to new threads.
+
+Stability and correctness
+- Pointer metadata propagation: Pointer locals/globals now carry base-type metadata end-to-end so `new(p)` and `p^` dereferences work reliably.
+- Parser: Supports named parameter syntax in function/procedure pointer types (e.g., `function(x: Integer): Integer`).
+
+Developer experience
+- Documentation updated to cover `@`, procedure/function pointer types, indirect calls, and `CreateThread`/`WaitForThread` usage with examples.
+
 All notable changes to this project will be documented in this file.
 
 ## v2.1-beta – 2025-09-02

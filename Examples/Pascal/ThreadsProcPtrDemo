@@ -1,0 +1,29 @@
+program ThreadsProcPtrDemo;
+
+type
+  PInt = ^integer;
+  PInc = function(x: Integer): Integer;
+
+function Inc1(x: Integer): Integer; begin Inc1 := x + 1; end;
+
+procedure Worker(p: PInt);
+begin
+  p^ := p^ + 1;
+end;
+
+var p: PInt;
+    t: integer;
+    f: PInc;
+begin
+  { Demonstrate CreateThread with a pointer argument }
+  new(p); p^ := 41;
+  t := CreateThread(@Worker, p);
+  WaitForThread(t);
+  writeln('thread result: ', p^);  { 42 }
+  dispose(p);
+
+  { Demonstrate procedure/function pointers and indirect call }
+  f := @Inc1;
+  writeln('func ptr: ', f(41));     { 42 }
+end.
+

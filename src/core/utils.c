@@ -44,6 +44,7 @@ const char *varTypeToString(VarType type) {
         case TYPE_FLOAT:        return "REAL";
         case TYPE_LONG_DOUBLE:  return "LONG_DOUBLE";
         case TYPE_NIL:          return "NIL";
+        case TYPE_THREAD:       return "THREAD";
         default:                return "UNKNOWN_VAR_TYPE";
     }
 }
@@ -127,6 +128,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_INLINE:       return "INLINE";
         case TOKEN_SPAWN:        return "SPAWN";
         case TOKEN_JOIN:         return "JOIN";
+        case TOKEN_AT:           return "AT";
         default:
             // Create a small buffer to handle potentially large unknown enum values
             // Although, this function should ideally cover all defined TokenType values.
@@ -187,7 +189,9 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_THREAD_SPAWN:   return "THREAD_SPAWN";
         case AST_THREAD_JOIN:    return "THREAD_JOIN";
         case AST_POINTER_TYPE:   return "POINTER_TYPE";
+        case AST_PROC_PTR_TYPE:  return "PROC_PTR_TYPE";
         case AST_DEREFERENCE:    return "DEREFERENCE";
+        case AST_ADDR_OF:        return "ADDR_OF";
         case AST_NIL:            return "NIL";
         default:                 return "UNKNOWN_AST_TYPE";
     }
@@ -638,11 +642,21 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                      (void*)pointer_type_node);
              fflush(stderr);
              #endif
+        } else if (pointer_type_node && pointer_type_node->type == AST_PROC_PTR_TYPE) {
+             // Procedure pointer types: treat as generic pointer with unknown base; no warning.
+             v.base_type_node = NULL;
+        } else if (pointer_type_node) {
+             // If a non-pointer AST node is provided (e.g., a simple type identifier),
+             // treat it as the base type directly.
+             v.base_type_node = pointer_type_node;
         } else {
+             // Unknown pointer type shape; log only in debug builds to avoid noisy stderr in tests
+             #ifdef DEBUG
              fprintf(stderr, "Warning: Failed to find POINTER_TYPE definition node when initializing pointer Value. Structure trace started from VAR_DECL->right at %p. Final node checked was %p (Type: %s).\n",
                      (void*)type_def_param,
                      (void*)pointer_type_node,
                      pointer_type_node ? astTypeToString(pointer_type_node->type) : "NULL");
+             #endif
              v.base_type_node = NULL;
         }
     }

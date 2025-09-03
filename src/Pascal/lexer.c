@@ -593,6 +593,7 @@ Token *getNextToken(Lexer *lexer) {
         if (lexer->current_char == ')') { advance(lexer); return newToken(TOKEN_RPAREN, ")", start_line, start_column); }
         if (lexer->current_char == '[') { advance(lexer); return newToken(TOKEN_LBRACKET, "[", start_line, start_column); }
         if (lexer->current_char == ']') { advance(lexer); return newToken(TOKEN_RBRACKET, "]", start_line, start_column); }
+        if (lexer->current_char == '@') { advance(lexer); return newToken(TOKEN_AT, "@", start_line, start_column); }
 
         // Relational Operators: =, <, >
         if (lexer->current_char == '=') { advance(lexer); return newToken(TOKEN_EQUAL, "=", start_line, start_column); }

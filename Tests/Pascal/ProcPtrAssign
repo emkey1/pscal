@@ -1,0 +1,13 @@
+program ProcPtrAssign;
+
+type
+  PProc = procedure();
+
+procedure H; begin end;
+
+var
+  p: PProc;
+begin
+  p := @H;
+end.
+

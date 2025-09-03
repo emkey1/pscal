@@ -12,6 +12,13 @@ add_custom_target(run_basic_examples
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Procedure pointers + threads demo
+add_custom_target(run_threads_procptr_demo
+    COMMAND ${CMAKE_COMMAND} -E echo "Running ThreadsProcPtrDemo..."
+    COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/Pascal/ThreadsProcPtrDemo
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # SDL examples are only run when SDL option is enabled
 if(SDL)
     add_custom_target(run_sdl_examples

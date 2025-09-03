@@ -38,6 +38,7 @@ static void resetStack(VM* vm) {
 typedef struct {
     Thread* thread;
     uint16_t entry;
+    Value arg; // optional argument passed to the routine
 } ThreadStartArgs;
 
 // Forward declarations for helpers used by threadStart.
@@ -49,6 +50,7 @@ static void* threadStart(void* arg) {
     Thread* thread = args->thread;
     VM* vm = thread->vm;
     uint16_t entry = args->entry;
+    Value start_arg = args->arg; // take ownership copy
     free(args);
 
     Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, entry);
@@ -61,6 +63,7 @@ static void* threadStart(void* arg) {
     frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
     frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
     frame->upvalues = NULL;
+    frame->discard_result_on_return = false;
 
     if (proc_symbol && proc_symbol->upvalue_count > 0) {
         frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
@@ -69,6 +72,28 @@ static void* threadStart(void* arg) {
                 frame->upvalues[i] = NULL;
             }
         }
+    }
+
+    // If the callee expects parameters, push the provided start_arg as the first argument.
+    if (proc_symbol && proc_symbol->type_def) {
+        int param_count = proc_symbol->type_def->child_count;
+        if (param_count > 0) {
+            // Coerce int->real if needed for the first param, mirroring OP_CALL behavior.
+            AST* param_ast = proc_symbol->type_def->children[0];
+            Value coerced = start_arg;
+            if (param_ast && isRealType(param_ast->var_type) && isIntlikeType(start_arg.type)) {
+                long double tmp = asLd(start_arg);
+                setTypeValue(&coerced, param_ast->var_type);
+                SET_REAL_VALUE(&coerced, tmp);
+            }
+            push(vm, coerced);
+        } else {
+            // No params expected; discard passed arg if it carries managed data
+            freeValue(&start_arg);
+        }
+    } else {
+        // Unknown signature; pass the arg conservatively
+        push(vm, start_arg);
     }
 
     for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
@@ -80,7 +105,7 @@ static void* threadStart(void* arg) {
     return NULL;
 }
 
-static int createThread(VM* vm, uint16_t entry) {
+static int createThreadWithArg(VM* vm, uint16_t entry, Value arg) {
     int id = -1;
     for (int i = 1; i < VM_MAX_THREADS; i++) {
         if (!vm->threads[i].active && vm->threads[i].vm == NULL) {
@@ -110,6 +135,7 @@ static int createThread(VM* vm, uint16_t entry) {
     }
     args->thread = t;
     args->entry = entry;
+    args->arg = arg; // copy struct contents; strings/arrays share buffers; caller should not free after
     t->active = true;
     if (pthread_create(&t->handle, NULL, threadStart, args) != 0) {
         free(args);
@@ -123,6 +149,11 @@ static int createThread(VM* vm, uint16_t entry) {
         vm->threadCount = id + 1;
     }
     return id;
+}
+
+// Backward-compatible helper: no argument provided, pass NIL
+static int createThread(VM* vm, uint16_t entry) {
+    return createThreadWithArg(vm, entry, makeNil());
 }
 
 static void joinThread(VM* vm, int id) {
@@ -627,6 +658,40 @@ static Value vmHostQuitRequested(VM* vm) {
     return makeBoolean(break_requested);
 }
 
+static Value vmHostCreateThreadAddr(VM* vm) {
+    // Expects: proc address and arg value on stack (address below arg). For backward compat we always push arg (nil) in compiler.
+    Value argVal = pop(vm);
+    Value addrVal = pop(vm);
+
+    uint16_t entry = 0;
+    if (IS_INTLIKE(addrVal)) {
+        entry = (uint16_t)AS_INTEGER(addrVal);
+    }
+    freeValue(&addrVal);
+
+    int id = createThreadWithArg(vm, entry, argVal);
+    // createThreadWithArg takes ownership of argVal copy via struct assignment; do not free argVal here
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_THREAD;
+    SET_INT_VALUE(&v, id < 0 ? -1 : id);
+    return v;
+}
+
+static Value vmHostWaitThread(VM* vm) {
+    // Expects top of stack: integer thread id
+    Value tidVal = pop(vm);
+    if (tidVal.type == TYPE_THREAD) {
+        int id = (int)AS_INTEGER(tidVal);
+        joinThread(vm, id);
+    } else if (IS_INTLIKE(tidVal)) {
+        int id = (int)AS_INTEGER(tidVal);
+        joinThread(vm, id);
+    }
+    freeValue(&tidVal);
+    return makeInt(0);
+}
+
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
     if (!vm) return false;
@@ -672,6 +737,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
         fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
         EXIT_FAILURE_HANDLER();
     }
+    registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
+    registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
 }
 
 void freeVM(VM* vm) {
@@ -754,7 +821,7 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
     }
     vm->frameCount--;
 
-    if (has_result) {
+    if (has_result && !currentFrame->discard_result_on_return) {
         push(vm, safeReturnValue);
     } else {
         freeValue(&safeReturnValue);
@@ -799,6 +866,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
 
     // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
     *(sym->value) = makeValueForType(type, type_def_for_value_init, sym);
+    // (debug logging removed)
 
     sym->is_alias = false;
     sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
@@ -914,6 +982,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             }
         }
         Value typeNameVal = vm->chunk->constants[type_name_idx];
+        // (debug logging removed)
         AST* type_def_node = NULL;
         if (declaredType == TYPE_STRING && str_len > 0) {
             Token* strTok = newToken(TOKEN_IDENTIFIER, "string", 0, 0);
@@ -928,11 +997,41 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             freeToken(lenTok);
             setRight(type_def_node, lenNode);
         } else if (typeNameVal.type == TYPE_STRING && typeNameVal.s_val) {
-            type_def_node = lookupType(typeNameVal.s_val);
-            if (declaredType == TYPE_ENUM && type_def_node == NULL) {
-                runtimeError(vm, "VM Error: Enum type '%s' not found for global '%s'.", typeNameVal.s_val, varNameVal.s_val);
-                return INTERPRET_RUNTIME_ERROR;
+            // Prefer user-defined type resolution if available
+            AST* looked = lookupType(typeNameVal.s_val);
+            if (declaredType == TYPE_POINTER && looked) {
+                type_def_node = looked; // Will be a POINTER_TYPE or TYPE_REFERENCE
+            } else if (declaredType == TYPE_POINTER) {
+                // Fall back to simple base types mapping
+                Token* baseTok = newToken(TOKEN_IDENTIFIER, typeNameVal.s_val, 0, 0);
+                type_def_node = newASTNode(AST_VARIABLE, baseTok);
+                const char* tn = typeNameVal.s_val;
+                if      (strcasecmp(tn, "integer") == 0 || strcasecmp(tn, "int") == 0) setTypeAST(type_def_node, TYPE_INT32);
+                else if (strcasecmp(tn, "real")    == 0 || strcasecmp(tn, "double") == 0) setTypeAST(type_def_node, TYPE_DOUBLE);
+                else if (strcasecmp(tn, "single")  == 0 || strcasecmp(tn, "float")  == 0) setTypeAST(type_def_node, TYPE_FLOAT);
+                else if (strcasecmp(tn, "char")    == 0) setTypeAST(type_def_node, TYPE_CHAR);
+                else if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) setTypeAST(type_def_node, TYPE_BOOLEAN);
+                else if (strcasecmp(tn, "byte")    == 0) setTypeAST(type_def_node, TYPE_BYTE);
+                else if (strcasecmp(tn, "word")    == 0) setTypeAST(type_def_node, TYPE_WORD);
+                else if (strcasecmp(tn, "int64")   == 0 || strcasecmp(tn, "longint") == 0) setTypeAST(type_def_node, TYPE_INT64);
+                else if (strcasecmp(tn, "cardinal")== 0) setTypeAST(type_def_node, TYPE_UINT32);
+                else setTypeAST(type_def_node, TYPE_VOID);
+                freeToken(baseTok);
+            } else {
+                type_def_node = looked;
+                if (declaredType == TYPE_ENUM && type_def_node == NULL) {
+                    runtimeError(vm, "VM Error: Enum type '%s' not found for global '%s'.", typeNameVal.s_val, varNameVal.s_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
             }
+        }
+
+        if (declaredType == TYPE_POINTER && type_def_node == NULL) {
+            // Final safety: default pointer base to integer if not provided
+            Token* baseTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0);
+            type_def_node = newASTNode(AST_VARIABLE, baseTok);
+            setTypeAST(type_def_node, TYPE_INT32);
+            freeToken(baseTok);
         }
 
         if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
@@ -2757,12 +2856,48 @@ comparison_error_label:
                 AST* type_def = NULL;
                 Value type_name_val = vm->chunk->constants[type_name_idx];
                 if (type_name_val.type == TYPE_STRING && type_name_val.s_val && type_name_val.s_val[0] != '\0') {
-                    type_def = lookupType(type_name_val.s_val);
+                    // Prefer a named type if available (e.g., pointer to record type)
+                    AST* looked = lookupType(type_name_val.s_val);
+                    if (looked) {
+                        type_def = looked;
+                    } else {
+                        // Build a simple base type node from the provided name
+                        Token* baseTok = newToken(TOKEN_IDENTIFIER, type_name_val.s_val, 0, 0);
+                        type_def = newASTNode(AST_VARIABLE, baseTok);
+                        const char* tn = type_name_val.s_val;
+                        if      (strcasecmp(tn, "integer") == 0 || strcasecmp(tn, "int") == 0) setTypeAST(type_def, TYPE_INT32);
+                        else if (strcasecmp(tn, "real")    == 0 || strcasecmp(tn, "double") == 0) setTypeAST(type_def, TYPE_DOUBLE);
+                        else if (strcasecmp(tn, "single")  == 0 || strcasecmp(tn, "float")  == 0) setTypeAST(type_def, TYPE_FLOAT);
+                        else if (strcasecmp(tn, "char")    == 0) setTypeAST(type_def, TYPE_CHAR);
+                        else if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) setTypeAST(type_def, TYPE_BOOLEAN);
+                        else if (strcasecmp(tn, "byte")    == 0) setTypeAST(type_def, TYPE_BYTE);
+                        else if (strcasecmp(tn, "word")    == 0) setTypeAST(type_def, TYPE_WORD);
+                        else if (strcasecmp(tn, "int64")   == 0 || strcasecmp(tn, "longint") == 0) setTypeAST(type_def, TYPE_INT64);
+                        else if (strcasecmp(tn, "cardinal")== 0) setTypeAST(type_def, TYPE_UINT32);
+                        else setTypeAST(type_def, TYPE_VOID);
+                        freeToken(baseTok);
+                    }
                 }
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 Value* target_slot = &frame->slots[slot];
                 freeValue(target_slot);
-                *target_slot = makeValueForType(TYPE_POINTER, type_def, NULL);
+                // Initialize pointer with a sensible base_type_node. If type_def is a pointer type
+                // use its right child; for basic types, use the type_def directly.
+                Value ptr = makeValueForType(TYPE_POINTER, NULL, NULL);
+                if (type_def) {
+                    AST* resolved = type_def;
+                    if (resolved->type == AST_TYPE_REFERENCE && resolved->right) {
+                        resolved = resolved->right;
+                    }
+                    if (resolved->type == AST_POINTER_TYPE && resolved->right) {
+                        ptr.base_type_node = resolved->right;
+                    } else if (resolved->type == AST_VARIABLE || resolved->type == AST_TYPE_IDENTIFIER) {
+                        ptr.base_type_node = resolved;
+                    } else {
+                        ptr.base_type_node = resolved;
+                    }
+                }
+                *target_slot = ptr;
                 break;
             }
             case OP_JUMP_IF_FALSE: {
@@ -2998,6 +3133,7 @@ comparison_error_label:
                 frame->locals_count = proc_symbol->locals_count;
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
+                frame->discard_result_on_return = false;
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
@@ -3034,6 +3170,188 @@ comparison_error_label:
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
+            case OP_CALL_INDIRECT: {
+                uint8_t declared_arity = READ_BYTE();
+                // Stack layout expected: [... args] [addr]
+                Value addrVal = pop(vm);
+                if (!IS_INTLIKE(addrVal)) {
+                    freeValue(&addrVal);
+                    runtimeError(vm, "VM Error: Indirect call requires integer address on stack.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                uint16_t target_address = (uint16_t)AS_INTEGER(addrVal);
+                freeValue(&addrVal);
+
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (vm->stackTop - vm->stack < declared_arity) {
+                    runtimeError(vm, "VM Error: Stack underflow for indirect call arguments. Expected %d, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity;
+
+                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+                if (!proc_symbol) {
+                    runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
+                    vm->frameCount--;
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // Coerce numeric argument types to match formal parameter real/integer expectations
+                if (proc_symbol->type_def && proc_symbol->type_def->child_count >= declared_arity) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = proc_symbol->type_def->children[i];
+                        Value* arg_val = frame->slots + i;
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
+                frame->function_symbol = proc_symbol;
+                frame->locals_count = proc_symbol->locals_count;
+                frame->upvalue_count = proc_symbol->upvalue_count;
+                frame->upvalues = NULL;
+                frame->discard_result_on_return = false;
+
+                if (proc_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    CallFrame* parent_frame = NULL;
+                    if (proc_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
+                        }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                        if (proc_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < proc_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                vm->ip = vm->chunk->code + target_address;
+                break;
+            }
+            case OP_PROC_CALL_INDIRECT: {
+                uint8_t declared_arity = READ_BYTE();
+                // Reuse OP_CALL_INDIRECT machinery by rewinding ip to interpret the common path,
+                // but we need to know when to discard a return value. Implement inline duplication instead.
+
+                Value addrVal = pop(vm);
+                if (!IS_INTLIKE(addrVal)) {
+                    freeValue(&addrVal);
+                    runtimeError(vm, "VM Error: Indirect call requires integer address on stack.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                uint16_t target_address = (uint16_t)AS_INTEGER(addrVal);
+                freeValue(&addrVal);
+
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vm->stackTop - vm->stack < declared_arity) {
+                    runtimeError(vm, "VM Error: Stack underflow for indirect call arguments. Expected %d, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity;
+
+                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+                if (!proc_symbol) {
+                    runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
+                    vm->frameCount--;
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (proc_symbol->type_def && proc_symbol->type_def->child_count >= declared_arity) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = proc_symbol->type_def->children[i];
+                        Value* arg_val = frame->slots + i;
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
+                frame->function_symbol = proc_symbol;
+                frame->locals_count = proc_symbol->locals_count;
+                frame->upvalue_count = proc_symbol->upvalue_count;
+                frame->upvalues = NULL;
+                frame->discard_result_on_return = true;
+
+                if (proc_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    CallFrame* parent_frame = NULL;
+                    if (proc_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
+                        }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                        if (proc_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < proc_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                vm->ip = vm->chunk->code + target_address;
+
+                // After the callee returns, if it is a function, its result will be on the stack.
+                // Since this opcode is for statement context, discard it to keep the stack balanced.
+                // This block will run when the frame unwinds back here.
+                // Note: actual popping occurs after the callee returns to this frame.
+                // The main interpreter loop continues; no action needed here now.
+                break;
+            }
 
             case OP_HALT:
                 return INTERPRET_OK;
@@ -3044,9 +3362,10 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 HostFn func = vm->host_functions[host_id];
-                pthread_mutex_lock(&globals_mutex);
+                // Do not hold globals_mutex around host calls that may block (e.g., thread waits),
+                // or that start threads which immediately need to access globals during VM init.
+                // Individual host functions should lock as needed.
                 Value result = func(vm);
-                pthread_mutex_unlock(&globals_mutex);
                 push(vm, result);
                 break;
             }
