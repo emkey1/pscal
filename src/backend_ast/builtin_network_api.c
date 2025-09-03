@@ -124,6 +124,7 @@ typedef struct HttpSession_s {
     char* ciphers;        // CURLOPT_SSL_CIPHER_LIST
     char* pinned_pubkey;  // CURLOPT_PINNEDPUBLICKEY
     char* out_file;       // optional sink for HttpRequest
+    char* accept_encoding; // CURLOPT_ACCEPT_ENCODING
     // Auth and last-results
     char* basic_auth;     // user:pass for basic auth
     char* last_headers;   // raw response headers from last request
@@ -176,6 +177,7 @@ static void httpFreeSession(int id) {
     if (s->curl) { curl_easy_cleanup(s->curl); s->curl = NULL; }
     if (s->user_agent) { free(s->user_agent); s->user_agent = NULL; }
     if (s->out_file) { free(s->out_file); s->out_file = NULL; }
+    if (s->accept_encoding) { free(s->accept_encoding); s->accept_encoding = NULL; }
     if (s->basic_auth) { free(s->basic_auth); s->basic_auth = NULL; }
     if (s->ca_path) { free(s->ca_path); s->ca_path = NULL; }
     if (s->client_cert) { free(s->client_cert); s->client_cert = NULL; }
@@ -318,6 +320,11 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
     } else if (strcasecmp(key, "out_file") == 0 && args[2].type == TYPE_STRING) {
         if (s->out_file) free(s->out_file);
         s->out_file = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "accept_encoding") == 0) {
+        if (s->accept_encoding) { free(s->accept_encoding); s->accept_encoding = NULL; }
+        if (args[2].type == TYPE_STRING) {
+            s->accept_encoding = strdup(args[2].s_val ? args[2].s_val : "");
+        }
     } else {
         runtimeError(vm, "httpSetOption: unsupported option or value type for '%s'.", key);
     }
@@ -469,6 +476,7 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
+    if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
@@ -710,6 +718,7 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
+    if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
@@ -972,6 +981,7 @@ typedef struct HttpAsyncJob_s {
     char* out_file;
     char* user_agent;
     char* basic_auth;
+    char* accept_encoding;
     char* ca_path; char* client_cert; char* client_key; char* proxy;
     char* proxy_userpwd; long proxy_type;
     long alpn; long tls_min; long tls_max; char* ciphers; char* pinned_pubkey;
@@ -1125,6 +1135,7 @@ static void* httpAsyncThread(void* arg) {
     if (job->user_agent && job->user_agent[0]) curl_easy_setopt(eh, CURLOPT_USERAGENT, job->user_agent);
     if (job->headers_slist) curl_easy_setopt(eh, CURLOPT_HTTPHEADER, job->headers_slist);
     if (job->resolve_slist) curl_easy_setopt(eh, CURLOPT_RESOLVE, job->resolve_slist);
+    if (job->accept_encoding) curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING, job->accept_encoding);
     if (job->basic_auth && job->basic_auth[0]) {
         curl_easy_setopt(eh, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(eh, CURLOPT_USERPWD, job->basic_auth);
@@ -1293,6 +1304,7 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         job->verify_peer = s->verify_peer; job->verify_host = s->verify_host; job->force_http2 = s->force_http2;
         job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
         job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
+        job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
         job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
@@ -1328,6 +1340,7 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         if (job->body) free(job->body);
         if (job->user_agent) free(job->user_agent);
         if (job->basic_auth) free(job->basic_auth);
+        if (job->accept_encoding) free(job->accept_encoding);
         if (job->ca_path) free(job->ca_path);
         if (job->client_cert) free(job->client_cert);
         if (job->client_key) free(job->client_key);
@@ -1384,6 +1397,7 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         job->verify_peer = s->verify_peer; job->verify_host = s->verify_host; job->force_http2 = s->force_http2;
         job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
         job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
+        job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
         job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
@@ -1457,6 +1471,7 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     if (job->error) free(job->error);
     if (job->user_agent) free(job->user_agent);
     if (job->basic_auth) free(job->basic_auth);
+    if (job->accept_encoding) free(job->accept_encoding);
     if (job->ca_path) free(job->ca_path);
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
@@ -1515,6 +1530,7 @@ Value vmBuiltinHttpTryAwait(VM* vm, int arg_count, Value* args) {
     if (job->error) free(job->error);
     if (job->user_agent) free(job->user_agent);
     if (job->basic_auth) free(job->basic_auth);
+    if (job->accept_encoding) free(job->accept_encoding);
     if (job->ca_path) free(job->ca_path);
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
