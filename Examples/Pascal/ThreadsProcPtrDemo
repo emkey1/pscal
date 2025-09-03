@@ -5,7 +5,10 @@ type
   PInt = ^integer;
   PInc = function(x: Integer): Integer;
 
-function Inc1(x: Integer): Integer; begin Inc1 := x + 1; end;
+function Inc1(x: Integer): Integer; 
+begin 
+  Inc1 := x + 1; 
+end;
 
 procedure Worker(p: PInt);
 begin
