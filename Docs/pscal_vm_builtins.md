@@ -111,6 +111,22 @@ VM. For instructions on adding your own routines, see
 | unlock | (mid: Integer) | void | Release the specified mutex. |
 | destroy | (mid: Integer) | void | Destroy the specified mutex. |
 
+## HTTP (Synchronous)
+
+| Name | Parameters | Returns | Description |
+| ---- | ---------- | ------- | ----------- |
+| HttpSession | () | Integer (session) | Create a reusable HTTP session (libcurl easy) with keep‑alive. |
+| HttpClose | (session: Integer) | void | Destroy a session and free resources. |
+| HttpSetHeader | (session: Integer, name: String, value: String) | void | Add a request header to the session. |
+| HttpClearHeaders | (session: Integer) | void | Clear all accumulated headers. |
+| HttpSetOption | (session: Integer, key: String, value: Int or String) | void | Set basic options: `timeout_ms` (Int), `follow_redirects` (Int 0/1), `user_agent` (String). |
+| HttpRequest | (session: Integer, method: String, url: String, body: String|MStream|nil, out: MStream) | Integer (status) | Perform a request; writes response body into `out`. Returns HTTP status or -1 on transport error. |
+
+Notes
+- `body` may be nil for GET or other methods without payload; strings and mstreams are supported.
+- `out` must be an initialized `MStream`; it is cleared before writing.
+- Errors and transport failures return -1 and report details on stderr.
+
 ## Math
 
 | Name | Parameters | Returns | Description |

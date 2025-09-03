@@ -19,6 +19,13 @@ add_custom_target(run_threads_procptr_demo
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# HTTP fetch demo (sync)
+add_custom_target(run_http_fetch_demo
+    COMMAND ${CMAKE_COMMAND} -E echo "Running HttpFetchDemo..."
+    COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/Pascal/HttpFetchDemo
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # SDL examples are only run when SDL option is enabled
 if(SDL)
     add_custom_target(run_sdl_examples
