@@ -51,7 +51,7 @@ begin
 
   SpawnFirework(400, 300);  { initial burst }
 
-  while PollKey() <> Ord('q') do
+  while not (PollKey() in [Ord('q'), Ord('Q')]) do
   begin
     ClearDevice();
 
@@ -71,7 +71,7 @@ begin
         FillCircle(Round(Particles[i].x), Round(Particles[i].y), 2);
       end;
 
-    OutTextXY(10, 10, 'Click to launch fireworks – Q quits');
+    OutTextXY(10, 10, 'Click to launch fireworks – Q or q quits');
     UpdateScreen();
     GraphLoop(16);  { ~60 fps }
   end;
