@@ -166,6 +166,27 @@ Built-in HTTP helpers are available to all front ends (Pascal and CLike). Highli
 Notes:
 - `file://` URLs are handled directly by the runtime with synthesized `Content-Length` and `Content-Type` headers; this enables hermetic tests without relying on libcurl’s file scheme.
 
+#### TLS, Security, and Proxies
+
+Configure per-session knobs via `HttpSetOption/httpsetoption`:
+
+- TLS constraints:
+  - `tls_min` / `tls_max`: integers 10/11/12/13 map to TLSv1.0/1.1/1.2/1.3 (min and max cap when supported).
+  - `alpn`: 0/1 to disable/enable ALPN (when libcurl supports it).
+  - `ciphers`: OpenSSL-style cipher list string for `CURLOPT_SSL_CIPHER_LIST`.
+  - `pin_sha256`: pinned public key (string). Use `sha256//BASE64` or a file path per libcurl `CURLOPT_PINNEDPUBLICKEY` format.
+
+- Proxies:
+  - `proxy`: proxy URL (e.g., `http://host:8080`).
+  - `proxy_userpwd`: `user:pass` credentials.
+  - `proxy_type`: `http`, `https` (if supported by your libcurl), `socks5`, or `socks4`.
+
+- DNS overrides:
+  - `resolve_add`: add an entry `host:port:address` (e.g., `example.com:443:93.184.216.34`).
+  - `resolve_clear`: clear all resolve overrides.
+
+All of the above apply to both sync and async requests. Async jobs snapshot session options at submission.
+
 An interactive session is also available via `build/bin/clike-repl`, which
 reads a single line of C-like code, wraps it in `int main() { ... }`, and
 executes it immediately. For details see

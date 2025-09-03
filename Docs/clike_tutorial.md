@@ -108,6 +108,46 @@ Notes:
 - `file://` URLs are supported without libcurl; the runtime reads the file and synthesizes basic headers.
 - If `out_file` is set via `httpsetoption`, `httprequest` tees the response to both memory and the file.
 
+### TLS/Security and Proxies
+
+Per-session options configured with `httpsetoption`:
+
+- TLS:
+  - `tls_min` / `tls_max`: 10, 11, 12, 13 map to TLSv1.0–TLSv1.3 (min and max).
+  - `alpn`: 0/1 toggles ALPN when available.
+  - `ciphers`: set cipher list (OpenSSL format).
+  - `pin_sha256`: pinned public key for `CURLOPT_PINNEDPUBLICKEY` (`sha256//BASE64` or file path).
+- Proxies:
+  - `proxy`: proxy URL (e.g., `http://proxy:8080`).
+  - `proxy_userpwd`: `user:pass` credentials.
+  - `proxy_type`: `http`, `https` (if supported), `socks5`, `socks4`.
+- DNS overrides:
+  - `resolve_add`: add `host:port:address` mapping.
+  - `resolve_clear`: clear overrides.
+
+Example (guarded by RUN_NET_TESTS):
+
+```c
+int main() {
+  if (getenv("RUN_NET_TESTS") == NULL || strcmp(getenv("RUN_NET_TESTS"), "1") != 0) {
+    printf("Set RUN_NET_TESTS=1 to run this demo.\n");
+    return 0;
+  }
+  const char* url = getenv("URL"); if (!url) url = "https://example.com";
+  const char* pin = getenv("PIN_SHA256");
+  int s = httpsession();
+  httpsetoption(s, "tls_min", 12);
+  httpsetoption(s, "alpn", 1);
+  if (pin && pin[0]) httpsetoption(s, "pin_sha256", pin);
+  mstream out = mstreamcreate();
+  int code = httprequest(s, "GET", url, NULL, out);
+  printf("status=%d err=%d msg=%s\n", code, httperrorcode(s), httplasterror(s));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}
+```
+
 Example:
 
 ```c
