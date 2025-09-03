@@ -84,18 +84,7 @@ static size_t dualWriteCallback(void *contents, size_t size, size_t nmemb, void 
     return real_size;
 }
 
-/* Header accumulator for async jobs */
-static size_t headerAccumJob(char *buffer, size_t size, size_t nitems, void *userdata) {
-    HttpAsyncJob* j = (HttpAsyncJob*)userdata;
-    size_t real_size = size * nitems;
-    size_t old_len = j->last_headers ? strlen(j->last_headers) : 0;
-    char* nb = (char*)realloc(j->last_headers, old_len + real_size + 1);
-    if (!nb) return real_size; // drop on OOM
-    j->last_headers = nb;
-    memcpy(j->last_headers + old_len, buffer, real_size);
-    j->last_headers[old_len + real_size] = '\0';
-    return real_size;
-}
+/* Header accumulator for async jobs declared after HttpAsyncJob definition below */
 
 /* Callback: writes received data directly to a FILE* */
 static size_t fileWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
@@ -599,7 +588,9 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
             case CURLE_OPERATION_TIMEDOUT: code = 3; break;
             case CURLE_SSL_CONNECT_ERROR:
             case CURLE_PEER_FAILED_VERIFICATION:
+#if defined(CURLE_SSL_CACERT) && (CURLE_SSL_CACERT != CURLE_PEER_FAILED_VERIFICATION)
             case CURLE_SSL_CACERT:
+#endif
 #ifdef CURLE_SSL_CACERT_BADFILE
             case CURLE_SSL_CACERT_BADFILE:
 #endif
@@ -821,7 +812,9 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
             case CURLE_OPERATION_TIMEDOUT: code = 3; break;
             case CURLE_SSL_CONNECT_ERROR:
             case CURLE_PEER_FAILED_VERIFICATION:
+#if defined(CURLE_SSL_CACERT) && (CURLE_SSL_CACERT != CURLE_PEER_FAILED_VERIFICATION)
             case CURLE_SSL_CACERT:
+#endif
 #ifdef CURLE_SSL_CACERT_BADFILE
             case CURLE_SSL_CACERT_BADFILE:
 #endif
@@ -998,6 +991,41 @@ typedef struct HttpAsyncJob_s {
 #define MAX_HTTP_ASYNC 32
 static HttpAsyncJob g_http_async[MAX_HTTP_ASYNC];
 
+/* Now that HttpAsyncJob is defined, provide helpers that reference it */
+static size_t headerAccumJob(char *buffer, size_t size, size_t nitems, void *userdata) {
+    HttpAsyncJob* j = (HttpAsyncJob*)userdata;
+    size_t real_size = size * nitems;
+    size_t old_len = j->last_headers ? strlen(j->last_headers) : 0;
+    char* nb = (char*)realloc(j->last_headers, old_len + real_size + 1);
+    if (!nb) return real_size; // drop on OOM
+    j->last_headers = nb;
+    memcpy(j->last_headers + old_len, buffer, real_size);
+    j->last_headers[old_len + real_size] = '\0';
+    return real_size;
+}
+
+#ifdef CURLOPT_XFERINFOFUNCTION
+static int xferInfoCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+    (void)ultotal; (void)ulnow;
+    HttpAsyncJob* j = (HttpAsyncJob*)clientp;
+    if (!j) return 0;
+    j->dl_total = (long long)dltotal;
+    j->dl_now = (long long)dlnow;
+    if (j->cancel_requested) return 1; // abort transfer
+    return 0;
+}
+#else
+static int progressCallback(void* clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
+    (void)ultotal; (void)ulnow;
+    HttpAsyncJob* j = (HttpAsyncJob*)clientp;
+    if (!j) return 0;
+    j->dl_total = (long long)dltotal;
+    j->dl_now = (long long)dlnow;
+    if (j->cancel_requested) return 1; // abort transfer
+    return 0;
+}
+#endif
+
 static int httpAllocAsync(void) {
     for (int i = 0; i < MAX_HTTP_ASYNC; i++) {
         if (!g_http_async[i].active) {
@@ -1107,30 +1135,10 @@ static void* httpAsyncThread(void* arg) {
     }
     // Progress + cancel
 #ifdef CURLOPT_XFERINFOFUNCTION
-    // Newer libcurl progress callback
-    static int xferInfoCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
-        (void)ultotal; (void)ulnow;
-        HttpAsyncJob* j = (HttpAsyncJob*)clientp;
-        if (!j) return 0;
-        j->dl_total = (long long)dltotal;
-        j->dl_now = (long long)dlnow;
-        if (j->cancel_requested) return 1; // abort transfer
-        return 0;
-    }
     curl_easy_setopt(eh, CURLOPT_XFERINFOFUNCTION, xferInfoCallback);
     curl_easy_setopt(eh, CURLOPT_XFERINFODATA, job);
     curl_easy_setopt(eh, CURLOPT_NOPROGRESS, 0L);
 #else
-    // Older libcurl progress callback
-    static int progressCallback(void* clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
-        (void)ultotal; (void)ulnow;
-        HttpAsyncJob* j = (HttpAsyncJob*)clientp;
-        if (!j) return 0;
-        j->dl_total = (long long)dltotal;
-        j->dl_now = (long long)dlnow;
-        if (j->cancel_requested) return 1; // abort transfer
-        return 0;
-    }
     curl_easy_setopt(eh, CURLOPT_PROGRESSFUNCTION, progressCallback);
     curl_easy_setopt(eh, CURLOPT_PROGRESSDATA, job);
     curl_easy_setopt(eh, CURLOPT_NOPROGRESS, 0L);
@@ -1229,7 +1237,9 @@ static void* httpAsyncThread(void* arg) {
             case CURLE_OPERATION_TIMEDOUT: code = 3; break;
             case CURLE_SSL_CONNECT_ERROR:
             case CURLE_PEER_FAILED_VERIFICATION:
+#if defined(CURLE_SSL_CACERT) && (CURLE_SSL_CACERT != CURLE_PEER_FAILED_VERIFICATION)
             case CURLE_SSL_CACERT:
+#endif
 #ifdef CURLE_SSL_CACERT_BADFILE
             case CURLE_SSL_CACERT_BADFILE:
 #endif
