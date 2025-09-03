@@ -2260,11 +2260,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
-
-                        // If it was a function, its return value is on the stack. Pop it.
-                        if (type == BUILTIN_TYPE_FUNCTION) {
-                            writeBytecodeChunk(chunk, OP_POP, line);
-                        }
+                        // Leave function return value on the stack for expression use.
                     } else {
                         // This case handles if a name is in the isBuiltin list but not in getBuiltinType,
                         // which would be an internal inconsistency.

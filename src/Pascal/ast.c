@@ -841,6 +841,7 @@ VarType getBuiltinReturnType(const char* name) {
     /* Character and ordinal helpers */
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
     if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
     /* Math routines returning REAL */
     if (strcasecmp(name, "cos")  == 0 ||
