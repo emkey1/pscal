@@ -1626,7 +1626,7 @@ Value vmBuiltinHttpGetHeader(VM* vm, int arg_count, Value* args) {
     size_t name_len = strlen(name);
     if (name_len == 0) return makeString("");
 
-    // Identify last header block (after final blank line)
+    // Identify start of the last header block (data before the final blank line)
     const char* all = s->last_headers;
     const char* block = all;
     const char* p = all;
@@ -1638,8 +1638,8 @@ Value vmBuiltinHttpGetHeader(VM* vm, int arg_count, Value* args) {
         else if (crlfcrlf) sep = crlfcrlf;
         else if (lflf) sep = lflf;
         else break;
-        block = sep + ((sep == crlfcrlf) ? 4 : 2);
-        p = block;
+        block = p;
+        p = sep + ((sep == crlfcrlf) ? 4 : 2);
     }
 
     // Scan lines in the last block for header name
