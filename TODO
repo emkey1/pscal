@@ -36,3 +36,7 @@ Provide examples mirroring the sample SDLThreadedMandelbrot program to showcase 
 This staged approach introduces address-of and procedure pointers, then layers a richer thread API atop the existing runtime without disrupting current programs.
 ---
 Provide ability to query threads and thread states
+
+---
+Expand network support
+

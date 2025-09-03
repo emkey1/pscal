@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program SDLSoundSmoke;
 begin
   InitSoundSystem;
