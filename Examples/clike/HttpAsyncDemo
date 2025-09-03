@@ -1,0 +1,21 @@
+#!/usr/bin/env clike
+
+int main() {
+  // Prepare source file for file:// demo
+  FILE *f = fopen("async_src_cl.txt", "w");
+  if (f) { fprintf(f, "HelloAsyncCL\n"); fclose(f); }
+  char* cwd = getenv("PWD");
+  string url = "file://"; url = url + cwd; url = url + "/async_src_cl.txt";
+
+  int s = httpsession();
+  int id = httprequestasync(s, "GET", url, NULL);
+  while (httpisdone(id) == 0) { delay(10); }
+  mstream out = mstreamcreate();
+  int code = httpawait(id, out);
+  printf("Status: %d\n", code);
+  printf("Body: %s\n", mstreambuffer(out));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}
+

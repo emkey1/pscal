@@ -618,6 +618,30 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     }
                 }
                 t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httprequestasync") == 0)) {
+                if (node->child_count != 4) {
+                    fprintf(stderr,
+                            "Type error: httprequestasync expects 4 arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httprequestasynctofile") == 0)) {
+                if (node->child_count != 5) {
+                    fprintf(stderr,
+                            "Type error: httprequestasynctofile expects 5 arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httptryawait") == 0) {
+                if (node->child_count != 2) {
+                    fprintf(stderr,
+                            "Type error: httptryawait expects (id:int, out:mstream) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
             } else if (strcasecmp(name, "httpisdone") == 0) {
                 if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
                     fprintf(stderr,

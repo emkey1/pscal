@@ -1,0 +1,42 @@
+program HttpAsyncFileURL;
+
+var s, id, code: integer;
+    ms: mstream;
+    cwd, url, line: string;
+    f: text;
+begin
+  assign(f, 'async_test_src.txt');
+  rewrite(f);
+  writeln(f, 'HelloAsyncTest');
+  close(f);
+
+  cwd := GetEnv('PWD');
+  url := 'file://' + cwd + '/async_test_src.txt';
+  s := HttpSession();
+  id := HttpRequestAsyncToFile(s, 'GET', url, nil, 'async_test_dst.txt');
+
+  while HttpIsDone(id) = 0 do Delay(1);
+
+  ms := mstreamcreate();
+  code := HttpTryAwait(id, ms);
+  if code = -2 then
+    code := HttpAwait(id, ms);
+
+  if code <> 200 then
+  begin
+    writeln('FAIL code=', code);
+  end
+  else
+  begin
+    assign(f, 'async_test_dst.txt');
+    reset(f); readln(f, line); close(f);
+    if line = 'HelloAsyncTest' then
+      writeln('PASS')
+    else
+      writeln('FAIL read=', line);
+  end;
+
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+

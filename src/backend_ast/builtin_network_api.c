@@ -1100,6 +1100,76 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
     return makeInt(id);
 }
 
+// HttpRequestAsyncToFile(session, method, url, bodyStrOrMStreamOrNil, outPath): Integer (async id)
+Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 5 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || args[2].type != TYPE_STRING) {
+        runtimeError(vm, "httpRequestAsyncToFile expects (session:int, method:string, url:string, body:string|mstream|nil, out:string).");
+        return makeInt(-1);
+    }
+    int id = httpAllocAsync();
+    if (id < 0) { runtimeError(vm, "httpRequestAsyncToFile: no free slots."); return makeInt(-1); }
+    HttpAsyncJob* job = &g_http_async[id];
+    job->session = (int)AS_INTEGER(args[0]);
+    job->method = strdup(args[1].s_val ? args[1].s_val : "GET");
+    job->url = strdup(args[2].s_val ? args[2].s_val : "");
+    if (args[3].type == TYPE_STRING && args[3].s_val) {
+        job->body_len = strlen(args[3].s_val);
+        job->body = (char*)malloc(job->body_len + 1);
+        if (job->body) { memcpy(job->body, args[3].s_val, job->body_len + 1); }
+    } else if (args[3].type == TYPE_MEMORYSTREAM && args[3].mstream) {
+        job->body_len = (size_t)args[3].mstream->size;
+        job->body = (char*)malloc(job->body_len + 1);
+        if (job->body && args[3].mstream->buffer) {
+            memcpy(job->body, args[3].mstream->buffer, job->body_len);
+            job->body[job->body_len] = '\0';
+        }
+    }
+    if (args[4].type != TYPE_STRING || !args[4].s_val) {
+        runtimeError(vm, "httpRequestAsyncToFile: out must be a filename string.");
+        // free partial
+        if (job->method) free(job->method); if (job->url) free(job->url); if (job->body) free(job->body);
+        job->active = 0;
+        return makeInt(-1);
+    }
+    job->out_file = strdup(args[4].s_val);
+    // Snapshot session options for thread safety
+    HttpSession* s = httpGet(job->session);
+    if (s) {
+        job->timeout_ms = s->timeout_ms; job->follow_redirects = s->follow_redirects;
+        job->verify_peer = s->verify_peer; job->verify_host = s->verify_host; job->force_http2 = s->force_http2;
+        job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
+        job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
+        job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
+        job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
+        job->client_key = s->client_key ? strdup(s->client_key) : NULL;
+        job->proxy = s->proxy ? strdup(s->proxy) : NULL;
+        // Duplicate headers slist
+        struct curl_slist* p = s->headers; struct curl_slist* tail = NULL;
+        while (p) {
+            struct curl_slist* node = curl_slist_append(NULL, p->data);
+            if (node) { if (!job->headers_slist) { job->headers_slist = node; tail = node; } else { tail->next = node; tail = node; } }
+            p = p->next;
+        }
+    }
+    if (pthread_create(&job->th, NULL, httpAsyncThread, (void*)(intptr_t)id) != 0) {
+        if (job->method) free(job->method);
+        if (job->url) free(job->url);
+        if (job->body) free(job->body);
+        if (job->user_agent) free(job->user_agent);
+        if (job->basic_auth) free(job->basic_auth);
+        if (job->ca_path) free(job->ca_path);
+        if (job->client_cert) free(job->client_cert);
+        if (job->client_key) free(job->client_key);
+        if (job->proxy) free(job->proxy);
+        if (job->out_file) free(job->out_file);
+        if (job->headers_slist) curl_slist_free_all(job->headers_slist);
+        job->active = 0;
+        runtimeError(vm, "httpRequestAsyncToFile: pthread_create failed.");
+        return makeInt(-1);
+    }
+    return makeInt(id);
+}
+
 // HttpAwait(asyncId, out:mstream): Integer (status)
 Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_MEMORYSTREAM || !args[1].mstream) {
@@ -1135,6 +1205,60 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
         if (job->last_error_msg) s->last_error_msg = strdup(job->last_error_msg);
     }
     // Free job resources
+    if (job->result) { if (job->result->buffer) free(job->result->buffer); free(job->result); }
+    if (job->method) free(job->method);
+    if (job->url) free(job->url);
+    if (job->body) free(job->body);
+    if (job->error) free(job->error);
+    if (job->user_agent) free(job->user_agent);
+    if (job->basic_auth) free(job->basic_auth);
+    if (job->ca_path) free(job->ca_path);
+    if (job->client_cert) free(job->client_cert);
+    if (job->client_key) free(job->client_key);
+    if (job->proxy) free(job->proxy);
+    if (job->out_file) free(job->out_file);
+    if (job->headers_slist) curl_slist_free_all(job->headers_slist);
+    if (job->last_headers) free(job->last_headers);
+    if (job->last_error_msg) free(job->last_error_msg);
+    memset(job, 0, sizeof(HttpAsyncJob));
+    return makeInt(status);
+}
+
+// HttpTryAwait(asyncId, out:mstream): Integer (-2: pending; otherwise status)
+Value vmBuiltinHttpTryAwait(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_MEMORYSTREAM || !args[1].mstream) {
+        runtimeError(vm, "httpTryAwait expects (id:int, out:mstream).");
+        return makeInt(-1);
+    }
+    int id = (int)AS_INTEGER(args[0]);
+    if (id < 0 || id >= MAX_HTTP_ASYNC) { runtimeError(vm, "httpTryAwait: invalid id."); return makeInt(-1); }
+    HttpAsyncJob* job = &g_http_async[id];
+    if (!job->active) { runtimeError(vm, "httpTryAwait: job not active."); return makeInt(-1); }
+    if (!job->done) {
+        return makeInt(-2); // pending
+    }
+    // Same as await: join and harvest
+    pthread_join(job->th, NULL);
+    int status = (int)job->status;
+    if (job->result && job->result->buffer) {
+        MStream* out = args[1].mstream;
+        if ((size_t)out->capacity < job->result->size + 1) {
+            unsigned char* nb = realloc(out->buffer, job->result->size + 1);
+            if (nb) { out->buffer = nb; out->capacity = (int)(job->result->size + 1); }
+        }
+        memcpy(out->buffer, job->result->buffer, job->result->size);
+        out->size = (int)job->result->size;
+        out->buffer[out->size] = '\0';
+    }
+    HttpSession* s = httpGet(job->session);
+    if (s) {
+        s->last_status = job->status;
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (job->last_headers) s->last_headers = strdup(job->last_headers);
+        s->last_error_code = job->last_error_code;
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        if (job->last_error_msg) s->last_error_msg = strdup(job->last_error_msg);
+    }
     if (job->result) { if (job->result->buffer) free(job->result->buffer); free(job->result); }
     if (job->method) free(job->method);
     if (job->url) free(job->url);
