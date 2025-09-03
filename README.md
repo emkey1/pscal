@@ -166,6 +166,8 @@ Built-in HTTP helpers are available to all front ends (Pascal and CLike). Highli
 Notes:
 - `file://` URLs are handled directly by the runtime with synthesized `Content-Length` and `Content-Type` headers; this enables hermetic tests without relying on libcurl’s file scheme.
 
+See also: Docs/http_security.md for details on pinning, TLS knobs, proxies, and DNS overrides with step‑by‑step commands.
+
 #### TLS, Security, and Proxies
 
 Configure per-session knobs via `HttpSetOption/httpsetoption`:
