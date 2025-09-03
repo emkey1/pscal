@@ -245,6 +245,47 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
 
+    // Special-case local file URLs to avoid relying on libcurl's file:// support
+    if (url && strncasecmp(url, "file://", 7) == 0) {
+        const char* path = url + 7; // e.g. file:///Users/... -> "/Users/..."
+        // Clear output mstream before writing
+        args[4].mstream->size = 0;
+        if (args[4].mstream->buffer && args[4].mstream->capacity > 0) {
+            args[4].mstream->buffer[0] = '\0';
+        }
+
+        FILE* f = fopen(path, "rb");
+        if (!f) {
+            runtimeError(vm, "httpRequest: cannot open local file '%s'", path);
+            return makeInt(-1);
+        }
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        if (fsize < 0) { fsize = 0; }
+        rewind(f);
+
+        // Ensure capacity
+        if (args[4].mstream->capacity < fsize + 1) {
+            unsigned char* newbuf = (unsigned char*)realloc(args[4].mstream->buffer, (size_t)fsize + 1);
+            if (!newbuf) {
+                fclose(f);
+                runtimeError(vm, "httpRequest: out-of-memory reading file '%s'", path);
+                return makeInt(-1);
+            }
+            args[4].mstream->buffer = newbuf;
+            args[4].mstream->capacity = (int)fsize + 1;
+        }
+
+        size_t nread = fread(args[4].mstream->buffer, 1, (size_t)fsize, f);
+        fclose(f);
+        args[4].mstream->size = (int)nread;
+        if (args[4].mstream->buffer) {
+            args[4].mstream->buffer[nread] = '\0';
+        }
+        // Mimic successful HTTP fetch
+        return makeInt(200);
+    }
+
     // Prepare CURL easy handle
     curl_easy_reset(s->curl);
     curl_easy_setopt(s->curl, CURLOPT_URL, url);
