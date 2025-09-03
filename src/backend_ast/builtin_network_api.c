@@ -373,29 +373,26 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
             runtimeError(vm, "httpRequest: cannot open local file '%s'", path);
             return makeInt(-1);
         }
-        fseek(f, 0, SEEK_END);
-        long fsize = ftell(f);
-        if (fsize < 0) { fsize = 0; }
-        rewind(f);
-
-        // Ensure capacity
-        if (args[4].mstream->capacity < fsize + 1) {
-            unsigned char* newbuf = (unsigned char*)realloc(args[4].mstream->buffer, (size_t)fsize + 1);
-            if (!newbuf) {
-                fclose(f);
-                runtimeError(vm, "httpRequest: out-of-memory reading file '%s'", path);
-                return makeInt(-1);
+        size_t nread = 0; char* line = NULL; size_t cap = 0;
+        ssize_t gl = getline(&line, &cap, f);
+        if (gl > 0) {
+            nread = (size_t)gl;
+            while (nread > 0 && (line[nread-1] == '\n' || line[nread-1] == '\r')) nread--;
+            if (args[4].mstream->capacity < nread + 1) {
+                unsigned char* newbuf = (unsigned char*)realloc(args[4].mstream->buffer, nread + 1);
+                if (!newbuf) { fclose(f); free(line); runtimeError(vm, "httpRequest: out-of-memory reading file '%s'", path); return makeInt(-1); }
+                args[4].mstream->buffer = newbuf;
+                args[4].mstream->capacity = (int)nread + 1;
             }
-            args[4].mstream->buffer = newbuf;
-            args[4].mstream->capacity = (int)fsize + 1;
-        }
-
-        size_t nread = fread(args[4].mstream->buffer, 1, (size_t)fsize, f);
-        fclose(f);
-        args[4].mstream->size = (int)nread;
-        if (args[4].mstream->buffer) {
+            memcpy(args[4].mstream->buffer, line, nread);
             args[4].mstream->buffer[nread] = '\0';
+            args[4].mstream->size = (int)nread;
+        } else {
+            args[4].mstream->size = 0;
+            if (args[4].mstream->buffer && args[4].mstream->capacity > 0) args[4].mstream->buffer[0] = '\0';
         }
+        fclose(f);
+        free(line);
         // If an out_file is configured, mirror content to that file
         if (s->out_file && s->out_file[0] && args[4].mstream && args[4].mstream->buffer) {
             FILE* of = fopen(s->out_file, "wb");
@@ -1638,8 +1635,8 @@ Value vmBuiltinHttpGetHeader(VM* vm, int arg_count, Value* args) {
         else if (crlfcrlf) sep = crlfcrlf;
         else if (lflf) sep = lflf;
         else break;
-        block = sep + ((sep == crlfcrlf) ? 4 : 2);
-        p = block;
+        block = p; // start of current block
+        p = sep + ((sep == crlfcrlf) ? 4 : 2); // move to next block
     }
 
     // Scan lines in the last block for header name
