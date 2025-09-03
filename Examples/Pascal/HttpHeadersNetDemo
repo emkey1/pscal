@@ -1,0 +1,27 @@
+program HttpHeadersNetDemo;
+
+var s, code: integer;
+    ms: mstream;
+    ua, ctype, server, run: string;
+begin
+  run := GetEnv('RUN_NET_TESTS');
+  if run <> '1' then
+  begin
+    writeln('Set RUN_NET_TESTS=1 to run this demo.');
+    exit;
+  end;
+
+  s := HttpSession();
+  HttpSetHeader(s, 'Accept', 'text/html');
+  ms := mstreamcreate();
+  code := HttpRequest(s, 'GET', 'https://example.com', nil, ms);
+  ctype := HttpGetHeader(s, 'Content-Type');
+  server := HttpGetHeader(s, 'Server');
+  writeln('Status: ', code);
+  writeln('Content-Type: ', ctype);
+  writeln('Server: ', server);
+  writeln('Body (first 80): ', copy(mstreambuffer(ms), 1, 80));
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+

@@ -89,6 +89,7 @@ typedef struct HttpSession_s {
     long verify_peer;     // CURLOPT_SSL_VERIFYPEER (0/1)
     long verify_host;     // CURLOPT_SSL_VERIFYHOST (0/1 maps to 0 or 2)
     long force_http2;     // 0/1
+    char* out_file;       // optional sink for HttpRequest
     // Auth and last-results
     char* basic_auth;     // user:pass for basic auth
     char* last_headers;   // raw response headers from last request
@@ -140,6 +141,7 @@ static void httpFreeSession(int id) {
     if (s->headers) { curl_slist_free_all(s->headers); s->headers = NULL; }
     if (s->curl) { curl_easy_cleanup(s->curl); s->curl = NULL; }
     if (s->user_agent) { free(s->user_agent); s->user_agent = NULL; }
+    if (s->out_file) { free(s->out_file); s->out_file = NULL; }
     if (s->basic_auth) { free(s->basic_auth); s->basic_auth = NULL; }
     if (s->ca_path) { free(s->ca_path); s->ca_path = NULL; }
     if (s->client_cert) { free(s->client_cert); s->client_cert = NULL; }
@@ -248,6 +250,9 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
     } else if (strcasecmp(key, "basic_auth") == 0 && args[2].type == TYPE_STRING) {
         if (s->basic_auth) free(s->basic_auth);
         s->basic_auth = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "out_file") == 0 && args[2].type == TYPE_STRING) {
+        if (s->out_file) free(s->out_file);
+        s->out_file = strdup(args[2].s_val ? args[2].s_val : "");
     } else {
         runtimeError(vm, "httpSetOption: unsupported option or value type for '%s'.", key);
     }
@@ -326,6 +331,19 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         if (args[4].mstream->buffer) {
             args[4].mstream->buffer[nread] = '\0';
         }
+        // If an out_file is configured, mirror content to that file
+        if (s->out_file && s->out_file[0] && args[4].mstream && args[4].mstream->buffer) {
+            FILE* of = fopen(s->out_file, "wb");
+            if (of) {
+                fwrite(args[4].mstream->buffer, 1, (size_t)args[4].mstream->size, of);
+                fclose(of);
+            } else {
+                if (s->last_error_msg) free(s->last_error_msg);
+                s->last_error_msg = strdup("cannot open out_file");
+                s->last_error_code = 2;
+            }
+        }
+
         // Synthesize a minimal header block for testability
         const char* content_type = "application/octet-stream";
         size_t path_len = strlen(path);
@@ -357,8 +375,42 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
     s->last_error_code = 0;
     curl_easy_setopt(s->curl, CURLOPT_URL, url);
-    curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, args[4].mstream);
+    // Choose sink: memory stream only or file+stream
+    FILE* tmp_out_file = NULL; // closed before return
+    typedef struct { FILE* f; MStream* ms; } DualSink;
+    DualSink dual = {0};
+    if (s->out_file && s->out_file[0]) {
+        tmp_out_file = fopen(s->out_file, "wb");
+        if (!tmp_out_file) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = strdup("cannot open out_file");
+            runtimeError(vm, "httpRequest: cannot open out_file '%s'", s->out_file);
+            return makeInt(-1);
+        }
+        dual.f = tmp_out_file;
+        dual.ms = args[4].mstream;
+        // Writer that tees to file and mstream
+        static size_t dualWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+            size_t real_size = size * nmemb;
+            DualSink* d = (DualSink*)userp;
+            if (!d) return 0;
+            if (d->f) {
+                size_t n = fwrite(contents, 1, real_size, d->f);
+                if (n != real_size) return 0;
+            }
+            if (d->ms) {
+                size_t n2 = writeCallback(contents, size, nmemb, (void*)d->ms);
+                if (n2 != real_size) return 0;
+            }
+            return real_size;
+        }
+        curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, dualWriteCallback);
+        curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, &dual);
+    } else {
+        curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, writeCallback);
+        curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, args[4].mstream);
+    }
     curl_easy_setopt(s->curl, CURLOPT_TIMEOUT_MS, s->timeout_ms);
     curl_easy_setopt(s->curl, CURLOPT_FOLLOWLOCATION, s->follow_redirects);
     // Capture headers
@@ -432,6 +484,7 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (res == CURLE_OK) {
         curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
         s->last_status = http_code;
+        if (tmp_out_file) fclose(tmp_out_file);
         return makeInt((int)http_code);
     } else {
         // Map curl error to a small VM error space
@@ -457,6 +510,7 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         s->last_error_code = code;
         if (s->last_error_msg) free(s->last_error_msg);
         s->last_error_msg = strdup(curl_easy_strerror(res));
+        if (tmp_out_file) fclose(tmp_out_file);
         runtimeError(vm, "httpRequest: curl failed: %s", curl_easy_strerror(res));
         return makeInt(-1);
     }
