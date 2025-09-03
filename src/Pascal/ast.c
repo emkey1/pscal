@@ -844,13 +844,24 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
     /* Math routines returning REAL */
-    if (strcasecmp(name, "cos")  == 0 ||
-        strcasecmp(name, "sin")  == 0 ||
-        strcasecmp(name, "tan")  == 0 ||
-        strcasecmp(name, "sqrt") == 0 ||
-        strcasecmp(name, "ln")   == 0 ||
-        strcasecmp(name, "exp")  == 0 ||
-        strcasecmp(name, "real") == 0) {
+    if (strcasecmp(name, "cos")   == 0 ||
+        strcasecmp(name, "sin")   == 0 ||
+        strcasecmp(name, "tan")   == 0 ||
+        strcasecmp(name, "sqrt")  == 0 ||
+        strcasecmp(name, "ln")    == 0 ||
+        strcasecmp(name, "exp")   == 0 ||
+        strcasecmp(name, "real")  == 0 ||
+        strcasecmp(name, "arctan") == 0 ||
+        strcasecmp(name, "arcsin") == 0 ||
+        strcasecmp(name, "arccos") == 0 ||
+        strcasecmp(name, "cotan")  == 0 ||
+        strcasecmp(name, "power")  == 0 ||
+        strcasecmp(name, "log10")  == 0 ||
+        strcasecmp(name, "sinh")   == 0 ||
+        strcasecmp(name, "cosh")   == 0 ||
+        strcasecmp(name, "tanh")   == 0 ||
+        strcasecmp(name, "max")    == 0 ||
+        strcasecmp(name, "min")    == 0) {
         return TYPE_REAL;
     }
 
@@ -874,7 +885,9 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "getmaxx")   == 0 ||
         strcasecmp(name, "getmaxy")   == 0 ||
         strcasecmp(name, "mutex")     == 0 ||
-        strcasecmp(name, "rcmutex")   == 0) {
+        strcasecmp(name, "rcmutex")   == 0 ||
+        strcasecmp(name, "floor")     == 0 ||
+        strcasecmp(name, "ceil")      == 0) {
         return TYPE_INTEGER;
     }
 
