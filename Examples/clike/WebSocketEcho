@@ -17,8 +17,8 @@ int main() {
   // send masked text frame "hi"
   socketsend(s, "\x81\x82\x12\x34\x56\x78\x7a\x5d");
   mstream msg = socketreceive(s, 1024);
-  unsigned char* buf = mstreambuffer(msg);
-  printf("echo: %c%c\n", buf[2], buf[3]);
+  str buf = mstreambuffer(msg);
+  printf("echo: %c%c\n", buf[3], buf[4]);
   mstreamfree(&msg);
   socketclose(s);
   return 0;
