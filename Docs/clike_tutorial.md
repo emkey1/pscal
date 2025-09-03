@@ -163,3 +163,16 @@ int main() {
   return 0;
 }
 ```
+
+## Socket networking
+
+The VM also exposes thin wrappers over BSD sockets:
+
+- `socketcreate(type)` – create TCP (`0`) or UDP (`1`) sockets.
+- `socketconnect(s, host, port)` – connect to a remote host/port.
+- `socketbind(s, port)`, `socketlisten(s, backlog)`, `socketaccept(s)` – server helpers.
+- `socketsend(s, data)` and `socketreceive(s, maxlen)` – send or receive strings or memory streams.
+- `socketsetblocking(s, bool)` toggles blocking mode; `socketpoll(s, timeout_ms, flags)` polls for read (`1`) or write (`2`).
+- `socketlasterror()` returns the last error code and `dnslookup(host)` resolves hostnames.
+
+See `Examples/clike/SocketEchoDemo` for a complete echo server/client demo.

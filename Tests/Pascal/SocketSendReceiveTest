@@ -1,0 +1,35 @@
+program SocketSendReceiveTest;
+
+var
+  t: integer;
+  client: integer;
+  ms: mstream;
+  msg: string;
+
+procedure Server;
+var srv, conn: integer; data: mstream;
+begin
+  srv := SocketCreate(0);
+  SocketBind(srv, 54321);
+  SocketListen(srv, 1);
+  conn := SocketAccept(srv);
+  data := SocketReceive(conn, 1024);
+  SocketSend(conn, data);
+  mstreamfree(data);
+  SocketClose(conn);
+  SocketClose(srv);
+end;
+
+begin
+  t := CreateThread(@Server);
+  Delay(100);
+  client := SocketCreate(0);
+  SocketConnect(client, '127.0.0.1', 54321);
+  SocketSend(client, 'hi');
+  ms := SocketReceive(client, 1024);
+  msg := mstreambuffer(ms);
+  writeln(msg);
+  mstreamfree(ms);
+  SocketClose(client);
+  WaitForThread(t);
+end.

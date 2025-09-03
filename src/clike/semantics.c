@@ -79,6 +79,26 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_BOOLEAN;
     }
 
+    /* Socket / DNS helpers */
+    if (strcasecmp(name, "socketcreate") == 0 ||
+        strcasecmp(name, "socketclose") == 0 ||
+        strcasecmp(name, "socketconnect") == 0 ||
+        strcasecmp(name, "socketbind") == 0 ||
+        strcasecmp(name, "socketlisten") == 0 ||
+        strcasecmp(name, "socketaccept") == 0 ||
+        strcasecmp(name, "socketsend") == 0 ||
+        strcasecmp(name, "socketsetblocking") == 0 ||
+        strcasecmp(name, "socketpoll") == 0 ||
+        strcasecmp(name, "socketlasterror") == 0) {
+        return TYPE_INT32;
+    }
+    if (strcasecmp(name, "socketreceive") == 0) {
+        return TYPE_MEMORYSTREAM;
+    }
+    if (strcasecmp(name, "dnslookup") == 0) {
+        return TYPE_STRING;
+    }
+
     return TYPE_VOID;
 }
 

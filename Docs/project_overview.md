@@ -34,7 +34,7 @@ The project follows a classic compiler and virtual machine design:
 * **Dual Language Support**: The ability to compile both Pascal-like and C-like code to the same bytecode is a major feature.
 * **Rich Type System**: Signed and unsigned integers from 8 to 64 bits and floating-point types up to extended precision.
 * **Graphics and Audio**: Through SDL bindings, the language supports creating graphical applications with audio capabilities, including window creation, shape and text rendering, and sound playback.
-* **Networking**: A networking API using `libcurl` allows for making HTTP requests and handling responses.
+* **Networking**: HTTP helpers via `libcurl` plus low-level TCP/UDP sockets with DNS utilities.
 * **Rich Built-in Library**: A comprehensive set of built-in functions is provided for:
     * File I/O (`readln`, `writeln`, `fileexists`).
     * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).

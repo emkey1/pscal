@@ -185,6 +185,18 @@ Numeric builtins preserve integer types when all inputs are integral. In particu
 | ---- | ---------- | ------- | ----------- |
 | apiSend | (data: String) | Integer | Send network packet. |
 | apiReceive | () | String | Receive network packet. |
+| DnsLookup | (host: String) | String | Resolve hostname to IPv4 address or empty string on error. |
+| SocketCreate | (kind: Integer) | Integer | Create TCP (0) or UDP (1) socket. Returns handle or -1. |
+| SocketConnect | (s: Integer, host: String, port: Integer) | Integer | Connect socket to remote host/port. Returns 0 or -1. |
+| SocketBind | (s: Integer, port: Integer) | Integer | Bind socket to local port. Returns 0 or -1. |
+| SocketListen | (s: Integer, backlog: Integer) | Integer | Begin listening for connections. Returns 0 or -1. |
+| SocketAccept | (s: Integer) | Integer | Accept connection; returns new socket or -1. |
+| SocketSend | (s: Integer, data: String\|MStream) | Integer | Send data; returns bytes sent or -1. |
+| SocketReceive | (s: Integer, maxLen: Integer) | MStream | Receive up to maxLen bytes. Returns memory stream or nil. |
+| SocketClose | (s: Integer) | Integer | Close socket. Returns 0 or -1. |
+| SocketSetBlocking | (s: Integer, blocking: Boolean) | Integer | Toggle blocking mode (0 on success). |
+| SocketPoll | (s: Integer, timeoutMs: Integer, flags: Integer) | Integer | Poll for read (1) or write (2); returns bitmask or -1. |
+| SocketLastError | () | Integer | Last socket/DNS error code. |
 
 ## SDL graphics and audio
 
