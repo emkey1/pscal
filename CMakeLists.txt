@@ -377,6 +377,69 @@ if(SDL)
 
 endif()
 
+# Rea front-end executable (placeholder)
+set(REA_SOURCES
+    src/rea/main.c
+    src/rea/lexer.c
+    src/rea/parser.c
+    src/Pascal/globals.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
+    src/compiler/bytecode.c
+    src/vm/vm.c
+    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/symbol/symbol.c
+    src/rea/stubs.c
+)
+
+list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+
+if(SDL)
+    list(APPEND REA_SOURCES
+        src/backend_ast/sdl.c
+        src/backend_ast/audio.c
+    )
+endif()
+
+add_executable(rea ${REA_SOURCES})
+if(TARGET CURL::libcurl)
+    target_link_libraries(rea PRIVATE CURL::libcurl m Threads::Threads)
+else()
+    target_link_libraries(rea PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+endif()
+
+if(SDL)
+    target_include_directories(rea PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+    )
+
+    target_link_directories(rea PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
+
+    set(REA_SDL_LIBS "")
+    if(TARGET SDL2::SDL2)
+        list(APPEND REA_SDL_LIBS SDL2::SDL2)
+    else()
+        list(APPEND REA_SDL_LIBS ${SDL2_LIBRARIES})
+    endif()
+    list(APPEND REA_SDL_LIBS
+        ${PC_SDL2_IMAGE_LIBRARIES}
+        ${PC_SDL2_MIXER_LIBRARIES}
+        ${PC_SDL2_TTF_LIBRARIES}
+        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+    )
+    list(REMOVE_DUPLICATES REA_SDL_LIBS)
+    target_link_libraries(rea PRIVATE ${REA_SDL_LIBS})
+    target_compile_definitions(rea PRIVATE SDL)
+endif()
+
 # ---- Examples ----
 add_subdirectory(Examples)
 

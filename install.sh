@@ -29,6 +29,12 @@ cp -r lib/pascal/* /usr/local/pscal/pascal/lib/
 mkdir -p /usr/local/pscal/clike/lib
 cp -r lib/clike/* /usr/local/pscal/clike/lib/
 
+# Install Rea library if present
+mkdir -p /usr/local/pscal/rea/lib
+if [ -d "lib/rea" ]; then
+    cp -r lib/rea/* /usr/local/pscal/rea/lib/
+fi
+
 # Install fonts
 mkdir -p /usr/local/pscal/fonts
 cp -r fonts/* /usr/local/pscal/fonts
@@ -38,7 +44,7 @@ mkdir -p /usr/local/pscal/etc
 cp -r etc/* /usr/local/pscal/etc
 
 # Set group to executable for any installed binaries
-for bin in clike clike-repl dascal pascal pscalvm; do
+for bin in clike clike-repl dascal pascal pscalvm rea; do
     if [ -f "/usr/local/bin/$bin" ]; then
         chmod go+x "/usr/local/bin/$bin"
     fi
