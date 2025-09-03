@@ -153,6 +153,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"apiSend", vmBuiltinApiSend},
     {"httpsession", vmBuiltinHttpSession},
     {"httpclose", vmBuiltinHttpClose},
+    {"httperrorcode", vmBuiltinHttpErrorCode},
+    {"httpgetlastheaders", vmBuiltinHttpGetLastHeaders},
     {"httpsetheader", vmBuiltinHttpSetHeader},
     {"httpclearheaders", vmBuiltinHttpClearHeaders},
     {"httpsetoption", vmBuiltinHttpSetOption},

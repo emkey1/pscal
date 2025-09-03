@@ -60,6 +60,8 @@ static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *use
     return real_size;
 }
 
+/* headerAccumCallback declared later after HttpSession typedef */
+
 // -------------------- Simple HTTP Session API (sync) --------------------
 
 typedef struct HttpSession_s {
@@ -78,7 +80,27 @@ typedef struct HttpSession_s {
     long verify_peer;     // CURLOPT_SSL_VERIFYPEER (0/1)
     long verify_host;     // CURLOPT_SSL_VERIFYHOST (0/1 maps to 0 or 2)
     long force_http2;     // 0/1
+    // Auth and last-results
+    char* basic_auth;     // user:pass for basic auth
+    char* last_headers;   // raw response headers from last request
+    int   last_error_code; // VM-specific error code (0 on success)
+    char* last_error_msg; // last libcurl error message
 } HttpSession;
+
+/* Callback for libcurl: accumulates raw response headers into the session */
+static size_t headerAccumCallback(char *buffer, size_t size, size_t nitems, void *userdata) {
+    size_t real_size = size * nitems;
+    HttpSession* s = (HttpSession*)userdata;
+    if (!s) return real_size;
+    if (real_size == 0) return 0;
+    size_t old_len = s->last_headers ? strlen(s->last_headers) : 0;
+    char* nb = (char*)realloc(s->last_headers, old_len + real_size + 1);
+    if (!nb) return real_size; // drop headers on OOM
+    s->last_headers = nb;
+    memcpy(s->last_headers + old_len, buffer, real_size);
+    s->last_headers[old_len + real_size] = '\0';
+    return real_size;
+}
 
 #define MAX_HTTP_SESSIONS 32
 static HttpSession g_http_sessions[MAX_HTTP_SESSIONS];
@@ -109,10 +131,13 @@ static void httpFreeSession(int id) {
     if (s->headers) { curl_slist_free_all(s->headers); s->headers = NULL; }
     if (s->curl) { curl_easy_cleanup(s->curl); s->curl = NULL; }
     if (s->user_agent) { free(s->user_agent); s->user_agent = NULL; }
+    if (s->basic_auth) { free(s->basic_auth); s->basic_auth = NULL; }
     if (s->ca_path) { free(s->ca_path); s->ca_path = NULL; }
     if (s->client_cert) { free(s->client_cert); s->client_cert = NULL; }
     if (s->client_key) { free(s->client_key); s->client_key = NULL; }
     if (s->proxy) { free(s->proxy); s->proxy = NULL; }
+    if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+    if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
     s->active = 0;
 }
 
@@ -211,6 +236,9 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
         s->verify_host = (long)AS_INTEGER(args[2]) ? 1L : 0L;
     } else if (strcasecmp(key, "http2") == 0 && IS_INTLIKE(args[2])) {
         s->force_http2 = (long)AS_INTEGER(args[2]) ? 1L : 0L;
+    } else if (strcasecmp(key, "basic_auth") == 0 && args[2].type == TYPE_STRING) {
+        if (s->basic_auth) free(s->basic_auth);
+        s->basic_auth = strdup(args[2].s_val ? args[2].s_val : "");
     } else {
         runtimeError(vm, "httpSetOption: unsupported option or value type for '%s'.", key);
     }
@@ -247,6 +275,10 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
 
     // Special-case local file URLs to avoid relying on libcurl's file:// support
     if (url && strncasecmp(url, "file://", 7) == 0) {
+        // Clear last headers and errors
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        s->last_error_code = 0;
         const char* path = url + 7; // e.g. file:///Users/... -> "/Users/..."
         // Clear output mstream before writing
         args[4].mstream->size = 0;
@@ -256,6 +288,9 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
 
         FILE* f = fopen(path, "rb");
         if (!f) {
+            if (s->last_error_msg) { free(s->last_error_msg); }
+            s->last_error_msg = strdup("cannot open local file");
+            s->last_error_code = 2; // VMERR_IO
             runtimeError(vm, "httpRequest: cannot open local file '%s'", path);
             return makeInt(-1);
         }
@@ -283,18 +318,30 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
             args[4].mstream->buffer[nread] = '\0';
         }
         // Mimic successful HTTP fetch
+        s->last_status = 200;
         return makeInt(200);
     }
 
     // Prepare CURL easy handle
     curl_easy_reset(s->curl);
+    // Reset last headers and errors
+    if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+    if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+    s->last_error_code = 0;
     curl_easy_setopt(s->curl, CURLOPT_URL, url);
     curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, args[4].mstream);
     curl_easy_setopt(s->curl, CURLOPT_TIMEOUT_MS, s->timeout_ms);
     curl_easy_setopt(s->curl, CURLOPT_FOLLOWLOCATION, s->follow_redirects);
+    // Capture headers
+    curl_easy_setopt(s->curl, CURLOPT_HEADERFUNCTION, headerAccumCallback);
+    curl_easy_setopt(s->curl, CURLOPT_HEADERDATA, s);
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
+    if (s->basic_auth && s->basic_auth[0]) {
+        curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
+        curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
+    }
 
     // Method + body
     if (strcasecmp(method, "GET") == 0) {
@@ -359,6 +406,29 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         s->last_status = http_code;
         return makeInt((int)http_code);
     } else {
+        // Map curl error to a small VM error space
+        // 1: generic, 2: I/O, 3: timeout, 4: ssl, 5: resolve, 6: connect
+        int code = 1;
+        switch (res) {
+            case CURLE_OPERATION_TIMEDOUT: code = 3; break;
+            case CURLE_SSL_CONNECT_ERROR:
+            case CURLE_PEER_FAILED_VERIFICATION:
+            case CURLE_SSL_CACERT:
+#ifdef CURLE_SSL_CACERT_BADFILE
+            case CURLE_SSL_CACERT_BADFILE:
+#endif
+            case CURLE_USE_SSL_FAILED: code = 4; break;
+            case CURLE_COULDNT_RESOLVE_HOST:
+            case CURLE_COULDNT_RESOLVE_PROXY: code = 5; break;
+            case CURLE_COULDNT_CONNECT: code = 6; break;
+            case CURLE_READ_ERROR:
+            case CURLE_WRITE_ERROR:
+            case CURLE_FILE_COULDNT_READ_FILE: code = 2; break;
+            default: code = 1; break;
+        }
+        s->last_error_code = code;
+        if (s->last_error_msg) free(s->last_error_msg);
+        s->last_error_msg = strdup(curl_easy_strerror(res));
         runtimeError(vm, "httpRequest: curl failed: %s", curl_easy_strerror(res));
         return makeInt(-1);
     }
@@ -676,8 +746,31 @@ Value vmBuiltinHttpLastError(VM* vm, int arg_count, Value* args) {
     }
     HttpSession* s = httpGet((int)AS_INTEGER(args[0]));
     if (!s) return makeString("invalid session");
-    char buf[64]; snprintf(buf, sizeof(buf), "%ld", s->last_status);
-    return makeString(buf);
+    if (s->last_error_msg) return makeString(s->last_error_msg);
+    return makeString("");
+}
+
+// HttpGetLastHeaders(session): String
+Value vmBuiltinHttpGetLastHeaders(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpGetLastHeaders expects 1 integer session id.");
+        return makeString("");
+    }
+    HttpSession* s = httpGet((int)AS_INTEGER(args[0]));
+    if (!s) return makeString("invalid session");
+    if (s->last_headers) return makeString(s->last_headers);
+    return makeString("");
+}
+
+// HttpErrorCode(session): Integer (0=none; 1=generic; 2=io; 3=timeout; 4=ssl; 5=resolve; 6=connect)
+Value vmBuiltinHttpErrorCode(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpErrorCode expects 1 integer session id.");
+        return makeInt(-1);
+    }
+    HttpSession* s = httpGet((int)AS_INTEGER(args[0]));
+    if (!s) return makeInt(-1);
+    return makeInt(s->last_error_code);
 }
 
 // -------------------- Minimal JSON helper --------------------
