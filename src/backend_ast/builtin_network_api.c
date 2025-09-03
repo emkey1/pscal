@@ -854,6 +854,10 @@ typedef struct HttpAsyncJob_s {
     char* last_headers;
     int   last_error_code;
     char* last_error_msg;
+    // Cancellation + progress
+    volatile int cancel_requested;
+    long long dl_now;
+    long long dl_total;
     int done;
 } HttpAsyncJob;
 
@@ -907,8 +911,10 @@ static void* httpAsyncThread(void* arg) {
         }
         size_t total = 0; unsigned char buf[8192]; size_t n;
         while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            if (job->cancel_requested) { fclose(in); job->status = -1; job->last_error_msg = strdup("canceled"); job->done = 1; return NULL; }
             writeCallback(buf, 1, n, job->result);
             total += n;
+            job->dl_now = (long long)total;
         }
         fclose(in);
         if (job->out_file && job->out_file[0] && job->result && job->result->buffer) {
@@ -959,6 +965,36 @@ static void* httpAsyncThread(void* arg) {
         curl_easy_setopt(eh, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(eh, CURLOPT_USERPWD, job->basic_auth);
     }
+    // Progress + cancel
+#ifdef CURLOPT_XFERINFOFUNCTION
+    // Newer libcurl progress callback
+    static int xferInfoCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+        (void)ultotal; (void)ulnow;
+        HttpAsyncJob* j = (HttpAsyncJob*)clientp;
+        if (!j) return 0;
+        j->dl_total = (long long)dltotal;
+        j->dl_now = (long long)dlnow;
+        if (j->cancel_requested) return 1; // abort transfer
+        return 0;
+    }
+    curl_easy_setopt(eh, CURLOPT_XFERINFOFUNCTION, xferInfoCallback);
+    curl_easy_setopt(eh, CURLOPT_XFERINFODATA, job);
+    curl_easy_setopt(eh, CURLOPT_NOPROGRESS, 0L);
+#else
+    // Older libcurl progress callback
+    static int progressCallback(void* clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
+        (void)ultotal; (void)ulnow;
+        HttpAsyncJob* j = (HttpAsyncJob*)clientp;
+        if (!j) return 0;
+        j->dl_total = (long long)dltotal;
+        j->dl_now = (long long)dlnow;
+        if (j->cancel_requested) return 1; // abort transfer
+        return 0;
+    }
+    curl_easy_setopt(eh, CURLOPT_PROGRESSFUNCTION, progressCallback);
+    curl_easy_setopt(eh, CURLOPT_PROGRESSDATA, job);
+    curl_easy_setopt(eh, CURLOPT_NOPROGRESS, 0L);
+#endif
     if (strcasecmp(job->method, "GET") == 0) {
         curl_easy_setopt(eh, CURLOPT_HTTPGET, 1L);
     } else if (strcasecmp(job->method, "POST") == 0) {
@@ -1289,6 +1325,46 @@ Value vmBuiltinHttpIsDone(VM* vm, int arg_count, Value* args) {
     HttpAsyncJob* job = &g_http_async[id];
     if (!job->active) return makeInt(0);
     return makeInt(job->done ? 1 : 0);
+}
+
+// HttpCancel(asyncId): Integer (1 on success, 0 otherwise)
+Value vmBuiltinHttpCancel(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpCancel expects (id:int).");
+        return makeInt(0);
+    }
+    int id = (int)AS_INTEGER(args[0]);
+    if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    HttpAsyncJob* job = &g_http_async[id];
+    if (!job->active) return makeInt(0);
+    job->cancel_requested = 1;
+    return makeInt(1);
+}
+
+// httpGetAsyncProgress(asyncId): Integer (bytes downloaded so far)
+Value vmBuiltinHttpGetAsyncProgress(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpGetAsyncProgress expects (id:int).");
+        return makeInt(0);
+    }
+    int id = (int)AS_INTEGER(args[0]);
+    if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    HttpAsyncJob* job = &g_http_async[id];
+    if (!job->active) return makeInt(0);
+    return makeInt((int)job->dl_now);
+}
+
+// httpGetAsyncTotal(asyncId): Integer (total bytes expected; 0 if unknown)
+Value vmBuiltinHttpGetAsyncTotal(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpGetAsyncTotal expects (id:int).");
+        return makeInt(0);
+    }
+    int id = (int)AS_INTEGER(args[0]);
+    if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    HttpAsyncJob* job = &g_http_async[id];
+    if (!job->active) return makeInt(0);
+    return makeInt((int)job->dl_total);
 }
 
 // HttpLastError(session): String

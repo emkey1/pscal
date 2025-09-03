@@ -36,6 +36,9 @@ Value vmBuiltinHttpRequestAsyncToFile(struct VM_s* vm, int arg_count, Value* arg
 Value vmBuiltinHttpAwait(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpIsDone(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpTryAwait(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpCancel(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpGetAsyncProgress(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpGetAsyncTotal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpLastError(struct VM_s* vm, int arg_count, Value* args);
 
 // JSON helpers (minimal)
