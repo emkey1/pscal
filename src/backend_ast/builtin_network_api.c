@@ -6,13 +6,67 @@
 #include <pthread.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <errno.h>
 #endif
 #include "backend_ast/builtin.h"
 #include "Pascal/globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+
+#ifdef _WIN32
+static void ensure_winsock(void) {
+    static int initialized = 0;
+    if (!initialized) {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2,2), &wsa);
+        initialized = 1;
+    }
+}
+#endif
+
+static int g_socket_last_error = 0;
+static char g_socket_last_error_msg[256];
+
+static int mapSocketError(int err) {
+#ifdef _WIN32
+    switch(err) {
+        case WSAETIMEDOUT: return 3;
+        case WSAECONNREFUSED:
+        case WSAENETUNREACH:
+        case WSAEHOSTUNREACH: return 6;
+        case WSAHOST_NOT_FOUND:
+        case WSANO_DATA: return 5;
+        default: return 1;
+    }
+#else
+    switch(err) {
+        case ETIMEDOUT: return 3;
+        case ECONNREFUSED:
+        case ENETUNREACH:
+        case EHOSTUNREACH: return 6;
+        default: return 1;
+    }
+#endif
+}
+
+static void setSocketError(int err) {
+    g_socket_last_error = mapSocketError(err);
+#ifdef _WIN32
+    snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "err %d", err);
+#else
+    snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "%s", strerror(err));
+#endif
+}
 
 static void sleep_ms(long ms) {
 #ifdef _WIN32
@@ -1143,6 +1197,306 @@ Value vmBuiltinApiReceive(VM* vm, int arg_count, Value* args) {
     // and the MStream object's memory is managed by MStreamFree.
 
     return result_string;
+}
+
+// -------------------- Socket API --------------------
+
+Value vmBuiltinSocketLastError(VM* vm, int arg_count, Value* args) {
+    (void)args; (void)arg_count; (void)vm;
+    return makeInt(g_socket_last_error);
+}
+
+Value vmBuiltinSocketCreate(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "socketCreate expects 1 integer argument (0=TCP,1=UDP).");
+        return makeInt(-1);
+    }
+    int type = (int)AS_INTEGER(args[0]);
+#ifdef _WIN32
+    ensure_winsock();
+#endif
+    int socktype = (type == 1) ? SOCK_DGRAM : SOCK_STREAM;
+    int proto = (type == 1) ? IPPROTO_UDP : IPPROTO_TCP;
+    int s = (int)socket(AF_INET, socktype, proto);
+    if (s < 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeInt(-1);
+    }
+    g_socket_last_error = 0;
+    return makeInt(s);
+}
+
+Value vmBuiltinSocketClose(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "socketClose expects 1 integer argument.");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+#ifdef _WIN32
+    int r = closesocket(s);
+    if (r != 0) setSocketError(WSAGetLastError());
+#else
+    int r = close(s);
+    if (r != 0) setSocketError(errno);
+#endif
+    if (r != 0) return makeInt(-1);
+    g_socket_last_error = 0;
+    return makeInt(0);
+}
+
+Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || !IS_INTLIKE(args[2])) {
+        runtimeError(vm, "socketConnect expects (socket, host, port).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    const char* host = args[1].s_val;
+    int port = (int)AS_INTEGER(args[2]);
+    char portstr[16]; snprintf(portstr, sizeof(portstr), "%d", port);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM; // default
+    if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        if (res) freeaddrinfo(res);
+        return makeInt(-1);
+    }
+    int r = connect(s, res->ai_addr, res->ai_addrlen);
+    if (r != 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        freeaddrinfo(res);
+        return makeInt(-1);
+    }
+    freeaddrinfo(res);
+    g_socket_last_error = 0;
+    return makeInt(0);
+}
+
+Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "socketBind expects (socket,int port).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    int port = (int)AS_INTEGER(args[1]);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons((unsigned short)port);
+    int r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    if (r != 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeInt(-1);
+    }
+    g_socket_last_error = 0;
+    return makeInt(0);
+}
+
+Value vmBuiltinSocketListen(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "socketListen expects (socket,int backlog).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    int backlog = (int)AS_INTEGER(args[1]);
+    int r = listen(s, backlog);
+    if (r != 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeInt(-1);
+    }
+    g_socket_last_error = 0;
+    return makeInt(0);
+}
+
+Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "socketAccept expects (socket).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    int r = (int)accept(s, NULL, NULL);
+    if (r < 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeInt(-1);
+    }
+    g_socket_last_error = 0;
+    return makeInt(r);
+}
+
+Value vmBuiltinSocketSend(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "socketSend expects (socket, data).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    const char* data = NULL;
+    size_t len = 0;
+    if (args[1].type == TYPE_STRING && args[1].s_val) {
+        data = args[1].s_val;
+        len = strlen(data);
+    } else if (args[1].type == TYPE_MEMORYSTREAM && args[1].mstream) {
+        data = (const char*)args[1].mstream->buffer;
+        len = args[1].mstream->size;
+    } else {
+        runtimeError(vm, "socketSend data must be string or mstream.");
+        return makeInt(-1);
+    }
+    int sent = (int)send(s, data, len, 0);
+    if (sent < 0) {
+#ifdef _WIN32
+        int e = WSAGetLastError();
+        if (e != WSAEWOULDBLOCK) setSocketError(e); else g_socket_last_error = 0;
+#else
+        if (errno != EWOULDBLOCK && errno != EAGAIN) setSocketError(errno); else g_socket_last_error = 0;
+#endif
+        return makeInt(-1);
+    }
+    g_socket_last_error = 0;
+    return makeInt(sent);
+}
+
+Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "socketReceive expects (socket, maxlen).");
+        return makeMStream(NULL);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    int maxlen = (int)AS_INTEGER(args[1]);
+    if (maxlen <= 0) maxlen = 4096;
+    MStream* ms = malloc(sizeof(MStream));
+    if (!ms) return makeMStream(NULL);
+    ms->buffer = malloc(maxlen+1);
+    if (!ms->buffer) { free(ms); return makeMStream(NULL); }
+    int n = (int)recv(s, ms->buffer, maxlen, 0);
+    if (n < 0) {
+#ifdef _WIN32
+        int e = WSAGetLastError();
+        if (e != WSAEWOULDBLOCK) setSocketError(e); else g_socket_last_error = 0;
+#else
+        if (errno != EWOULDBLOCK && errno != EAGAIN) setSocketError(errno); else g_socket_last_error = 0;
+#endif
+        free(ms->buffer); free(ms); return makeMStream(NULL);
+    }
+    ms->size = n;
+    ms->buffer[n] = '\0';
+    ms->capacity = maxlen+1;
+    g_socket_last_error = 0;
+    return makeMStream(ms);
+}
+
+Value vmBuiltinSocketSetBlocking(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_BOOLEAN) {
+        runtimeError(vm, "socketSetBlocking expects (socket, boolean).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    int blocking = args[1].i_val;
+#ifdef _WIN32
+    u_long mode = blocking ? 0 : 1;
+    int r = ioctlsocket(s, FIONBIO, &mode);
+    if (r != 0) setSocketError(WSAGetLastError());
+#else
+    int flags = fcntl(s, F_GETFL, 0);
+    if (flags < 0) { setSocketError(errno); return makeInt(-1); }
+    if (blocking) flags &= ~O_NONBLOCK; else flags |= O_NONBLOCK;
+    int r = fcntl(s, F_SETFL, flags);
+    if (r != 0) setSocketError(errno);
+#endif
+    if (r != 0) return makeInt(-1);
+    g_socket_last_error = 0;
+    return makeInt(0);
+}
+
+Value vmBuiltinSocketPoll(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2])) {
+        runtimeError(vm, "socketPoll expects (socket, timeout_ms, flags).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    int timeout = (int)AS_INTEGER(args[1]);
+    int flags = (int)AS_INTEGER(args[2]);
+    fd_set rfds, wfds;
+    FD_ZERO(&rfds); FD_ZERO(&wfds);
+    if (flags & 1) FD_SET(s, &rfds);
+    if (flags & 2) FD_SET(s, &wfds);
+    struct timeval tv;
+    tv.tv_sec = timeout / 1000;
+    tv.tv_usec = (timeout % 1000) * 1000;
+    int r = select(s+1, &rfds, &wfds, NULL, &tv);
+    if (r < 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeInt(-1);
+    }
+    if (r == 0) return makeInt(0);
+    int out = 0;
+    if (FD_ISSET(s, &rfds)) out |= 1;
+    if (FD_ISSET(s, &wfds)) out |= 2;
+    g_socket_last_error = 0;
+    return makeInt(out);
+}
+
+Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "dnsLookup expects (hostname).");
+        return makeString("");
+    }
+    const char* host = args[0].s_val;
+#ifdef _WIN32
+    ensure_winsock();
+#endif
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    int e = getaddrinfo(host, NULL, &hints, &res);
+    if (e != 0 || !res) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        if (res) freeaddrinfo(res);
+        return makeString("");
+    }
+    char buf[INET_ADDRSTRLEN];
+    struct sockaddr_in* addr = (struct sockaddr_in*)res->ai_addr;
+    const char* ip = inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof(buf));
+    freeaddrinfo(res);
+    if (!ip) {
+        setSocketError(errno);
+        return makeString("");
+    }
+    g_socket_last_error = 0;
+    return makeString(buf);
 }
 
 // -------------------- HTTP Async --------------------
