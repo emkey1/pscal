@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program HttpPinningDemo;
 
 var s, code: integer;

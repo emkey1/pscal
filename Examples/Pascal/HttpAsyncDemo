@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program HttpAsyncDemo;
 
 var s, id, code: integer;

@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program HttpHeadersAuthDemo;
 
 var s, code: integer;

@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program HttpAsyncProgressCancelDemo;
 
 var s, id, code: integer;
