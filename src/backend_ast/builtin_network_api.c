@@ -317,6 +317,25 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         if (args[4].mstream->buffer) {
             args[4].mstream->buffer[nread] = '\0';
         }
+        // Synthesize a minimal header block for testability
+        const char* content_type = "application/octet-stream";
+        size_t path_len = strlen(path);
+        if (path_len >= 4) {
+            const char* ext = path + path_len - 4;
+            if (strcasecmp(ext, ".txt") == 0) content_type = "text/plain";
+            else if (strcasecmp(ext, ".htm") == 0 || strcasecmp(ext, ".html") == 0) content_type = "text/html";
+            else if (strcasecmp(ext, ".json") == 0) content_type = "application/json";
+        }
+        char hdr[256];
+        int hdrlen = snprintf(hdr, sizeof(hdr),
+                              "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n",
+                              (int)nread, content_type);
+        if (hdrlen > 0) {
+            s->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (s->last_headers) {
+                memcpy(s->last_headers, hdr, (size_t)hdrlen + 1);
+            }
+        }
         // Mimic successful HTTP fetch
         s->last_status = 200;
         return makeInt(200);

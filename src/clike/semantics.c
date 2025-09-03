@@ -493,9 +493,112 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     }
                 }
             }
-            // Final fallback for known VM helpers that may not be declared in clike tables
-            if ((strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) &&
-                (t == TYPE_UNKNOWN || t == TYPE_VOID)) {
+            // Final fallback for known VM HTTP helpers; assign return types and validate args
+            if (strcasecmp(name, "httpsession") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr,
+                            "Type error: httpsession expects no arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httpclose") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpclose expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpsetheader") == 0) {
+                if (node->child_count != 3) {
+                    fprintf(stderr,
+                            "Type error: httpsetheader expects (session:int, name:string, value:string) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    if (!isIntlikeType(analyzeExpr(node->children[0], scopes)) ||
+                        analyzeExpr(node->children[1], scopes) != TYPE_STRING ||
+                        analyzeExpr(node->children[2], scopes) != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: httpsetheader argument types are (int, string, string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpclearheaders") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpclearheaders expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpsetoption") == 0) {
+                if (node->child_count != 3) {
+                    fprintf(stderr,
+                            "Type error: httpsetoption expects (session:int, key:string, value:int|string) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType a0 = analyzeExpr(node->children[0], scopes);
+                    VarType a1 = analyzeExpr(node->children[1], scopes);
+                    VarType a2 = analyzeExpr(node->children[2], scopes);
+                    if (!isIntlikeType(a0) || a1 != TYPE_STRING || !(isIntlikeType(a2) || a2 == TYPE_STRING)) {
+                        fprintf(stderr,
+                                "Type error: httpsetoption expects (int, string, int|string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpgetlastheaders") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpgetlastheaders expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_STRING;
+            } else if (strcasecmp(name, "httpgetheader") == 0) {
+                if (node->child_count != 2) {
+                    fprintf(stderr,
+                            "Type error: httpgetheader expects (session:int, name:string) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType a0 = analyzeExpr(node->children[0], scopes);
+                    VarType a1 = analyzeExpr(node->children[1], scopes);
+                    if (!isIntlikeType(a0) || a1 != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: httpgetheader expects (int, string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_STRING;
+            } else if (strcasecmp(name, "httperrorcode") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httperrorcode expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httplasterror") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httplasterror expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_STRING;
+            } else if ((strcasecmp(name, "httprequest") == 0)) {
+                // We leave flexible checking for now; ensure it returns int
+                t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) &&
+                       (t == TYPE_UNKNOWN || t == TYPE_VOID)) {
                 t = TYPE_INT32;
             }
             for (int i = 0; i < node->child_count; ++i) {

@@ -1,0 +1,30 @@
+program HttpHeadersFileURL;
+
+var s, code: integer;
+    ms: mstream;
+    cwd, url, vlen, vtype: string;
+    f: text;
+begin
+  { Create a local .txt file so file:// path synthesizes headers }
+  assign(f, 'headers_test.txt');
+  rewrite(f);
+  writeln(f, 'Hello');
+  close(f);
+
+  s := HttpSession();
+  ms := mstreamcreate();
+  cwd := GetEnv('PWD');
+  url := 'file://' + cwd + '/headers_test.txt';
+  code := HttpRequest(s, 'GET', url, nil, ms);
+  vlen := HttpGetHeader(s, 'Content-Length');
+  vtype := HttpGetHeader(s, 'Content-Type');
+
+  if (code = 200) and (vlen = '5') and (vtype = 'text/plain') then
+    writeln('PASS')
+  else
+    writeln('FAIL code=', code, ' len=', vlen, ' type=', vtype);
+
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+
