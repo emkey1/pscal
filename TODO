@@ -38,5 +38,27 @@ This staged approach introduces address-of and procedure pointers, then layers a
 Provide ability to query threads and thread states
 
 ---
-Expand network support
+Networking additions:
 
+- Phase 1: Solid HTTP sync API (libcurl easy)
+    - Sessions with keep-alive, headers map, redirects, timeouts.
+    - Bodies to/from MStream or file; status + headers; basic auth.
+    - Map curl errors to stable VM error codes.
+- Phase 2: Async execution
+    - Option A: Use threads under the hood (CreateThread/WaitForThread) returning Thread or HttpFuture handle.
+    - Option B: libcurl multi + poll/select integration for true non-blocking; if chosen, add a simple event loop
+(NetRunLoopStart/Stop, NetPoll) and Futures.
+- Phase 3: TLS/security knobs
+    - CA bundle/custom CA, client cert/key, hostname verification, pinning, proxies, HTTP/2.
+- Phase 4: Reliability and ergonomics
+    - Retry/backoff, rate-limiting, cookie jar, compressed responses, streaming uploads, progress callbacks,
+cancellation.
+- Phase 5: Sockets
+    - TCP/UDP sockets, non-blocking, poll, DNS helpers; straightforward thin wrappers over BSD sockets.
+- Phase 6: Higher protocols (optional)
+    - WebSocket client (upgrade from HTTP), SSE streaming; consider libwebsockets for WS.
+    - MQTT via libmosquitto (optional module).
+- Phase 7: Tooling and docs
+    - Unit tests with a tiny embedded HTTP server (or testcontainers) and golden-cases.
+    - Examples: JSON API fetcher, file uploader, WebSocket echo, TCP echo client.
+    - Troubleshooting guide for TLS/CA issues.
