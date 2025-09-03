@@ -140,7 +140,7 @@ Provides DOS‑style file and environment operations by wrapping builtins【F:li
 * `exec`
 
 ### MathLib
-Compatibility shim for math routines【F:lib/pascal/mathlib.pl†L1-L40】.
+Compatibility shim for math routines【F:lib/pascal/mathlib.pl†L1-L80】.
 
 - MathLib now forwards to VM builtins for all functions, keeping existing
   programs that `uses MathLib;` working without modification.
@@ -152,6 +152,9 @@ Provided wrappers:
 - Trigonometry: `ArcTan`, `ArcSin`, `ArcCos`, `Cotan`
 - Exponentials: `Power`, `Log10`, `Sinh`, `Cosh`, `Tanh`
 - Helpers: `Max`, `Min`, `Floor`, `Ceil`
+
+Constants exported by MathLib:
+- `Pi`, `E`, `Ln2`, `Ln10`, `TwoPi`, `PiOver2`
 
 ### mylib
 Example user unit exporting a record type and routines【F:lib/pascal/mylib.pl†L1-L40】.
