@@ -1,19 +1,16 @@
 #!/usr/bin/env clike
 
 int main() {
-  const char* run = getenv("RUN_NET_TESTS");
-  if (!run || strcmp(run, "1") != 0) {
-    printf("Set RUN_NET_TESTS=1 and optionally PIN_SHA256, URL to run.\n");
+  if (getenv("RUN_NET_TESTS") != "1") {
+    printf("Set RUN_NET_TESTS=1 to run this demo.\n");
     return 0;
   }
-  const char* url = getenv("URL"); if (!url) url = "https://example.com";
-  const char* pin = getenv("PIN_SHA256");
   int s = httpsession();
   httpsetoption(s, "tls_min", 12);
   httpsetoption(s, "alpn", 1);
-  if (pin && pin[0]) httpsetoption(s, "pin_sha256", pin);
+  httpsetoption(s, "pin_sha256", "");
   mstream out = mstreamcreate();
-  int code = httprequest(s, "GET", url, NULL, out);
+  int code = httprequest(s, "GET", "https://example.com", NULL, out);
   printf("Status: %d\nErrCode: %d\nErrMsg: %s\n", code, httperrorcode(s), httplasterror(s));
   mstreamfree(&out);
   httpclose(s);
