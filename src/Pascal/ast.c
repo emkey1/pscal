@@ -896,6 +896,19 @@ VarType getBuiltinReturnType(const char* name) {
     /* HTTP session helpers */
     if (strcasecmp(name, "httpsession") == 0) return TYPE_INTEGER;
     if (strcasecmp(name, "httprequest") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequesttofile") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequestasync") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequestasynctofile") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpisdone") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httptryawait") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpcancel") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpgetasyncprogress") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpgetasynctotal") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpawait") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httperrorcode") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpgetheader") == 0) return TYPE_STRING;
+    if (strcasecmp(name, "httpgetlastheaders") == 0) return TYPE_STRING;
+    if (strcasecmp(name, "httplasterror") == 0) return TYPE_STRING;
 
     /* ReadKey and UpCase return a single character */
     if (strcasecmp(name, "readkey") == 0 ||
