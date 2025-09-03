@@ -618,6 +618,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     }
                 }
                 t = TYPE_INT32;
+            } else if (strcasecmp(name, "httpisdone") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpisdone expects (id:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
             } else if ((strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) &&
                        (t == TYPE_UNKNOWN || t == TYPE_VOID)) {
                 t = TYPE_INT32;

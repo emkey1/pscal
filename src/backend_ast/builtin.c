@@ -162,6 +162,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"httprequest", vmBuiltinHttpRequest},
     {"httprequesttofile", vmBuiltinHttpRequestToFile},
     {"httprequestasync", vmBuiltinHttpRequestAsync},
+    {"httpisdone", vmBuiltinHttpIsDone},
     {"httpawait", vmBuiltinHttpAwait},
     {"httplasterror", vmBuiltinHttpLastError},
     {"jsonget", vmBuiltinJsonGet},

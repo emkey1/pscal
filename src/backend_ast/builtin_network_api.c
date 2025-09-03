@@ -60,6 +60,43 @@ static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *use
     return real_size;
 }
 
+/* Forward declare async job for header callback */
+typedef struct HttpAsyncJob_s HttpAsyncJob;
+
+/* Helper to tee response to FILE and MStream */
+typedef struct DualSink_s {
+    FILE* f;
+    MStream* ms;
+} DualSink;
+
+static size_t dualWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t real_size = size * nmemb;
+    DualSink* d = (DualSink*)userp;
+    if (!d) return 0;
+    if (d->f) {
+        size_t n = fwrite(contents, 1, real_size, d->f);
+        if (n != real_size) return 0;
+    }
+    if (d->ms) {
+        size_t n2 = writeCallback(contents, size, nmemb, (void*)d->ms);
+        if (n2 != real_size) return 0;
+    }
+    return real_size;
+}
+
+/* Header accumulator for async jobs */
+static size_t headerAccumJob(char *buffer, size_t size, size_t nitems, void *userdata) {
+    HttpAsyncJob* j = (HttpAsyncJob*)userdata;
+    size_t real_size = size * nitems;
+    size_t old_len = j->last_headers ? strlen(j->last_headers) : 0;
+    char* nb = (char*)realloc(j->last_headers, old_len + real_size + 1);
+    if (!nb) return real_size; // drop on OOM
+    j->last_headers = nb;
+    memcpy(j->last_headers + old_len, buffer, real_size);
+    j->last_headers[old_len + real_size] = '\0';
+    return real_size;
+}
+
 /* Callback: writes received data directly to a FILE* */
 static size_t fileWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t real_size = size * nmemb;
@@ -377,8 +414,7 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     curl_easy_setopt(s->curl, CURLOPT_URL, url);
     // Choose sink: memory stream only or file+stream
     FILE* tmp_out_file = NULL; // closed before return
-    typedef struct { FILE* f; MStream* ms; } DualSink;
-    DualSink dual = {0};
+    DualSink dual = (DualSink){0};
     if (s->out_file && s->out_file[0]) {
         tmp_out_file = fopen(s->out_file, "wb");
         if (!tmp_out_file) {
@@ -390,21 +426,6 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         }
         dual.f = tmp_out_file;
         dual.ms = args[4].mstream;
-        // Writer that tees to file and mstream
-        static size_t dualWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
-            size_t real_size = size * nmemb;
-            DualSink* d = (DualSink*)userp;
-            if (!d) return 0;
-            if (d->f) {
-                size_t n = fwrite(contents, 1, real_size, d->f);
-                if (n != real_size) return 0;
-            }
-            if (d->ms) {
-                size_t n2 = writeCallback(contents, size, nmemb, (void*)d->ms);
-                if (n2 != real_size) return 0;
-            }
-            return real_size;
-        }
         curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, dualWriteCallback);
         curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, &dual);
     } else {
@@ -822,6 +843,17 @@ typedef struct HttpAsyncJob_s {
     MStream* result; // allocated by job thread
     long status;
     char* error;
+    // Mirror of session options at submission time
+    char* out_file;
+    char* user_agent;
+    char* basic_auth;
+    char* ca_path; char* client_cert; char* client_key; char* proxy;
+    long timeout_ms; long follow_redirects; long verify_peer; long verify_host; long force_http2;
+    struct curl_slist* headers_slist; // copied list
+    // Per-job accumulators
+    char* last_headers;
+    int   last_error_code;
+    char* last_error_msg;
     int done;
 } HttpAsyncJob;
 
@@ -843,7 +875,7 @@ static void* httpAsyncThread(void* arg) {
     int id = (int)(intptr_t)arg;
     HttpAsyncJob* job = &g_http_async[id];
     HttpSession* s = httpGet(job->session);
-    if (!s || !s->curl) {
+    if (!s) {
         job->status = -1;
         job->error = strdup("invalid session");
         job->done = 1;
@@ -863,65 +895,140 @@ static void* httpAsyncThread(void* arg) {
         job->status = -1; job->error = strdup("malloc failed"); job->done = 1; return NULL;
     }
     job->result->buffer[0] = '\0'; job->result->size = 0; job->result->capacity = 16;
+    // file:// fast-path
+    if (job->url && strncasecmp(job->url, "file://", 7) == 0) {
+        const char* path = job->url + 7;
+        FILE* in = fopen(path, "rb");
+        if (!in) {
+            job->status = -1;
+            job->error = strdup("cannot open local file");
+            job->done = 1;
+            return NULL;
+        }
+        size_t total = 0; unsigned char buf[8192]; size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            writeCallback(buf, 1, n, job->result);
+            total += n;
+        }
+        fclose(in);
+        if (job->out_file && job->out_file[0] && job->result && job->result->buffer) {
+            FILE* of = fopen(job->out_file, "wb");
+            if (of) { fwrite(job->result->buffer, 1, (size_t)job->result->size, of); fclose(of); }
+        }
+        // headers
+        const char* content_type = "application/octet-stream";
+        size_t path_len = strlen(path);
+        if (path_len >= 4) {
+            const char* ext = path + path_len - 4;
+            if (strcasecmp(ext, ".txt") == 0) content_type = "text/plain";
+            else if (strcasecmp(ext, ".htm") == 0 || strcasecmp(ext, ".html") == 0) content_type = "text/html";
+            else if (strcasecmp(ext, ".json") == 0) content_type = "application/json";
+        }
+        char hdr[256];
+        int hdrlen = snprintf(hdr, sizeof(hdr), "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n", total, content_type);
+        if (hdrlen > 0) { job->last_headers = strndup(hdr, (size_t)hdrlen); }
+        job->status = 200;
+        job->done = 1;
+        return NULL;
+    }
 
-    // Configure CURL
-    curl_easy_reset(s->curl);
-    curl_easy_setopt(s->curl, CURLOPT_URL, job->url);
-    curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, job->result);
-    curl_easy_setopt(s->curl, CURLOPT_TIMEOUT_MS, s->timeout_ms);
-    curl_easy_setopt(s->curl, CURLOPT_FOLLOWLOCATION, s->follow_redirects);
-    if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
-    if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
+    // Configure CURL with per-job easy handle
+    CURL* eh = curl_easy_init();
+    if (!eh) { job->status = -1; job->error = strdup("curl init failed"); job->done = 1; return NULL; }
+    curl_easy_setopt(eh, CURLOPT_URL, job->url);
+    // choose sink
+    FILE* tmp_file = NULL;
+    DualSink dual = (DualSink){0};
+    if (job->out_file && job->out_file[0]) {
+        tmp_file = fopen(job->out_file, "wb");
+        if (tmp_file) { dual.f = tmp_file; }
+        dual.ms = job->result;
+        curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, dualWriteCallback);
+        curl_easy_setopt(eh, CURLOPT_WRITEDATA, &dual);
+    } else {
+        curl_easy_setopt(eh, CURLOPT_WRITEFUNCTION, writeCallback);
+        curl_easy_setopt(eh, CURLOPT_WRITEDATA, job->result);
+    }
+    curl_easy_setopt(eh, CURLOPT_TIMEOUT_MS, job->timeout_ms);
+    curl_easy_setopt(eh, CURLOPT_FOLLOWLOCATION, job->follow_redirects);
+    curl_easy_setopt(eh, CURLOPT_HEADERFUNCTION, headerAccumJob);
+    curl_easy_setopt(eh, CURLOPT_HEADERDATA, job);
+    if (job->user_agent && job->user_agent[0]) curl_easy_setopt(eh, CURLOPT_USERAGENT, job->user_agent);
+    if (job->headers_slist) curl_easy_setopt(eh, CURLOPT_HTTPHEADER, job->headers_slist);
+    if (job->basic_auth && job->basic_auth[0]) {
+        curl_easy_setopt(eh, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
+        curl_easy_setopt(eh, CURLOPT_USERPWD, job->basic_auth);
+    }
     if (strcasecmp(job->method, "GET") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
+        curl_easy_setopt(eh, CURLOPT_HTTPGET, 1L);
     } else if (strcasecmp(job->method, "POST") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(eh, CURLOPT_POST, 1L);
         if (job->body && job->body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, job->body);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+            curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
+            curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
         }
     } else if (strcasecmp(job->method, "PUT") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "PUT");
         if (job->body && job->body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, job->body);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+            curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
+            curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
         }
     } else if (strcasecmp(job->method, "DELETE") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+        curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "DELETE");
     } else {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, job->method);
+        curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, job->method);
         if (job->body && job->body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, job->body);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+            curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
+            curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
         }
     }
-    // TLS/proxy same as sync
-    if (s->ca_path && s->ca_path[0]) curl_easy_setopt(s->curl, CURLOPT_CAINFO, s->ca_path);
-    if (s->client_cert && s->client_cert[0]) curl_easy_setopt(s->curl, CURLOPT_SSLCERT, s->client_cert);
-    if (s->client_key && s->client_key[0]) curl_easy_setopt(s->curl, CURLOPT_SSLKEY, s->client_key);
-    curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYPEER, s->verify_peer);
-    curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYHOST, s->verify_host ? 2L : 0L);
-    if (s->proxy && s->proxy[0]) curl_easy_setopt(s->curl, CURLOPT_PROXY, s->proxy);
+    if (job->ca_path && job->ca_path[0]) curl_easy_setopt(eh, CURLOPT_CAINFO, job->ca_path);
+    if (job->client_cert && job->client_cert[0]) curl_easy_setopt(eh, CURLOPT_SSLCERT, job->client_cert);
+    if (job->client_key && job->client_key[0]) curl_easy_setopt(eh, CURLOPT_SSLKEY, job->client_key);
+    curl_easy_setopt(eh, CURLOPT_SSL_VERIFYPEER, job->verify_peer);
+    curl_easy_setopt(eh, CURLOPT_SSL_VERIFYHOST, job->verify_host ? 2L : 0L);
+    if (job->proxy && job->proxy[0]) curl_easy_setopt(eh, CURLOPT_PROXY, job->proxy);
 #ifdef CURLOPT_HTTP_VERSION
-    if (s->force_http2) {
+    if (job->force_http2) {
 #ifdef CURL_HTTP_VERSION_2TLS
-        curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+        curl_easy_setopt(eh, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 #elif defined(CURL_HTTP_VERSION_2_0)
-        curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+        curl_easy_setopt(eh, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
 #endif
     }
 #endif
 
-    CURLcode res = curl_easy_perform(s->curl);
+    CURLcode res = curl_easy_perform(eh);
     long http_code = 0;
     if (res == CURLE_OK) {
-        curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_getinfo(eh, CURLINFO_RESPONSE_CODE, &http_code);
         job->status = http_code;
     } else {
         job->status = -1;
-        job->error = strdup(curl_easy_strerror(res));
+        job->last_error_msg = strdup(curl_easy_strerror(res));
+        int code = 1;
+        switch (res) {
+            case CURLE_OPERATION_TIMEDOUT: code = 3; break;
+            case CURLE_SSL_CONNECT_ERROR:
+            case CURLE_PEER_FAILED_VERIFICATION:
+            case CURLE_SSL_CACERT:
+#ifdef CURLE_SSL_CACERT_BADFILE
+            case CURLE_SSL_CACERT_BADFILE:
+#endif
+            case CURLE_USE_SSL_FAILED: code = 4; break;
+            case CURLE_COULDNT_RESOLVE_HOST:
+            case CURLE_COULDNT_RESOLVE_PROXY: code = 5; break;
+            case CURLE_COULDNT_CONNECT: code = 6; break;
+            case CURLE_READ_ERROR:
+            case CURLE_WRITE_ERROR:
+            case CURLE_FILE_COULDNT_READ_FILE: code = 2; break;
+            default: code = 1; break;
+        }
+        job->last_error_code = code;
+        job->error = job->last_error_msg ? strdup(job->last_error_msg) : strdup("error");
     }
+    if (tmp_file) fclose(tmp_file);
+    if (eh) curl_easy_cleanup(eh);
     job->done = 1;
     return NULL;
 }
@@ -950,10 +1057,42 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
             job->body[job->body_len] = '\0';
         }
     }
+    // Snapshot session options for thread safety
+    HttpSession* s = httpGet(job->session);
+    if (s) {
+        job->timeout_ms = s->timeout_ms; job->follow_redirects = s->follow_redirects;
+        job->verify_peer = s->verify_peer; job->verify_host = s->verify_host; job->force_http2 = s->force_http2;
+        job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
+        job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
+        job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
+        job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
+        job->client_key = s->client_key ? strdup(s->client_key) : NULL;
+        job->proxy = s->proxy ? strdup(s->proxy) : NULL;
+        job->out_file = s->out_file ? strdup(s->out_file) : NULL;
+        // Duplicate headers slist
+        struct curl_slist* p = s->headers;
+        struct curl_slist* tail = NULL;
+        while (p) {
+            struct curl_slist* node = curl_slist_append(NULL, p->data);
+            if (node) {
+                if (!job->headers_slist) { job->headers_slist = node; tail = node; }
+                else { tail->next = node; tail = node; }
+            }
+            p = p->next;
+        }
+    }
     if (pthread_create(&job->th, NULL, httpAsyncThread, (void*)(intptr_t)id) != 0) {
         if (job->method) free(job->method);
         if (job->url) free(job->url);
         if (job->body) free(job->body);
+        if (job->user_agent) free(job->user_agent);
+        if (job->basic_auth) free(job->basic_auth);
+        if (job->ca_path) free(job->ca_path);
+        if (job->client_cert) free(job->client_cert);
+        if (job->client_key) free(job->client_key);
+        if (job->proxy) free(job->proxy);
+        if (job->out_file) free(job->out_file);
+        if (job->headers_slist) curl_slist_free_all(job->headers_slist);
         job->active = 0;
         runtimeError(vm, "httpRequestAsync: pthread_create failed.");
         return makeInt(-1);
@@ -985,14 +1124,47 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
         out->size = (int)job->result->size;
         out->buffer[out->size] = '\0';
     }
+    // Update session last_* fields from job
+    HttpSession* s = httpGet(job->session);
+    if (s) {
+        s->last_status = job->status;
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (job->last_headers) s->last_headers = strdup(job->last_headers);
+        s->last_error_code = job->last_error_code;
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        if (job->last_error_msg) s->last_error_msg = strdup(job->last_error_msg);
+    }
     // Free job resources
     if (job->result) { if (job->result->buffer) free(job->result->buffer); free(job->result); }
     if (job->method) free(job->method);
     if (job->url) free(job->url);
     if (job->body) free(job->body);
     if (job->error) free(job->error);
+    if (job->user_agent) free(job->user_agent);
+    if (job->basic_auth) free(job->basic_auth);
+    if (job->ca_path) free(job->ca_path);
+    if (job->client_cert) free(job->client_cert);
+    if (job->client_key) free(job->client_key);
+    if (job->proxy) free(job->proxy);
+    if (job->out_file) free(job->out_file);
+    if (job->headers_slist) curl_slist_free_all(job->headers_slist);
+    if (job->last_headers) free(job->last_headers);
+    if (job->last_error_msg) free(job->last_error_msg);
     memset(job, 0, sizeof(HttpAsyncJob));
     return makeInt(status);
+}
+
+// HttpIsDone(asyncId): Integer (0/1)
+Value vmBuiltinHttpIsDone(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpIsDone expects (id:int).");
+        return makeInt(0);
+    }
+    int id = (int)AS_INTEGER(args[0]);
+    if (id < 0 || id >= MAX_HTTP_ASYNC) return makeInt(0);
+    HttpAsyncJob* job = &g_http_async[id];
+    if (!job->active) return makeInt(0);
+    return makeInt(job->done ? 1 : 0);
 }
 
 // HttpLastError(session): String
