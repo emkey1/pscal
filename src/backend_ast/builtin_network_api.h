@@ -26,4 +26,12 @@ Value vmBuiltinHttpClearHeaders(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpSetOption(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpRequest(struct VM_s* vm, int arg_count, Value* args);
 
+// HTTP Async API
+Value vmBuiltinHttpRequestAsync(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpAwait(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpLastError(struct VM_s* vm, int arg_count, Value* args);
+
+// JSON helpers (minimal)
+Value vmBuiltinJsonGet(struct VM_s* vm, int arg_count, Value* args);
+
 #endif // BUILTIN_NETWORK_API_H

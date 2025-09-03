@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <curl/curl.h>
+#include <pthread.h>
 #include "backend_ast/builtin.h"
 #include "Pascal/globals.h"
 #include "core/utils.h"
@@ -438,4 +439,238 @@ Value vmBuiltinApiReceive(VM* vm, int arg_count, Value* args) {
     // and the MStream object's memory is managed by MStreamFree.
 
     return result_string;
+}
+
+// -------------------- HTTP Async --------------------
+
+typedef struct HttpAsyncJob_s {
+    int active;
+    pthread_t th;
+    int session;
+    char* method;
+    char* url;
+    char* body;
+    size_t body_len;
+    MStream* result; // allocated by job thread
+    long status;
+    char* error;
+    int done;
+} HttpAsyncJob;
+
+#define MAX_HTTP_ASYNC 32
+static HttpAsyncJob g_http_async[MAX_HTTP_ASYNC];
+
+static int httpAllocAsync(void) {
+    for (int i = 0; i < MAX_HTTP_ASYNC; i++) {
+        if (!g_http_async[i].active) {
+            memset(&g_http_async[i], 0, sizeof(HttpAsyncJob));
+            g_http_async[i].active = 1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void* httpAsyncThread(void* arg) {
+    int id = (int)(intptr_t)arg;
+    HttpAsyncJob* job = &g_http_async[id];
+    HttpSession* s = httpGet(job->session);
+    if (!s || !s->curl) {
+        job->status = -1;
+        job->error = strdup("invalid session");
+        job->done = 1;
+        return NULL;
+    }
+    // Set up output mstream
+    job->result = (MStream*)malloc(sizeof(MStream));
+    if (!job->result) {
+        job->status = -1;
+        job->error = strdup("malloc failed");
+        job->done = 1;
+        return NULL;
+    }
+    job->result->buffer = (unsigned char*)malloc(16);
+    if (!job->result->buffer) {
+        free(job->result); job->result = NULL;
+        job->status = -1; job->error = strdup("malloc failed"); job->done = 1; return NULL;
+    }
+    job->result->buffer[0] = '\0'; job->result->size = 0; job->result->capacity = 16;
+
+    // Configure CURL
+    curl_easy_reset(s->curl);
+    curl_easy_setopt(s->curl, CURLOPT_URL, job->url);
+    curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, writeCallback);
+    curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, job->result);
+    curl_easy_setopt(s->curl, CURLOPT_TIMEOUT_MS, s->timeout_ms);
+    curl_easy_setopt(s->curl, CURLOPT_FOLLOWLOCATION, s->follow_redirects);
+    if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
+    if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
+    if (strcasecmp(job->method, "GET") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
+    } else if (strcasecmp(job->method, "POST") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+        if (job->body && job->body_len > 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, job->body);
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+        }
+    } else if (strcasecmp(job->method, "PUT") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        if (job->body && job->body_len > 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, job->body);
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+        }
+    } else if (strcasecmp(job->method, "DELETE") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    } else {
+        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, job->method);
+        if (job->body && job->body_len > 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, job->body);
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+        }
+    }
+    // TLS/proxy same as sync
+    if (s->ca_path && s->ca_path[0]) curl_easy_setopt(s->curl, CURLOPT_CAINFO, s->ca_path);
+    if (s->client_cert && s->client_cert[0]) curl_easy_setopt(s->curl, CURLOPT_SSLCERT, s->client_cert);
+    if (s->client_key && s->client_key[0]) curl_easy_setopt(s->curl, CURLOPT_SSLKEY, s->client_key);
+    curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYPEER, s->verify_peer);
+    curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYHOST, s->verify_host ? 2L : 0L);
+    if (s->proxy && s->proxy[0]) curl_easy_setopt(s->curl, CURLOPT_PROXY, s->proxy);
+#ifdef CURLOPT_HTTP_VERSION
+    if (s->force_http2) {
+#ifdef CURL_HTTP_VERSION_2TLS
+        curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#elif defined(CURL_HTTP_VERSION_2_0)
+        curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+#endif
+    }
+#endif
+
+    CURLcode res = curl_easy_perform(s->curl);
+    long http_code = 0;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+        job->status = http_code;
+    } else {
+        job->status = -1;
+        job->error = strdup(curl_easy_strerror(res));
+    }
+    job->done = 1;
+    return NULL;
+}
+
+// HttpRequestAsync(session, method, url, bodyStrOrMStreamOrNil): Integer (async id)
+Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || args[2].type != TYPE_STRING) {
+        runtimeError(vm, "httpRequestAsync expects (session:int, method:string, url:string, body:string|mstream|nil).");
+        return makeInt(-1);
+    }
+    int id = httpAllocAsync();
+    if (id < 0) { runtimeError(vm, "httpRequestAsync: no free slots."); return makeInt(-1); }
+    HttpAsyncJob* job = &g_http_async[id];
+    job->session = (int)AS_INTEGER(args[0]);
+    job->method = strdup(args[1].s_val ? args[1].s_val : "GET");
+    job->url = strdup(args[2].s_val ? args[2].s_val : "");
+    if (args[3].type == TYPE_STRING && args[3].s_val) {
+        job->body_len = strlen(args[3].s_val);
+        job->body = (char*)malloc(job->body_len + 1);
+        if (job->body) { memcpy(job->body, args[3].s_val, job->body_len + 1); }
+    } else if (args[3].type == TYPE_MEMORYSTREAM && args[3].mstream) {
+        job->body_len = (size_t)args[3].mstream->size;
+        job->body = (char*)malloc(job->body_len + 1);
+        if (job->body && args[3].mstream->buffer) {
+            memcpy(job->body, args[3].mstream->buffer, job->body_len);
+            job->body[job->body_len] = '\0';
+        }
+    }
+    if (pthread_create(&job->th, NULL, httpAsyncThread, (void*)(intptr_t)id) != 0) {
+        if (job->method) free(job->method);
+        if (job->url) free(job->url);
+        if (job->body) free(job->body);
+        job->active = 0;
+        runtimeError(vm, "httpRequestAsync: pthread_create failed.");
+        return makeInt(-1);
+    }
+    return makeInt(id);
+}
+
+// HttpAwait(asyncId, out:mstream): Integer (status)
+Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_MEMORYSTREAM || !args[1].mstream) {
+        runtimeError(vm, "httpAwait expects (id:int, out:mstream).");
+        return makeInt(-1);
+    }
+    int id = (int)AS_INTEGER(args[0]);
+    if (id < 0 || id >= MAX_HTTP_ASYNC) { runtimeError(vm, "httpAwait: invalid id."); return makeInt(-1); }
+    HttpAsyncJob* job = &g_http_async[id];
+    if (!job->active) { runtimeError(vm, "httpAwait: job not active."); return makeInt(-1); }
+    pthread_join(job->th, NULL);
+    int status = (int)job->status;
+    // Copy result into provided mstream
+    if (job->result && job->result->buffer) {
+        MStream* out = args[1].mstream;
+        // ensure capacity
+        if ((size_t)out->capacity < job->result->size + 1) {
+            unsigned char* nb = realloc(out->buffer, job->result->size + 1);
+            if (nb) { out->buffer = nb; out->capacity = (int)(job->result->size + 1); }
+        }
+        memcpy(out->buffer, job->result->buffer, job->result->size);
+        out->size = (int)job->result->size;
+        out->buffer[out->size] = '\0';
+    }
+    // Free job resources
+    if (job->result) { if (job->result->buffer) free(job->result->buffer); free(job->result); }
+    if (job->method) free(job->method);
+    if (job->url) free(job->url);
+    if (job->body) free(job->body);
+    if (job->error) free(job->error);
+    memset(job, 0, sizeof(HttpAsyncJob));
+    return makeInt(status);
+}
+
+// HttpLastError(session): String
+Value vmBuiltinHttpLastError(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "httpLastError expects 1 integer session id.");
+        return makeString("");
+    }
+    HttpSession* s = httpGet((int)AS_INTEGER(args[0]));
+    if (!s) return makeString("invalid session");
+    char buf[64]; snprintf(buf, sizeof(buf), "%ld", s->last_status);
+    return makeString(buf);
+}
+
+// -------------------- Minimal JSON helper --------------------
+// JsonGet(jsonStr, key) -> returns value as string for flat JSON (string/number/bool)
+Value vmBuiltinJsonGet(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+        runtimeError(vm, "JsonGet expects (json:string, key:string).");
+        return makeString("");
+    }
+    const char* json = args[0].s_val ? args[0].s_val : "";
+    const char* key = args[1].s_val ? args[1].s_val : "";
+    char pat[256]; snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char* p = strstr(json, pat);
+    if (!p) return makeString("");
+    p = strchr(p + strlen(pat), ':');
+    if (!p) return makeString("");
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p == '"') {
+        p++;
+        const char* q = strchr(p, '"');
+        if (!q) return makeString("");
+        size_t len = (size_t)(q - p);
+        char* out = (char*)malloc(len + 1);
+        if (!out) return makeString("");
+        memcpy(out, p, len); out[len] = '\0';
+        Value s = makeString(out); free(out); return s;
+    }
+    // number/bool until delimiter
+    const char* q = p;
+    while (*q && *q != ',' && *q != '}' && *q != ' ' && *q != '\t' && *q != '\n' && *q != '\r') q++;
+    size_t len = (size_t)(q - p);
+    char* out = (char*)malloc(len + 1);
+    if (!out) return makeString("");
+    memcpy(out, p, len); out[len] = '\0';
+    Value s = makeString(out); free(out); return s;
 }

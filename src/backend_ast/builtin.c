@@ -151,6 +151,16 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"apiReceive", vmBuiltinApiReceive},
     {"apiSend", vmBuiltinApiSend},
+    {"httpsession", vmBuiltinHttpSession},
+    {"httpclose", vmBuiltinHttpClose},
+    {"httpsetheader", vmBuiltinHttpSetHeader},
+    {"httpclearheaders", vmBuiltinHttpClearHeaders},
+    {"httpsetoption", vmBuiltinHttpSetOption},
+    {"httprequest", vmBuiltinHttpRequest},
+    {"httprequestasync", vmBuiltinHttpRequestAsync},
+    {"httpawait", vmBuiltinHttpAwait},
+    {"httplasterror", vmBuiltinHttpLastError},
+    {"jsonget", vmBuiltinJsonGet},
     {"append", vmBuiltinAppend},
     {"arccos", vmBuiltinArccos},
     {"arcsin", vmBuiltinArcsin},
@@ -3278,6 +3288,12 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpSession", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpClose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpSetHeader", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpClearHeaders", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpSetOption", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpRequest", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
