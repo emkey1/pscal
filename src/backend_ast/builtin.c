@@ -216,6 +216,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"destroytexture", vmBuiltinDestroytexture},
 #endif
     {"dispose", vmBuiltinDispose},
+    {"dnslookup", vmBuiltinDnsLookup},
     {"dosExec", vmBuiltinDosExec},
     {"dosFindfirst", vmBuiltinDosFindfirst},
     {"dosFindnext", vmBuiltinDosFindnext},
@@ -359,6 +360,17 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sinh", vmBuiltinSinh},
+    {"socketaccept", vmBuiltinSocketAccept},
+    {"socketbind", vmBuiltinSocketBind},
+    {"socketclose", vmBuiltinSocketClose},
+    {"socketconnect", vmBuiltinSocketConnect},
+    {"socketcreate", vmBuiltinSocketCreate},
+    {"socketlasterror", vmBuiltinSocketLastError},
+    {"socketlisten", vmBuiltinSocketListen},
+    {"socketpoll", vmBuiltinSocketPoll},
+    {"socketreceive", vmBuiltinSocketReceive},
+    {"socketsend", vmBuiltinSocketSend},
+    {"socketsetblocking", vmBuiltinSocketSetBlocking},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
     {"str", vmBuiltinStr},
@@ -3317,6 +3329,18 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("HttpGetLastHeaders", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("HttpErrorCode", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("HttpGetHeader", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("DnsLookup", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketAccept", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketBind", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketClose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("SocketConnect", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketCreate", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketLastError", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketListen", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketPoll", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketReceive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketSend", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketSetBlocking", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
