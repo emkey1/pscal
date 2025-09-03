@@ -113,6 +113,7 @@ static size_t fileWriteCallback(void *contents, size_t size, size_t nmemb, void 
 typedef struct HttpSession_s {
     CURL* curl;
     struct curl_slist* headers; // accumulated request headers
+    struct curl_slist* resolve; // host:port:address entries
     long timeout_ms;
     long follow_redirects;
     char* user_agent;
@@ -123,9 +124,16 @@ typedef struct HttpSession_s {
     char* client_cert;    // CURLOPT_SSLCERT
     char* client_key;     // CURLOPT_SSLKEY
     char* proxy;          // CURLOPT_PROXY
+    char* proxy_userpwd;  // CURLOPT_PROXYUSERPWD
+    long proxy_type;      // CURLOPT_PROXYTYPE
     long verify_peer;     // CURLOPT_SSL_VERIFYPEER (0/1)
     long verify_host;     // CURLOPT_SSL_VERIFYHOST (0/1 maps to 0 or 2)
     long force_http2;     // 0/1
+    long alpn;            // 0/1, CURLOPT_SSL_ENABLE_ALPN
+    long tls_min;         // 10/11/12/13 -> TLS versions
+    long tls_max;         // 10/11/12/13 -> TLS max
+    char* ciphers;        // CURLOPT_SSL_CIPHER_LIST
+    char* pinned_pubkey;  // CURLOPT_PINNEDPUBLICKEY
     char* out_file;       // optional sink for HttpRequest
     // Auth and last-results
     char* basic_auth;     // user:pass for basic auth
@@ -184,6 +192,10 @@ static void httpFreeSession(int id) {
     if (s->client_cert) { free(s->client_cert); s->client_cert = NULL; }
     if (s->client_key) { free(s->client_key); s->client_key = NULL; }
     if (s->proxy) { free(s->proxy); s->proxy = NULL; }
+    if (s->proxy_userpwd) { free(s->proxy_userpwd); s->proxy_userpwd = NULL; }
+    if (s->ciphers) { free(s->ciphers); s->ciphers = NULL; }
+    if (s->pinned_pubkey) { free(s->pinned_pubkey); s->pinned_pubkey = NULL; }
+    if (s->resolve) { curl_slist_free_all(s->resolve); s->resolve = NULL; }
     if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
     if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
     s->active = 0;
@@ -278,6 +290,33 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
     } else if (strcasecmp(key, "proxy") == 0 && args[2].type == TYPE_STRING) {
         if (s->proxy) free(s->proxy);
         s->proxy = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "proxy_userpwd") == 0 && args[2].type == TYPE_STRING) {
+        if (s->proxy_userpwd) free(s->proxy_userpwd);
+        s->proxy_userpwd = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "proxy_type") == 0 && args[2].type == TYPE_STRING) {
+        const char* v = args[2].s_val ? args[2].s_val : "";
+        if (strcasecmp(v, "http") == 0) s->proxy_type = (long)CURLPROXY_HTTP;
+#ifdef CURLPROXY_HTTPS
+        else if (strcasecmp(v, "https") == 0) s->proxy_type = (long)CURLPROXY_HTTPS;
+#endif
+        else if (strcasecmp(v, "socks5") == 0) s->proxy_type = (long)CURLPROXY_SOCKS5;
+        else if (strcasecmp(v, "socks4") == 0) s->proxy_type = (long)CURLPROXY_SOCKS4;
+    } else if (strcasecmp(key, "tls_min") == 0 && IS_INTLIKE(args[2])) {
+        s->tls_min = (long)AS_INTEGER(args[2]);
+    } else if (strcasecmp(key, "tls_max") == 0 && IS_INTLIKE(args[2])) {
+        s->tls_max = (long)AS_INTEGER(args[2]);
+    } else if (strcasecmp(key, "ciphers") == 0 && args[2].type == TYPE_STRING) {
+        if (s->ciphers) free(s->ciphers);
+        s->ciphers = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "alpn") == 0 && IS_INTLIKE(args[2])) {
+        s->alpn = (long)AS_INTEGER(args[2]) ? 1L : 0L;
+    } else if (strcasecmp(key, "pin_sha256") == 0 && args[2].type == TYPE_STRING) {
+        if (s->pinned_pubkey) free(s->pinned_pubkey);
+        s->pinned_pubkey = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "resolve_add") == 0 && args[2].type == TYPE_STRING) {
+        s->resolve = curl_slist_append(s->resolve, args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "resolve_clear") == 0) {
+        if (s->resolve) { curl_slist_free_all(s->resolve); s->resolve = NULL; }
     } else if (strcasecmp(key, "verify_peer") == 0 && IS_INTLIKE(args[2])) {
         s->verify_peer = (long)AS_INTEGER(args[2]) ? 1L : 0L;
     } else if (strcasecmp(key, "verify_host") == 0 && IS_INTLIKE(args[2])) {
@@ -439,6 +478,7 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     curl_easy_setopt(s->curl, CURLOPT_HEADERDATA, s);
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
+    if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
@@ -483,6 +523,8 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYHOST, s->verify_host ? 2L : 0L);
     if (s->proxy && s->proxy[0]) {
         curl_easy_setopt(s->curl, CURLOPT_PROXY, s->proxy);
+        if (s->proxy_userpwd && s->proxy_userpwd[0]) curl_easy_setopt(s->curl, CURLOPT_PROXYUSERPWD, s->proxy_userpwd);
+        if (s->proxy_type) curl_easy_setopt(s->curl, CURLOPT_PROXYTYPE, s->proxy_type);
     }
 #ifdef CURLOPT_HTTP_VERSION
     if (s->force_http2) {
@@ -490,6 +532,48 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 #elif defined(CURL_HTTP_VERSION_2_0)
         curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+#endif
+    // Extra TLS knobs
+#ifdef CURLOPT_SSL_ENABLE_ALPN
+    curl_easy_setopt(s->curl, CURLOPT_SSL_ENABLE_ALPN, s->alpn);
+#endif
+    if (s->tls_min) {
+        long v = 0;
+        switch (s->tls_min) {
+            case 10: v = CURL_SSLVERSION_TLSv1; break;
+#ifdef CURL_SSLVERSION_TLSv1_1
+            case 11: v = CURL_SSLVERSION_TLSv1_1; break;
+#endif
+#ifdef CURL_SSLVERSION_TLSv1_2
+            case 12: v = CURL_SSLVERSION_TLSv1_2; break;
+#endif
+#ifdef CURL_SSLVERSION_TLSv1_3
+            case 13: v = CURL_SSLVERSION_TLSv1_3; break;
+#endif
+        }
+        if (v) curl_easy_setopt(s->curl, CURLOPT_SSLVERSION, v);
+    }
+#ifdef CURL_SSLVERSION_MAX_DEFAULT
+    if (s->tls_max) {
+        long vmax = 0;
+#ifdef CURL_SSLVERSION_MAX_TLSv1_0
+        if (s->tls_max == 10) vmax = CURL_SSLVERSION_MAX_TLSv1_0;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_1
+        if (s->tls_max == 11) vmax = CURL_SSLVERSION_MAX_TLSv1_1;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_2
+        if (s->tls_max == 12) vmax = CURL_SSLVERSION_MAX_TLSv1_2;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_3
+        if (s->tls_max == 13) vmax = CURL_SSLVERSION_MAX_TLSv1_3;
+#endif
+        if (vmax) curl_easy_setopt(s->curl, CURLOPT_SSLVERSION, vmax);
+    }
+#endif
+    if (s->ciphers && s->ciphers[0]) curl_easy_setopt(s->curl, CURLOPT_SSL_CIPHER_LIST, s->ciphers);
+#ifdef CURLOPT_PINNEDPUBLICKEY
+    if (s->pinned_pubkey && s->pinned_pubkey[0]) curl_easy_setopt(s->curl, CURLOPT_PINNEDPUBLICKEY, s->pinned_pubkey);
 #endif
     }
 #endif
@@ -633,6 +717,7 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     curl_easy_setopt(s->curl, CURLOPT_HEADERDATA, s);
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
+    if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
@@ -667,7 +752,11 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     if (s->client_key && s->client_key[0]) curl_easy_setopt(s->curl, CURLOPT_SSLKEY, s->client_key);
     curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYPEER, s->verify_peer);
     curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYHOST, s->verify_host ? 2L : 0L);
-    if (s->proxy && s->proxy[0]) curl_easy_setopt(s->curl, CURLOPT_PROXY, s->proxy);
+    if (s->proxy && s->proxy[0]) {
+        curl_easy_setopt(s->curl, CURLOPT_PROXY, s->proxy);
+        if (s->proxy_userpwd && s->proxy_userpwd[0]) curl_easy_setopt(s->curl, CURLOPT_PROXYUSERPWD, s->proxy_userpwd);
+        if (s->proxy_type) curl_easy_setopt(s->curl, CURLOPT_PROXYTYPE, s->proxy_type);
+    }
 #ifdef CURLOPT_HTTP_VERSION
     if (s->force_http2) {
 #ifdef CURL_HTTP_VERSION_2TLS
@@ -676,6 +765,48 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
         curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
 #endif
     }
+#endif
+    // Extra TLS knobs
+#ifdef CURLOPT_SSL_ENABLE_ALPN
+    curl_easy_setopt(s->curl, CURLOPT_SSL_ENABLE_ALPN, s->alpn);
+#endif
+    if (s->tls_min) {
+        long v = 0;
+        switch (s->tls_min) {
+            case 10: v = CURL_SSLVERSION_TLSv1; break;
+#ifdef CURL_SSLVERSION_TLSv1_1
+            case 11: v = CURL_SSLVERSION_TLSv1_1; break;
+#endif
+#ifdef CURL_SSLVERSION_TLSv1_2
+            case 12: v = CURL_SSLVERSION_TLSv1_2; break;
+#endif
+#ifdef CURL_SSLVERSION_TLSv1_3
+            case 13: v = CURL_SSLVERSION_TLSv1_3; break;
+#endif
+        }
+        if (v) curl_easy_setopt(s->curl, CURLOPT_SSLVERSION, v);
+    }
+#ifdef CURL_SSLVERSION_MAX_DEFAULT
+    if (s->tls_max) {
+        long vmax = 0;
+#ifdef CURL_SSLVERSION_MAX_TLSv1_0
+        if (s->tls_max == 10) vmax = CURL_SSLVERSION_MAX_TLSv1_0;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_1
+        if (s->tls_max == 11) vmax = CURL_SSLVERSION_MAX_TLSv1_1;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_2
+        if (s->tls_max == 12) vmax = CURL_SSLVERSION_MAX_TLSv1_2;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_3
+        if (s->tls_max == 13) vmax = CURL_SSLVERSION_MAX_TLSv1_3;
+#endif
+        if (vmax) curl_easy_setopt(s->curl, CURLOPT_SSLVERSION, vmax);
+    }
+#endif
+    if (s->ciphers && s->ciphers[0]) curl_easy_setopt(s->curl, CURLOPT_SSL_CIPHER_LIST, s->ciphers);
+#ifdef CURLOPT_PINNEDPUBLICKEY
+    if (s->pinned_pubkey && s->pinned_pubkey[0]) curl_easy_setopt(s->curl, CURLOPT_PINNEDPUBLICKEY, s->pinned_pubkey);
 #endif
     CURLcode res = curl_easy_perform(s->curl);
     long http_code = 0;
@@ -848,8 +979,11 @@ typedef struct HttpAsyncJob_s {
     char* user_agent;
     char* basic_auth;
     char* ca_path; char* client_cert; char* client_key; char* proxy;
+    char* proxy_userpwd; long proxy_type;
+    long alpn; long tls_min; long tls_max; char* ciphers; char* pinned_pubkey;
     long timeout_ms; long follow_redirects; long verify_peer; long verify_host; long force_http2;
     struct curl_slist* headers_slist; // copied list
+    struct curl_slist* resolve_slist; // copied list
     // Per-job accumulators
     char* last_headers;
     int   last_error_code;
@@ -961,9 +1095,15 @@ static void* httpAsyncThread(void* arg) {
     curl_easy_setopt(eh, CURLOPT_HEADERDATA, job);
     if (job->user_agent && job->user_agent[0]) curl_easy_setopt(eh, CURLOPT_USERAGENT, job->user_agent);
     if (job->headers_slist) curl_easy_setopt(eh, CURLOPT_HTTPHEADER, job->headers_slist);
+    if (job->resolve_slist) curl_easy_setopt(eh, CURLOPT_RESOLVE, job->resolve_slist);
     if (job->basic_auth && job->basic_auth[0]) {
         curl_easy_setopt(eh, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(eh, CURLOPT_USERPWD, job->basic_auth);
+    }
+    if (job->proxy && job->proxy[0]) {
+        curl_easy_setopt(eh, CURLOPT_PROXY, job->proxy);
+        if (job->proxy_userpwd && job->proxy_userpwd[0]) curl_easy_setopt(eh, CURLOPT_PROXYUSERPWD, job->proxy_userpwd);
+        if (job->proxy_type) curl_easy_setopt(eh, CURLOPT_PROXYTYPE, job->proxy_type);
     }
     // Progress + cancel
 #ifdef CURLOPT_XFERINFOFUNCTION
@@ -1032,6 +1172,48 @@ static void* httpAsyncThread(void* arg) {
         curl_easy_setopt(eh, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
 #endif
     }
+#endif
+    // Extra TLS knobs
+#ifdef CURLOPT_SSL_ENABLE_ALPN
+    curl_easy_setopt(eh, CURLOPT_SSL_ENABLE_ALPN, job->alpn);
+#endif
+    if (job->tls_min) {
+        long v = 0;
+        switch (job->tls_min) {
+            case 10: v = CURL_SSLVERSION_TLSv1; break;
+#ifdef CURL_SSLVERSION_TLSv1_1
+            case 11: v = CURL_SSLVERSION_TLSv1_1; break;
+#endif
+#ifdef CURL_SSLVERSION_TLSv1_2
+            case 12: v = CURL_SSLVERSION_TLSv1_2; break;
+#endif
+#ifdef CURL_SSLVERSION_TLSv1_3
+            case 13: v = CURL_SSLVERSION_TLSv1_3; break;
+#endif
+        }
+        if (v) curl_easy_setopt(eh, CURLOPT_SSLVERSION, v);
+    }
+#ifdef CURL_SSLVERSION_MAX_DEFAULT
+    if (job->tls_max) {
+        long vmax = 0;
+#ifdef CURL_SSLVERSION_MAX_TLSv1_0
+        if (job->tls_max == 10) vmax = CURL_SSLVERSION_MAX_TLSv1_0;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_1
+        if (job->tls_max == 11) vmax = CURL_SSLVERSION_MAX_TLSv1_1;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_2
+        if (job->tls_max == 12) vmax = CURL_SSLVERSION_MAX_TLSv1_2;
+#endif
+#ifdef CURL_SSLVERSION_MAX_TLSv1_3
+        if (job->tls_max == 13) vmax = CURL_SSLVERSION_MAX_TLSv1_3;
+#endif
+        if (vmax) curl_easy_setopt(eh, CURLOPT_SSLVERSION, vmax);
+    }
+#endif
+    if (job->ciphers && job->ciphers[0]) curl_easy_setopt(eh, CURLOPT_SSL_CIPHER_LIST, job->ciphers);
+#ifdef CURLOPT_PINNEDPUBLICKEY
+    if (job->pinned_pubkey && job->pinned_pubkey[0]) curl_easy_setopt(eh, CURLOPT_PINNEDPUBLICKEY, job->pinned_pubkey);
 #endif
 
     CURLcode res = curl_easy_perform(eh);
@@ -1104,6 +1286,11 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
         job->proxy = s->proxy ? strdup(s->proxy) : NULL;
+        job->proxy_userpwd = s->proxy_userpwd ? strdup(s->proxy_userpwd) : NULL;
+        job->proxy_type = s->proxy_type;
+        job->alpn = s->alpn; job->tls_min = s->tls_min; job->tls_max = s->tls_max;
+        job->ciphers = s->ciphers ? strdup(s->ciphers) : NULL;
+        job->pinned_pubkey = s->pinned_pubkey ? strdup(s->pinned_pubkey) : NULL;
         job->out_file = s->out_file ? strdup(s->out_file) : NULL;
         // Duplicate headers slist
         struct curl_slist* p = s->headers;
@@ -1114,6 +1301,13 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
                 if (!job->headers_slist) { job->headers_slist = node; tail = node; }
                 else { tail->next = node; tail = node; }
             }
+            p = p->next;
+        }
+        // Duplicate resolve slist
+        p = s->resolve; tail = NULL;
+        while (p) {
+            struct curl_slist* node = curl_slist_append(NULL, p->data);
+            if (node) { if (!job->resolve_slist) { job->resolve_slist = node; tail = node; } else { tail->next = node; tail = node; } }
             p = p->next;
         }
     }
@@ -1127,8 +1321,12 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         if (job->client_cert) free(job->client_cert);
         if (job->client_key) free(job->client_key);
         if (job->proxy) free(job->proxy);
+        if (job->proxy_userpwd) free(job->proxy_userpwd);
+        if (job->ciphers) free(job->ciphers);
+        if (job->pinned_pubkey) free(job->pinned_pubkey);
         if (job->out_file) free(job->out_file);
         if (job->headers_slist) curl_slist_free_all(job->headers_slist);
+        if (job->resolve_slist) curl_slist_free_all(job->resolve_slist);
         job->active = 0;
         runtimeError(vm, "httpRequestAsync: pthread_create failed.");
         return makeInt(-1);
@@ -1252,8 +1450,12 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
     if (job->proxy) free(job->proxy);
+    if (job->proxy_userpwd) free(job->proxy_userpwd);
+    if (job->ciphers) free(job->ciphers);
+    if (job->pinned_pubkey) free(job->pinned_pubkey);
     if (job->out_file) free(job->out_file);
     if (job->headers_slist) curl_slist_free_all(job->headers_slist);
+    if (job->resolve_slist) curl_slist_free_all(job->resolve_slist);
     if (job->last_headers) free(job->last_headers);
     if (job->last_error_msg) free(job->last_error_msg);
     memset(job, 0, sizeof(HttpAsyncJob));
