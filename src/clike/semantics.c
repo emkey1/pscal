@@ -465,28 +465,38 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 if (bid != -1) {
                     t = builtinReturnType(name);
                 } else {
-                    // Allow indirect calls through variables (function pointers): if a variable
-                    // with this name exists in any visible scope, treat the call as indirect.
-                    VarType vt = TYPE_UNKNOWN;
-                    for (int i = scopes->depth - 1; i >= 0; --i) {
-                        vt = vtGetType(&scopes->scopes[i], name);
-                        if (vt != TYPE_UNKNOWN) break;
-                    }
-                    if (vt == TYPE_UNKNOWN) {
-                        vt = vtGetType(&globalVars, name);
-                    }
-                    if (vt != TYPE_UNKNOWN) {
-                        // Indirect function pointer call: conservatively assume int return
+                    // Known VM builtins not in clike's local map (HTTP helpers):
+                    if (strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) {
                         t = TYPE_INT32;
                     } else {
-                        fprintf(stderr,
-                                "Type error: call to undefined function '%s' at line %d, column %d\n",
-                                name,
-                                node->token.line,
-                                node->token.column);
-                        clike_error_count++;
+                        // Allow indirect calls through variables (function pointers): if a variable
+                        // with this name exists in any visible scope, treat the call as indirect.
+                        VarType vt = TYPE_UNKNOWN;
+                        for (int i = scopes->depth - 1; i >= 0; --i) {
+                            vt = vtGetType(&scopes->scopes[i], name);
+                            if (vt != TYPE_UNKNOWN) break;
+                        }
+                        if (vt == TYPE_UNKNOWN) {
+                            vt = vtGetType(&globalVars, name);
+                        }
+                        if (vt != TYPE_UNKNOWN) {
+                            // Indirect function pointer call: conservatively assume int return
+                            t = TYPE_INT32;
+                        } else {
+                            fprintf(stderr,
+                                    "Type error: call to undefined function '%s' at line %d, column %d\n",
+                                    name,
+                                    node->token.line,
+                                    node->token.column);
+                            clike_error_count++;
+                        }
                     }
                 }
+            }
+            // Final fallback for known VM helpers that may not be declared in clike tables
+            if ((strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) &&
+                (t == TYPE_UNKNOWN || t == TYPE_VOID)) {
+                t = TYPE_INT32;
             }
             for (int i = 0; i < node->child_count; ++i) {
                 analyzeExpr(node->children[i], scopes);
