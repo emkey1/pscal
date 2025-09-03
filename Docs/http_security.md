@@ -15,7 +15,17 @@ Warning: Treat pinning as a sharp tool. Keep a backup pin for key rotation, and 
 
 ### Compute a sha256 pin from a live host
 
-Replace `example.com` with your hostname:
+Replace `example.com` with your hostname. You can also use the helper script `tools/pin-from-host.sh`:
+
+```
+tools/pin-from-host.sh example.com
+# or with explicit port and SNI
+tools/pin-from-host.sh example.com:8443 --sni service.example.com
+# from a PEM file
+tools/pin-from-host.sh --pem cert.pem
+```
+
+Manually, using OpenSSL:
 
 ```
 # 1) Fetch the leaf cert’s public key
@@ -117,4 +127,3 @@ All options above are honored by both sync and async requests. Async requests sn
 - Pinning failures → SSL error message and `HttpErrorCode/httperrorcode` 4 (SSL). Verify your base64 pin and that no TLS offload is altering the cert.
 - Proxy failures → see `HttpLastError/httplasterror`. Some proxies require specific auth methods or block CONNECT.
 - Cipher/TLS min/max → ensure your libcurl/OpenSSL build supports requested TLS versions and cipher names.
-
