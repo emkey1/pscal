@@ -597,6 +597,27 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             } else if ((strcasecmp(name, "httprequest") == 0)) {
                 // We leave flexible checking for now; ensure it returns int
                 t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httprequesttofile") == 0)) {
+                // httprequesttofile(session:int, method:string, url:string, body:string|mstream|nil, out:string)
+                if (node->child_count != 5) {
+                    fprintf(stderr,
+                            "Type error: httprequesttofile expects 5 arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType a0 = analyzeExpr(node->children[0], scopes);
+                    VarType a1 = analyzeExpr(node->children[1], scopes);
+                    VarType a2 = analyzeExpr(node->children[2], scopes);
+                    VarType a3 = analyzeExpr(node->children[3], scopes);
+                    VarType a4 = analyzeExpr(node->children[4], scopes);
+                    if (!isIntlikeType(a0) || a1 != TYPE_STRING || a2 != TYPE_STRING || !(a3 == TYPE_STRING || a3 == TYPE_MEMORYSTREAM || a3 == TYPE_NIL) || a4 != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: httprequesttofile expects (int, string, string, string|mstream|nil, string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_INT32;
             } else if ((strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) &&
                        (t == TYPE_UNKNOWN || t == TYPE_VOID)) {
                 t = TYPE_INT32;

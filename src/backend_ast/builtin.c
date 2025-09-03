@@ -160,6 +160,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"httpclearheaders", vmBuiltinHttpClearHeaders},
     {"httpsetoption", vmBuiltinHttpSetOption},
     {"httprequest", vmBuiltinHttpRequest},
+    {"httprequesttofile", vmBuiltinHttpRequestToFile},
     {"httprequestasync", vmBuiltinHttpRequestAsync},
     {"httpawait", vmBuiltinHttpAwait},
     {"httplasterror", vmBuiltinHttpLastError},

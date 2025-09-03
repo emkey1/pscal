@@ -1,0 +1,35 @@
+program HttpRequestToFileFileURL;
+
+var s, code: integer;
+    cwd, url, line: string;
+    f: text;
+begin
+  assign(f, 'src_to_file.txt');
+  rewrite(f);
+  writeln(f, 'HelloToFile');
+  close(f);
+
+  s := HttpSession();
+  cwd := GetEnv('PWD');
+  url := 'file://' + cwd + '/src_to_file.txt';
+  code := HttpRequestToFile(s, 'GET', url, nil, 'dst_to_file.txt');
+
+  if code <> 200 then
+  begin
+    writeln('FAIL code=', code);
+  end
+  else
+  begin
+    assign(f, 'dst_to_file.txt');
+    reset(f);
+    readln(f, line);
+    close(f);
+    if line = 'HelloToFile' then
+      writeln('PASS')
+    else
+      writeln('FAIL read=', line);
+  end;
+
+  HttpClose(s);
+end.
+

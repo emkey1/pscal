@@ -60,6 +60,15 @@ static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *use
     return real_size;
 }
 
+/* Callback: writes received data directly to a FILE* */
+static size_t fileWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t real_size = size * nmemb;
+    FILE* f = (FILE*)userp;
+    if (!f) return 0;
+    size_t n = fwrite(contents, 1, real_size, f);
+    return n;
+}
+
 /* headerAccumCallback declared later after HttpSession typedef */
 
 // -------------------- Simple HTTP Session API (sync) --------------------
@@ -449,6 +458,181 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         if (s->last_error_msg) free(s->last_error_msg);
         s->last_error_msg = strdup(curl_easy_strerror(res));
         runtimeError(vm, "httpRequest: curl failed: %s", curl_easy_strerror(res));
+        return makeInt(-1);
+    }
+}
+
+// httpRequestToFile(session, method, url, bodyStrOrMStreamOrNil, outFilename): Integer (status)
+Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 5 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || args[2].type != TYPE_STRING) {
+        runtimeError(vm, "httpRequestToFile expects (session:int, method:string, url:string, body:string|mstream|nil, out:string).");
+        return makeInt(-1);
+    }
+    HttpSession* s = httpGet((int)AS_INTEGER(args[0]));
+    if (!s) { runtimeError(vm, "httpRequestToFile: invalid session id."); return makeInt(-1); }
+
+    const char* method = args[1].s_val ? args[1].s_val : "GET";
+    const char* url = args[2].s_val;
+    const char* body_ptr = NULL;
+    size_t body_len = 0;
+    if (args[3].type == TYPE_STRING && args[3].s_val) {
+        body_ptr = args[3].s_val; body_len = strlen(args[3].s_val);
+    } else if (args[3].type == TYPE_MEMORYSTREAM && args[3].mstream) {
+        body_ptr = (const char*)args[3].mstream->buffer; body_len = (size_t)args[3].mstream->size;
+    } else if (args[3].type == TYPE_NIL) {
+        // ok, no body
+    } else {
+        runtimeError(vm, "httpRequestToFile: body must be string, mstream or nil.");
+        return makeInt(-1);
+    }
+    if (args[4].type != TYPE_STRING || !args[4].s_val) {
+        runtimeError(vm, "httpRequestToFile: out must be a filename string.");
+        return makeInt(-1);
+    }
+    const char* out_path = args[4].s_val;
+
+    // Reset last headers and errors
+    if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+    if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+    s->last_error_code = 0;
+
+    // Handle file:// specially
+    if (url && strncasecmp(url, "file://", 7) == 0) {
+        const char* path = url + 7;
+        FILE* in = fopen(path, "rb");
+        if (!in) {
+            s->last_error_code = 2;
+            s->last_error_msg = strdup("cannot open local file");
+            runtimeError(vm, "httpRequestToFile: cannot open local file '%s'", path);
+            return makeInt(-1);
+        }
+        FILE* out = fopen(out_path, "wb");
+        if (!out) {
+            fclose(in);
+            s->last_error_code = 2;
+            s->last_error_msg = strdup("cannot open out file");
+            runtimeError(vm, "httpRequestToFile: cannot open out file '%s'", out_path);
+            return makeInt(-1);
+        }
+        char buf[8192]; size_t total = 0; size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            fwrite(buf, 1, n, out); total += n;
+        }
+        fclose(in); fclose(out);
+        // Synthesize headers
+        const char* content_type = "application/octet-stream";
+        size_t path_len = strlen(path);
+        if (path_len >= 4) {
+            const char* ext = path + path_len - 4;
+            if (strcasecmp(ext, ".txt") == 0) content_type = "text/plain";
+            else if (strcasecmp(ext, ".htm") == 0 || strcasecmp(ext, ".html") == 0) content_type = "text/html";
+            else if (strcasecmp(ext, ".json") == 0) content_type = "application/json";
+        }
+        char hdr[256];
+        int hdrlen = snprintf(hdr, sizeof(hdr),
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              total, content_type);
+        if (hdrlen > 0) {
+            s->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (s->last_headers) memcpy(s->last_headers, hdr, (size_t)hdrlen + 1);
+        }
+        s->last_status = 200;
+        return makeInt(200);
+    }
+
+    // Network path
+    FILE* out = fopen(out_path, "wb");
+    if (!out) {
+        s->last_error_code = 2;
+        s->last_error_msg = strdup("cannot open out file");
+        runtimeError(vm, "httpRequestToFile: cannot open out file '%s'", out_path);
+        return makeInt(-1);
+    }
+    curl_easy_reset(s->curl);
+    curl_easy_setopt(s->curl, CURLOPT_URL, url);
+    curl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, fileWriteCallback);
+    curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, out);
+    curl_easy_setopt(s->curl, CURLOPT_TIMEOUT_MS, s->timeout_ms);
+    curl_easy_setopt(s->curl, CURLOPT_FOLLOWLOCATION, s->follow_redirects);
+    curl_easy_setopt(s->curl, CURLOPT_HEADERFUNCTION, headerAccumCallback);
+    curl_easy_setopt(s->curl, CURLOPT_HEADERDATA, s);
+    if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
+    if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
+    if (s->basic_auth && s->basic_auth[0]) {
+        curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
+        curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
+    }
+    // Method + body
+    if (strcasecmp(method, "GET") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
+    } else if (strcasecmp(method, "POST") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+        if (body_ptr && body_len > 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        }
+    } else if (strcasecmp(method, "PUT") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        if (body_ptr && body_len > 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        }
+    } else if (strcasecmp(method, "DELETE") == 0) {
+        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    } else {
+        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
+        if (body_ptr && body_len > 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        }
+    }
+    // TLS/Proxy options
+    if (s->ca_path && s->ca_path[0]) curl_easy_setopt(s->curl, CURLOPT_CAINFO, s->ca_path);
+    if (s->client_cert && s->client_cert[0]) curl_easy_setopt(s->curl, CURLOPT_SSLCERT, s->client_cert);
+    if (s->client_key && s->client_key[0]) curl_easy_setopt(s->curl, CURLOPT_SSLKEY, s->client_key);
+    curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYPEER, s->verify_peer);
+    curl_easy_setopt(s->curl, CURLOPT_SSL_VERIFYHOST, s->verify_host ? 2L : 0L);
+    if (s->proxy && s->proxy[0]) curl_easy_setopt(s->curl, CURLOPT_PROXY, s->proxy);
+#ifdef CURLOPT_HTTP_VERSION
+    if (s->force_http2) {
+#ifdef CURL_HTTP_VERSION_2TLS
+        curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#elif defined(CURL_HTTP_VERSION_2_0)
+        curl_easy_setopt(s->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+#endif
+    }
+#endif
+    CURLcode res = curl_easy_perform(s->curl);
+    long http_code = 0;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+        s->last_status = http_code;
+        fclose(out);
+        return makeInt((int)http_code);
+    } else {
+        int code = 1;
+        switch (res) {
+            case CURLE_OPERATION_TIMEDOUT: code = 3; break;
+            case CURLE_SSL_CONNECT_ERROR:
+            case CURLE_PEER_FAILED_VERIFICATION:
+            case CURLE_SSL_CACERT:
+#ifdef CURLE_SSL_CACERT_BADFILE
+            case CURLE_SSL_CACERT_BADFILE:
+#endif
+            case CURLE_USE_SSL_FAILED: code = 4; break;
+            case CURLE_COULDNT_RESOLVE_HOST:
+            case CURLE_COULDNT_RESOLVE_PROXY: code = 5; break;
+            case CURLE_COULDNT_CONNECT: code = 6; break;
+            case CURLE_READ_ERROR:
+            case CURLE_WRITE_ERROR:
+            case CURLE_FILE_COULDNT_READ_FILE: code = 2; break;
+            default: code = 1; break;
+        }
+        s->last_error_code = code;
+        if (s->last_error_msg) free(s->last_error_msg);
+        s->last_error_msg = strdup(curl_easy_strerror(res));
+        fclose(out);
+        runtimeError(vm, "httpRequestToFile: curl failed: %s", curl_easy_strerror(res));
         return makeInt(-1);
     }
 }
