@@ -1,4 +1,6 @@
 name: SDL Smoke Tests (manual)
+permissions:
+  contents: read
 
 on:
   workflow_dispatch:
