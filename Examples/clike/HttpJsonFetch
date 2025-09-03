@@ -1,0 +1,12 @@
+#!/usr/bin/env clike
+
+int main() {
+  int s = httpsession();
+  mstream out = mstreamcreate();
+  int code = httprequest(s, "GET", "https://jsonplaceholder.typicode.com/todos/1", NULL, out);
+  printf("status: %d\n", code);
+  printf("body: %s\n", mstreambuffer(out));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}

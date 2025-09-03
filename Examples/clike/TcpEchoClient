@@ -1,0 +1,12 @@
+#!/usr/bin/env clike
+
+int main() {
+  int s = socketcreate(0);
+  socketconnect(s, "tcpbin.com", 4242);
+  socketsend(s, "ping\n");
+  mstream resp = socketreceive(s, 1024);
+  printf("echo: %s\n", mstreambuffer(resp));
+  mstreamfree(&resp);
+  socketclose(s);
+  return 0;
+}

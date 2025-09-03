@@ -46,6 +46,14 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
 
   echo "---- $test_name ----"
 
+  server_pid=""
+  server_script="$SCRIPT_DIR/clike/$test_name.net"
+  if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
+    python3 "$server_script" &
+    server_pid=$!
+    sleep 1
+  fi
+
   set +e
   if [ -f "$in_file" ]; then
     "$CLIKE_BIN" "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
@@ -95,6 +103,11 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
       cat "$actual_err"
       EXIT_CODE=1
     fi
+  fi
+
+  if [ -n "$server_pid" ]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
   fi
 
   rm -f "$actual_out" "$actual_err"
