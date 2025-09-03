@@ -4,10 +4,23 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <pthread.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #include "backend_ast/builtin.h"
 #include "Pascal/globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+
+static void sleep_ms(long ms) {
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    usleep(ms * 1000);
+#endif
+}
 
 /* Callback for libcurl: writes received data into a MStream */
 static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *userp) {
@@ -127,6 +140,11 @@ typedef struct HttpSession_s {
     char* accept_encoding; // CURLOPT_ACCEPT_ENCODING
     char* cookie_file;    // CURLOPT_COOKIEFILE
     char* cookie_jar;     // CURLOPT_COOKIEJAR
+    long max_retries;     // number of retries
+    long retry_delay_ms;  // initial backoff delay
+    curl_off_t max_recv_speed; // rate limiting
+    curl_off_t max_send_speed;
+    char* upload_file;    // path for streaming upload
     // Auth and last-results
     char* basic_auth;     // user:pass for basic auth
     char* last_headers;   // raw response headers from last request
@@ -165,6 +183,10 @@ static int httpAllocSession(void) {
         g_http_sessions[i].active = 1;
         g_http_sessions[i].verify_peer = 1;
         g_http_sessions[i].verify_host = 1;
+        g_http_sessions[i].max_retries = 0;
+        g_http_sessions[i].retry_delay_ms = 0;
+        g_http_sessions[i].max_recv_speed = 0;
+        g_http_sessions[i].max_send_speed = 0;
         return i;
     }
     }
@@ -190,6 +212,7 @@ static void httpFreeSession(int id) {
     if (s->proxy_userpwd) { free(s->proxy_userpwd); s->proxy_userpwd = NULL; }
     if (s->ciphers) { free(s->ciphers); s->ciphers = NULL; }
     if (s->pinned_pubkey) { free(s->pinned_pubkey); s->pinned_pubkey = NULL; }
+    if (s->upload_file) { free(s->upload_file); s->upload_file = NULL; }
     if (s->resolve) { curl_slist_free_all(s->resolve); s->resolve = NULL; }
     if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
     if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
@@ -342,6 +365,17 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
     } else if (strcasecmp(key, "cookie_jar") == 0 && args[2].type == TYPE_STRING) {
         if (s->cookie_jar) free(s->cookie_jar);
         s->cookie_jar = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "retry_max") == 0 && IS_INTLIKE(args[2])) {
+        s->max_retries = (long)AS_INTEGER(args[2]);
+    } else if (strcasecmp(key, "retry_delay_ms") == 0 && IS_INTLIKE(args[2])) {
+        s->retry_delay_ms = (long)AS_INTEGER(args[2]);
+    } else if (strcasecmp(key, "max_recv_speed") == 0 && IS_INTLIKE(args[2])) {
+        s->max_recv_speed = (curl_off_t)AS_INTEGER(args[2]);
+    } else if (strcasecmp(key, "max_send_speed") == 0 && IS_INTLIKE(args[2])) {
+        s->max_send_speed = (curl_off_t)AS_INTEGER(args[2]);
+    } else if (strcasecmp(key, "upload_file") == 0 && args[2].type == TYPE_STRING) {
+        if (s->upload_file) free(s->upload_file);
+        s->upload_file = strdup(args[2].s_val ? args[2].s_val : "");
     } else {
         runtimeError(vm, "httpSetOption: unsupported option or value type for '%s'.", key);
     }
@@ -496,33 +530,60 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
     if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
     if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
+    if (s->max_recv_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_RECV_SPEED_LARGE, s->max_recv_speed);
+    if (s->max_send_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_SEND_SPEED_LARGE, s->max_send_speed);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
     }
-
-    // Method + body
-    if (strcasecmp(method, "GET") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
-    } else if (strcasecmp(method, "POST") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
-        if (body_ptr && body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+    FILE* upload_fp = NULL;
+    if (s->upload_file && s->upload_file[0]) {
+        upload_fp = fopen(s->upload_file, "rb");
+        if (!upload_fp) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = strdup("cannot open upload file");
+            if (tmp_out_file) fclose(tmp_out_file);
+            runtimeError(vm, "httpRequest: cannot open upload_file '%s'", s->upload_file);
+            return makeInt(-1);
         }
-    } else if (strcasecmp(method, "PUT") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
-        if (body_ptr && body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        curl_easy_setopt(s->curl, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(s->curl, CURLOPT_READDATA, upload_fp);
+        fseeko(upload_fp, 0, SEEK_END);
+        curl_off_t up_size = ftello(upload_fp);
+        fseeko(upload_fp, 0, SEEK_SET);
+        curl_easy_setopt(s->curl, CURLOPT_INFILESIZE_LARGE, up_size);
+        if (strcasecmp(method, "POST") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+        } else if (strcasecmp(method, "PUT") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        } else {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
         }
-    } else if (strcasecmp(method, "DELETE") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     } else {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
-        if (body_ptr && body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        // Method + body
+        if (strcasecmp(method, "GET") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
+        } else if (strcasecmp(method, "POST") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+            if (body_ptr && body_len > 0) {
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+            }
+        } else if (strcasecmp(method, "PUT") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+            if (body_ptr && body_len > 0) {
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+            }
+        } else if (strcasecmp(method, "DELETE") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+        } else {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
+            if (body_ptr && body_len > 0) {
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+            }
         }
     }
 
@@ -601,14 +662,35 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         args[4].mstream->buffer[0] = '\0';
     }
 
-    CURLcode res = curl_easy_perform(s->curl);
     long http_code = 0;
-    if (res == CURLE_OK) {
-        curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    CURLcode res = CURLE_OK;
+    long delay = s->retry_delay_ms;
+    int attempt = 0;
+    while (1) {
+        res = curl_easy_perform(s->curl);
+        if (res == CURLE_OK) {
+            curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+            if (http_code < 500) break;
+        }
+        if (attempt >= s->max_retries) break;
+        attempt++;
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        args[4].mstream->size = 0;
+        if (args[4].mstream->buffer && args[4].mstream->capacity > 0) args[4].mstream->buffer[0] = '\0';
+        if (upload_fp) fseeko(upload_fp, 0, SEEK_SET);
+        if (delay > 0) { sleep_ms(delay); delay *= 2; }
+    }
+
+    if (upload_fp) fclose(upload_fp);
+
+    if (res == CURLE_OK && http_code < 500) {
         s->last_status = http_code;
         if (tmp_out_file) fclose(tmp_out_file);
         return makeInt((int)http_code);
-    } else {
+    }
+
+    if (res != CURLE_OK) {
         // Map curl error to a small VM error space
         // 1: generic, 2: I/O, 3: timeout, 4: ssl, 5: resolve, 6: connect
         int code = 1;
@@ -638,6 +720,14 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "httpRequest: curl failed: %s", curl_easy_strerror(res));
         return makeInt(-1);
     }
+
+    s->last_status = http_code;
+    s->last_error_code = 1;
+    if (s->last_error_msg) free(s->last_error_msg);
+    s->last_error_msg = strdup("HTTP error");
+    if (tmp_out_file) fclose(tmp_out_file);
+    runtimeError(vm, "httpRequest: HTTP status %ld", http_code);
+    return makeInt(-1);
 }
 
 // httpRequestToFile(session, method, url, bodyStrOrMStreamOrNil, outFilename): Integer (status)
@@ -740,32 +830,57 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
     if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
     if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
+    if (s->max_recv_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_RECV_SPEED_LARGE, s->max_recv_speed);
+    if (s->max_send_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_SEND_SPEED_LARGE, s->max_send_speed);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
     }
-    // Method + body
-    if (strcasecmp(method, "GET") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
-    } else if (strcasecmp(method, "POST") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
-        if (body_ptr && body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+    FILE* upload_fp = NULL;
+    if (s->upload_file && s->upload_file[0]) {
+        upload_fp = fopen(s->upload_file, "rb");
+        if (!upload_fp) {
+            s->last_error_code = 2;
+            s->last_error_msg = strdup("cannot open upload file");
+            fclose(out);
+            runtimeError(vm, "httpRequestToFile: cannot open upload_file '%s'", s->upload_file);
+            return makeInt(-1);
         }
-    } else if (strcasecmp(method, "PUT") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
-        if (body_ptr && body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        curl_easy_setopt(s->curl, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(s->curl, CURLOPT_READDATA, upload_fp);
+        fseeko(upload_fp, 0, SEEK_END); curl_off_t up_size = ftello(upload_fp); fseeko(upload_fp, 0, SEEK_SET);
+        curl_easy_setopt(s->curl, CURLOPT_INFILESIZE_LARGE, up_size);
+        if (strcasecmp(method, "POST") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+        } else if (strcasecmp(method, "PUT") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        } else {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
         }
-    } else if (strcasecmp(method, "DELETE") == 0) {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     } else {
-        curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
-        if (body_ptr && body_len > 0) {
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
-            curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+        // Method + body
+        if (strcasecmp(method, "GET") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_HTTPGET, 1L);
+        } else if (strcasecmp(method, "POST") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_POST, 1L);
+            if (body_ptr && body_len > 0) {
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+            }
+        } else if (strcasecmp(method, "PUT") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+            if (body_ptr && body_len > 0) {
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+            }
+        } else if (strcasecmp(method, "DELETE") == 0) {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+        } else {
+            curl_easy_setopt(s->curl, CURLOPT_CUSTOMREQUEST, method);
+            if (body_ptr && body_len > 0) {
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDS, body_ptr);
+                curl_easy_setopt(s->curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+            }
         }
     }
     // TLS/Proxy options
@@ -830,14 +945,34 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
 #ifdef CURLOPT_PINNEDPUBLICKEY
     if (s->pinned_pubkey && s->pinned_pubkey[0]) curl_easy_setopt(s->curl, CURLOPT_PINNEDPUBLICKEY, s->pinned_pubkey);
 #endif
-    CURLcode res = curl_easy_perform(s->curl);
     long http_code = 0;
-    if (res == CURLE_OK) {
-        curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    CURLcode res = CURLE_OK;
+    long delay = s->retry_delay_ms;
+    int attempt = 0;
+    while (1) {
+        res = curl_easy_perform(s->curl);
+        if (res == CURLE_OK) {
+            curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &http_code);
+            if (http_code < 500) break;
+        }
+        if (attempt >= s->max_retries) break;
+        attempt++;
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        if (upload_fp) fseeko(upload_fp, 0, SEEK_SET);
+        fclose(out);
+        out = fopen(out_path, "wb");
+        if (!out) { s->last_error_code = 2; s->last_error_msg = strdup("cannot open out file"); break; }
+        curl_easy_setopt(s->curl, CURLOPT_WRITEDATA, out);
+        if (delay > 0) { sleep_ms(delay); delay *= 2; }
+    }
+    if (upload_fp) fclose(upload_fp);
+    if (res == CURLE_OK && http_code < 500) {
         s->last_status = http_code;
         fclose(out);
         return makeInt((int)http_code);
-    } else {
+    }
+    if (res != CURLE_OK) {
         int code = 1;
         switch (res) {
             case CURLE_OPERATION_TIMEDOUT: code = 3; break;
@@ -865,6 +1000,13 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "httpRequestToFile: curl failed: %s", curl_easy_strerror(res));
         return makeInt(-1);
     }
+    s->last_status = http_code;
+    s->last_error_code = 1;
+    if (s->last_error_msg) free(s->last_error_msg);
+    s->last_error_msg = strdup("HTTP error");
+    fclose(out);
+    runtimeError(vm, "httpRequestToFile: HTTP status %ld", http_code);
+    return makeInt(-1);
 }
 
 // -------------------- Existing simple helpers --------------------
@@ -1005,6 +1147,11 @@ typedef struct HttpAsyncJob_s {
     char* accept_encoding;
     char* cookie_file;
     char* cookie_jar;
+    long max_retries;
+    long retry_delay_ms;
+    curl_off_t max_recv_speed;
+    curl_off_t max_send_speed;
+    char* upload_file;
     char* ca_path; char* client_cert; char* client_key; char* proxy;
     char* proxy_userpwd; long proxy_type;
     long alpn; long tls_min; long tls_max; char* ciphers; char* pinned_pubkey;
@@ -1161,6 +1308,8 @@ static void* httpAsyncThread(void* arg) {
     if (job->accept_encoding) curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING, job->accept_encoding);
     if (job->cookie_file) curl_easy_setopt(eh, CURLOPT_COOKIEFILE, job->cookie_file);
     if (job->cookie_jar) curl_easy_setopt(eh, CURLOPT_COOKIEJAR, job->cookie_jar);
+    if (job->max_recv_speed > 0) curl_easy_setopt(eh, CURLOPT_MAX_RECV_SPEED_LARGE, job->max_recv_speed);
+    if (job->max_send_speed > 0) curl_easy_setopt(eh, CURLOPT_MAX_SEND_SPEED_LARGE, job->max_send_speed);
     if (job->basic_auth && job->basic_auth[0]) {
         curl_easy_setopt(eh, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(eh, CURLOPT_USERPWD, job->basic_auth);
@@ -1180,27 +1329,49 @@ static void* httpAsyncThread(void* arg) {
     curl_easy_setopt(eh, CURLOPT_PROGRESSDATA, job);
     curl_easy_setopt(eh, CURLOPT_NOPROGRESS, 0L);
 #endif
-    if (strcasecmp(job->method, "GET") == 0) {
-        curl_easy_setopt(eh, CURLOPT_HTTPGET, 1L);
-    } else if (strcasecmp(job->method, "POST") == 0) {
-        curl_easy_setopt(eh, CURLOPT_POST, 1L);
-        if (job->body && job->body_len > 0) {
-            curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
-            curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+    FILE* upload_fp = NULL;
+    if (job->upload_file && job->upload_file[0]) {
+        upload_fp = fopen(job->upload_file, "rb");
+        if (!upload_fp) {
+            job->status = -1; job->error = strdup("cannot open upload file");
+            if (tmp_file) fclose(tmp_file);
+            if (eh) curl_easy_cleanup(eh);
+            job->done = 1; return NULL;
         }
-    } else if (strcasecmp(job->method, "PUT") == 0) {
-        curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "PUT");
-        if (job->body && job->body_len > 0) {
-            curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
-            curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+        curl_easy_setopt(eh, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(eh, CURLOPT_READDATA, upload_fp);
+        fseeko(upload_fp, 0, SEEK_END); curl_off_t up_size = ftello(upload_fp); fseeko(upload_fp, 0, SEEK_SET);
+        curl_easy_setopt(eh, CURLOPT_INFILESIZE_LARGE, up_size);
+        if (strcasecmp(job->method, "POST") == 0) {
+            curl_easy_setopt(eh, CURLOPT_POST, 1L);
+        } else if (strcasecmp(job->method, "PUT") == 0) {
+            curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "PUT");
+        } else {
+            curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, job->method);
         }
-    } else if (strcasecmp(job->method, "DELETE") == 0) {
-        curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "DELETE");
     } else {
-        curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, job->method);
-        if (job->body && job->body_len > 0) {
-            curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
-            curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+        if (strcasecmp(job->method, "GET") == 0) {
+            curl_easy_setopt(eh, CURLOPT_HTTPGET, 1L);
+        } else if (strcasecmp(job->method, "POST") == 0) {
+            curl_easy_setopt(eh, CURLOPT_POST, 1L);
+            if (job->body && job->body_len > 0) {
+                curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
+                curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+            }
+        } else if (strcasecmp(job->method, "PUT") == 0) {
+            curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "PUT");
+            if (job->body && job->body_len > 0) {
+                curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
+                curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+            }
+        } else if (strcasecmp(job->method, "DELETE") == 0) {
+            curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, "DELETE");
+        } else {
+            curl_easy_setopt(eh, CURLOPT_CUSTOMREQUEST, job->method);
+            if (job->body && job->body_len > 0) {
+                curl_easy_setopt(eh, CURLOPT_POSTFIELDS, job->body);
+                curl_easy_setopt(eh, CURLOPT_POSTFIELDSIZE, (long)job->body_len);
+            }
         }
     }
     if (job->ca_path && job->ca_path[0]) curl_easy_setopt(eh, CURLOPT_CAINFO, job->ca_path);
@@ -1261,36 +1432,59 @@ static void* httpAsyncThread(void* arg) {
     if (job->pinned_pubkey && job->pinned_pubkey[0]) curl_easy_setopt(eh, CURLOPT_PINNEDPUBLICKEY, job->pinned_pubkey);
 #endif
 
-    CURLcode res = curl_easy_perform(eh);
     long http_code = 0;
-    if (res == CURLE_OK) {
-        curl_easy_getinfo(eh, CURLINFO_RESPONSE_CODE, &http_code);
+    CURLcode res = CURLE_OK;
+    long delay = job->retry_delay_ms;
+    int attempt = 0;
+    while (1) {
+        res = curl_easy_perform(eh);
+        if (res == CURLE_OK) {
+            curl_easy_getinfo(eh, CURLINFO_RESPONSE_CODE, &http_code);
+            if (http_code < 500) break;
+        }
+        if (attempt >= job->max_retries) break;
+        attempt++;
+        if (job->last_headers) { free(job->last_headers); job->last_headers = NULL; }
+        if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+        if (job->result) { job->result->size = 0; if (job->result->buffer) job->result->buffer[0] = '\0'; }
+        if (tmp_file) { fclose(tmp_file); tmp_file = fopen(job->out_file, "wb"); dual.f = tmp_file; }
+        if (upload_fp) fseeko(upload_fp, 0, SEEK_SET);
+        if (delay > 0) { sleep_ms(delay); delay *= 2; }
+    }
+    if (upload_fp) fclose(upload_fp);
+    if (res == CURLE_OK && http_code < 500) {
         job->status = http_code;
     } else {
         job->status = -1;
-        job->last_error_msg = strdup(curl_easy_strerror(res));
-        int code = 1;
-        switch (res) {
-            case CURLE_OPERATION_TIMEDOUT: code = 3; break;
-            case CURLE_SSL_CONNECT_ERROR:
-            case CURLE_PEER_FAILED_VERIFICATION:
+        if (res != CURLE_OK) {
+            job->last_error_msg = strdup(curl_easy_strerror(res));
+            int code = 1;
+            switch (res) {
+                case CURLE_OPERATION_TIMEDOUT: code = 3; break;
+                case CURLE_SSL_CONNECT_ERROR:
+                case CURLE_PEER_FAILED_VERIFICATION:
 #if defined(CURLE_SSL_CACERT) && (CURLE_SSL_CACERT != CURLE_PEER_FAILED_VERIFICATION)
-            case CURLE_SSL_CACERT:
+                case CURLE_SSL_CACERT:
 #endif
 #ifdef CURLE_SSL_CACERT_BADFILE
-            case CURLE_SSL_CACERT_BADFILE:
+                case CURLE_SSL_CACERT_BADFILE:
 #endif
-            case CURLE_USE_SSL_FAILED: code = 4; break;
-            case CURLE_COULDNT_RESOLVE_HOST:
-            case CURLE_COULDNT_RESOLVE_PROXY: code = 5; break;
-            case CURLE_COULDNT_CONNECT: code = 6; break;
-            case CURLE_READ_ERROR:
-            case CURLE_WRITE_ERROR:
-            case CURLE_FILE_COULDNT_READ_FILE: code = 2; break;
-            default: code = 1; break;
+                case CURLE_USE_SSL_FAILED: code = 4; break;
+                case CURLE_COULDNT_RESOLVE_HOST:
+                case CURLE_COULDNT_RESOLVE_PROXY: code = 5; break;
+                case CURLE_COULDNT_CONNECT: code = 6; break;
+                case CURLE_READ_ERROR:
+                case CURLE_WRITE_ERROR:
+                case CURLE_FILE_COULDNT_READ_FILE: code = 2; break;
+                default: code = 1; break;
+            }
+            job->last_error_code = code;
+            job->error = job->last_error_msg ? strdup(job->last_error_msg) : strdup("error");
+        } else {
+            job->last_error_code = 1;
+            job->last_error_msg = strdup("HTTP error");
+            job->error = strdup("HTTP error");
         }
-        job->last_error_code = code;
-        job->error = job->last_error_msg ? strdup(job->last_error_msg) : strdup("error");
     }
     if (tmp_file) fclose(tmp_file);
     if (eh) curl_easy_cleanup(eh);
@@ -1332,6 +1526,11 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
         job->cookie_file = s->cookie_file ? strdup(s->cookie_file) : NULL;
         job->cookie_jar = s->cookie_jar ? strdup(s->cookie_jar) : NULL;
+        job->max_retries = s->max_retries;
+        job->retry_delay_ms = s->retry_delay_ms;
+        job->max_recv_speed = s->max_recv_speed;
+        job->max_send_speed = s->max_send_speed;
+        job->upload_file = s->upload_file ? strdup(s->upload_file) : NULL;
         job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
@@ -1370,6 +1569,7 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         if (job->accept_encoding) free(job->accept_encoding);
         if (job->cookie_file) free(job->cookie_file);
         if (job->cookie_jar) free(job->cookie_jar);
+        if (job->upload_file) free(job->upload_file);
         if (job->ca_path) free(job->ca_path);
         if (job->client_cert) free(job->client_cert);
         if (job->client_key) free(job->client_key);
@@ -1429,6 +1629,11 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
         job->cookie_file = s->cookie_file ? strdup(s->cookie_file) : NULL;
         job->cookie_jar = s->cookie_jar ? strdup(s->cookie_jar) : NULL;
+        job->max_retries = s->max_retries;
+        job->retry_delay_ms = s->retry_delay_ms;
+        job->max_recv_speed = s->max_recv_speed;
+        job->max_send_speed = s->max_send_speed;
+        job->upload_file = s->upload_file ? strdup(s->upload_file) : NULL;
         job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
@@ -1450,6 +1655,7 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         if (job->accept_encoding) free(job->accept_encoding);
         if (job->cookie_file) free(job->cookie_file);
         if (job->cookie_jar) free(job->cookie_jar);
+        if (job->upload_file) free(job->upload_file);
         if (job->ca_path) free(job->ca_path);
         if (job->client_cert) free(job->client_cert);
         if (job->client_key) free(job->client_key);
@@ -1508,6 +1714,7 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     if (job->accept_encoding) free(job->accept_encoding);
     if (job->cookie_file) free(job->cookie_file);
     if (job->cookie_jar) free(job->cookie_jar);
+    if (job->upload_file) free(job->upload_file);
     if (job->ca_path) free(job->ca_path);
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
@@ -1569,6 +1776,7 @@ Value vmBuiltinHttpTryAwait(VM* vm, int arg_count, Value* args) {
     if (job->accept_encoding) free(job->accept_encoding);
     if (job->cookie_file) free(job->cookie_file);
     if (job->cookie_jar) free(job->cookie_jar);
+    if (job->upload_file) free(job->upload_file);
     if (job->ca_path) free(job->ca_path);
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
