@@ -18,4 +18,12 @@ struct VM_s;
 Value vmBuiltinApiSend(struct VM_s* vm, int arg_count, Value* args); // ADDED
 Value vmBuiltinApiReceive(struct VM_s* vm, int arg_count, Value* args); // ADDED
 
+// HTTP Session API (sync)
+Value vmBuiltinHttpSession(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpClose(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpSetHeader(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpClearHeaders(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpSetOption(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpRequest(struct VM_s* vm, int arg_count, Value* args);
+
 #endif // BUILTIN_NETWORK_API_H
