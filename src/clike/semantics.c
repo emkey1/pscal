@@ -313,10 +313,21 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             }
             return node->var_type;
         }
-        case TCAST_ADDR:
+        case TCAST_ADDR: {
+            // Address-of: allow &var and &func
+            if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                char *name = tokenToCString(node->left->token);
+                VarType ft = getFunctionType(name);
+                free(name);
+                if (ft != TYPE_UNKNOWN) {
+                    node->var_type = TYPE_POINTER;
+                    return TYPE_POINTER;
+                }
+            }
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_POINTER;
             return TYPE_POINTER;
+        }
         case TCAST_DEREF:
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_UNKNOWN;
@@ -360,7 +371,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 !(isRealType(lt) && isRealType(rt)) &&
                 !(isRealType(lt) && isIntlikeType(rt)) &&
                 !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
-                !(isIntlikeType(lt) && isIntlikeType(rt))) {
+                !(isIntlikeType(lt) && isIntlikeType(rt)) &&
+                !(isIntlikeType(lt) && rt == TYPE_POINTER)) {
                 fprintf(stderr,
                         "Type error: cannot assign %s to %s at line %d, column %d\n",
                         varTypeToString(rt), varTypeToString(lt),
@@ -453,12 +465,27 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 if (bid != -1) {
                     t = builtinReturnType(name);
                 } else {
-                    fprintf(stderr,
-                            "Type error: call to undefined function '%s' at line %d, column %d\n",
-                            name,
-                            node->token.line,
-                            node->token.column);
-                    clike_error_count++;
+                    // Allow indirect calls through variables (function pointers): if a variable
+                    // with this name exists in any visible scope, treat the call as indirect.
+                    VarType vt = TYPE_UNKNOWN;
+                    for (int i = scopes->depth - 1; i >= 0; --i) {
+                        vt = vtGetType(&scopes->scopes[i], name);
+                        if (vt != TYPE_UNKNOWN) break;
+                    }
+                    if (vt == TYPE_UNKNOWN) {
+                        vt = vtGetType(&globalVars, name);
+                    }
+                    if (vt != TYPE_UNKNOWN) {
+                        // Indirect function pointer call: conservatively assume int return
+                        t = TYPE_INT32;
+                    } else {
+                        fprintf(stderr,
+                                "Type error: call to undefined function '%s' at line %d, column %d\n",
+                                name,
+                                node->token.line,
+                                node->token.column);
+                        clike_error_count++;
+                    }
                 }
             }
             for (int i = 0; i < node->child_count; ++i) {
@@ -614,7 +641,8 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                     if (declType != initType &&
                         !(isRealType(declType) && isRealType(initType)) &&
                         !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
-                        !(isIntlikeType(declType) && isIntlikeType(initType))) {
+                        !(isIntlikeType(declType) && isIntlikeType(initType)) &&
+                        !(isIntlikeType(declType) && initType == TYPE_POINTER)) {
                         fprintf(stderr,
                                 "Type error: cannot assign %s to %s at line %d, column %d\n",
                                 varTypeToString(initType), varTypeToString(declType),
