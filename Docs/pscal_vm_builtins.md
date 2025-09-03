@@ -119,7 +119,7 @@ VM. For instructions on adding your own routines, see
 | HttpClose | (session: Integer) | void | Destroy a session and free resources. |
 | HttpSetHeader | (session: Integer, name: String, value: String) | void | Add a request header to the session. |
 | HttpClearHeaders | (session: Integer) | void | Clear all accumulated headers. |
-| HttpSetOption | (session: Integer, key: String, value: Int or String) | void | Set basic options: `timeout_ms` (Int), `follow_redirects` (Int 0/1), `user_agent` (String). |
+| HttpSetOption | (session: Integer, key: String, value: Int or String) | void | Set options such as `timeout_ms` (Int), `follow_redirects` (Int 0/1), `user_agent` (String), `accept_encoding` (String). |
 | HttpRequest | (session: Integer, method: String, url: String, body: String|MStream|nil, out: MStream) | Integer (status) | Perform a request; writes response body into `out`. Returns HTTP status or -1 on transport error. |
 
 Notes
