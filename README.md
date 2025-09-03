@@ -153,6 +153,7 @@ Built-in HTTP helpers are available to all front ends (Pascal and CLike). Highli
 - Headers: `HttpSetHeader/httpsetheader`, `HttpClearHeaders/httpclearheaders`, `HttpGetLastHeaders/httpgetlastheaders`, `HttpGetHeader/httpgetheader`.
 - Options via `HttpSetOption/httpsetoption` (key → value):
   - `timeout_ms`, `follow_redirects`, `user_agent`
+  - Compression: `accept_encoding` (e.g., `gzip` or empty string for all supported encodings)
   - TLS: `ca_path`, `client_cert`, `client_key`, hostname checks via `verify_peer`, `verify_host`
   - Proxy: `proxy`
   - HTTP/2: `http2`
