@@ -1,0 +1,36 @@
+program HttpHeadersAuthDemo;
+
+var s, code: integer;
+    ms: mstream;
+    body, ctype, server: string;
+begin
+  s := HttpSession();
+  HttpSetHeader(s, 'Accept', 'text/html');
+  ms := mstreamcreate();
+
+  { Simple header fetch }
+  code := HttpRequest(s, 'GET', 'https://example.com', nil, ms);
+  ctype := HttpGetHeader(s, 'Content-Type');
+  server := HttpGetHeader(s, 'Server');
+  writeln('Status: ', code);
+  writeln('Content-Type: ', ctype);
+  writeln('Server: ', server);
+
+  { Print a snippet of the body }
+  body := mstreambuffer(ms);
+  writeln('Body (first 80 chars):');
+  writeln(copy(body, 1, 80));
+
+  { Basic auth example (uncomment to try with httpbin) }
+  { 
+  HttpSetOption(s, 'basic_auth', 'user:passwd');
+  code := HttpRequest(s, 'GET', 'https://httpbin.org/basic-auth/user/passwd', nil, ms);
+  writeln('httpbin basic-auth status: ', code);
+  if code <> 200 then
+    writeln('ErrorCode: ', HttpErrorCode(s), ' Message: ', HttpLastError(s));
+  }
+
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+

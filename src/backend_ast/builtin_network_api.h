@@ -27,6 +27,7 @@ Value vmBuiltinHttpSetOption(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpRequest(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpGetLastHeaders(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHttpErrorCode(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinHttpGetHeader(struct VM_s* vm, int arg_count, Value* args);
 
 // HTTP Async API
 Value vmBuiltinHttpRequestAsync(struct VM_s* vm, int arg_count, Value* args);

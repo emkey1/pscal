@@ -773,6 +773,71 @@ Value vmBuiltinHttpErrorCode(VM* vm, int arg_count, Value* args) {
     return makeInt(s->last_error_code);
 }
 
+// HttpGetHeader(session, name): String (value from last response headers; empty if not found)
+Value vmBuiltinHttpGetHeader(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING) {
+        runtimeError(vm, "httpGetHeader expects (session:int, name:string).");
+        return makeString("");
+    }
+    HttpSession* s = httpGet((int)AS_INTEGER(args[0]));
+    if (!s || !s->last_headers) return makeString("");
+    const char* name = args[1].s_val ? args[1].s_val : "";
+    size_t name_len = strlen(name);
+    if (name_len == 0) return makeString("");
+
+    // Identify last header block (after final blank line)
+    const char* all = s->last_headers;
+    const char* block = all;
+    const char* p = all;
+    while (1) {
+        const char* crlfcrlf = strstr(p, "\r\n\r\n");
+        const char* lflf = strstr(p, "\n\n");
+        const char* sep = NULL;
+        if (crlfcrlf && lflf) sep = (crlfcrlf < lflf) ? crlfcrlf : lflf;
+        else if (crlfcrlf) sep = crlfcrlf;
+        else if (lflf) sep = lflf;
+        else break;
+        block = sep + ((sep == crlfcrlf) ? 4 : 2);
+        p = block;
+    }
+
+    // Scan lines in the last block for header name
+    const char* line = block;
+    while (line && *line) {
+        const char* eol = strchr(line, '\n');
+        size_t linelen = eol ? (size_t)(eol - line) : strlen(line);
+        // Trim trailing CR
+        while (linelen > 0 && (line[linelen - 1] == '\r' || line[linelen - 1] == '\n')) linelen--;
+        // Find colon
+        const char* colon = memchr(line, ':', linelen);
+        if (colon) {
+            // header name range: line..colon
+            size_t hlen = (size_t)(colon - line);
+            // trim trailing spaces from name
+            while (hlen > 0 && (line[hlen - 1] == ' ' || line[hlen - 1] == '\t')) hlen--;
+            // compare case-insensitive
+            if (hlen == name_len && strncasecmp(line, name, name_len) == 0) {
+                // value begins after colon and spaces
+                const char* valstart = colon + 1;
+                // skip spaces/tabs
+                while ((*valstart == ' ' || *valstart == '\t') && (valstart < line + linelen)) valstart++;
+                size_t vlen = (size_t)((line + linelen) - valstart);
+                // trim trailing spaces
+                while (vlen > 0 && (valstart[vlen - 1] == ' ' || valstart[vlen - 1] == '\t')) vlen--;
+                char* out = (char*)malloc(vlen + 1);
+                if (!out) return makeString("");
+                memcpy(out, valstart, vlen); out[vlen] = '\0';
+                Value sv = makeString(out);
+                free(out);
+                return sv;
+            }
+        }
+        if (!eol) break;
+        line = eol + 1;
+    }
+    return makeString("");
+}
+
 // -------------------- Minimal JSON helper --------------------
 // JsonGet(jsonStr, key) -> returns value as string for flat JSON (string/number/bool)
 Value vmBuiltinJsonGet(VM* vm, int arg_count, Value* args) {

@@ -155,6 +155,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"httpclose", vmBuiltinHttpClose},
     {"httperrorcode", vmBuiltinHttpErrorCode},
     {"httpgetlastheaders", vmBuiltinHttpGetLastHeaders},
+    {"httpgetheader", vmBuiltinHttpGetHeader},
     {"httpsetheader", vmBuiltinHttpSetHeader},
     {"httpclearheaders", vmBuiltinHttpClearHeaders},
     {"httpsetoption", vmBuiltinHttpSetOption},
