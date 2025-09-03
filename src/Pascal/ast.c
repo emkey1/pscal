@@ -881,13 +881,21 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "inttostr")  == 0 ||
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
-        strcasecmp(name, "copy")      == 0) {
+        strcasecmp(name, "copy")      == 0 ||
+        strcasecmp(name, "mstreambuffer") == 0) {
         return TYPE_STRING;
     }
+
+    /* Memory stream helpers */
+    if (strcasecmp(name, "mstreamcreate") == 0) return TYPE_MEMORYSTREAM;
 
     /* Threading helpers (new API) */
     if (strcasecmp(name, "createthread") == 0) return TYPE_THREAD;
     if (strcasecmp(name, "waitforthread") == 0) return TYPE_INTEGER;
+
+    /* HTTP session helpers */
+    if (strcasecmp(name, "httpsession") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequest") == 0) return TYPE_INTEGER;
 
     /* ReadKey and UpCase return a single character */
     if (strcasecmp(name, "readkey") == 0 ||
