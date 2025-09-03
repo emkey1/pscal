@@ -2,13 +2,16 @@ program HttpFetchDataURL;
 
 var s, code: integer;
     ms: mstream;
+    cwd, url, body: string;
 begin
   s := HttpSession();
   HttpSetHeader(s, 'Accept', 'text/plain');
+  cwd := GetEnv('PWD');
+  url := 'file://' + cwd + '/readln_test.txt';
   ms := mstreamcreate();
-  code := HttpRequest(s, 'GET', 'data:text/plain,hello%20world', nil, ms);
-  writeln(mstreambuffer(ms));
+  code := HttpRequest(s, 'GET', url, nil, ms);
+  body := mstreambuffer(ms);
+  writeln(body);
   mstreamfree(ms);
   HttpClose(s);
 end.
-
