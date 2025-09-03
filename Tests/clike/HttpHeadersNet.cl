@@ -8,7 +8,7 @@ int main() {
   str ctype = httpgetheader(s, "Content-Type");
   int n = length(ctype);
   if (n > 9) n = 9; // print only the media type prefix (e.g., text/html)
-  for (int i = 0; i < n; i = i + 1) printf("%c", ctype[i]);
+  for (int i = 0; i < n; i = i + 1) printf("%c", ctype[i + 1]);
   printf("\n");
   mstreamfree(&out);
   httpclose(s);
