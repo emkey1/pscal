@@ -125,6 +125,8 @@ typedef struct HttpSession_s {
     char* pinned_pubkey;  // CURLOPT_PINNEDPUBLICKEY
     char* out_file;       // optional sink for HttpRequest
     char* accept_encoding; // CURLOPT_ACCEPT_ENCODING
+    char* cookie_file;    // CURLOPT_COOKIEFILE
+    char* cookie_jar;     // CURLOPT_COOKIEJAR
     // Auth and last-results
     char* basic_auth;     // user:pass for basic auth
     char* last_headers;   // raw response headers from last request
@@ -178,6 +180,8 @@ static void httpFreeSession(int id) {
     if (s->user_agent) { free(s->user_agent); s->user_agent = NULL; }
     if (s->out_file) { free(s->out_file); s->out_file = NULL; }
     if (s->accept_encoding) { free(s->accept_encoding); s->accept_encoding = NULL; }
+    if (s->cookie_file) { free(s->cookie_file); s->cookie_file = NULL; }
+    if (s->cookie_jar) { free(s->cookie_jar); s->cookie_jar = NULL; }
     if (s->basic_auth) { free(s->basic_auth); s->basic_auth = NULL; }
     if (s->ca_path) { free(s->ca_path); s->ca_path = NULL; }
     if (s->client_cert) { free(s->client_cert); s->client_cert = NULL; }
@@ -332,6 +336,12 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
         } else if (!IS_INTLIKE(args[2])) {
             runtimeError(vm, "httpSetOption: accept_encoding expects string or int.");
         }
+    } else if (strcasecmp(key, "cookie_file") == 0 && args[2].type == TYPE_STRING) {
+        if (s->cookie_file) free(s->cookie_file);
+        s->cookie_file = strdup(args[2].s_val ? args[2].s_val : "");
+    } else if (strcasecmp(key, "cookie_jar") == 0 && args[2].type == TYPE_STRING) {
+        if (s->cookie_jar) free(s->cookie_jar);
+        s->cookie_jar = strdup(args[2].s_val ? args[2].s_val : "");
     } else {
         runtimeError(vm, "httpSetOption: unsupported option or value type for '%s'.", key);
     }
@@ -484,6 +494,8 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
     if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
+    if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
+    if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
@@ -726,6 +738,8 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
     if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
+    if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
+    if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
     if (s->basic_auth && s->basic_auth[0]) {
         curl_easy_setopt(s->curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(s->curl, CURLOPT_USERPWD, s->basic_auth);
@@ -989,6 +1003,8 @@ typedef struct HttpAsyncJob_s {
     char* user_agent;
     char* basic_auth;
     char* accept_encoding;
+    char* cookie_file;
+    char* cookie_jar;
     char* ca_path; char* client_cert; char* client_key; char* proxy;
     char* proxy_userpwd; long proxy_type;
     long alpn; long tls_min; long tls_max; char* ciphers; char* pinned_pubkey;
@@ -1143,6 +1159,8 @@ static void* httpAsyncThread(void* arg) {
     if (job->headers_slist) curl_easy_setopt(eh, CURLOPT_HTTPHEADER, job->headers_slist);
     if (job->resolve_slist) curl_easy_setopt(eh, CURLOPT_RESOLVE, job->resolve_slist);
     if (job->accept_encoding) curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING, job->accept_encoding);
+    if (job->cookie_file) curl_easy_setopt(eh, CURLOPT_COOKIEFILE, job->cookie_file);
+    if (job->cookie_jar) curl_easy_setopt(eh, CURLOPT_COOKIEJAR, job->cookie_jar);
     if (job->basic_auth && job->basic_auth[0]) {
         curl_easy_setopt(eh, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
         curl_easy_setopt(eh, CURLOPT_USERPWD, job->basic_auth);
@@ -1312,6 +1330,8 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
         job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
         job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
+        job->cookie_file = s->cookie_file ? strdup(s->cookie_file) : NULL;
+        job->cookie_jar = s->cookie_jar ? strdup(s->cookie_jar) : NULL;
         job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
@@ -1348,6 +1368,8 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         if (job->user_agent) free(job->user_agent);
         if (job->basic_auth) free(job->basic_auth);
         if (job->accept_encoding) free(job->accept_encoding);
+        if (job->cookie_file) free(job->cookie_file);
+        if (job->cookie_jar) free(job->cookie_jar);
         if (job->ca_path) free(job->ca_path);
         if (job->client_cert) free(job->client_cert);
         if (job->client_key) free(job->client_key);
@@ -1405,6 +1427,8 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
         job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
         job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
+        job->cookie_file = s->cookie_file ? strdup(s->cookie_file) : NULL;
+        job->cookie_jar = s->cookie_jar ? strdup(s->cookie_jar) : NULL;
         job->ca_path = s->ca_path ? strdup(s->ca_path) : NULL;
         job->client_cert = s->client_cert ? strdup(s->client_cert) : NULL;
         job->client_key = s->client_key ? strdup(s->client_key) : NULL;
@@ -1423,6 +1447,9 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         if (job->body) free(job->body);
         if (job->user_agent) free(job->user_agent);
         if (job->basic_auth) free(job->basic_auth);
+        if (job->accept_encoding) free(job->accept_encoding);
+        if (job->cookie_file) free(job->cookie_file);
+        if (job->cookie_jar) free(job->cookie_jar);
         if (job->ca_path) free(job->ca_path);
         if (job->client_cert) free(job->client_cert);
         if (job->client_key) free(job->client_key);
@@ -1479,6 +1506,8 @@ Value vmBuiltinHttpAwait(VM* vm, int arg_count, Value* args) {
     if (job->user_agent) free(job->user_agent);
     if (job->basic_auth) free(job->basic_auth);
     if (job->accept_encoding) free(job->accept_encoding);
+    if (job->cookie_file) free(job->cookie_file);
+    if (job->cookie_jar) free(job->cookie_jar);
     if (job->ca_path) free(job->ca_path);
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
@@ -1538,6 +1567,8 @@ Value vmBuiltinHttpTryAwait(VM* vm, int arg_count, Value* args) {
     if (job->user_agent) free(job->user_agent);
     if (job->basic_auth) free(job->basic_auth);
     if (job->accept_encoding) free(job->accept_encoding);
+    if (job->cookie_file) free(job->cookie_file);
+    if (job->cookie_jar) free(job->cookie_jar);
     if (job->ca_path) free(job->ca_path);
     if (job->client_cert) free(job->client_cert);
     if (job->client_key) free(job->client_key);
