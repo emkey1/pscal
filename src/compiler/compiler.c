@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
 #include <math.h>
+#include <ctype.h>
+#include <strings.h>
 
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h" // For isBuiltin
@@ -374,6 +376,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
+static void compilePrintf(AST* node, BytecodeChunk* chunk, int line);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -1636,6 +1639,110 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     }
 }
 
+static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
+    if (!node) return;
+    int arg_index = 0;
+    int write_arg_count = 0;
+
+    if (node->child_count > 0 && node->children[0]->type == AST_STRING &&
+        node->children[0]->token && node->children[0]->token->value) {
+        arg_index = 1;
+        const char* fmt = node->children[0]->token->value;
+        size_t flen = strlen(fmt);
+        char* seg = (char*)malloc(flen + 1);
+        size_t seglen = 0;
+        for (size_t i = 0; i < flen; ++i) {
+            if (fmt[i] == '%' && i + 1 < flen) {
+                if (fmt[i + 1] == '%') {
+                    seg[seglen++] = '%';
+                    i++;
+                } else {
+                    size_t j = i + 1;
+                    int width = 0;
+                    int precision = -1;
+                    while (j < flen && isdigit((unsigned char)fmt[j])) {
+                        width = width * 10 + (fmt[j] - '0');
+                        j++;
+                    }
+                    if (j < flen && fmt[j] == '.') {
+                        j++;
+                        precision = 0;
+                        while (j < flen && isdigit((unsigned char)fmt[j])) {
+                            precision = precision * 10 + (fmt[j] - '0');
+                            j++;
+                        }
+                    }
+                    const char* length_mods = "hlLjzt";
+                    while (j < flen && strchr(length_mods, fmt[j]) != NULL) j++;
+                    const char* specifiers = "cdiuoxXfFeEgGaAspn";
+                    if (j < flen && strchr(specifiers, fmt[j]) != NULL && arg_index < node->child_count) {
+                        if (seglen > 0) {
+                            seg[seglen] = '\0';
+                            Value sv = makeString(seg);
+                            int cidx = addConstantToChunk(chunk, &sv);
+                            freeValue(&sv);
+                            writeBytecodeChunk(chunk, OP_CONSTANT, line);
+                            writeBytecodeChunk(chunk, (uint8_t)cidx, line);
+                            write_arg_count++;
+                            seglen = 0;
+                        }
+                        AST* arg_node = node->children[arg_index++];
+                        compileRValue(arg_node, chunk, getLine(arg_node));
+                        if (width > 0 || precision >= 0) {
+                            if (precision < 0) precision = PASCAL_DEFAULT_FLOAT_PRECISION;
+                            writeBytecodeChunk(chunk, OP_FORMAT_VALUE, line);
+                            writeBytecodeChunk(chunk, (uint8_t)width, line);
+                            writeBytecodeChunk(chunk, (uint8_t)precision, line);
+                        }
+                        write_arg_count++;
+                        i = j;
+                    } else {
+                        seg[seglen++] = '%';
+                    }
+                }
+            } else {
+                seg[seglen++] = fmt[i];
+            }
+        }
+        if (seglen > 0) {
+            seg[seglen] = '\0';
+            Value sv = makeString(seg);
+            int cidx = addConstantToChunk(chunk, &sv);
+            freeValue(&sv);
+            writeBytecodeChunk(chunk, OP_CONSTANT, line);
+            writeBytecodeChunk(chunk, (uint8_t)cidx, line);
+            write_arg_count++;
+        }
+        free(seg);
+
+        for (; arg_index < node->child_count; ++arg_index) {
+            AST* arg_node = node->children[arg_index];
+            compileRValue(arg_node, chunk, getLine(arg_node));
+            write_arg_count++;
+        }
+
+        writeBytecodeChunk(chunk, OP_WRITE, line);
+        writeBytecodeChunk(chunk, (uint8_t)write_arg_count, line);
+
+        Value zero = makeInt(0);
+        int zidx = addConstantToChunk(chunk, &zero);
+        freeValue(&zero);
+        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+        writeBytecodeChunk(chunk, (uint8_t)zidx, line);
+    } else {
+        for (int i = 0; i < node->child_count; ++i) {
+            compileRValue(node->children[i], chunk, getLine(node->children[i]));
+        }
+        Value cnt = makeInt(node->child_count);
+        int idx = addConstantToChunk(chunk, &cnt);
+        freeValue(&cnt);
+        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+        writeBytecodeChunk(chunk, (uint8_t)idx, line);
+        writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+        writeBytecodeChunk(chunk, (uint8_t)HOST_FN_PRINTF, line);
+    }
+}
+
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -2062,6 +2169,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
             if (proc_symbol && proc_symbol->is_alias) {
                 proc_symbol = proc_symbol->real_symbol;
+            }
+
+            if (strcasecmp(calleeName, "printf") == 0) {
+                compilePrintf(node, chunk, line);
+                writeBytecodeChunk(chunk, OP_POP, line);
+                break;
             }
 
             if (strcasecmp(calleeName, "lock") == 0) {
@@ -2781,6 +2894,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
                 compiler_had_error = true;
                 emitConstant(chunk, addNilConstant(chunk), line);
+                break;
+            }
+
+            if (strcasecmp(functionName, "printf") == 0) {
+                compilePrintf(node, chunk, line);
                 break;
             }
 
