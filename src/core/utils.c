@@ -175,6 +175,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_BOOLEAN:        return "BOOLEAN";
         case AST_FORMATTED_EXPR: return "FORMATTED_EXPR";
         case AST_TYPE_REFERENCE: return "TYPE_REFERENCE";
+        case AST_TYPE_IDENTIFIER:return "TYPE_IDENTIFIER";
         case AST_SUBRANGE:       return "SUBRANGE";
         case AST_USES_CLAUSE:    return "USES_CLAUSE";
         case AST_UNIT:           return "UNIT";

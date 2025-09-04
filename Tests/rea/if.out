@@ -1,0 +1,192 @@
+{
+
+  "node_type": "PROGRAM",
+  "var_type_annotated": "VOID",
+  "main_block": 
+  {
+
+    "node_type": "BLOCK",
+    "var_type_annotated": "VOID",
+    "is_global_scope": false,
+    "declarations": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "INT64",
+          "left": 
+          {
+
+            "node_type": "NUMBER",
+            "token": {
+                "type": "INTEGER_CONST",
+                "value": "0"
+            },
+            "var_type_annotated": "INT64",
+            "i_val": 0
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_IDENTIFIER",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "int"
+            },
+            "var_type_annotated": "INT64"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "x"
+              },
+              "var_type_annotated": "INT64"
+            }
+          ]
+        }
+      ]
+    }
+,
+    "body": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "IF",
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "BINARY_OP",
+            "token": {
+                "type": "EQUAL",
+                "value": "=="
+            },
+            "var_type_annotated": "BOOLEAN",
+            "left": 
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "x"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE"
+            }
+,
+            "right": 
+            {
+
+              "node_type": "NUMBER",
+              "token": {
+                  "type": "INTEGER_CONST",
+                  "value": "0"
+              },
+              "var_type_annotated": "INT64",
+              "i_val": 0
+            }
+
+          }
+,
+          "right": 
+          {
+
+            "node_type": "COMPOUND",
+            "var_type_annotated": "VOID",
+            "children": [
+              {
+
+                "node_type": "ASSIGN",
+                "token": {
+                    "type": "ASSIGN",
+                    "value": "="
+                },
+                "var_type_annotated": "UNKNOWN_VAR_TYPE",
+                "left": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "x"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                }
+,
+                "right": 
+                {
+
+                  "node_type": "NUMBER",
+                  "token": {
+                      "type": "INTEGER_CONST",
+                      "value": "1"
+                  },
+                  "var_type_annotated": "INT64",
+                  "i_val": 0
+                }
+
+              }
+            ]
+          }
+,
+          "extra": 
+          {
+
+            "node_type": "COMPOUND",
+            "var_type_annotated": "VOID",
+            "children": [
+              {
+
+                "node_type": "ASSIGN",
+                "token": {
+                    "type": "ASSIGN",
+                    "value": "="
+                },
+                "var_type_annotated": "UNKNOWN_VAR_TYPE",
+                "left": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "x"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                }
+,
+                "right": 
+                {
+
+                  "node_type": "NUMBER",
+                  "token": {
+                      "type": "INTEGER_CONST",
+                      "value": "2"
+                  },
+                  "var_type_annotated": "INT64",
+                  "i_val": 0
+                }
+
+              }
+            ]
+          }
+
+        }
+      ]
+    }
+
+  }
+
+}
+
