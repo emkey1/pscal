@@ -1675,6 +1675,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
+        case AST_RETURN: {
+            if (node->left) {
+                compileRValue(node->left, chunk, getLine(node->left));
+            }
+            writeBytecodeChunk(chunk, OP_RETURN, line);
+            break;
+        }
         case AST_BREAK: {
             addBreakJump(chunk, line);
             break;
