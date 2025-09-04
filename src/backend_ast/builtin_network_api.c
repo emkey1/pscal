@@ -582,7 +582,8 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
-    if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
+    curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING,
+                     s->accept_encoding ? s->accept_encoding : "");
     if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
     if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
     if (s->max_recv_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_RECV_SPEED_LARGE, s->max_recv_speed);
@@ -893,7 +894,8 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
-    if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
+    curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING,
+                     s->accept_encoding ? s->accept_encoding : "");
     if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
     if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
     if (s->max_recv_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_RECV_SPEED_LARGE, s->max_recv_speed);
@@ -1678,7 +1680,8 @@ static void* httpAsyncThread(void* arg) {
     if (job->user_agent && job->user_agent[0]) curl_easy_setopt(eh, CURLOPT_USERAGENT, job->user_agent);
     if (job->headers_slist) curl_easy_setopt(eh, CURLOPT_HTTPHEADER, job->headers_slist);
     if (job->resolve_slist) curl_easy_setopt(eh, CURLOPT_RESOLVE, job->resolve_slist);
-    if (job->accept_encoding) curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING, job->accept_encoding);
+    curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING,
+                     job->accept_encoding ? job->accept_encoding : "");
     if (job->cookie_file) curl_easy_setopt(eh, CURLOPT_COOKIEFILE, job->cookie_file);
     if (job->cookie_jar) curl_easy_setopt(eh, CURLOPT_COOKIEJAR, job->cookie_jar);
     if (job->max_recv_speed > 0) curl_easy_setopt(eh, CURLOPT_MAX_RECV_SPEED_LARGE, job->max_recv_speed);
