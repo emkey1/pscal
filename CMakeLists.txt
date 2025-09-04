@@ -382,7 +382,6 @@ set(REA_SOURCES
     src/rea/main.c
     src/rea/lexer.c
     src/rea/parser.c
-    src/rea/ast.c
     src/ast/ast.c
     src/Pascal/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
