@@ -797,13 +797,26 @@ static Value vmHostPrintf(VM* vm) {
                     }
                     case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
                         long double rv = isRealType(v.type) ? AS_REAL(v) : (long double)AS_INTEGER(v);
-                        if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+                        if (precision >= 0 && width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
+                        else if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
                         else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
                         else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
-                        snprintf(buf, sizeof(buf), fmtbuf, (double)rv);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
+
+                        // If 'L' modifier is present, pass a long double; otherwise pass double
+                        if (strcmp(lenmod, "L") == 0) {
+                            // Print directly with long double argument
+                            // Use a temporary buffer via vsnprintf-like call by delegating to snprintf
+                            // Note: snprintf supports %Lf on platforms where long double is distinct.
+                            // We still format into buf to keep existing behavior (collect into string before fputs)
+                            // Casting to long double explicitly for clarity.
+                            snprintf(buf, sizeof(buf), fmtbuf, (long double)rv);
+                        } else {
+                            snprintf(buf, sizeof(buf), fmtbuf, (double)rv);
+                        }
                         fputs(buf, stdout);
                         break;
                     }
