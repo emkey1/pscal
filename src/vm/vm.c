@@ -692,6 +692,127 @@ static Value vmHostWaitThread(VM* vm) {
     return makeInt(0);
 }
 
+static Value vmHostPrintf(VM* vm) {
+    Value argcVal = pop(vm);
+    int argCount = 0;
+    if (IS_INTLIKE(argcVal)) {
+        argCount = (int)AS_INTEGER(argcVal);
+    }
+    freeValue(&argcVal);
+
+    if (argCount <= 0) {
+        return makeInt(0);
+    }
+
+    Value* args = (Value*)malloc(sizeof(Value) * argCount);
+    if (!args) {
+        return makeInt(0);
+    }
+
+    for (int i = argCount - 1; i >= 0; --i) {
+        args[i] = pop(vm);
+    }
+
+    if (args[0].type != TYPE_STRING || args[0].s_val == NULL) {
+        for (int i = 0; i < argCount; ++i) {
+            freeValue(&args[i]);
+        }
+        free(args);
+        return makeInt(0);
+    }
+
+    const char* fmt = args[0].s_val;
+    int printed = 0;
+    int nextArg = 1;
+
+    for (const char* p = fmt; *p; ++p) {
+        if (*p == '%' && *(p + 1)) {
+            if (*(p + 1) == '%') {
+                putchar('%');
+                printed++;
+                ++p;
+                continue;
+            }
+
+            const char* spec_start = p;
+            ++p;
+            while (*p && strchr("+-0 #", *p)) ++p;
+            while (*p && (*p >= '0' && *p <= '9')) ++p;
+            if (*p == '.') {
+                ++p;
+                while (*p && (*p >= '0' && *p <= '9')) ++p;
+            }
+            while (*p && strchr("hlLjzt", *p)) ++p;
+            char spec = *p;
+            size_t spec_len = p - spec_start + 1;
+            char fmt_spec[64];
+            if (spec_len >= sizeof(fmt_spec)) spec_len = sizeof(fmt_spec) - 1;
+            memcpy(fmt_spec, spec_start, spec_len);
+            fmt_spec[spec_len] = '\0';
+
+            Value* argp = nextArg < argCount ? &args[nextArg++] : NULL;
+
+            switch (spec) {
+                case 'd': case 'i': case 'u': case 'o': case 'x': case 'X': {
+                    long long v = 0;
+                    if (argp) {
+                        if (IS_INTLIKE(*argp) || argp->type == TYPE_THREAD) {
+                            v = AS_INTEGER(*argp);
+                        } else if (isRealType(argp->type)) {
+                            v = (long long)AS_REAL(*argp);
+                        } else if (argp->type == TYPE_CHAR) {
+                            v = argp->c_val;
+                        }
+                    }
+                    printed += printf(fmt_spec, v);
+                    break;
+                }
+                case 'c': {
+                    int c = 0;
+                    if (argp) {
+                        if (argp->type == TYPE_CHAR) c = argp->c_val;
+                        else if (IS_INTLIKE(*argp)) c = (int)AS_INTEGER(*argp);
+                    }
+                    printed += printf(fmt_spec, c);
+                    break;
+                }
+                case 'f': case 'F': case 'e': case 'E':
+                case 'g': case 'G': case 'a': case 'A': {
+                    long double d = 0.0L;
+                    if (argp) {
+                        if (isRealType(argp->type)) d = AS_REAL(*argp);
+                        else if (IS_INTLIKE(*argp)) d = (long double)AS_INTEGER(*argp);
+                        else if (argp->type == TYPE_CHAR) d = (long double)argp->c_val;
+                    }
+                    printed += printf(fmt_spec, (double)d);
+                    break;
+                }
+                case 's': {
+                    const char* s = "";
+                    if (argp && argp->type == TYPE_STRING && argp->s_val) {
+                        s = argp->s_val;
+                    }
+                    printed += printf(fmt_spec, s);
+                    break;
+                }
+                default:
+                    printed += printf("%s", fmt_spec);
+                    break;
+            }
+        } else {
+            putchar(*p);
+            printed++;
+        }
+    }
+
+    fflush(stdout);
+    for (int i = 0; i < argCount; ++i) {
+        freeValue(&args[i]);
+    }
+    free(args);
+    return makeInt(printed);
+}
+
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
     if (!vm) return false;
@@ -739,6 +860,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
+    registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
 }
 
 void freeVM(VM* vm) {
