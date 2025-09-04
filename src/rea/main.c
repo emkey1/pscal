@@ -11,7 +11,6 @@
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h"
 #include "rea/parser.h"
-#include "rea/ast.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -80,23 +79,16 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
-    ReaAST *ast = parseRea(src);
+    AST *program = parseRea(src);
     if (dump_ast_json) {
-        reaDumpASTJSON(ast, stdout);
-        reaFreeAST(ast);
+        dumpASTJSON(program, stdout);
+        freeAST(program);
         free(src);
         return vmExitWithCleanup(EXIT_SUCCESS);
-    }
-    if (ast) {
-        reaFreeAST(ast);
     }
 
     initSymbolSystem();
     registerAllBuiltins();
-
-    AST *program = newASTNode(AST_PROGRAM, NULL);
-    AST *block = newASTNode(AST_BLOCK, NULL);
-    setRight(program, block);
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
