@@ -6,6 +6,9 @@
 #include "core/utils.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
+#include "ast/ast.h"
+#include "compiler/bytecode.h"
+#include "compiler/compiler.h"
 #include "backend_ast/builtin.h"
 #include "rea/parser.h"
 #include "rea/ast.h"
@@ -74,13 +77,17 @@ int main(int argc, char **argv) {
         reaFreeAST(ast);
     }
 
-    // Placeholder: no compilation yet. Just run an empty chunk.
     initSymbolSystem();
     registerAllBuiltins();
 
+    AST *program = newASTNode(AST_PROGRAM, NULL);
+    AST *block = newASTNode(AST_BLOCK, NULL);
+    setRight(program, block);
+
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    writeBytecodeChunk(&chunk, OP_HALT, 0);
+    compileASTToBytecode(program, &chunk);
+    finalizeBytecode(&chunk);
 
     if (argc > argi + 1) {
         gParamCount = argc - (argi + 1);
@@ -92,10 +99,13 @@ int main(int argc, char **argv) {
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
+    freeAST(program);
+    freeProcedureTable();
+    freeTypeTableASTNodes();
+    freeTypeTable();
 
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-    if (procedure_table) freeHashTable(procedure_table);
 
     free(src);
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);

@@ -1,7 +1,7 @@
 #include "clike/parser.h"
 #include "clike/errors.h"
 #include "clike/opt.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

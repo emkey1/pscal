@@ -7,7 +7,7 @@
 #include "backend_ast/builtin.h" // For isBuiltin
 #include "core/utils.h"
 #include "core/types.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID

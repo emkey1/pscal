@@ -1,4 +1,4 @@
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include "symbol/symbol.h"
 #include "core/types.h"
 #include "core/utils.h"

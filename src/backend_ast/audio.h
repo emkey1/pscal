@@ -11,7 +11,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include "types.h"
-#include "ast.h"
+#include "ast/ast.h"
 
 // Forward declare the VM struct
 struct VM_s;
