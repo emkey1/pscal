@@ -6,12 +6,13 @@
 
 typedef enum {
     REA_AST_PROGRAM,
-    REA_AST_TOKEN
+    REA_AST_NUMBER,
+    REA_AST_BINARY
 } ReaASTNodeType;
 
 typedef struct ReaAST {
     ReaASTNodeType type;
-    ReaToken token;            // Valid if type == REA_AST_TOKEN
+    ReaToken token;            // Used by literal and operator nodes
     struct ReaAST **children;
     int child_count;
     int child_capacity;
