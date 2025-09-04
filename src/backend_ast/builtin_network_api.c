@@ -193,6 +193,7 @@ typedef struct HttpSession_s {
     char* pinned_pubkey;  // CURLOPT_PINNEDPUBLICKEY
     char* out_file;       // optional sink for HttpRequest
     char* accept_encoding; // CURLOPT_ACCEPT_ENCODING
+    long  accept_encoding_disabled; // explicitly cleared by user
     char* cookie_file;    // CURLOPT_COOKIEFILE
     char* cookie_jar;     // CURLOPT_COOKIEJAR
     long max_retries;     // number of retries
@@ -257,6 +258,7 @@ static void httpFreeSession(int id) {
     if (s->user_agent) { free(s->user_agent); s->user_agent = NULL; }
     if (s->out_file) { free(s->out_file); s->out_file = NULL; }
     if (s->accept_encoding) { free(s->accept_encoding); s->accept_encoding = NULL; }
+    s->accept_encoding_disabled = 0;
     if (s->cookie_file) { free(s->cookie_file); s->cookie_file = NULL; }
     if (s->cookie_jar) { free(s->cookie_jar); s->cookie_jar = NULL; }
     if (s->basic_auth) { free(s->basic_auth); s->basic_auth = NULL; }
@@ -403,15 +405,19 @@ Value vmBuiltinHttpSetOption(VM* vm, int arg_count, Value* args) {
         if (s->out_file) free(s->out_file);
         s->out_file = strdup(args[2].s_val ? args[2].s_val : "");
     } else if (strcasecmp(key, "accept_encoding") == 0) {
+        /* Always clear the curl handle so callers can disable compression
+           even after a request has set the default empty string. */
+        curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, NULL);
         if (s->accept_encoding) {
-            /* Clear the libcurl handle to avoid dangling pointers before freeing */
-            curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, NULL);
             free(s->accept_encoding);
             s->accept_encoding = NULL;
         }
         if (args[2].type == TYPE_STRING) {
             s->accept_encoding = strdup(args[2].s_val ? args[2].s_val : "");
-        } else if (!IS_INTLIKE(args[2])) {
+            s->accept_encoding_disabled = 0;
+        } else if (IS_INTLIKE(args[2])) {
+            s->accept_encoding_disabled = 1;
+        } else {
             runtimeError(vm, "httpSetOption: accept_encoding expects string or int.");
         }
     } else if (strcasecmp(key, "cookie_file") == 0 && args[2].type == TYPE_STRING) {
@@ -582,7 +588,10 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
-    if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
+    if (!s->accept_encoding_disabled) {
+        curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING,
+                         s->accept_encoding ? s->accept_encoding : "");
+    }
     if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
     if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
     if (s->max_recv_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_RECV_SPEED_LARGE, s->max_recv_speed);
@@ -893,7 +902,10 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
     if (s->user_agent) curl_easy_setopt(s->curl, CURLOPT_USERAGENT, s->user_agent);
     if (s->headers) curl_easy_setopt(s->curl, CURLOPT_HTTPHEADER, s->headers);
     if (s->resolve) curl_easy_setopt(s->curl, CURLOPT_RESOLVE, s->resolve);
-    if (s->accept_encoding) curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING, s->accept_encoding);
+    if (!s->accept_encoding_disabled) {
+        curl_easy_setopt(s->curl, CURLOPT_ACCEPT_ENCODING,
+                         s->accept_encoding ? s->accept_encoding : "");
+    }
     if (s->cookie_file) curl_easy_setopt(s->curl, CURLOPT_COOKIEFILE, s->cookie_file);
     if (s->cookie_jar) curl_easy_setopt(s->curl, CURLOPT_COOKIEJAR, s->cookie_jar);
     if (s->max_recv_speed > 0) curl_easy_setopt(s->curl, CURLOPT_MAX_RECV_SPEED_LARGE, s->max_recv_speed);
@@ -1518,6 +1530,7 @@ typedef struct HttpAsyncJob_s {
     char* user_agent;
     char* basic_auth;
     char* accept_encoding;
+    long  accept_encoding_disabled;
     char* cookie_file;
     char* cookie_jar;
     long max_retries;
@@ -1678,7 +1691,10 @@ static void* httpAsyncThread(void* arg) {
     if (job->user_agent && job->user_agent[0]) curl_easy_setopt(eh, CURLOPT_USERAGENT, job->user_agent);
     if (job->headers_slist) curl_easy_setopt(eh, CURLOPT_HTTPHEADER, job->headers_slist);
     if (job->resolve_slist) curl_easy_setopt(eh, CURLOPT_RESOLVE, job->resolve_slist);
-    if (job->accept_encoding) curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING, job->accept_encoding);
+    if (!job->accept_encoding_disabled) {
+        curl_easy_setopt(eh, CURLOPT_ACCEPT_ENCODING,
+                         job->accept_encoding ? job->accept_encoding : "");
+    }
     if (job->cookie_file) curl_easy_setopt(eh, CURLOPT_COOKIEFILE, job->cookie_file);
     if (job->cookie_jar) curl_easy_setopt(eh, CURLOPT_COOKIEJAR, job->cookie_jar);
     if (job->max_recv_speed > 0) curl_easy_setopt(eh, CURLOPT_MAX_RECV_SPEED_LARGE, job->max_recv_speed);
@@ -1911,6 +1927,7 @@ Value vmBuiltinHttpRequestAsync(VM* vm, int arg_count, Value* args) {
         job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
         job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
         job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
+        job->accept_encoding_disabled = s->accept_encoding_disabled;
         job->cookie_file = s->cookie_file ? strdup(s->cookie_file) : NULL;
         job->cookie_jar = s->cookie_jar ? strdup(s->cookie_jar) : NULL;
         job->max_retries = s->max_retries;
@@ -2014,6 +2031,7 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
         job->user_agent = s->user_agent ? strdup(s->user_agent) : NULL;
         job->basic_auth = s->basic_auth ? strdup(s->basic_auth) : NULL;
         job->accept_encoding = s->accept_encoding ? strdup(s->accept_encoding) : NULL;
+        job->accept_encoding_disabled = s->accept_encoding_disabled;
         job->cookie_file = s->cookie_file ? strdup(s->cookie_file) : NULL;
         job->cookie_jar = s->cookie_jar ? strdup(s->cookie_jar) : NULL;
         job->max_retries = s->max_retries;
