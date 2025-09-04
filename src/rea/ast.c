@@ -32,9 +32,7 @@ void reaFreeAST(ReaAST *node) {
         reaFreeAST(node->children[i]);
     }
     free(node->children);
-    if (node->type == REA_AST_TOKEN) {
-        reaFreeToken(&node->token);
-    }
+    reaFreeToken(&node->token);
     free(node);
 }
 
@@ -113,7 +111,8 @@ const char *reaTokenTypeToString(ReaTokenType type) {
 const char *reaASTNodeTypeToString(ReaASTNodeType type) {
     switch (type) {
         case REA_AST_PROGRAM: return "PROGRAM";
-        case REA_AST_TOKEN: return "TOKEN";
+        case REA_AST_NUMBER: return "NUMBER";
+        case REA_AST_BINARY: return "BINARY";
     }
     return "UNKNOWN";
 }
@@ -151,7 +150,7 @@ static void dumpJSON(ReaAST *node, FILE *out, int indent) {
     indent++;
     printIndent(out, indent);
     fprintf(out, "\"node_type\": \"%s\"", reaASTNodeTypeToString(node->type));
-    if (node->type == REA_AST_TOKEN) {
+    if (node->token.start) {
         fputs(",\n", out);
         printIndent(out, indent);
         fprintf(out, "\"token_type\": \"%s\",\n", reaTokenTypeToString(node->token.type));

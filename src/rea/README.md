@@ -1,8 +1,10 @@
 # Rea Front End
 
 This directory hosts the experimental front end for the Rea programming
-language. At the moment the executable only loads a source file and executes
-an empty bytecode chunk, but the layout below sketches the path toward a full
+language. The current prototype recognises arithmetic expressions composed of
+numeric literals, parentheses and the `+`, `-`, `*` and `/` operators. Each
+top-level expression is compiled to bytecode that prints its result via the
+existing PSCAL VM. The layout below sketches the path toward a full
 compiler.
 
 ## Running
