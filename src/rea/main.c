@@ -79,16 +79,20 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
+    initSymbolSystem();
+    registerAllBuiltins();
+
     AST *program = parseRea(src);
+    if (!program) {
+        free(src);
+        return vmExitWithCleanup(EXIT_FAILURE);
+    }
     if (dump_ast_json) {
         dumpASTJSON(program, stdout);
         freeAST(program);
         free(src);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
-
-    initSymbolSystem();
-    registerAllBuiltins();
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
