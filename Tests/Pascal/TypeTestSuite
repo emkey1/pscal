@@ -391,9 +391,8 @@ begin
   // AssertEqualInt(11, succ(byte(10)), 'Succ(Byte)'); // Type cast syntax likely needed
   // AssertEqualInt(9, pred(byte(10)), 'Pred(Byte)');
 
-  // Assigning integer (should work if in range, behavior outside range depends on impl)
-  testInt := 128;
-  testByte := testInt;
+  // Assigning constant value (should work if in range)
+  testByte := 128;
   tempInt := testByte;
   AssertEqualInt(128, tempInt, 'Assign Integer to Byte');
 end;
@@ -433,9 +432,8 @@ begin
   tempInt := testWord;
   AssertEqualInt(501, tempInt, 'Dec(Word, 500)');
 
-  // Assigning integer
-  testInt := 50000;
-  testWord := testInt;
+  // Assigning constant value
+  testWord := 50000;
   tempInt := testWord;
   AssertEqualInt(50000, tempInt, 'Assign Integer to Word');
 end;

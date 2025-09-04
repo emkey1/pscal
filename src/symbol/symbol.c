@@ -722,11 +722,9 @@ void updateSymbol(const char *name, Value val) {
         // Handle specific allowed coercions and promotions.
         if (isRealType(sym->type) && (isRealType(val.type) || isIntlikeType(val.type))) types_compatible = true;
         else if (sym->type == TYPE_INTEGER && isRealType(val.type)) { types_compatible = false; } // No implicit Real to Integer
+        else if (isIntlikeType(sym->type) && isIntlikeType(val.type)) types_compatible = true;
         else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
         else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
-        else if (sym->type == TYPE_INTEGER && (val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN || val.type == TYPE_CHAR)) types_compatible = true;
-        else if ((sym->type == TYPE_BYTE || sym->type == TYPE_WORD || sym->type == TYPE_CHAR) && val.type == TYPE_INTEGER) types_compatible = true;
-        else if (sym->type == TYPE_BOOLEAN && val.type == TYPE_INTEGER) types_compatible = true;
         else if (sym->type == TYPE_ENUM && val.type == TYPE_ENUM) {
              if ((sym->value->enum_val.enum_name == NULL && val.enum_val.enum_name == NULL) ||
                  (sym->value->enum_val.enum_name != NULL && val.enum_val.enum_name != NULL &&
@@ -741,7 +739,7 @@ void updateSymbol(const char *name, Value val) {
                  types_compatible = false;
              }
         }
-        else if (sym->type == TYPE_ENUM && val.type == TYPE_INTEGER) types_compatible = true;
+        else if (sym->type == TYPE_ENUM && isIntlikeType(val.type)) types_compatible = true;
         else if (sym->type == TYPE_POINTER && (val.type == TYPE_POINTER || val.type == TYPE_NIL)) types_compatible = true;
         else if (sym->type == TYPE_SET && val.type == TYPE_SET) types_compatible = true;
         else if (sym->type == TYPE_MEMORYSTREAM && val.type == TYPE_MEMORYSTREAM) types_compatible = true;
@@ -772,12 +770,22 @@ void updateSymbol(const char *name, Value val) {
 
     // --- Perform Assignment ---
     // Use a switch on the TARGET symbol's type to handle assignments correctly.
-    switch (sym->type) {
-        case TYPE_INTEGER:
-            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD || val.type == TYPE_BOOLEAN) SET_INT_VALUE(sym->value, val.i_val);
-            else if (val.type == TYPE_CHAR) SET_INT_VALUE(sym->value, (long long)val.c_val);
-            else if (isRealType(val.type)) SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
-            break;
+      switch (sym->type) {
+          case TYPE_INTEGER:
+              if (isIntlikeType(val.type)) {
+                  SET_INT_VALUE(sym->value, asI64(val));
+              } else if (isRealType(val.type)) {
+                  SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
+              }
+              break;
+
+          case TYPE_INT64:
+              if (isIntlikeType(val.type)) {
+                  SET_INT_VALUE(sym->value, asI64(val));
+              } else if (isRealType(val.type)) {
+                  SET_INT_VALUE(sym->value, (long long)AS_REAL(val));
+              }
+              break;
 
         case TYPE_REAL:
             if (isRealType(val.type) || isIntlikeType(val.type)) {
@@ -797,31 +805,27 @@ void updateSymbol(const char *name, Value val) {
             }
             break;
 
-        case TYPE_BYTE:
-            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
-                if (val.i_val < 0 || val.i_val > 255) {
-                    fprintf(stderr, "Runtime warning: Assignment to BYTE variable '%s' out of range (0-255). Value %lld will be truncated.\n", name, val.i_val);
+        case TYPE_BYTE: {
+            if (isIntlikeType(val.type)) {
+                long long tmp = asI64(val);
+                if (tmp < 0 || tmp > 255) {
+                    fprintf(stderr, "Runtime warning: Assignment to BYTE variable '%s' out of range (0-255). Value %lld will be truncated.\n", name, tmp);
                 }
-                SET_INT_VALUE(sym->value, (val.i_val & 0xFF));
-            } else if (val.type == TYPE_CHAR) {
-                SET_INT_VALUE(sym->value, (long long)val.c_val);
-            } else if (val.type == TYPE_BOOLEAN) {
-                SET_INT_VALUE(sym->value, val.i_val);
+                SET_INT_VALUE(sym->value, (tmp & 0xFF));
             }
             break;
+        }
 
-        case TYPE_WORD:
-            if (val.type == TYPE_INTEGER || val.type == TYPE_BYTE || val.type == TYPE_WORD) {
-                if (val.i_val < 0 || val.i_val > 65535) {
-                    fprintf(stderr, "Runtime warning: Assignment to WORD variable '%s' out of range (0-65535). Value %lld will be truncated.\n", name, val.i_val);
+        case TYPE_WORD: {
+            if (isIntlikeType(val.type)) {
+                long long tmp = asI64(val);
+                if (tmp < 0 || tmp > 65535) {
+                    fprintf(stderr, "Runtime warning: Assignment to WORD variable '%s' out of range (0-65535). Value %lld will be truncated.\n", name, tmp);
                 }
-                SET_INT_VALUE(sym->value, (val.i_val & 0xFFFF));
-            } else if (val.type == TYPE_CHAR) {
-                SET_INT_VALUE(sym->value, (long long)val.c_val);
-            } else if (val.type == TYPE_BOOLEAN) {
-                SET_INT_VALUE(sym->value, val.i_val);
+                SET_INT_VALUE(sym->value, (tmp & 0xFFFF));
             }
             break;
+        }
 
         case TYPE_STRING: {
             const char* source_str = NULL;
@@ -856,8 +860,7 @@ void updateSymbol(const char *name, Value val) {
             break;
 
         case TYPE_BOOLEAN:
-            if (val.type == TYPE_BOOLEAN) SET_INT_VALUE(sym->value, val.i_val);
-            else if (val.type == TYPE_INTEGER) SET_INT_VALUE(sym->value, (val.i_val != 0) ? 1 : 0);
+            if (isIntlikeType(val.type)) SET_INT_VALUE(sym->value, asI64(val) != 0 ? 1 : 0);
             break;
 
         case TYPE_FILE:
@@ -866,10 +869,10 @@ void updateSymbol(const char *name, Value val) {
             break;
 
         case TYPE_CHAR:
-            if (val.type == TYPE_CHAR) sym->value->c_val = val.c_val;
-            else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) sym->value->c_val = val.s_val[0];
-            else if (val.type == TYPE_INTEGER) {
-                sym->value->c_val = (int)val.i_val;
+            if (isIntlikeType(val.type)) {
+                sym->value->c_val = (int)asI64(val);
+            } else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) {
+                sym->value->c_val = val.s_val[0];
             }
             break;
 
@@ -882,16 +885,17 @@ void updateSymbol(const char *name, Value val) {
                 if(sym->value->enum_val.enum_name) free(sym->value->enum_val.enum_name);
                 sym->value->enum_val.enum_name = val.enum_val.enum_name ? strdup(val.enum_val.enum_name) : NULL;
                 sym->value->enum_val.ordinal = val.enum_val.ordinal;
-            } else if (val.type == TYPE_INTEGER) {
+            } else if (isIntlikeType(val.type)) {
                 AST* typeDef = sym->type_def;
                 if (typeDef && typeDef->type == AST_TYPE_REFERENCE) typeDef = typeDef->right;
                 long long maxOrdinal = -1;
                 if (typeDef && typeDef->type == AST_ENUM_TYPE) { maxOrdinal = typeDef->child_count - 1; }
 
-                if (maxOrdinal != -1 && (val.i_val < 0 || val.i_val > maxOrdinal)) {
-                    fprintf(stderr, "Runtime warning: Assignment to ENUM variable '%s' out of range (0..%lld). Value %lld is invalid.\n", name, maxOrdinal, val.i_val);
+                long long v = asI64(val);
+                if (maxOrdinal != -1 && (v < 0 || v > maxOrdinal)) {
+                    fprintf(stderr, "Runtime warning: Assignment to ENUM variable '%s' out of range (0..%lld). Value %lld is invalid.\n", name, maxOrdinal, v);
                 }
-                sym->value->enum_val.ordinal = (int)val.i_val;
+                sym->value->enum_val.ordinal = (int)v;
             }
             break;
 
