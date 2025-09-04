@@ -3413,6 +3413,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("PopScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Pos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Power", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("printf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PushScreen", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitRequested", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Random", AST_FUNCTION_DECL, NULL);

@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <limits.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -658,6 +659,91 @@ static Value vmHostQuitRequested(VM* vm) {
     return makeBoolean(break_requested);
 }
 
+static Value vmHostPrintf(VM* vm) {
+    Value countVal = pop(vm);
+    int argCount = IS_INTLIKE(countVal) ? (int)AS_INTEGER(countVal) : 0;
+    freeValue(&countVal);
+    if (argCount <= 0) {
+        return makeInt(0);
+    }
+
+    Value* args = malloc(sizeof(Value) * argCount);
+    if (!args) {
+        for (int i = 0; i < argCount; i++) {
+            Value v = pop(vm);
+            freeValue(&v);
+        }
+        return makeInt(0);
+    }
+
+    for (int i = 0; i < argCount; i++) {
+        args[argCount - 1 - i] = pop(vm);
+    }
+
+    bool color_was_applied = applyCurrentTextAttributes(stdout);
+
+    if (args[0].type == TYPE_STRING && args[0].s_val) {
+        const char* fmt = args[0].s_val;
+        size_t flen = strlen(fmt);
+        size_t segStart = 0;
+        int argIndex = 1;
+        for (size_t i = 0; i < flen; ++i) {
+            if (fmt[i] == '%' && i + 1 < flen) {
+                if (i > segStart) {
+                    fwrite(fmt + segStart, 1, i - segStart, stdout);
+                }
+                if (fmt[i + 1] == '%') {
+                    fputc('%', stdout);
+                    i++;
+                    segStart = i + 1;
+                    continue;
+                }
+                size_t j = i + 1;
+                while (j < flen && strchr("-+ #0'", fmt[j])) j++;
+                while (j < flen && isdigit((unsigned char)fmt[j])) j++;
+                if (j < flen && fmt[j] == '.') {
+                    j++;
+                    while (j < flen && isdigit((unsigned char)fmt[j])) j++;
+                }
+                if (j < flen) {
+                    if ((fmt[j] == 'h' || fmt[j] == 'l') && j + 1 < flen && fmt[j + 1] == fmt[j]) {
+                        j += 2;
+                    } else if (strchr("hlLjzt", fmt[j])) {
+                        j++;
+                    }
+                }
+                if (argIndex < argCount) {
+                    printValueToStream(args[argIndex], stdout);
+                    freeValue(&args[argIndex]);
+                    argIndex++;
+                }
+                i = j;
+                segStart = i + 1;
+            }
+        }
+        if (segStart < flen) {
+            fwrite(fmt + segStart, 1, flen - segStart, stdout);
+        }
+        freeValue(&args[0]);
+        for (; argIndex < argCount; ++argIndex) {
+            printValueToStream(args[argIndex], stdout);
+            freeValue(&args[argIndex]);
+        }
+    } else {
+        for (int i = 0; i < argCount; i++) {
+            printValueToStream(args[i], stdout);
+            freeValue(&args[i]);
+        }
+    }
+
+    free(args);
+    if (color_was_applied) {
+        resetTextAttributes(stdout);
+    }
+    fflush(stdout);
+    return makeInt(0);
+}
+
 static Value vmHostCreateThreadAddr(VM* vm) {
     // Expects: proc address and arg value on stack (address below arg). For backward compat we always push arg (nil) in compiler.
     Value argVal = pop(vm);
@@ -737,6 +823,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
         fprintf(stderr, "Fatal VM Error: Could not register HOST_FN_QUIT_REQUESTED.\n");
         EXIT_FAILURE_HANDLER();
     }
+    registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
 }

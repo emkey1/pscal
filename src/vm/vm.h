@@ -35,7 +35,7 @@ typedef enum {
     HOST_FN_QUIT_REQUESTED,
     HOST_FN_CREATE_THREAD_ADDR,
     HOST_FN_WAIT_THREAD,
-    // ... add other host function IDs here ...
+    HOST_FN_PRINTF,
     HOST_FN_COUNT
 } HostFunctionID;
 
