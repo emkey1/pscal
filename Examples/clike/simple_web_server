@@ -1,0 +1,101 @@
+#!/usr/bin/env clike
+
+// Simple CLike web server
+// - Listens on port 5555 by default
+// - Creates /tmp/clike_htdocs.[PID] and writes index.html
+// - Multithreaded: spawns a handler thread per connection
+// - Note: current socketBind binds all interfaces; by default we only advertise
+//   localhost. Serving is minimal and for demo/testing.
+
+int Port = 5555;
+str RootDir;
+str IndexPath;
+str Body;
+
+// Max concurrent handler wrappers
+const int MaxThreads = 8;
+int connSlots[MaxThreads];
+int nextSlot = 0;
+
+void serveConn(int c) {
+  // Read (ignore) request
+  mstream req = socketreceive(c, 2048);
+  // Minimal HTTP response
+  int len = length(Body);
+  str hdr = "HTTP/1.1 200 OK\r\n"
+               "Content-Type: text/html\r\n"
+               "Content-Length: ";
+  hdr = hdr + inttostr(len) + "\r\n\r\n";
+  socketsend(c, hdr);
+  socketsend(c, Body);
+  socketclose(c);
+}
+
+void handler0() { serveConn(connSlots[0]); }
+void handler1() { serveConn(connSlots[1]); }
+void handler2() { serveConn(connSlots[2]); }
+void handler3() { serveConn(connSlots[3]); }
+void handler4() { serveConn(connSlots[4]); }
+void handler5() { serveConn(connSlots[5]); }
+void handler6() { serveConn(connSlots[6]); }
+void handler7() { serveConn(connSlots[7]); }
+
+void spawnHandler(int c) {
+  int slot = nextSlot % MaxThreads;
+  nextSlot = nextSlot + 1;
+  connSlots[slot] = c;
+  switch (slot) {
+    case 0: spawn(handler0); break;
+    case 1: spawn(handler1); break;
+    case 2: spawn(handler2); break;
+    case 3: spawn(handler3); break;
+    case 4: spawn(handler4); break;
+    case 5: spawn(handler5); break;
+    case 6: spawn(handler6); break;
+    case 7: spawn(handler7); break;
+  }
+}
+
+void initFiles() {
+  int pid = getpid();
+  str pidStr = inttostr(pid);
+  RootDir = "/tmp/clike_htdocs." + pidStr;
+  mkdir(RootDir);
+  IndexPath = RootDir + "/index.html";
+  Body = "<html><body>Hello from the CLike web server</body></html>";
+  // Write file via shell (dosExec) for simplicity
+  // Use sh -c to handle redirection
+  str cmd = "-c \"echo '" + Body + "' > " + IndexPath + "\"";
+  dosExec("/bin/sh", cmd);
+}
+
+int main() {
+  initFiles();
+  printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+  printf("Root: %s\n", RootDir);
+
+  int srv = socketcreate(0);
+  if (srv < 0) { printf("socketcreate failed\n"); return 1; }
+  // Bind and listen; current API binds all interfaces (INADDR_ANY)
+  // Bind explicitly to localhost by default
+  if (socketbindaddr(srv, "127.0.0.1", Port) != 0) {
+    printf("socketbind failed: %d\n", socketlasterror());
+    return 1;
+  }
+  if (socketlisten(srv, 16) != 0) {
+    printf("socketlisten failed: %d\n", socketlasterror());
+    return 1;
+  }
+  printf("Waiting for connections... (Ctrl+C to quit)\n");
+  while (1) {
+    int c = socketaccept(srv);
+    if (c >= 0) {
+      spawnHandler(c);
+    } else {
+      // Small sleep to avoid busy loop on transient errors
+      delay(10);
+    }
+  }
+  socketclose(srv);
+  return 0;
+}
