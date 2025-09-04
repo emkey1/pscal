@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -7,6 +8,7 @@
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 #include "rea/parser.h"
+#include "rea/ast.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -18,15 +20,27 @@ static void initSymbolSystem(void) {
     current_procedure_table = procedure_table;
 }
 
+static const char *REA_USAGE =
+    "Usage: rea <options> <source.rea> [program_parameters...]\n"
+    "   Options:\n"
+    "     --dump-ast-json       Dump AST to JSON and exit.\n";
+
 int main(int argc, char **argv) {
     vmInitTerminalState();
 
-    if (argc < 2) {
-        fprintf(stderr, "Usage: rea <source.rea> [program_parameters...]\n");
+    int dump_ast_json = 0;
+    int argi = 1;
+    if (argc > argi && strcmp(argv[argi], "--dump-ast-json") == 0) {
+        dump_ast_json = 1;
+        argi++;
+    }
+
+    if (argc <= argi) {
+        fprintf(stderr, "%s", REA_USAGE);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
 
-    const char *path = argv[1];
+    const char *path = argv[argi];
     FILE *f = fopen(path, "rb");
     if (!f) {
         perror("open");
@@ -49,9 +63,15 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
-    AST *ast = parseRea(src);
+    ReaAST *ast = parseRea(src);
+    if (dump_ast_json) {
+        reaDumpASTJSON(ast, stdout);
+        reaFreeAST(ast);
+        free(src);
+        return vmExitWithCleanup(EXIT_SUCCESS);
+    }
     if (ast) {
-        freeAST(ast);
+        reaFreeAST(ast);
     }
 
     // Placeholder: no compilation yet. Just run an empty chunk.
@@ -62,9 +82,9 @@ int main(int argc, char **argv) {
     initBytecodeChunk(&chunk);
     writeBytecodeChunk(&chunk, OP_HALT, 0);
 
-    if (argc > 2) {
-        gParamCount = argc - 2;
-        gParamValues = &argv[2];
+    if (argc > argi + 1) {
+        gParamCount = argc - (argi + 1);
+        gParamValues = &argv[argi + 1];
     }
 
     VM vm;
