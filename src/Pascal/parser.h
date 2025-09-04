@@ -3,7 +3,7 @@
 
 #include "types.h"
 #include "lexer.h"
-#include "ast.h"
+#include "ast/ast.h"
 #include <stdbool.h>
 #include "compiler/bytecode.h"
 

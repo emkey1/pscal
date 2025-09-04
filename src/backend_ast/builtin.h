@@ -2,7 +2,7 @@
 #define BUILTIN_H
 
 #include "core/types.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include "Pascal/globals.h"
 
 struct VM_s;

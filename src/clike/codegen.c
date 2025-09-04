@@ -3,7 +3,7 @@
 #include "backend_ast/builtin.h"
 #include "clike/parser.h"
 #include "clike/semantics.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"

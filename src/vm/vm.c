@@ -16,7 +16,7 @@
 #include "Pascal/globals.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>

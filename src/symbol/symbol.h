@@ -60,7 +60,7 @@ typedef struct SymbolTable_s HashTable;
 // --- Include ast.h if full AST definition is needed by prototypes below ---
 // Or if symbol.c needs it extensively.
 // Ensure ast.h forward-declares Symbol if it needs Symbol* and symbol.h isn't included first by ast.h.
-#include "ast.h"
+#include "ast/ast.h"
 
 
 // --- Public Symbol Table Interface Prototypes ---
