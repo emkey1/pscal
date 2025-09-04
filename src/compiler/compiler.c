@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
 #include <math.h>
+#include <ctype.h>
 
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h" // For isBuiltin
@@ -374,6 +375,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
+static void compilePrintf(AST* callNode, BytecodeChunk* chunk, int line);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -1636,6 +1638,83 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     }
 }
 
+static void compilePrintf(AST* callNode, BytecodeChunk* chunk, int line) {
+    int argIndex = 0;
+    int writeArgCount = 0;
+    if (callNode->child_count > 0 && callNode->children[0]->type == AST_STRING) {
+        AST* fmtNode = callNode->children[0];
+        const char* fmt = fmtNode->token && fmtNode->token->value ? fmtNode->token->value : "";
+        size_t flen = strlen(fmt);
+        char* seg = malloc(flen + 1);
+        size_t seglen = 0;
+        argIndex = 1;
+        for (size_t i = 0; i < flen; ++i) {
+            if (fmt[i] == '%' && i + 1 < flen) {
+                if (fmt[i + 1] == '%') {
+                    seg[seglen++] = '%';
+                    i++; // skip second %
+                } else {
+                    if (seglen > 0) {
+                        seg[seglen] = '\0';
+                        Value strv = makeString(seg);
+                        int cidx = addConstantToChunk(chunk, &strv);
+                        freeValue(&strv);
+                        emitConstant(chunk, cidx, line);
+                        writeArgCount++;
+                        seglen = 0;
+                    }
+                    if (argIndex < callNode->child_count) {
+                        compileRValue(callNode->children[argIndex], chunk, getLine(callNode->children[argIndex]));
+                        writeArgCount++;
+                        argIndex++;
+                    }
+                    // Skip over flags, width, precision, and length modifiers.
+                    size_t j = i + 1;
+                    // Flags
+                    while (j < flen && strchr("-+ #0'", fmt[j])) j++;
+                    // Width
+                    while (j < flen && isdigit((unsigned char)fmt[j])) j++;
+                    // Precision
+                    if (j < flen && fmt[j] == '.') {
+                        j++;
+                        while (j < flen && isdigit((unsigned char)fmt[j])) j++;
+                    }
+                    // Length modifiers
+                    if (j < flen) {
+                        if ((fmt[j] == 'h' || fmt[j] == 'l') && j + 1 < flen && fmt[j + 1] == fmt[j]) {
+                            j += 2; // hh or ll
+                        } else if (strchr("hlLjzt", fmt[j])) {
+                            j++;
+                        }
+                    }
+                    if (j < flen) {
+                        i = j; // Skip the conversion specifier
+                    } else {
+                        i = flen; // bail out if malformed
+                    }
+                }
+            } else {
+                seg[seglen++] = fmt[i];
+            }
+        }
+        if (seglen > 0) {
+            seg[seglen] = '\0';
+            Value strv = makeString(seg);
+            int cidx = addConstantToChunk(chunk, &strv);
+            freeValue(&strv);
+            emitConstant(chunk, cidx, line);
+            writeArgCount++;
+        }
+        free(seg);
+    }
+    for (; argIndex < callNode->child_count; ++argIndex) {
+        compileRValue(callNode->children[argIndex], chunk, getLine(callNode->children[argIndex]));
+        writeArgCount++;
+    }
+    writeBytecodeChunk(chunk, OP_WRITE, line);
+    writeBytecodeChunk(chunk, (uint8_t)writeArgCount, line);
+}
+
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1660,8 +1739,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_EXPR_STMT: {
             if (node->left) {
-                compileRValue(node->left, chunk, getLine(node->left));
-                writeBytecodeChunk(chunk, OP_POP, line);
+                if (node->left->type == AST_PROCEDURE_CALL && node->left->token &&
+                    strcasecmp(node->left->token->value, "printf") == 0) {
+                    compilePrintf(node->left, chunk, getLine(node->left));
+                } else {
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    writeBytecodeChunk(chunk, OP_POP, line);
+                }
             }
             break;
         }
@@ -2036,6 +2120,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
+            if (node->token && strcasecmp(node->token->value, "printf") == 0) {
+                compilePrintf(node, chunk, line);
+                break;
+            }
             const char* calleeName = node->token->value;
 
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
@@ -2764,7 +2852,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_PROCEDURE_CALL: {
             int line = getLine(node);
             if (line <= 0) line = current_line_approx;
-
+            if (node->token && strcasecmp(node->token->value, "printf") == 0) {
+                compilePrintf(node, chunk, line);
+                emitConstant(chunk, addIntConstant(chunk, 0), line);
+                break;
+            }
             const char* functionName = NULL;
             bool isCallQualified = false;
 
