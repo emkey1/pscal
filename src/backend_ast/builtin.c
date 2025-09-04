@@ -30,6 +30,9 @@
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 
+// Maximum number of arguments allowed for write/writeln
+#define MAX_WRITE_ARGS_VM 32
+
 // Per-thread state to keep core builtins thread-safe
 static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
 static _Thread_local unsigned int rand_seed = 1;
@@ -396,9 +399,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
-    {"window", vmBuiltinWindow},
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
+    {"window", vmBuiltinWindow},
+    {"write", vmBuiltinWrite},
     {"to be filled", NULL}
 };
 
@@ -2711,6 +2715,83 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1) {
+        runtimeError(vm, "Write expects at least a newline flag.");
+        return makeVoid();
+    }
+
+    bool newline = false;
+    Value flag = args[0];
+    if (isRealType(flag.type)) {
+        newline = (AS_REAL(flag) != 0.0);
+    } else if (IS_INTLIKE(flag)) {
+        newline = (AS_INTEGER(flag) != 0);
+    } else if (flag.type == TYPE_BOOLEAN) {
+        newline = flag.i_val != 0;
+    } else if (flag.type == TYPE_CHAR) {
+        newline = flag.c_val != 0;
+    }
+
+    FILE* output_stream = stdout;
+    int start_index = 1;
+    bool first_arg_is_file_by_value = false;
+
+    if (arg_count > 1) {
+        const Value* first = &args[1];
+        if (first->type == TYPE_POINTER && first->ptr_val) first = (const Value*)first->ptr_val;
+        if (first->type == TYPE_FILE) {
+            if (!first->f_val) {
+                runtimeError(vm, "File not open for writing.");
+                return makeVoid();
+            }
+            output_stream = first->f_val;
+            start_index = 2;
+            if (args[1].type == TYPE_FILE) first_arg_is_file_by_value = true;
+        }
+    }
+
+    int print_arg_count = arg_count - start_index;
+    if (print_arg_count > MAX_WRITE_ARGS_VM) {
+        runtimeError(vm, "VM Error: Too many arguments for WRITE/WRITELN (max %d).", MAX_WRITE_ARGS_VM);
+        return makeVoid();
+    }
+
+    bool color_was_applied = false;
+    if (output_stream == stdout) {
+        color_was_applied = applyCurrentTextAttributes(output_stream);
+    }
+
+    for (int i = start_index; i < arg_count; i++) {
+        Value val = args[i];
+        if (val.type == TYPE_STRING) {
+            if (output_stream == stdout) {
+                fputs(val.s_val ? val.s_val : "", output_stream);
+            } else {
+                size_t len = val.s_val ? strlen(val.s_val) : 0;
+                fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
+            }
+        } else if (val.type == TYPE_CHAR) {
+            fputc(val.c_val, output_stream);
+        } else {
+            printValueToStream(val, output_stream);
+        }
+    }
+
+    if (newline) {
+        fprintf(output_stream, "\n");
+    }
+
+    if (color_was_applied) {
+        resetTextAttributes(output_stream);
+    }
+
+    fflush(output_stream);
+    if (first_arg_is_file_by_value) { args[1].type = TYPE_NIL; args[1].f_val = NULL; }
+
+    return makeVoid();
+}
+
 
 Value vmBuiltinIoresult(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "IOResult requires 0 arguments."); return makeInt(0); }
@@ -3586,6 +3667,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("VMVersion", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Write", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);

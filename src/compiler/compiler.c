@@ -1709,8 +1709,12 @@ static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
             freeValue(&sv);
             free(processed);
 
+            Value nl = makeInt(0);
+            int nlidx = addConstantToChunk(chunk, &nl);
+            freeValue(&nl);
+            emitConstant(chunk, nlidx, line);
             emitConstant(chunk, cidx, line);
-            int write_arg_count = 1;
+            int write_arg_count = 2;
 
             for (int i = 1; i < node->child_count; i++) {
                 AST* arg = node->children[i];
@@ -1718,7 +1722,9 @@ static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
                 write_arg_count++;
             }
 
-            writeBytecodeChunk(chunk, OP_WRITE, line);
+            int nameIndex = addStringConstant(chunk, "write");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)write_arg_count, line);
 
             Value zero = makeInt(0);
@@ -1792,11 +1798,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_WRITELN: {
             int argCount = node->child_count;
+            Value nl = makeInt(1);
+            int nlidx = addConstantToChunk(chunk, &nl);
+            freeValue(&nl);
+            emitConstant(chunk, nlidx, line);
             for (int i = 0; i < argCount; i++) {
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
-            writeBytecodeChunk(chunk, OP_WRITE_LN, line);
-            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
+            int nameIndex = addStringConstant(chunk, "write");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            emitShort(chunk, (uint16_t)nameIndex, line);
+            writeBytecodeChunk(chunk, (uint8_t)(argCount + 1), line);
             break;
         }
         case AST_WHILE: {
@@ -1998,11 +2010,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_WRITE: {
             int argCount = node->child_count;
+            Value nl = makeInt(0);
+            int nlidx = addConstantToChunk(chunk, &nl);
+            freeValue(&nl);
+            emitConstant(chunk, nlidx, line);
             for (int i = 0; i < argCount; i++) {
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
-            writeBytecodeChunk(chunk, OP_WRITE, line);
-            writeBytecodeChunk(chunk, (uint8_t)argCount, line);
+            int nameIndex = addStringConstant(chunk, "write");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            emitShort(chunk, (uint16_t)nameIndex, line);
+            writeBytecodeChunk(chunk, (uint8_t)(argCount + 1), line);
             break;
         }
         case AST_ASSIGN: {

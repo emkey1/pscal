@@ -318,6 +318,9 @@ class tinyCompiler:
         self.vars: Set[str] = set()
         self.var_name_idx: Dict[str, int] = {}
         self.read_idx = self.builder.add_constant(TYPE_STRING, "read")
+        self.write_idx = self.builder.add_constant(TYPE_STRING, "write")
+        self.const_true_idx = self.builder.add_constant(TYPE_INTEGER, 1)
+        self.const_false_idx = self.builder.add_constant(TYPE_INTEGER, 0)
         self.type_integer_idx = self.builder.add_constant(TYPE_STRING, "integer")
 
     # --- AST Traversal to collect variables ---
@@ -352,8 +355,11 @@ class tinyCompiler:
             self.compile_statement(stmt)
 
         # Ensure every program terminates with a newline for clean output
-        self.builder.emit(self.opcodes["OP_WRITE_LN"])
-        self.builder.emit(0)
+        self.builder.emit(self.opcodes["OP_CONSTANT"])
+        self.builder.emit(self.const_true_idx)
+        self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+        self.builder.emit_short(self.write_idx)
+        self.builder.emit(1)
         self.builder.emit(self.opcodes["OP_HALT"])
         return self.builder
 
@@ -373,12 +379,18 @@ class tinyCompiler:
             self.builder.emit(1)  # argument count
         elif isinstance(stmt, Write):
             if stmt.expr is None:
-                self.builder.emit(self.opcodes["OP_WRITE_LN"])
-                self.builder.emit(0)
-            else:
-                self.compile_expression(stmt.expr)
-                self.builder.emit(self.opcodes["OP_WRITE"])
+                self.builder.emit(self.opcodes["OP_CONSTANT"])
+                self.builder.emit(self.const_true_idx)
+                self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+                self.builder.emit_short(self.write_idx)
                 self.builder.emit(1)
+            else:
+                self.builder.emit(self.opcodes["OP_CONSTANT"])
+                self.builder.emit(self.const_false_idx)
+                self.compile_expression(stmt.expr)
+                self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+                self.builder.emit_short(self.write_idx)
+                self.builder.emit(2)
         elif isinstance(stmt, If):
             self.compile_expression(stmt.cond)
             self.builder.emit(self.opcodes["OP_JUMP_IF_FALSE"])
