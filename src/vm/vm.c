@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -724,7 +725,15 @@ static Value vmHostPrintf(VM* vm) {
                     while (j < flen && isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
                 }
                 const char* length_mods = "hlLjzt";
+                size_t mod_start = j;
                 while (j < flen && strchr(length_mods, fmt[j]) != NULL) j++;
+                char lenmod[4] = {0};
+                size_t mod_len = (j > mod_start) ? (j - mod_start) : 0;
+                if (mod_len > 0) {
+                    if (mod_len > sizeof(lenmod) - 1) mod_len = sizeof(lenmod) - 1;
+                    memcpy(lenmod, fmt + mod_start, mod_len);
+                    lenmod[mod_len] = '\0';
+                }
                 char spec = (j < flen) ? fmt[j] : '\0';
 
                 char fmtbuf[32];
@@ -738,16 +747,51 @@ static Value vmHostPrintf(VM* vm) {
                             u = (unsigned long long)AS_INTEGER(v);
                         }
                         bool is_unsigned = (spec=='u'||spec=='o'||spec=='x'||spec=='X');
-                        if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+                        if (precision >= 0 && width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
+                        else if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
                         else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
                         else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
-                        if (is_unsigned)
-                            snprintf(buf, sizeof(buf), fmtbuf, u);
-                        else
-                            snprintf(buf, sizeof(buf), fmtbuf, s);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
+
+                        // Cast to the correct type expected by the format length modifier
+                        if (is_unsigned) {
+                            if (strcmp(lenmod, "ll") == 0) {
+                                unsigned long long val = (unsigned long long)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "l") == 0) {
+                                unsigned long val = (unsigned long)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "j") == 0) {
+                                uintmax_t val = (uintmax_t)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "z") == 0) {
+                                size_t val = (size_t)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else {
+                                unsigned int val = (unsigned int)u; // includes h, hh, and default
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            }
+                        } else {
+                            if (strcmp(lenmod, "ll") == 0) {
+                                long long val = (long long)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "l") == 0) {
+                                long val = (long)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "j") == 0) {
+                                intmax_t val = (intmax_t)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "t") == 0) {
+                                ptrdiff_t val = (ptrdiff_t)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else {
+                                int val = (int)s; // includes h, hh, and default
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            }
+                        }
                         fputs(buf, stdout);
                         break;
                     }
