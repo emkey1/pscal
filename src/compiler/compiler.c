@@ -1658,6 +1658,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, OP_THREAD_JOIN, line);
             break;
         }
+        case AST_EXPR_STMT: {
+            if (node->left) {
+                compileRValue(node->left, chunk, getLine(node->left));
+                writeBytecodeChunk(chunk, OP_POP, line);
+            }
+            break;
+        }
         case AST_WRITELN: {
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {

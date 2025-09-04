@@ -1,9 +1,13 @@
 # Rea Front End
 
 This directory hosts the experimental front end for the Rea programming
-language. At the moment the executable only loads a source file and executes
-an empty bytecode chunk, but the layout below sketches the path toward a full
-compiler.
+language. The parser now emits PSCAL AST nodes directly, mirroring the Pascal
+front end, so the resulting tree can be compiled without an intermediate
+conversion step. The current implementation handles basic expressions, and the
+layout below sketches the path toward a full compiler.
+
+Numeric literals default to 64-bit integers or doubles, preserving the full
+range and precision of source values.
 
 ## Running
 

@@ -162,6 +162,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_WRITE:          return "WRITE";
         case AST_READLN:         return "READLN";
         case AST_READ:           return "READ";
+        case AST_EXPR_STMT:      return "EXPR_STMT";
         case AST_PROCEDURE_DECL: return "PROCEDURE_DECL";
         case AST_PROCEDURE_CALL: return "PROCEDURE_CALL";
         case AST_FUNCTION_DECL:  return "FUNCTION_DECL";
