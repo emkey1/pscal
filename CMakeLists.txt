@@ -145,7 +145,7 @@ endif()
 set(PSCAL_SOURCES
     src/Pascal/main.c src/Pascal/globals.c
     src/core/types.c src/core/utils.c src/core/list.c
-    src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/ast.c src/Pascal/opt.c
+    src/Pascal/lexer.c src/Pascal/parser.c src/ast/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c
@@ -383,13 +383,15 @@ set(REA_SOURCES
     src/rea/lexer.c
     src/rea/parser.c
     src/rea/ast.c
+    src/ast/ast.c
     src/Pascal/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
     src/compiler/bytecode.c
+    src/compiler/compiler.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
     src/symbol/symbol.c
-    src/rea/stubs.c
+    src/rea/type_stubs.c
 )
 
 list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})

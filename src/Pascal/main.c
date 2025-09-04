@@ -1,6 +1,6 @@
 #include "lexer.h"
 #include "parser.h"
-#include "ast.h"
+#include "ast/ast.h"
 #include "opt.h"
 #include "core/types.h"
 #include "core/utils.h"
