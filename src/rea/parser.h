@@ -2,9 +2,9 @@
 #define REA_PARSER_H
 
 #include "rea/lexer.h"
-#include "Pascal/ast.h"
+#include "rea/ast.h"
 
-AST *parseRea(const char *source);
+ReaAST *parseRea(const char *source);
 
 #endif
 
