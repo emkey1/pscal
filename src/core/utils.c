@@ -121,6 +121,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_INITIALIZATION:return "INITIALIZATION";
         case TOKEN_IN:            return "IN";
         case TOKEN_BREAK:         return "BREAK";
+        case TOKEN_RETURN:        return "RETURN";
         case TOKEN_OUT:           return "OUT";
         case TOKEN_SET:           return "SET";
         case TOKEN_CARET:         return "CARET";
@@ -162,6 +163,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_WRITE:          return "WRITE";
         case AST_READLN:         return "READLN";
         case AST_READ:           return "READ";
+        case AST_RETURN:         return "RETURN";
         case AST_EXPR_STMT:      return "EXPR_STMT";
         case AST_PROCEDURE_DECL: return "PROCEDURE_DECL";
         case AST_PROCEDURE_CALL: return "PROCEDURE_CALL";

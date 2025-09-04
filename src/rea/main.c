@@ -79,6 +79,9 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
+    initSymbolSystem();
+    registerAllBuiltins();
+
     AST *program = parseRea(src);
     if (dump_ast_json) {
         dumpASTJSON(program, stdout);
@@ -86,9 +89,6 @@ int main(int argc, char **argv) {
         free(src);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
-
-    initSymbolSystem();
-    registerAllBuiltins();
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
