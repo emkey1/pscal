@@ -1665,6 +1665,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             break;
         }
+        case AST_VAR_DECL: {
+            if (current_function_compiler != NULL) {
+                for (int i = 0; i < node->child_count; i++) {
+                    AST *varNameNode = node->children[i];
+                    if (varNameNode && varNameNode->token) {
+                        addLocal(current_function_compiler,
+                                 varNameNode->token->value,
+                                 getLine(varNameNode), false);
+                    }
+                }
+            }
+            compileNode(node, chunk, line);
+            break;
+        }
         case AST_WRITELN: {
             int argCount = node->child_count;
             for (int i = 0; i < argCount; i++) {
@@ -2599,10 +2613,37 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Use the specialized opcode
                 break;
             }
-            
+
             // Default behavior for actual arrays: get address, then get value.
             compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+            break;
+        }
+        case AST_ASSIGN: {
+            AST* lvalue = node->left;
+            AST* rvalue = node->right;
+
+            compileRValue(rvalue, chunk, getLine(rvalue));
+            writeBytecodeChunk(chunk, OP_DUP, line); // Preserve assigned value as the expression result
+
+            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                lvalue->token && lvalue->token->value &&
+                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                 strcasecmp(lvalue->token->value, "result") == 0)) {
+
+                int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+                if (return_slot != -1) {
+                    writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                    writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
+                } else {
+                    fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
+                    compiler_had_error = true;
+                }
+            } else {
+                compileLValue(lvalue, chunk, getLine(lvalue));
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            }
             break;
         }
         case AST_BINARY_OP: {
