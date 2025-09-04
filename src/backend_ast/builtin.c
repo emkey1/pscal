@@ -317,6 +317,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
+    {"printf", vmBuiltinPrintf},
     {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
@@ -596,6 +597,123 @@ Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
         return makeInt(0);
     }
     return makeInt((long long)(found - haystack) + 1);
+}
+
+Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "printf expects a format string as the first argument.");
+        return makeInt(0);
+    }
+    const char* fmt = AS_STRING(args[0]);
+    int arg_index = 1;
+    for (size_t i = 0; fmt && fmt[i] != '\0'; i++) {
+        char c = fmt[i];
+        if (c == '\\' && fmt[i + 1] != '\0') {
+            char esc = fmt[++i];
+            switch (esc) {
+                case 'n': fputc('\n', stdout); break;
+                case 'r': fputc('\r', stdout); break;
+                case 't': fputc('\t', stdout); break;
+                case '\\': fputc('\\', stdout); break;
+                case '"': fputc('"', stdout); break;
+                default: fputc(esc, stdout); break;
+            }
+            continue;
+        }
+        if (c == '%' && fmt[i + 1] != '\0') {
+            if (fmt[i + 1] == '%') {
+                fputc('%', stdout);
+                i++;
+                continue;
+            }
+            size_t j = i + 1;
+            int width = 0;
+            int precision = -1;
+            while (isdigit((unsigned char)fmt[j])) {
+                width = width * 10 + (fmt[j] - '0');
+                j++;
+            }
+            if (fmt[j] == '.') {
+                j++;
+                precision = 0;
+                while (isdigit((unsigned char)fmt[j])) {
+                    precision = precision * 10 + (fmt[j] - '0');
+                    j++;
+                }
+            }
+            const char* length_mods = "hlLjzt";
+            while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                j++;
+            }
+            char spec = fmt[j];
+            char fmtbuf[32];
+            char buf[256];
+            if (width > 0 && precision >= 0) {
+                snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+            } else if (width > 0) {
+                snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+            } else if (precision >= 0) {
+                snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
+            } else {
+                snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            }
+            if (arg_index < arg_count) {
+                Value v = args[arg_index++];
+                switch (spec) {
+                    case 'd':
+                    case 'i':
+                        snprintf(buf, sizeof(buf), fmtbuf, (long long)asI64(v));
+                        fputs(buf, stdout);
+                        break;
+                    case 'u':
+                    case 'o':
+                    case 'x':
+                    case 'X':
+                        snprintf(buf, sizeof(buf), fmtbuf, (unsigned long long)asI64(v));
+                        fputs(buf, stdout);
+                        break;
+                    case 'f':
+                    case 'F':
+                    case 'e':
+                    case 'E':
+                    case 'g':
+                    case 'G':
+                    case 'a':
+                    case 'A':
+                        snprintf(buf, sizeof(buf), fmtbuf, (double)AS_REAL(v));
+                        fputs(buf, stdout);
+                        break;
+                    case 'c': {
+                        char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
+                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        fputs(buf, stdout);
+                        break;
+                    }
+                    case 's': {
+                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        fputs(buf, stdout);
+                        break;
+                    }
+                    case 'p':
+                        snprintf(buf, sizeof(buf), fmtbuf, (void*)(uintptr_t)asI64(v));
+                        fputs(buf, stdout);
+                        break;
+                    default:
+                        printValueToStream(v, stdout);
+                        break;
+                }
+            } else {
+                fputc('%', stdout);
+                fputc(spec, stdout);
+            }
+            i = j;
+            continue;
+        }
+        fputc(c, stdout);
+    }
+    fflush(stdout);
+    return makeInt(0);
 }
 
 Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
