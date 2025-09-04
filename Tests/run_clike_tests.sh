@@ -37,7 +37,22 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
     continue
   fi
 
+  # Skip network-labeled tests unless RUN_NET_TESTS=1
+  if [ -f "$SCRIPT_DIR/clike/$test_name.net" ] && [ "${RUN_NET_TESTS:-0}" != "1" ]; then
+    echo "Skipping $test_name (network test; set RUN_NET_TESTS=1 to enable)"
+    echo
+    continue
+  fi
+
   echo "---- $test_name ----"
+
+  server_pid=""
+  server_script="$SCRIPT_DIR/clike/$test_name.net"
+  if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
+    python3 "$server_script" &
+    server_pid=$!
+    sleep 1
+  fi
 
   set +e
   if [ -f "$in_file" ]; then
@@ -88,6 +103,11 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
       cat "$actual_err"
       EXIT_CODE=1
     fi
+  fi
+
+  if [ -n "$server_pid" ]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
   fi
 
   rm -f "$actual_out" "$actual_err"

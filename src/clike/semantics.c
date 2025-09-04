@@ -79,6 +79,26 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_BOOLEAN;
     }
 
+    /* Socket / DNS helpers */
+    if (strcasecmp(name, "socketcreate") == 0 ||
+        strcasecmp(name, "socketclose") == 0 ||
+        strcasecmp(name, "socketconnect") == 0 ||
+        strcasecmp(name, "socketbind") == 0 ||
+        strcasecmp(name, "socketlisten") == 0 ||
+        strcasecmp(name, "socketaccept") == 0 ||
+        strcasecmp(name, "socketsend") == 0 ||
+        strcasecmp(name, "socketsetblocking") == 0 ||
+        strcasecmp(name, "socketpoll") == 0 ||
+        strcasecmp(name, "socketlasterror") == 0) {
+        return TYPE_INT32;
+    }
+    if (strcasecmp(name, "socketreceive") == 0) {
+        return TYPE_MEMORYSTREAM;
+    }
+    if (strcasecmp(name, "dnslookup") == 0) {
+        return TYPE_STRING;
+    }
+
     return TYPE_VOID;
 }
 
@@ -313,10 +333,21 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             }
             return node->var_type;
         }
-        case TCAST_ADDR:
+        case TCAST_ADDR: {
+            // Address-of: allow &var and &func
+            if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                char *name = tokenToCString(node->left->token);
+                VarType ft = getFunctionType(name);
+                free(name);
+                if (ft != TYPE_UNKNOWN) {
+                    node->var_type = TYPE_POINTER;
+                    return TYPE_POINTER;
+                }
+            }
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_POINTER;
             return TYPE_POINTER;
+        }
         case TCAST_DEREF:
             analyzeExpr(node->left, scopes);
             node->var_type = TYPE_UNKNOWN;
@@ -360,7 +391,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 !(isRealType(lt) && isRealType(rt)) &&
                 !(isRealType(lt) && isIntlikeType(rt)) &&
                 !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
-                !(isIntlikeType(lt) && isIntlikeType(rt))) {
+                !(isIntlikeType(lt) && isIntlikeType(rt)) &&
+                !(isIntlikeType(lt) && rt == TYPE_POINTER)) {
                 fprintf(stderr,
                         "Type error: cannot assign %s to %s at line %d, column %d\n",
                         varTypeToString(rt), varTypeToString(lt),
@@ -453,13 +485,194 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 if (bid != -1) {
                     t = builtinReturnType(name);
                 } else {
+                    // Known VM builtins not in clike's local map (HTTP helpers):
+                    if (strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) {
+                        t = TYPE_INT32;
+                    } else {
+                        // Allow indirect calls through variables (function pointers): if a variable
+                        // with this name exists in any visible scope, treat the call as indirect.
+                        VarType vt = TYPE_UNKNOWN;
+                        for (int i = scopes->depth - 1; i >= 0; --i) {
+                            vt = vtGetType(&scopes->scopes[i], name);
+                            if (vt != TYPE_UNKNOWN) break;
+                        }
+                        if (vt == TYPE_UNKNOWN) {
+                            vt = vtGetType(&globalVars, name);
+                        }
+                        if (vt != TYPE_UNKNOWN) {
+                            // Indirect function pointer call: conservatively assume int return
+                            t = TYPE_INT32;
+                        } else {
+                            fprintf(stderr,
+                                    "Type error: call to undefined function '%s' at line %d, column %d\n",
+                                    name,
+                                    node->token.line,
+                                    node->token.column);
+                            clike_error_count++;
+                        }
+                    }
+                }
+            }
+            // Final fallback for known VM HTTP helpers; assign return types and validate args
+            if (strcasecmp(name, "httpsession") == 0) {
+                if (node->child_count != 0) {
                     fprintf(stderr,
-                            "Type error: call to undefined function '%s' at line %d, column %d\n",
-                            name,
-                            node->token.line,
-                            node->token.column);
+                            "Type error: httpsession expects no arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
                     clike_error_count++;
                 }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httpclose") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpclose expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpsetheader") == 0) {
+                if (node->child_count != 3) {
+                    fprintf(stderr,
+                            "Type error: httpsetheader expects (session:int, name:string, value:string) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    if (!isIntlikeType(analyzeExpr(node->children[0], scopes)) ||
+                        analyzeExpr(node->children[1], scopes) != TYPE_STRING ||
+                        analyzeExpr(node->children[2], scopes) != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: httpsetheader argument types are (int, string, string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpclearheaders") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpclearheaders expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpsetoption") == 0) {
+                if (node->child_count != 3) {
+                    fprintf(stderr,
+                            "Type error: httpsetoption expects (session:int, key:string, value:int|string) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType a0 = analyzeExpr(node->children[0], scopes);
+                    VarType a1 = analyzeExpr(node->children[1], scopes);
+                    VarType a2 = analyzeExpr(node->children[2], scopes);
+                    if (!isIntlikeType(a0) || a1 != TYPE_STRING || !(isIntlikeType(a2) || a2 == TYPE_STRING)) {
+                        fprintf(stderr,
+                                "Type error: httpsetoption expects (int, string, int|string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_VOID;
+            } else if (strcasecmp(name, "httpgetlastheaders") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpgetlastheaders expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_STRING;
+            } else if (strcasecmp(name, "httpgetheader") == 0) {
+                if (node->child_count != 2) {
+                    fprintf(stderr,
+                            "Type error: httpgetheader expects (session:int, name:string) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType a0 = analyzeExpr(node->children[0], scopes);
+                    VarType a1 = analyzeExpr(node->children[1], scopes);
+                    if (!isIntlikeType(a0) || a1 != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: httpgetheader expects (int, string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_STRING;
+            } else if (strcasecmp(name, "httperrorcode") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httperrorcode expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httplasterror") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httplasterror expects (session:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_STRING;
+            } else if ((strcasecmp(name, "httprequest") == 0)) {
+                // We leave flexible checking for now; ensure it returns int
+                t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httprequesttofile") == 0)) {
+                // httprequesttofile(session:int, method:string, url:string, body:string|mstream|nil, out:string)
+                if (node->child_count != 5) {
+                    fprintf(stderr,
+                            "Type error: httprequesttofile expects 5 arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                } else {
+                    VarType a0 = analyzeExpr(node->children[0], scopes);
+                    VarType a1 = analyzeExpr(node->children[1], scopes);
+                    VarType a2 = analyzeExpr(node->children[2], scopes);
+                    VarType a3 = analyzeExpr(node->children[3], scopes);
+                    VarType a4 = analyzeExpr(node->children[4], scopes);
+                    if (!isIntlikeType(a0) || a1 != TYPE_STRING || a2 != TYPE_STRING || !(a3 == TYPE_STRING || a3 == TYPE_MEMORYSTREAM || a3 == TYPE_NIL) || a4 != TYPE_STRING) {
+                        fprintf(stderr,
+                                "Type error: httprequesttofile expects (int, string, string, string|mstream|nil, string) at line %d, column %d\n",
+                                node->token.line, node->token.column);
+                        clike_error_count++;
+                    }
+                }
+                t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httprequestasync") == 0)) {
+                if (node->child_count != 4) {
+                    fprintf(stderr,
+                            "Type error: httprequestasync expects 4 arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httprequestasynctofile") == 0)) {
+                if (node->child_count != 5) {
+                    fprintf(stderr,
+                            "Type error: httprequestasynctofile expects 5 arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httptryawait") == 0) {
+                if (node->child_count != 2) {
+                    fprintf(stderr,
+                            "Type error: httptryawait expects (id:int, out:mstream) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if (strcasecmp(name, "httpisdone") == 0) {
+                if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
+                    fprintf(stderr,
+                            "Type error: httpisdone expects (id:int) at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_INT32;
+            } else if ((strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) &&
+                       (t == TYPE_UNKNOWN || t == TYPE_VOID)) {
+                t = TYPE_INT32;
             }
             for (int i = 0; i < node->child_count; ++i) {
                 analyzeExpr(node->children[i], scopes);
@@ -614,7 +827,8 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                     if (declType != initType &&
                         !(isRealType(declType) && isRealType(initType)) &&
                         !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
-                        !(isIntlikeType(declType) && isIntlikeType(initType))) {
+                        !(isIntlikeType(declType) && isIntlikeType(initType)) &&
+                        !(isIntlikeType(declType) && initType == TYPE_POINTER)) {
                         fprintf(stderr,
                                 "Type error: cannot assign %s to %s at line %d, column %d\n",
                                 varTypeToString(initType), varTypeToString(declType),

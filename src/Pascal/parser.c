@@ -1350,6 +1350,65 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
          setRight(node, baseTypeNode);
         // Flow continues to the end, return node
 
+    } else if (initialTokenType == TOKEN_FUNCTION || initialTokenType == TOKEN_PROCEDURE) {
+        // Procedure/function pointer type: function '(' [named params] ')' ':' returnType | procedure '(' [named params] ')'
+        int isFunction = (initialTokenType == TOKEN_FUNCTION);
+        Token* kwTok = copyToken(initialToken);
+        eat(parser, initialTokenType);
+
+        // Parse optional parameter types list
+        AST* paramsList = NULL;
+        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+            eat(parser, TOKEN_LPAREN);
+            paramsList = newASTNode(AST_LIST, NULL);
+            while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+                // Support optional named parameters: name ':' type
+                if (parser->current_token->type == TOKEN_IDENTIFIER) {
+                    Token* nextTok = peekToken(parser);
+                    bool hasNameThenColon = (nextTok && nextTok->type == TOKEN_COLON);
+                    if (nextTok) freeToken(nextTok);
+                    if (hasNameThenColon) {
+                        eat(parser, TOKEN_IDENTIFIER); // consume param name
+                        eat(parser, TOKEN_COLON);      // consume ':'
+                    }
+                }
+                // Parse the type after an optional name (or the type name itself if unnamed)
+                AST* ptype = typeSpecifier(parser, 1);
+                if (!ptype) { freeAST(paramsList); if (kwTok) freeToken(kwTok); return NULL; }
+                addChild(paramsList, ptype);
+                if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+                    eat(parser, TOKEN_COMMA);
+                } else {
+                    break;
+                }
+            }
+            if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+                errorParser(parser, "Expected ')' to close parameter type list");
+                if (kwTok) freeToken(kwTok);
+                freeAST(paramsList);
+                return NULL;
+            }
+            eat(parser, TOKEN_RPAREN);
+        }
+
+        AST* retType = NULL;
+        if (isFunction) {
+            if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+                errorParser(parser, "Expected ':' and return type for function type");
+                if (kwTok) freeToken(kwTok); freeAST(paramsList); return NULL;
+            }
+            eat(parser, TOKEN_COLON);
+            retType = typeSpecifier(parser, 0);
+            if (!retType) { if (kwTok) freeToken(kwTok); freeAST(paramsList); return NULL; }
+        }
+
+        AST* procType = newASTNode(AST_PROC_PTR_TYPE, kwTok);
+        if (kwTok) freeToken(kwTok);
+        if (paramsList) addChild(procType, paramsList);
+        if (retType) setRight(procType, retType);
+        setTypeAST(procType, TYPE_POINTER);
+        return procType;
+
     } else if (initialTokenType == TOKEN_IDENTIFIER) {
         // IDENTIFIER logic for basic types, user types, string[N]
         // Use initialToken for newASTNode calls
@@ -2702,8 +2761,8 @@ AST *term(Parser *parser) {
     return node;
 }
 
-// factor: Parses literals, variables, function calls, NOT, parenthesized expressions, set constructors.
-// factor ::= literal | variable | function_call | '(' expression ')' | NOT factor | '[' set_elements ']'
+// factor: Parses literals, variables, function calls, NOT, parenthesized expressions, set constructors, and '@' addr-of.
+// factor ::= literal | variable | function_call | '(' expression ')' | NOT factor | '[' set_elements ']' | '@' IDENTIFIER
 AST *factor(Parser *parser) {
     // *** Use initial token type and pointer like in typeSpecifier ***
     Token *initialToken = parser->current_token;
@@ -2884,11 +2943,12 @@ AST *factor(Parser *parser) {
                         }
 
                     } else if (procSym) { // It's a procedure (not a function) used as a value
-                        char error_msg[128];
-                        snprintf(error_msg, sizeof(error_msg), "Procedure '%s' cannot be used as a value", procSym->name);
-                        errorParser(parser, error_msg);
-                        freeAST(node);
-                        return newASTNode(AST_NOOP, NULL);
+                        // Treat bare procedure identifiers in expression context as their address.
+                        // This allows CreateThread(Worker) as a convenience for @Worker.
+                        AST* addrNode = newASTNode(AST_ADDR_OF, NULL);
+                        setLeft(addrNode, node); // Transfer ownership of variable node as child
+                        setTypeAST(addrNode, TYPE_POINTER);
+                        node = addrNode;
                     }
                     // Otherwise, it's just a variable/constant reference.
                 }
@@ -2897,6 +2957,25 @@ AST *factor(Parser *parser) {
         // If lvalue returned DEREFERENCE, FIELD_ACCESS, ARRAY_ACCESS, it's used as is.
         // No immediate return needed here as lvalue consumed the relevant tokens.
         // Flow continues to end.
+
+    } else if (initialTokenType == TOKEN_AT) {
+        // Address-of operator: @Identifier
+        Token* atTok = copyToken(initialToken);
+        eat(parser, TOKEN_AT);
+        if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
+            errorParser(parser, "Expected identifier after '@'");
+            if (atTok) freeToken(atTok);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        // Create a VARIABLE node for the identifier
+        AST* idNode = newASTNode(AST_VARIABLE, parser->current_token);
+        eat(parser, TOKEN_IDENTIFIER);
+        // Create an ADDR_OF node and attach identifier as left child
+        AST* addrNode = newASTNode(AST_ADDR_OF, atTok);
+        if (atTok) freeToken(atTok);
+        setLeft(addrNode, idNode);
+        // Type will be annotated later (typically TYPE_POINTER)
+        return addrNode;
 
     } else if (initialTokenType == TOKEN_LPAREN) {
         eat(parser, TOKEN_LPAREN); // Eat '('

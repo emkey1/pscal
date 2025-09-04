@@ -688,6 +688,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     "OP_CALL", address, targetProcName, declared_arity);
             return offset + 6;
         }
+        case OP_CALL_INDIRECT: {
+            uint8_t arg_count = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s (args=%d)\n", "OP_CALL_INDIRECT", arg_count);
+            return offset + 2;
+        }
+        case OP_PROC_CALL_INDIRECT: {
+            uint8_t arg_count = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s (args=%d)\n", "OP_PROC_CALL_INDIRECT", arg_count);
+            return offset + 2;
+        }
         case OP_HALT:
             fprintf(stderr, "OP_HALT\n");
             return offset + 1;

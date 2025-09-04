@@ -1,0 +1,17 @@
+program FuncPtrIndirectCall;
+
+type
+  PInc = function(x: Integer): Integer;
+
+function Inc1(x: Integer): Integer;
+begin
+  Inc1 := x + 1;
+end;
+
+var f: PInc; n: Integer;
+begin
+  f := @Inc1;
+  n := f(41);
+  writeln(n);
+end.
+

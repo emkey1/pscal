@@ -1,0 +1,27 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/block_decl.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 OP_DEFINE_GLOBAL NameIdx:0   'x' Type:INT64 ('int')
+0005    | OP_CONSTANT         2 '0'
+0007    | OP_SET_GLOBAL       0 'x'
+0009    2 OP_GET_GLOBAL       0 'x'
+0011    | OP_CONSTANT         2 '0'
+0013    | OP_EQUAL
+0014    | OP_JUMP_IF_FALSE   15 (to 0032)
+0017    3 OP_DEFINE_GLOBAL NameIdx:3   'y' Type:INT64 ('int')
+0022    | OP_CONSTANT         4 '1'
+0024    | OP_SET_GLOBAL       3 'y'
+0026    4 OP_GET_GLOBAL       3 'y'
+0028    | OP_GET_GLOBAL_ADDRESS    0 'x'
+0030    | OP_SWAP
+0031    | OP_SET_INDIRECT
+0032    0 OP_HALT
+== End Disassembly: Tests/rea/block_decl.rea ==
+
+Constants (5):\n  0000: STR   "x"
+  0001: STR   "int"
+  0002: INT   0
+  0003: STR   "y"
+  0004: INT   1
+

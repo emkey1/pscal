@@ -1,0 +1,31 @@
+#!/usr/bin/env pascal
+program HttpPinningDemo;
+
+var s, code: integer;
+    ms: mstream;
+    url, pin: string;
+begin
+  if GetEnv('RUN_NET_TESTS') <> '1' then
+  begin
+    writeln('Set RUN_NET_TESTS=1 and optionally PIN_SHA256, URL to run.');
+    exit;
+  end;
+
+  url := GetEnv('URL');
+  if url = '' then url := 'https://example.com';
+  pin := GetEnv('PIN_SHA256');
+
+  s := HttpSession();
+  HttpSetOption(s, 'tls_min', 12);
+  HttpSetOption(s, 'alpn', 1);
+  if pin <> '' then HttpSetOption(s, 'pin_sha256', pin);
+
+  ms := mstreamcreate();
+  code := HttpRequest(s, 'GET', url, nil, ms);
+  writeln('Status: ', code);
+  writeln('ErrCode: ', HttpErrorCode(s));
+  writeln('ErrMsg: ', HttpLastError(s));
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+

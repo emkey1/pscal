@@ -1,0 +1,14 @@
+#!/usr/bin/env clike
+
+int main() {
+  // assumes "upload.txt" exists in current directory
+  int s = httpsession();
+  httpsetoption(s, "upload_file", "upload.txt");
+  mstream out = mstreamcreate();
+  int code = httprequest(s, "POST", "https://httpbin.org/post", NULL, out);
+  printf("status: %d\n", code);
+  printf("body: %s\n", mstreambuffer(out));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}

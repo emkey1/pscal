@@ -1,0 +1,25 @@
+#!/usr/bin/env clike
+
+int main() {
+  int s = socketcreate(0);
+  socketconnect(s, "echo.websocket.events", 80);
+  socketsend(s,
+    "GET / HTTP/1.1\r\n"
+    "Host: echo.websocket.events\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    "\r\n");
+  mstream resp = socketreceive(s, 1024);
+  printf("handshake:\n%s\n", mstreambuffer(resp));
+  mstreamfree(&resp);
+  // send masked text frame "hi"
+  socketsend(s, "\x81\x82\x12\x34\x56\x78\x7a\x5d");
+  mstream msg = socketreceive(s, 1024);
+  str buf = mstreambuffer(msg);
+  printf("echo: %c%c\n", buf[3], buf[4]);
+  mstreamfree(&msg);
+  socketclose(s);
+  return 0;
+}

@@ -1,0 +1,33 @@
+#!/usr/bin/env pascal
+program HttpAsyncDemo;
+
+var s, id, code: integer;
+    ms: mstream;
+    cwd, url, line: string;
+    f: text;
+begin
+  { Create local file to fetch via file:// }
+  assign(f, 'async_src.txt');
+  rewrite(f);
+  writeln(f, 'HelloAsync');
+  close(f);
+
+  cwd := GetEnv('PWD');
+  url := 'file://' + cwd + '/async_src.txt';
+
+  s := HttpSession();
+  id := HttpRequestAsyncToFile(s, 'GET', url, nil, 'async_dst.txt');
+  while HttpIsDone(id) = 0 do Delay(10);
+
+  ms := mstreamcreate();
+  code := HttpAwait(id, ms);
+  writeln('Status: ', code);
+
+  assign(f, 'async_dst.txt');
+  reset(f); readln(f, line); close(f);
+  writeln('File: ', line);
+
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+

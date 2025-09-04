@@ -1,0 +1,13 @@
+program ProcPtrAssignMismatch;
+
+type
+  PProc = procedure(integer);
+
+procedure H; begin end;
+
+var
+  p: PProc;
+begin
+  p := @H;  { mismatch: expected 1 param, got 0 }
+end.
+

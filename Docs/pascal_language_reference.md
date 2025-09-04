@@ -63,6 +63,7 @@ The language supports a variety of built-in data types:
 | `String` | `TYPE_STRING` | Dynamic-length or fixed-length string. |
 | `Boolean` | `TYPE_BOOLEAN` | `True` or `False`. |
 | `Text`, `File` | `TYPE_FILE` | Represents a file handle. |
+| `Thread` | `TYPE_THREAD` | A handle identifying a VM thread. |
 | `MStream` | `TYPE_MEMORYSTREAM` | A dynamic in-memory stream of bytes. |
 
 ### **Variables and Constants**
@@ -211,35 +212,80 @@ The language supports modular programming through **units**. A unit is a separat
 
 ### **Built-in Functions and Procedures**
 
-The Pascal front end has access to the full suite of built-in routines provided by the PSCAL VM. This includes extensive support for:
-* File I/O (`Assign`, `Reset`, `Rewrite`, `Read`, `Write`, `Close`, etc.)
-* String manipulation (`Length`, `Copy`, `Pos`, `Concat`, etc.)
-* Mathematical functions (`Sin`, `Cos`, `Sqrt`, `Abs`, etc.)
-* Memory management (`New`, `Dispose`)
-* Console I/O (`GotoXY`, `TextColor`, `ClrScr`, etc.)
-* SDL-based graphics and sound, if compiled with SDL support.
+The Pascal front end exposes the PSCAL VM's built-ins, including:
+
+- File I/O: `Assign`, `Reset`, `Rewrite`, `Read`, `ReadLn`, `Write`, `WriteLn`, `Close`, `EOF`, `IOResult`, etc.
+- String operations: `Length`, `Copy`, `Pos`, `Concat`, `UpCase`, `ReadKey`, conversions (`IntToStr`, `RealToStr`).
+- Math: `Sin`, `Cos`, `Tan`, `Sqrt`, `Ln`, `Exp`, `Abs`, `Round`, `Trunc`, `Random`.
+- Memory: `New`, `Dispose`.
+- Console/text: `GotoXY`, `TextColor`, `TextBackground`, `ClrScr`, `WhereX`, `WhereY`.
+- Concurrency (see below): `spawn`, `join`, `mutex`, `rcmutex`, `lock`, `unlock`, `destroy`.
+- SDL-based graphics/sound (when built with `-DSDL=ON`): e.g., `InitGraph`, `CloseGraph`, `UpdateScreen`, `SetRGBColor`, `DrawLine`, `FillRect`, `FillCircle`, `CreateTexture`, `UpdateTexture`, `DestroyTexture`, text helpers like `InitTextSystem`, `OutTextXY`, and audio: `InitSoundSystem`, `LoadSound`, `PlaySound`, `IsSoundPlaying`, `FreeSound`, `QuitSoundSystem`.
+
+Note: SDL built-ins are available only in SDL-enabled builds. Headless CI typically skips these routines.
 
 ### **Threading and Synchronization**
 
-The Pascal front end supports lightweight concurrency and mutex primitives using the following built-ins:
+The VM provides lightweight threads and mutexes for safe concurrency.
 
-* `spawn` – starts a new thread executing a parameterless procedure and returns a thread identifier.
-* `join` – waits for the thread whose identifier is given to finish execution.
-* `mutex` – creates a standard mutex and returns its integer identifier.
-* `rcmutex` – creates a recursive mutex and returns its identifier.
-* `lock` – takes a mutex identifier and waits until the mutex is acquired.
-* `unlock` – releases a previously acquired mutex.
-* `destroy` – permanently frees a mutex so its identifier can no longer be used.
+Thread lifecycle
+- `spawn <ProcIdent>`: starts a new thread running a parameterless procedure, returns an `integer` thread id.
+- `join <tid>`: blocks until the target thread finishes.
 
-Threads share global variables and are scheduled cooperatively; a `join` yields control until the target thread completes.
+Mutex APIs
+- `mutex(): integer`: create a standard (non-recursive) mutex; returns an id.
+- `rcmutex(): integer`: create a recursive mutex (same thread may re‑acquire).
+- `lock(<mid>)`: acquire the mutex with id `<mid>` (blocks until available).
+- `unlock(<mid>)`: release a previously acquired mutex.
+- `destroy(<mid>)`: permanently free the mutex; its id may be reused by future `mutex/rcmutex` calls.
 
-Example:
+Semantics and notes
+- Threads share global variables. Use mutexes to protect shared state.
+- `spawn` expects a parameterless procedure. Pass data through globals or pre‑initialized structures.
+- Recursive mutexes are useful when helpers invoked under a lock need to acquire the same mutex.
+- A typical pattern is: create → lock/unlock as needed → destroy.
 
+Extended helpers (procedure pointers)
+
+In addition to `spawn`/`join`, the following helpers support passing data to a new thread:
+
+- `CreateThread(@Proc, argPtr: Pointer = nil): Thread` – spawn a new thread that calls `Proc`, passing `argPtr` as its first (and only) parameter.
+- `WaitForThread(t: Thread): Integer` – wait for completion of the given thread handle (returns 0).
+
+Examples
+
+Spawn and join:
 ```pascal
+procedure Worker; begin (* do work *) end;
 var tid: integer;
 begin
-  tid := spawn WorkerProc;
+  tid := spawn Worker;
   join tid;
+end.
+```
+
+Mutex for shared counter:
+```pascal
+var counter, mid: integer;
+
+procedure IncWorker;
+var i: integer;
+begin
+  for i := 1 to 100 do begin
+    lock(mid);
+    counter := counter + 1;
+    unlock(mid);
+  end;
+end;
+
+var t1, t2: integer;
+begin
+  counter := 0;
+  mid := mutex();
+  t1 := spawn IncWorker; t2 := spawn IncWorker;
+  join t1; join t2;
+  destroy(mid);
+  WriteLn(counter);  { expected 200 }
 end.
 ```
 
@@ -254,3 +300,40 @@ begin
   WriteLn('Hello, World!');
 end.
 ```
+Address-of (`@`)
+
+The `@` operator yields the address of a procedure or function identifier as a pointer value. Example:
+
+```pascal
+procedure Handler; begin end;
+var p: pointer;
+begin
+  p := @Handler;
+end.
+```
+
+Currently `@` is intended for taking routine addresses. Using `@` with non-routine identifiers is not supported.
+
+Procedure and function pointers
+
+Declare procedure/function pointer types using `procedure (...)` or `function (...): <Type>` in a type definition. Assign with `@Name` and call indirectly:
+
+```pascal
+type
+  PProc = procedure();
+  PInc  = function(x: Integer): Integer;
+
+procedure Hello; begin writeln('hi'); end;
+function Inc1(x: Integer): Integer; begin Inc1 := x + 1; end;
+
+var p: PProc; f: PInc; n: Integer;
+begin
+  p := @Hello; p();  // or just p; for parameterless
+  f := @Inc1; n := f(41); writeln(n);
+end.
+```
+
+Assignments and parameter passing perform signature checks (arity and simple parameter/return types).
+
+See also
+- A compact, runnable demo combining procedure/function pointers (including indirect calls) with the new thread helpers is available at `Examples/Pascal/ThreadsProcPtrDemo`.

@@ -1,0 +1,13 @@
+program CreateThreadSmoke;
+
+procedure Worker;
+begin
+  writeln('worker');
+end;
+
+var t: integer; { thread handle; currently returns an integer id }
+begin
+  t := CreateThread(@Worker);
+  WaitForThread(t);
+end.
+

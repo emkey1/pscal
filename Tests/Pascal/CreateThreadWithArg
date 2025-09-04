@@ -1,0 +1,18 @@
+program CreateThreadWithArg;
+
+procedure Worker(p: ^integer);
+begin
+  p^ := p^ + 1;
+end;
+
+var p: ^integer;
+    t: integer;
+begin
+  new(p);
+  p^ := 41;
+  t := CreateThread(@Worker, p);
+  WaitForThread(t);
+  writeln(p^);
+  dispose(p);
+end.
+

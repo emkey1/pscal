@@ -151,6 +151,26 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"apiReceive", vmBuiltinApiReceive},
     {"apiSend", vmBuiltinApiSend},
+    {"httpsession", vmBuiltinHttpSession},
+    {"httpclose", vmBuiltinHttpClose},
+    {"httperrorcode", vmBuiltinHttpErrorCode},
+    {"httpgetlastheaders", vmBuiltinHttpGetLastHeaders},
+    {"httpgetheader", vmBuiltinHttpGetHeader},
+    {"httpsetheader", vmBuiltinHttpSetHeader},
+    {"httpclearheaders", vmBuiltinHttpClearHeaders},
+    {"httpsetoption", vmBuiltinHttpSetOption},
+    {"httprequest", vmBuiltinHttpRequest},
+    {"httprequesttofile", vmBuiltinHttpRequestToFile},
+    {"httprequestasync", vmBuiltinHttpRequestAsync},
+    {"httprequestasynctofile", vmBuiltinHttpRequestAsyncToFile},
+    {"httpisdone", vmBuiltinHttpIsDone},
+    {"httptryawait", vmBuiltinHttpTryAwait},
+    {"httpcancel", vmBuiltinHttpCancel},
+    {"httpgetasyncprogress", vmBuiltinHttpGetAsyncProgress},
+    {"httpgetasynctotal", vmBuiltinHttpGetAsyncTotal},
+    {"httpawait", vmBuiltinHttpAwait},
+    {"httplasterror", vmBuiltinHttpLastError},
+    {"jsonget", vmBuiltinJsonGet},
     {"append", vmBuiltinAppend},
     {"arccos", vmBuiltinArccos},
     {"arcsin", vmBuiltinArcsin},
@@ -196,6 +216,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"destroytexture", vmBuiltinDestroytexture},
 #endif
     {"dispose", vmBuiltinDispose},
+    {"dnslookup", vmBuiltinDnsLookup},
     {"dosExec", vmBuiltinDosExec},
     {"dosFindfirst", vmBuiltinDosFindfirst},
     {"dosFindnext", vmBuiltinDosFindnext},
@@ -339,6 +360,17 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sinh", vmBuiltinSinh},
+    {"socketaccept", vmBuiltinSocketAccept},
+    {"socketbind", vmBuiltinSocketBind},
+    {"socketclose", vmBuiltinSocketClose},
+    {"socketconnect", vmBuiltinSocketConnect},
+    {"socketcreate", vmBuiltinSocketCreate},
+    {"socketlasterror", vmBuiltinSocketLastError},
+    {"socketlisten", vmBuiltinSocketListen},
+    {"socketpoll", vmBuiltinSocketPoll},
+    {"socketreceive", vmBuiltinSocketReceive},
+    {"socketsend", vmBuiltinSocketSend},
+    {"socketsetblocking", vmBuiltinSocketSetBlocking},
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
     {"str", vmBuiltinStr},
@@ -1992,24 +2024,12 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     }
 
     AST *baseTypeNode = pointerVarValuePtr->base_type_node;
-#ifdef DEBUG
-    fprintf(stderr, "[DEBUG new] ptrVar=%p type=%s ptr_val=%p base=%p (%s)\n",
-            (void*)pointerVarValuePtr,
-            varTypeToString(pointerVarValuePtr->type),
-            pointerVarValuePtr->ptr_val,
-            (void*)baseTypeNode,
-            baseTypeNode ? astTypeToString(baseTypeNode->type) : "NULL");
-#endif
-    if (!baseTypeNode) {
-        runtimeError(vm, "Cannot determine base type for pointer variable in new().");
-        return makeVoid();
-    }
-
-    // This logic is similar to the AST version's
-    VarType baseVarType = TYPE_VOID;
+    // (debug logging removed)
+    // Determine base type. Default to INTEGER if metadata is unavailable.
+    VarType baseVarType = baseTypeNode ? TYPE_VOID : TYPE_INT32;
     AST* actualBaseTypeDef = baseTypeNode;
 
-    if (actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
+    if (actualBaseTypeDef && actualBaseTypeDef->type == AST_VARIABLE && actualBaseTypeDef->token) {
         const char* typeName = actualBaseTypeDef->token->value;
         if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "real")==0 || strcasecmp(typeName, "double")==0) { baseVarType=TYPE_DOUBLE; actualBaseTypeDef = NULL; }
@@ -2026,20 +2046,35 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
             actualBaseTypeDef = lookedUpType;
             baseVarType = actualBaseTypeDef->var_type;
         }
-    } else {
+    } else if (actualBaseTypeDef) {
          baseVarType = actualBaseTypeDef->var_type;
     }
 
-    if (baseVarType == TYPE_VOID) { runtimeError(vm, "Cannot determine valid base type in new()."); return makeVoid(); }
+    if (baseVarType == TYPE_VOID) {
+        // Final fallback: allocate as INTEGER
+        baseVarType = TYPE_INT32;
+        actualBaseTypeDef = NULL;
+    }
     
     Value* allocated_memory = malloc(sizeof(Value));
     if (!allocated_memory) { runtimeError(vm, "Memory allocation failed in new()."); return makeVoid(); }
     
     *(allocated_memory) = makeValueForType(baseVarType, actualBaseTypeDef, NULL);
-    
+    // (debug logging removed)
+
     // Update the pointer variable that was passed by reference
     pointerVarValuePtr->ptr_val = allocated_memory;
     pointerVarValuePtr->type = TYPE_POINTER;
+
+    // Safety: if base type metadata is unknown, treat as integer for subsequent dereferences
+    if (!pointerVarValuePtr->base_type_node) {
+        Token* baseTok = newToken(TOKEN_IDENTIFIER, "integer", 0, 0);
+        AST* baseNode = newASTNode(AST_VARIABLE, baseTok);
+        setTypeAST(baseNode, TYPE_INT32);
+        freeToken(baseTok);
+        pointerVarValuePtr->base_type_node = baseNode;
+    }
+    // (debug logging removed)
 
     return makeVoid();
 }
@@ -3275,6 +3310,37 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpSession", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpClose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpSetHeader", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpClearHeaders", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpSetOption", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("HttpRequest", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpRequestToFile", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpRequestAsync", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpRequestAsyncToFile", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpIsDone", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpTryAwait", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpCancel", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpGetAsyncProgress", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpGetAsyncTotal", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpAwait", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpLastError", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpGetLastHeaders", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpErrorCode", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("HttpGetHeader", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("DnsLookup", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketAccept", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketBind", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketClose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("SocketConnect", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketCreate", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketLastError", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketListen", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketPoll", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketReceive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketSend", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketSetBlocking", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);

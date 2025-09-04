@@ -17,7 +17,12 @@ Pscal implements a substantial subset of classic Pascal:
 * **Control flow** – `if`, `case`, `for`, `while`, `repeat…until`, and `break`.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
-* **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish; `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
+* **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish. Prefer `CreateThread(@Proc, arg)` and `WaitForThread(t)` when you need to pass a pointer argument. `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
+
+Examples
+- See `Examples/Pascal/ThreadsProcPtrDemo` for a compact demonstration of:
+  - Procedure/function pointers (including indirect calls), and
+  - `CreateThread(@Worker, argPtr)`/`WaitForThread(t)` passing a pointer argument.
 
 Example program:
 
@@ -131,11 +136,21 @@ Provides DOS‑style file and environment operations by wrapping builtins【F:li
 * `exec`
 
 ### MathLib
-Advanced mathematical routines【F:lib/pascal/mathlib.pl†L1-L136】.
+Compatibility shim for math routines【F:lib/pascal/mathlib.pl†L1-L80】.
 
-* Trigonometry: `ArcTan`, `ArcSin`, `ArcCos`, `Cotan`
-* Exponentials: `Power`, `Log10`, `Sinh`, `Cosh`, `Tanh`
-* Helpers: `Max`, `Min`, `Floor`, `Ceil`
+- MathLib now forwards to VM builtins for all functions, keeping existing
+  programs that `uses MathLib;` working without modification.
+- Prefer calling the builtins directly in new code: `arctan`, `arcsin`,
+  `arccos`, `cotan`, `power`, `log10`, `sinh`, `cosh`, `tanh`, `max`, `min`,
+  `floor`, `ceil`.
+
+Provided wrappers:
+- Trigonometry: `ArcTan`, `ArcSin`, `ArcCos`, `Cotan`
+- Exponentials: `Power`, `Log10`, `Sinh`, `Cosh`, `Tanh`
+- Helpers: `Max`, `Min`, `Floor`, `Ceil`
+
+Constants exported by MathLib:
+- `Pi`, `E`, `Ln2`, `Ln10`, `TwoPi`, `PiOver2`
 
 ### mylib
 Example user unit exporting a record type and routines【F:lib/pascal/mylib.pl†L1-L40】.

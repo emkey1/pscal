@@ -103,11 +103,29 @@ VM. For instructions on adding your own routines, see
 | ---- | ---------- | ------- | ----------- |
 | spawn | (address: Integer) | Integer | Start a new thread at the given bytecode address and return its id. |
 | join | (tid: Integer) | void | Wait for the specified thread to finish. |
+| CreateThread | (procAddr: Pointer, arg: Pointer = nil) | Thread | Start a new thread invoking the given routine with `arg`. Backward-compatible with 1-arg form. |
+| WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete. |
 | mutex | () | Integer | Create a standard mutex and return its identifier. |
 | rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
 | lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
 | unlock | (mid: Integer) | void | Release the specified mutex. |
 | destroy | (mid: Integer) | void | Destroy the specified mutex. |
+
+## HTTP (Synchronous)
+
+| Name | Parameters | Returns | Description |
+| ---- | ---------- | ------- | ----------- |
+| HttpSession | () | Integer (session) | Create a reusable HTTP session (libcurl easy) with keep‑alive. |
+| HttpClose | (session: Integer) | void | Destroy a session and free resources. |
+| HttpSetHeader | (session: Integer, name: String, value: String) | void | Add a request header to the session. |
+| HttpClearHeaders | (session: Integer) | void | Clear all accumulated headers. |
+| HttpSetOption | (session: Integer, key: String, value: Int or String) | void | Set options such as `timeout_ms` (Int), `follow_redirects` (Int 0/1), `user_agent` (String), `accept_encoding` (String), cookie persistence via `cookie_file`/`cookie_jar` (String), retry/backoff via `retry_max`/`retry_delay_ms`, rate limiting with `max_recv_speed`/`max_send_speed`, and streaming uploads via `upload_file` (String). |
+| HttpRequest | (session: Integer, method: String, url: String, body: String|MStream|nil, out: MStream) | Integer (status) | Perform a request; writes response body into `out`. Returns HTTP status or -1 on transport error. |
+
+Notes
+- `body` may be nil for GET or other methods without payload; strings and mstreams are supported.
+- `out` must be an initialized `MStream`; it is cleared before writing.
+- Errors and transport failures return -1 and report details on stderr.
 
 ## Math
 
@@ -167,6 +185,18 @@ Numeric builtins preserve integer types when all inputs are integral. In particu
 | ---- | ---------- | ------- | ----------- |
 | apiSend | (data: String) | Integer | Send network packet. |
 | apiReceive | () | String | Receive network packet. |
+| DnsLookup | (host: String) | String | Resolve hostname to IPv4 address or empty string on error. |
+| SocketCreate | (kind: Integer) | Integer | Create TCP (0) or UDP (1) socket. Returns handle or -1. |
+| SocketConnect | (s: Integer, host: String, port: Integer) | Integer | Connect socket to remote host/port. Returns 0 or -1. |
+| SocketBind | (s: Integer, port: Integer) | Integer | Bind socket to local port. Returns 0 or -1. |
+| SocketListen | (s: Integer, backlog: Integer) | Integer | Begin listening for connections. Returns 0 or -1. |
+| SocketAccept | (s: Integer) | Integer | Accept connection; returns new socket or -1. |
+| SocketSend | (s: Integer, data: String\|MStream) | Integer | Send data; returns bytes sent or -1. |
+| SocketReceive | (s: Integer, maxLen: Integer) | MStream | Receive up to maxLen bytes. Returns memory stream or nil. |
+| SocketClose | (s: Integer) | Integer | Close socket. Returns 0 or -1. |
+| SocketSetBlocking | (s: Integer, blocking: Boolean) | Integer | Toggle blocking mode (0 on success). |
+| SocketPoll | (s: Integer, timeoutMs: Integer, flags: Integer) | Integer | Poll for read (1) or write (2); returns bitmask or -1. |
+| SocketLastError | () | Integer | Last socket/DNS error code. |
 
 ## SDL graphics and audio
 
@@ -238,4 +268,3 @@ int main() {
   return 0;
 }
 ```
-

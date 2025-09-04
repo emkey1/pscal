@@ -4,7 +4,7 @@
 #include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdlib.h>

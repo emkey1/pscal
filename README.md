@@ -64,7 +64,29 @@ cd Tests;./run_all_tests
 
   If `RUN_SDL=1` is not set, the scripts may export `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` and skip SDL-specific tests to remain deterministic in CI.
 
+- Network tests: to keep CI deterministic, tests that require outbound network are guarded.
+  - Pascal examples include a demo (`Examples/Pascal/HttpHeadersNetDemo`) that only runs when `RUN_NET_TESTS=1` is set.
+  - The CLike test runner will skip any test with a `.net` sentinel file unless `RUN_NET_TESTS=1` is set.
+
 Note: On macOS, you may see benign LaunchServices/XPC warnings on stderr when running SDL tests in some environments.
+
+## Running the new example (threads + procedure pointers)
+
+Two convenient ways to run the demo that exercises procedure/function pointers (including indirect calls) and the new `CreateThread(@Proc, arg)`/`WaitForThread(t)` APIs:
+
+1) CMake custom target:
+
+```sh
+cmake --build build --target run_threads_procptr_demo
+```
+
+2) Makefile in `Examples/`:
+
+```sh
+make -C Examples threads-procptr-demo
+```
+
+The example source lives at `Examples/Pascal/ThreadsProcPtrDemo`.
 
 ## Tiny language front end (Written in Python)
 
@@ -121,6 +143,52 @@ Environment variables:
 - `CLIKE_LIB_DIR`: search directory for CLike `import "..."` modules.
 - `PASCAL_LIB_DIR`: root directory for Pascal units (`.pl` files). The test runner stages a copy under this path.
 - `SDL_VIDEODRIVER`, `SDL_AUDIODRIVER`: set to `dummy` by default in headless runs; set `RUN_SDL=1` to execute SDL examples/tests.
+- `RUN_NET_TESTS`: when set to `1`, enables network-dependent tests and demos.
+
+### HTTP networking (sync)
+
+Built-in HTTP helpers are available to all front ends (Pascal and CLike). Highlights:
+
+- Sessions: `HttpSession/httpsession`, `HttpClose/httpclose`.
+- Headers: `HttpSetHeader/httpsetheader`, `HttpClearHeaders/httpclearheaders`, `HttpGetLastHeaders/httpgetlastheaders`, `HttpGetHeader/httpgetheader`.
+- Options via `HttpSetOption/httpsetoption` (key → value):
+  - `timeout_ms`, `follow_redirects`, `user_agent`
+  - Compression: `accept_encoding` (e.g., `gzip` or empty string for all supported encodings)
+  - TLS: `ca_path`, `client_cert`, `client_key`, hostname checks via `verify_peer`, `verify_host`
+  - Proxy: `proxy`
+  - HTTP/2: `http2`
+  - Auth: `basic_auth` (`user:pass`)
+  - Output: `out_file` (tee response to file in `HttpRequest`)
+- Requests:
+  - Memory: `HttpRequest/httprequest(s, method, url, bodyStr|mstream|nil, outMStream)` → status code
+  - File: `HttpRequestToFile/httprequesttofile(s, method, url, body, outPath)` → status code
+- Errors: `HttpErrorCode/httperrorcode` (0 none; 1 generic; 2 I/O; 3 timeout; 4 SSL; 5 resolve; 6 connect), `HttpLastError/httplasterror` message.
+
+Notes:
+- `file://` URLs are handled directly by the runtime with synthesized `Content-Length` and `Content-Type` headers; this enables hermetic tests without relying on libcurl’s file scheme.
+
+See also: Docs/http_security.md for details on pinning, TLS knobs, proxies, and DNS overrides with step‑by‑step commands.
+
+#### TLS, Security, and Proxies
+
+Configure per-session knobs via `HttpSetOption/httpsetoption`:
+
+- TLS constraints:
+  - `tls_min` / `tls_max`: integers 10/11/12/13 map to TLSv1.0/1.1/1.2/1.3 (min and max cap when supported).
+  - `alpn`: 0/1 to disable/enable ALPN (when libcurl supports it).
+  - `ciphers`: OpenSSL-style cipher list string for `CURLOPT_SSL_CIPHER_LIST`.
+  - `pin_sha256`: pinned public key (string). Use `sha256//BASE64` or a file path per libcurl `CURLOPT_PINNEDPUBLICKEY` format.
+
+- Proxies:
+  - `proxy`: proxy URL (e.g., `http://host:8080`).
+  - `proxy_userpwd`: `user:pass` credentials.
+  - `proxy_type`: `http`, `https` (if supported by your libcurl), `socks5`, or `socks4`.
+
+- DNS overrides:
+  - `resolve_add`: add an entry `host:port:address` (e.g., `example.com:443:93.184.216.34`).
+  - `resolve_clear`: clear all resolve overrides.
+
+All of the above apply to both sync and async requests. Async jobs snapshot session options at submission.
 
 An interactive session is also available via `build/bin/clike-repl`, which
 reads a single line of C-like code, wraps it in `int main() { ... }`, and
@@ -142,6 +210,10 @@ Additional VM builtin functions can be linked in by dropping C source files into
 function that registers its routines.  See
 [Docs/extended_builtins.md](Docs/extended_builtins.md) for details and an
 example that exposes the host process ID in `src/ext_builtins/getpid.c`.
+
+## Tools
+
+- `tools/pin-from-host.sh`: computes a libcurl-compatible SPKI pin (`sha256//BASE64`) from a live host or PEM file. Useful with `HttpSetOption(s, 'pin_sha256', ...)`. See `Docs/http_security.md` for usage.
 
 ## License
 

@@ -1,0 +1,7 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/bytecode_dump.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    0 OP_HALT
+== End Disassembly: Tests/rea/bytecode_dump.rea ==
+

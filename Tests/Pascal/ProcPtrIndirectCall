@@ -1,0 +1,13 @@
+program ProcPtrIndirectCall;
+
+type
+  PProc = procedure();
+
+procedure Hello; begin writeln('ok'); end;
+
+var p: PProc;
+begin
+  p := @Hello;
+  p();
+end.
+

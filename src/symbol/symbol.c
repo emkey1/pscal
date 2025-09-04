@@ -13,7 +13,7 @@
 #include "symbol/symbol.h"
 #include <assert.h>
 #include "core/list.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 
 // --- Hash Table Implementation ---
 

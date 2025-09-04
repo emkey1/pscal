@@ -1,6 +1,8 @@
-Support goto? (no)
 ---
-Plan to add CreateThread/WaitForThread and @ procedure pointers
+Support goto? (no)
+
+---
+Plan to add CreateThread/WaitForThread and @ procedure pointers (Done)
 
 Lexical support for @
 Extend the lexer to recognize @ as a token representing the address-of operator.
@@ -36,3 +38,120 @@ Provide examples mirroring the sample SDLThreadedMandelbrot program to showcase 
 This staged approach introduces address-of and procedure pointers, then layers a richer thread API atop the existing runtime without disrupting current programs.
 ---
 Provide ability to query threads and thread states
+
+---
+Networking additions:
+
+- Phase 1: Solid HTTP sync API (libcurl easy)
+    - Sessions with keep-alive, headers map, redirects, timeouts.
+    - Bodies to/from MStream or file; status + headers; basic auth.
+    - Map curl errors to stable VM error codes.
+- Phase 2: Async execution
+    - Option A: Use threads under the hood (CreateThread/WaitForThread) returning Thread or HttpFuture handle.
+    - Option B: libcurl multi + poll/select integration for true non-blocking; if chosen, add a simple event loop
+(NetRunLoopStart/Stop, NetPoll) and Futures.
+- Phase 3: TLS/security knobs
+    - CA bundle/custom CA, client cert/key, hostname verification, pinning, proxies, HTTP/2.
+- Phase 4: Reliability and ergonomics
+    - Retry/backoff, rate-limiting, cookie jar, compressed responses, streaming uploads, progress callbacks,
+cancellation.
+- Phase 5: Sockets
+    - TCP/UDP sockets, non-blocking, poll, DNS helpers; straightforward thin wrappers over BSD sockets.
+- Phase 6: Higher protocols (optional)
+    - WebSocket client (upgrade from HTTP), SSE streaming; consider libwebsockets for WS.
+    - MQTT via libmosquitto (optional module).
+- Phase 7: Tooling and docs
+    - Unit tests with a tiny embedded HTTP server (or testcontainers) and golden-cases.
+    - Examples: JSON API fetcher, file uploader, WebSocket echo, TCP echo client.
+    - Troubleshooting guide for TLS/CA issues.
+---
+Add += and similar to Pascal Front End
+
+---
+New OOP front end.
+
+### Rea: An Object-Oriented Language Specification
+
+This document outlines a plan for implementing **Rea**, a new, object-oriented front end for the PSCAL Virtual Machine (VM). The language is designed for readability and ease of use while leveraging the VM's stack-based architecture and existing capabilities. The design builds upon concepts found in the existing C-Like and Pascal front ends to introduce a class-based programming paradigm.
+
+***
+
+### 1. Language Semantics and Features
+
+The Rea language is a strongly typed, class-based, object-oriented language.
+
+#### 1.1. Lexical Structure
+
+* **Comments:** Supports single-line comments with `//` and multi-line comments with `/* ... */`.
+* **Identifiers:** Identifiers for variables, classes, and methods are case-sensitive. They must begin with a letter or an underscore and can be followed by any number of letters, digits, or underscores.
+* **Keywords:**
+    * **Data Types:** `int`, `int64`, `int32`, `int16`, `int8`, `float`, `float32`, `long double`, `char`, `byte`, `str`, `text`, `mstream`, `void`, `bool`.
+    * **Class & Object:** `class`, `new`, `extends`, `this`, `super`.
+    * **Control Flow:** `if`, `else`, `while`, `for`, `do`, `switch`, `case`, `default`, `break`, `continue`, `return`.
+    * **Other:** `const`, `#import`.
+* **Literals:** Integer, floating-point, character, and string literals will follow the C-Like language specification.
+
+#### 1.2. Data Types
+
+Rea uses the VM's primitive types but standardizes on 64-bit integer and floating-point types as the default for new development.
+
+| Rea Keyword | VM Type | Description |
+| :--- | :--- | :--- |
+| `int` | `TYPE_INT64` | 64-bit signed integer. |
+| `int32` | `TYPE_INT32` | 32-bit signed integer. |
+| `int16` | `TYPE_INT16` | 16-bit signed integer. |
+| `int8` | `TYPE_INT8` | 8-bit signed integer. |
+| `float` | `TYPE_DOUBLE` | 64-bit floating-point number. |
+| `float32` | `TYPE_FLOAT` | 32-bit floating-point number. |
+| `long double` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
+| `str` | `TYPE_STRING` | Dynamic-length string. |
+| `bool` | `TYPE_BOOLEAN` | Boolean values (`true` and `false`). |
+| `void` | `TYPE_VOID` | Absence of value (for procedures). |
+
+#### 1.3. Object-Oriented Programming
+
+* **Class Definition:** The `class` keyword defines a new type that can contain data fields and methods. Fields are declared like variables, and methods are defined like functions. A class is a pointer type, so a variable of a class type will hold a pointer to an object instance.
+* **Constructors:** A special method with the same name as the class will serve as the constructor. It initializes the object's fields. A constructor will not have a return type.
+* **Object Instantiation:** The `new` keyword will allocate memory for a new object on the heap and call the class's constructor. This will translate to a sequence of opcodes that handle memory allocation and initialization, leveraging the existing VM memory management.
+* **Field and Method Access:** The dot `.` operator is used to access an object's fields and methods.
+* **`this` and `super`:** The `this` keyword provides a reference to the current object instance within a method. The `super` keyword provides a reference to the parent class's constructor and methods, allowing for proper initialization and method overriding.
+* **Inheritance:** The `extends` keyword will be used to create a subclass that inherits fields and methods from a parent class.
+* **Polymorphism:** Method overriding will be supported. To implement this on the PSCAL VM, the compiler will generate a virtual method table (V-table) for each class. This table would be a constant array of function pointers. When a method is called, the bytecode will look up the correct function pointer in the V-table based on the object's dynamic type, enabling polymorphic behavior.
+* **No Overloading:** As specified, method overloading will not be supported. Each method within a class, and each top-level function, must have a unique name.
+* **Built-in Routines:** Rea will have access to the VM's built-in functions and procedures. This includes core built-ins like `writeln` and `printf`, as well as extended built-ins for I/O, string manipulation, mathematics, and threading.
+
+***
+
+### 2. Implementation Plan
+
+The implementation will focus on creating a compiler for Rea that translates source code into PSCAL VM bytecode. The process involves a front-end component (parser, semantic analyzer) and a back-end component (code generator).
+
+#### 2.1. Front End (Rea Compiler)
+
+* **Lexical Analysis:** A new lexer will be created to parse the Rea syntax, including new keywords and literals, and produce a stream of tokens.
+* **Parsing:** A new parser will build an Abstract Syntax Tree (AST) for Rea code. It must be able to handle class definitions, method declarations, inheritance relationships, and method calls.
+* **Semantic Analysis:** This phase will perform type checking and resolve symbols (variables, methods, class names). The compiler will need a symbol table that can manage class-scoped symbols and handle inheritance, ensuring that field and method lookups are correct.
+
+#### 2.2. Back End (Code Generation)
+
+This is where the translation to PSCAL VM opcodes occurs.
+
+* **Class Representation:** A class will be represented in the bytecode as a type definition with a list of its fields and methods. An object instance will be a structured block of memory similar to a Pascal `record` or C `struct`.
+* **Object & Field Opcodes:**
+    * `new ClassName(...)` → A call to a runtime built-in function that allocates a block of memory for the object and initializes it. This could use the `OP_INIT_LOCAL_ARRAY` opcode with a new type for objects.
+    * `obj.field = value` → `OP_GET_GLOBAL_ADDRESS` (or `OP_GET_LOCAL_ADDRESS`) to get a pointer to the object, followed by `OP_GET_FIELD_ADDRESS` to get a pointer to the field. Finally, `OP_SET_INDIRECT` to write the value to the field.
+* **Method Dispatch Opcodes:**
+    * `obj.method()` → The compiler will determine if `method` is a virtual method (i.e., overridden). If it is, the compiler will emit opcodes to:
+        1. Push the object reference onto the stack.
+        2. Push arguments.
+        3. Look up the correct function pointer from the object's V-table based on its type.
+        4. Call the function using a modified `OP_CALL`.
+    * **VM Extension:** The VM's `CallFrame` and `procedureTable` will be extended to store and look up class and method information to support the V-table mechanism.
+
+***
+
+### 3. Summary of Rea Implementation Details
+
+* **Compiler:** A new compiler will be developed to translate Rea source code into PSCAL VM bytecode.
+* **Virtual Machine:** The existing PSCAL VM will be extended with minimal changes, primarily in the symbol table and `CallFrame` to support object-oriented constructs like V-tables for dynamic method dispatch.
+* **Opcodes:** The implementation will reuse many existing opcodes for arithmetic and control flow. New bytecode opcodes may be introduced to simplify object and method handling.

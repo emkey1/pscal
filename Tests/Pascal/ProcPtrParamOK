@@ -1,0 +1,16 @@
+program ProcPtrParamOK;
+
+type
+  PProc = procedure();
+
+procedure H; begin end;
+
+procedure Call(p: PProc);
+begin
+  // no-op
+end;
+
+begin
+  Call(@H);
+end.
+

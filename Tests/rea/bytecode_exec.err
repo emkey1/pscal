@@ -1,0 +1,43 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/bytecode_exec.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 OP_DEFINE_GLOBAL NameIdx:0   'a' Type:INT64 ('int')
+0005    | OP_CONSTANT         2 '1'
+0007    | OP_CONSTANT         3 '2'
+0009    | OP_CONSTANT         4 '3'
+0011    | OP_MULTIPLY
+0012    | OP_ADD
+0013    | OP_SET_GLOBAL       0 'a'
+0015    2 OP_DEFINE_GLOBAL NameIdx:5   'b' Type:BOOLEAN ('bool')
+0020    | OP_GET_GLOBAL       0 'a'
+0022    | OP_CONSTANT         7 '7'
+0024    | OP_GREATER_EQUAL
+0025    | OP_SET_GLOBAL       5 'b'
+0027    3 OP_DEFINE_GLOBAL NameIdx:8   'msg' Type:STRING ('str') len=0
+0034    | OP_CONSTANT        11 'hi'
+0036    | OP_SET_GLOBAL       8 'msg'
+0038    4 OP_GET_GLOBAL       0 'a'
+0040    | OP_NEGATE
+0041    | OP_CONSTANT        12 '4'
+0043    | OP_ADD
+0044    | OP_GET_GLOBAL_ADDRESS    0 'a'
+0046    | OP_SWAP
+0047    | OP_SET_INDIRECT
+0048    0 OP_HALT
+== End Disassembly: Tests/rea/bytecode_exec.rea ==
+
+Constants (13):\n  0000: STR   "a"
+  0001: STR   "int"
+  0002: INT   1
+  0003: INT   2
+  0004: INT   3
+  0005: STR   "b"
+  0006: STR   "bool"
+  0007: INT   7
+  0008: STR   "msg"
+  0009: STR   "str"
+  0010: INT   0
+  0011: STR   "hi"
+  0012: INT   4
+

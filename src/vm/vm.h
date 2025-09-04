@@ -33,6 +33,8 @@ typedef Value (*HostFn)(struct VM_s* vm);
 // Enum to identify specific host functions
 typedef enum {
     HOST_FN_QUIT_REQUESTED,
+    HOST_FN_CREATE_THREAD_ADDR,
+    HOST_FN_WAIT_THREAD,
     // ... add other host function IDs here ...
     HOST_FN_COUNT
 } HostFunctionID;
@@ -53,6 +55,7 @@ typedef struct {
     uint8_t locals_count;       // Number of local variables (excluding params)
     uint8_t upvalue_count;
     Value** upvalues;
+    bool discard_result_on_return; // If true, drop any function result on return
 } CallFrame;
 
 // Thread structure representing a lightweight VM thread

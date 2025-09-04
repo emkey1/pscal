@@ -1,0 +1,31 @@
+#!/usr/bin/env clike
+
+int main() {
+    int s = httpsession();
+    if (s < 0) { printf("session error\n"); return 1; }
+    httpsetheader(s, "Accept", "text/html");
+
+    mstream out = mstreamcreate();
+    int code = httprequest(s, "GET", "https://example.com", NULL, out);
+    printf("Status: %d\n", code);
+    printf("Content-Type: %s\n", httpgetheader(s, "Content-Type"));
+    printf("Server: %s\n", httpgetheader(s, "Server"));
+
+    // Print a snippet of the body
+    str body = mstreambuffer(out);
+    int n = strlen(body);
+    if (n > 80) n = 80;
+    printf("Body (first %d): ", n);
+    for (int i = 1; i <= n; i = i + 1) printf("%c", body[i]);
+    printf("\n");
+
+    // Basic auth example (uncomment to try)
+    // httpsetoption(s, "basic_auth", "user:passwd");
+    // code = httprequest(s, "GET", "https://httpbin.org/basic-auth/user/passwd", NULL, out);
+    // printf("httpbin status: %d err=%d msg=%s\n", code, httperrorcode(s), httplasterror(s));
+
+    mstreamfree(&out);
+    httpclose(s);
+    return 0;
+}
+

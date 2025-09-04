@@ -1,8 +1,8 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
-#include "Pascal/ast.h"
-#include "globals.h"
+#include "ast.h"
+#include "Pascal/globals.h"
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
 #include "backend_ast/builtin.h"
@@ -413,6 +413,23 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
 
     if (node->var_type == TYPE_VOID) {
         switch(node->type) {
+            case AST_ADDR_OF: {
+                // Address-of: ensure left is an identifier referencing a procedure/function
+                node->var_type = TYPE_POINTER;
+                if (node->left && node->left->token && node->left->token->value) {
+                    const char* name = node->left->token->value;
+                    Symbol* procSym = lookupProcedure(name);
+                    if (!procSym) {
+                        fprintf(stderr, "L%d: Compiler Error: '@' requires a procedure or function identifier (got '%s').\n",
+                                node->token ? node->token->line : 0, name);
+                        pascal_semantic_error_count++;
+                    }
+                } else {
+                    fprintf(stderr, "Compiler Error: '@' missing identifier operand.\n");
+                    pascal_semantic_error_count++;
+                }
+                break;
+            }
             case AST_VARIABLE: {
                 const char* varName = node->token ? node->token->value : NULL;
                 if (!varName) { node->var_type = TYPE_VOID; break; }
@@ -515,8 +532,8 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 if (procSymbol) {
                     node->var_type = procSymbol->type;
                 } else {
-                     if (node->token) {
-                          node->var_type = getBuiltinReturnType(node->token->value);
+                    if (node->token) {
+                         node->var_type = getBuiltinReturnType(node->token->value);
                           if (node->var_type == TYPE_VOID && isBuiltin(node->token->value)) {
                               // Known built-in procedure
                           } else if (node->var_type == TYPE_VOID) {
@@ -527,10 +544,64 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                      } else {
                           node->var_type = TYPE_VOID;
                      }
-                }
-                /*
-                 * Some builtins (e.g., succ/pred) return the same type as
-                 * their first argument.  If no explicit return type was
+                 }
+                // Minimal argument checking for procedure-pointer parameters
+                 if (procSymbol && procSymbol->type_def && node->child_count > 0) {
+                     AST* decl = procSymbol->type_def; // PROCEDURE_DECL or FUNCTION_DECL
+                     int expected = decl->child_count;
+                     int given = node->child_count;
+                     if (given >= expected) {
+                         for (int i = 0; i < expected; ++i) {
+                             AST* formal = decl->children[i];
+                             AST* actual = node->children[i];
+                             if (!formal || !actual) continue;
+                             AST* ftype = resolveTypeAlias(formal->right); // type node
+                             if (ftype && ftype->type == AST_PROC_PTR_TYPE) {
+                                 if (actual->type == AST_ADDR_OF && actual->left && actual->left->token) {
+                                     const char* aname = actual->left->token->value;
+                                     Symbol* as = lookupProcedure(aname);
+                                     if (as && as->type_def) {
+                                         AST* adecl = as->type_def;
+                                         AST* fparams = (ftype->child_count > 0) ? ftype->children[0] : NULL;
+                                         int fpc = fparams ? fparams->child_count : 0;
+                                         int apc = adecl->child_count;
+                                         if (fpc != apc) {
+                                             fprintf(stderr, "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n", aname, fpc, apc);
+                                             pascal_semantic_error_count++;
+                                         } else {
+                                             for (int j = 0; j < fpc; ++j) {
+                                                 AST* ft = fparams->children[j];
+                                                 AST* at = adecl->children[j];
+                                                 if (ft && at && ft->var_type != at->var_type) {
+                                                     fprintf(stderr, "Type error: proc pointer param %d type mismatch for '%s' (expected %s, got %s).\n", j+1, aname, varTypeToString(ft->var_type), varTypeToString(at->var_type));
+                                                     pascal_semantic_error_count++;
+                                                     break;
+                                                 }
+                                             }
+                                         }
+                                         AST* fret = ftype->right; // may be NULL for procedure
+                                         AST* aret = adecl->right; // may be NULL for procedure
+                                         VarType fRT = fret ? fret->var_type : TYPE_VOID;
+                                         VarType aRT = aret ? aret->var_type : TYPE_VOID;
+                                         if (fRT != aRT) {
+                                             fprintf(stderr, "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n", aname, varTypeToString(fRT), varTypeToString(aRT));
+                                             pascal_semantic_error_count++;
+                                         }
+                                      } else {
+                                         fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", aname);
+                                         pascal_semantic_error_count++;
+                                      }
+                                  } else {
+                                     fprintf(stderr, "Type error: expected '@proc' for procedure pointer argument.\n");
+                                     pascal_semantic_error_count++;
+                                  }
+                              }
+                          }
+                      }
+                  }
+                 /*
+                  * Some builtins (e.g., succ/pred) return the same type as
+                  * their first argument.  If no explicit return type was
                  * resolved above, infer it from the argument so enum literals
                  * retain their declared type.
                  */
@@ -690,6 +761,65 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
             case AST_NIL:
                 node->var_type = TYPE_NIL; // Or TYPE_POINTER if nil is a generic pointer type
                 break;
+            case AST_ASSIGN: {
+                // Minimal semantic check: procedure-pointer assignment
+                if (node->left && node->right) {
+                    AST* lhs = node->left;
+                    AST* rhs = node->right;
+                    AST* lhsType = resolveTypeAlias(lhs->type_def);
+                    if (lhsType && lhsType->type == AST_PROC_PTR_TYPE) {
+                        if (rhs->type == AST_ADDR_OF && rhs->left && rhs->left->token) {
+                            const char* pname = rhs->left->token->value;
+                            Symbol* psym = lookupProcedure(pname);
+                            if (psym && psym->type_def) {
+                                // Compare signatures: param count and simple VarType equality
+                                AST* decl = psym->type_def; // PROCEDURE_DECL or FUNCTION_DECL
+                                int declParamCount = decl->child_count;
+                                AST* paramsList = (lhsType->child_count > 0) ? lhsType->children[0] : NULL; // AST_LIST
+                                int ptrParamCount = paramsList ? paramsList->child_count : 0;
+                                if (declParamCount != ptrParamCount) {
+                                    fprintf(stderr, "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
+                                            pname, ptrParamCount, declParamCount);
+                                    pascal_semantic_error_count++;
+                                } else {
+                                    for (int i = 0; i < declParamCount; ++i) {
+                                        AST* dparam = decl->children[i];
+                                        AST* tparam = paramsList ? paramsList->children[i] : NULL;
+                                        if (!dparam || !tparam) continue;
+                                        VarType dt = dparam->var_type;
+                                        VarType tt = tparam->var_type;
+                                        if (dt != tt) {
+                                            fprintf(stderr, "Type error: proc pointer param %d type mismatch for '%s' (expected %s, got %s).\n",
+                                                    i+1, pname, varTypeToString(tt), varTypeToString(dt));
+                                            pascal_semantic_error_count++;
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Return type for function pointers
+                                AST* lhsRet = lhsType->right; // may be NULL for procedure
+                                if (lhsRet) {
+                                    AST* declRet = decl->right; // may be NULL for procedure
+                                    VarType lrt = lhsRet->var_type;
+                                    VarType drt = declRet ? declRet->var_type : TYPE_VOID;
+                                    if (lrt != drt) {
+                                        fprintf(stderr, "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
+                                                pname, varTypeToString(lrt), varTypeToString(drt));
+                                        pascal_semantic_error_count++;
+                                    }
+                                }
+                            } else {
+                                fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
+                                pascal_semantic_error_count++;
+                            }
+                        } else {
+                            fprintf(stderr, "Type error: expected '@proc' on right-hand side of proc pointer assignment.\n");
+                            pascal_semantic_error_count++;
+                        }
+                    }
+                }
+                break;
+            }
             default:
                  break;
         }
@@ -711,15 +841,27 @@ VarType getBuiltinReturnType(const char* name) {
     /* Character and ordinal helpers */
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
     if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
     /* Math routines returning REAL */
-    if (strcasecmp(name, "cos")  == 0 ||
-        strcasecmp(name, "sin")  == 0 ||
-        strcasecmp(name, "tan")  == 0 ||
-        strcasecmp(name, "sqrt") == 0 ||
-        strcasecmp(name, "ln")   == 0 ||
-        strcasecmp(name, "exp")  == 0 ||
-        strcasecmp(name, "real") == 0) {
+    if (strcasecmp(name, "cos")   == 0 ||
+        strcasecmp(name, "sin")   == 0 ||
+        strcasecmp(name, "tan")   == 0 ||
+        strcasecmp(name, "sqrt")  == 0 ||
+        strcasecmp(name, "ln")    == 0 ||
+        strcasecmp(name, "exp")   == 0 ||
+        strcasecmp(name, "real")  == 0 ||
+        strcasecmp(name, "arctan") == 0 ||
+        strcasecmp(name, "arcsin") == 0 ||
+        strcasecmp(name, "arccos") == 0 ||
+        strcasecmp(name, "cotan")  == 0 ||
+        strcasecmp(name, "power")  == 0 ||
+        strcasecmp(name, "log10")  == 0 ||
+        strcasecmp(name, "sinh")   == 0 ||
+        strcasecmp(name, "cosh")   == 0 ||
+        strcasecmp(name, "tanh")   == 0 ||
+        strcasecmp(name, "max")    == 0 ||
+        strcasecmp(name, "min")    == 0) {
         return TYPE_REAL;
     }
 
@@ -743,7 +885,9 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "getmaxx")   == 0 ||
         strcasecmp(name, "getmaxy")   == 0 ||
         strcasecmp(name, "mutex")     == 0 ||
-        strcasecmp(name, "rcmutex")   == 0) {
+        strcasecmp(name, "rcmutex")   == 0 ||
+        strcasecmp(name, "floor")     == 0 ||
+        strcasecmp(name, "ceil")      == 0) {
         return TYPE_INTEGER;
     }
 
@@ -751,9 +895,34 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "inttostr")  == 0 ||
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
-        strcasecmp(name, "copy")      == 0) {
+        strcasecmp(name, "copy")      == 0 ||
+        strcasecmp(name, "mstreambuffer") == 0) {
         return TYPE_STRING;
     }
+
+    /* Memory stream helpers */
+    if (strcasecmp(name, "mstreamcreate") == 0) return TYPE_MEMORYSTREAM;
+
+    /* Threading helpers (new API) */
+    if (strcasecmp(name, "createthread") == 0) return TYPE_THREAD;
+    if (strcasecmp(name, "waitforthread") == 0) return TYPE_INTEGER;
+
+    /* HTTP session helpers */
+    if (strcasecmp(name, "httpsession") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequest") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequesttofile") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequestasync") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httprequestasynctofile") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpisdone") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httptryawait") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpcancel") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpgetasyncprogress") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpgetasynctotal") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpawait") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httperrorcode") == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "httpgetheader") == 0) return TYPE_STRING;
+    if (strcasecmp(name, "httpgetlastheaders") == 0) return TYPE_STRING;
+    if (strcasecmp(name, "httplasterror") == 0) return TYPE_STRING;
 
     /* ReadKey and UpCase return a single character */
     if (strcasecmp(name, "readkey") == 0 ||

@@ -1,0 +1,24 @@
+program HttpFetchDataURL;
+
+var s, code: integer;
+    ms: mstream;
+    cwd, url, body: string;
+    f: text;
+begin
+  { Ensure the file exists with known content }
+  assign(f, 'readln_test.txt');
+  rewrite(f);
+  writeln(f, 'Test');
+  close(f);
+
+  s := HttpSession();
+  HttpSetHeader(s, 'Accept', 'text/plain');
+  cwd := GetEnv('PWD');
+  url := 'file://' + cwd + '/readln_test.txt';
+  ms := mstreamcreate();
+  code := HttpRequest(s, 'GET', url, nil, ms);
+  body := mstreambuffer(ms);
+  writeln(body);
+  mstreamfree(ms);
+  HttpClose(s);
+end.

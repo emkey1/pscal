@@ -1,0 +1,11 @@
+#!/usr/bin/env clike
+#ifdef SDL_ENABLED
+int main() {
+    initgraph(320, 240, "SDL Smoke");
+    closegraph();
+    return 0;
+}
+#else
+int main() { printf("SDL not enabled\n"); return 0; }
+#endif
+

@@ -83,3 +83,96 @@ export CLIKE_LIB_DIR=$(pwd)/Examples/clike
 
 - `CLIKE_LIB_DIR`: directory for imported `.cl` modules.
 - `SDL_VIDEODRIVER`, `SDL_AUDIODRIVER`: set to `dummy` for headless runs. Set `RUN_SDL=1` to run SDL content.
+
+## HTTP networking (sync)
+
+The CLike front end can call VM HTTP builtins directly. Common helpers:
+
+- `httpsession(): int` – create a session; returns session id or -1 on error.
+- `httpclose(s)` – free session.
+- `httpsetheader(s, name, value)` – set request header.
+- `httpclearheaders(s)` – clear accumulated headers.
+- `httpsetoption(s, key, value)` – set options; supported keys include:
+  - `timeout_ms` (int), `follow_redirects` (int 0/1), `user_agent` (string)
+  - `ca_path`, `client_cert`, `client_key`, `proxy` (strings)
+  - `verify_peer` (0/1), `verify_host` (0/1), `http2` (0/1)
+  - `basic_auth` (string `user:pass`), `out_file` (string path)
+- `httprequest(s, method, url, bodyStr|mstream|null, outMStream): int` – perform request.
+- `httprequesttofile(s, method, url, body, outPath): int` – stream response to file.
+- `httpgetlastheaders(s): string` – raw response headers for last request.
+- `httpgetheader(s, name): string` – convenience header lookup.
+- `httperrorcode(s): int` – VM error class (0 none; 1 generic; 2 I/O; 3 timeout; 4 SSL; 5 resolve; 6 connect).
+- `httplasterror(s): string` – last libcurl error message if any.
+
+Notes:
+- `file://` URLs are supported without libcurl; the runtime reads the file and synthesizes basic headers.
+- If `out_file` is set via `httpsetoption`, `httprequest` tees the response to both memory and the file.
+
+### TLS/Security and Proxies
+
+Per-session options configured with `httpsetoption`:
+
+- TLS:
+  - `tls_min` / `tls_max`: 10, 11, 12, 13 map to TLSv1.0–TLSv1.3 (min and max).
+  - `alpn`: 0/1 toggles ALPN when available.
+  - `ciphers`: set cipher list (OpenSSL format).
+  - `pin_sha256`: pinned public key for `CURLOPT_PINNEDPUBLICKEY` (`sha256//BASE64` or file path).
+- Proxies:
+  - `proxy`: proxy URL (e.g., `http://proxy:8080`).
+  - `proxy_userpwd`: `user:pass` credentials.
+  - `proxy_type`: `http`, `https` (if supported), `socks5`, `socks4`.
+- DNS overrides:
+  - `resolve_add`: add `host:port:address` mapping.
+  - `resolve_clear`: clear overrides.
+
+Example (guarded by RUN_NET_TESTS):
+
+```c
+int main() {
+  if (getenv("RUN_NET_TESTS") == NULL || strcmp(getenv("RUN_NET_TESTS"), "1") != 0) {
+    printf("Set RUN_NET_TESTS=1 to run this demo.\n");
+    return 0;
+  }
+  const char* url = getenv("URL"); if (!url) url = "https://example.com";
+  const char* pin = getenv("PIN_SHA256");
+  int s = httpsession();
+  httpsetoption(s, "tls_min", 12);
+  httpsetoption(s, "alpn", 1);
+  if (pin && pin[0]) httpsetoption(s, "pin_sha256", pin);
+  mstream out = mstreamcreate();
+  int code = httprequest(s, "GET", url, NULL, out);
+  printf("status=%d err=%d msg=%s\n", code, httperrorcode(s), httplasterror(s));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}
+```
+
+Example:
+
+```c
+int main() {
+  int s = httpsession();
+  httpsetheader(s, "Accept", "text/html");
+  httpsetoption(s, "timeout_ms", 5000);
+  mstream out = mstreamcreate();
+  int code = httprequest(s, "GET", "https://example.com", NULL, out);
+  printf("status=%d, ctype=%s\n", code, httpgetheader(s, "Content-Type"));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}
+```
+
+## Socket networking
+
+The VM also exposes thin wrappers over BSD sockets:
+
+- `socketcreate(type)` – create TCP (`0`) or UDP (`1`) sockets.
+- `socketconnect(s, host, port)` – connect to a remote host/port.
+- `socketbind(s, port)`, `socketlisten(s, backlog)`, `socketaccept(s)` – server helpers.
+- `socketsend(s, data)` and `socketreceive(s, maxlen)` – send or receive strings or memory streams.
+- `socketsetblocking(s, bool)` toggles blocking mode; `socketpoll(s, timeout_ms, flags)` polls for read (`1`) or write (`2`).
+- `socketlasterror()` returns the last error code and `dnslookup(host)` resolves hostnames.
+
+See `Examples/clike/SocketEchoDemo` for a complete echo server/client demo.

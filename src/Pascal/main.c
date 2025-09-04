@@ -1,6 +1,6 @@
 #include "lexer.h"
 #include "parser.h"
-#include "ast.h"
+#include "ast/ast.h"
 #include "opt.h"
 #include "core/types.h"
 #include "core/utils.h"
@@ -101,7 +101,10 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
         annotateTypes(GlobalAST, NULL, GlobalAST);
-        if (dump_ast_json_flag) {
+        if (pascal_semantic_error_count > 0 && !dump_ast_json_flag) {
+            fprintf(stderr, "Compilation failed with errors.\n");
+            overall_success_status = false;
+        } else if (dump_ast_json_flag) {
             fprintf(stderr, "--- Dumping AST to JSON (stdout) ---\n");
             dumpASTJSON(GlobalAST, stdout);
             fprintf(stderr, "\n--- AST JSON Dump Complete (stderr print)---\n");

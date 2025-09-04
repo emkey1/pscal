@@ -1,0 +1,14 @@
+#!/usr/bin/env clike
+
+int main() {
+  int s = httpsession();
+  int id = httprequestasync(s, "GET", "data:text/plain,HelloAsyncCL", NULL);
+  while (httpisdone(id) == 0) { delay(10); }
+  mstream out = mstreamcreate();
+  httpawait(id, out);
+  printf("Body: %s\n", mstreambuffer(out));
+  mstreamfree(&out);
+  httpclose(s);
+  return 0;
+}
+

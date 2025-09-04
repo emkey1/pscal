@@ -3,7 +3,7 @@
 #include "backend_ast/builtin.h"
 #include "clike/parser.h"
 #include "clike/semantics.h"
-#include "Pascal/ast.h"
+#include "ast/ast.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
@@ -848,9 +848,29 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     break;
             }
             break;
-        case TCAST_ADDR:
+        case TCAST_ADDR: {
+            // Support &var (address-of variable) and &func (address-of routine)
+            if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                char* name = tokenToCString(node->left->token);
+                // If it's a known function, emit its bytecode address as an integer constant.
+                Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                if (sym) {
+                    Value addr; memset(&addr, 0, sizeof(Value));
+                    addr.type = TYPE_INT32;
+                    SET_INT_VALUE(&addr, (long long)sym->bytecode_address);
+                    int cidx = addConstantToChunk(chunk, &addr);
+                    freeValue(&addr);
+                    writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                    free(name);
+                    break;
+                }
+                free(name);
+            }
+            // Fallback: address of variable/field/element
             compileLValue(node->left, chunk, ctx);
             break;
+        }
         case TCAST_DEREF:
             compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, OP_GET_INDIRECT, node->token.line);
@@ -1239,9 +1259,22 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     }
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
                 } else {
-                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
-                    emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                    // If a local variable with this name exists, treat it as an indirect call through a function pointer.
+                    int localIdx = resolveLocal(ctx, name);
+                    if (localIdx >= 0) {
+                        // Push the callee pointer value and emit indirect call
+                        ASTNodeClike idNode = {0};
+                        idNode.type = TCAST_IDENTIFIER;
+                        idNode.token = node->token; // reuse token for name
+                        compileExpression(&idNode, chunk, ctx);
+                        writeBytecodeChunk(chunk, OP_CALL_INDIRECT, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                    } else {
+                        // Fallback to builtin call by name (existing behavior)
+                        writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                        emitShort(chunk, (uint16_t)nameIndex, node->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                    }
                 }
             }
             free(name);

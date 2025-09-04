@@ -1,0 +1,27 @@
+#!/usr/bin/env pascal
+program HttpFetchDemo;
+
+var
+  s: integer;     { Http session handle }
+  ms: mstream;    { Response buffer }
+  code: integer;  { HTTP status }
+  body: string;
+
+begin
+  s := HttpSession();
+  HttpSetOption(s, 'timeout_ms', 5000);
+  HttpSetHeader(s, 'Accept', 'text/plain');
+
+  ms := mstreamcreate();
+  code := HttpRequest(s, 'GET', 'https://example.com', nil, ms);
+  if code = 200 then begin
+    body := mstreambuffer(ms);
+    writeln(body);
+  end else begin
+    writeln('HTTP status: ', code);
+  end;
+
+  mstreamfree(ms);
+  HttpClose(s);
+end.
+
