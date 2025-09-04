@@ -1323,6 +1323,41 @@ Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+// socketBindAddr(socket, host:string, port:int)
+Value vmBuiltinSocketBindAddr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || !IS_INTLIKE(args[2])) {
+        runtimeError(vm, "socketBindAddr expects (socket:int, host:string, port:int).");
+        return makeInt(-1);
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    const char* host = args[1].s_val ? args[1].s_val : "127.0.0.1";
+    int port = (int)AS_INTEGER(args[2]);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((unsigned short)port);
+    int p = inet_pton(AF_INET, host, &addr.sin_addr);
+    if (p != 1) {
+#ifdef _WIN32
+        setSocketError(WSAEINVAL);
+#else
+        setSocketError(EINVAL);
+#endif
+        return makeInt(-1);
+    }
+    int r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    if (r != 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeInt(-1);
+    }
+    g_socket_last_error = 0;
+    return makeInt(0);
+}
+
 Value vmBuiltinSocketListen(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
         runtimeError(vm, "socketListen expects (socket,int backlog).");

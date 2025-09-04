@@ -84,6 +84,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "socketclose") == 0 ||
         strcasecmp(name, "socketconnect") == 0 ||
         strcasecmp(name, "socketbind") == 0 ||
+        strcasecmp(name, "socketbindaddr") == 0 ||
         strcasecmp(name, "socketlisten") == 0 ||
         strcasecmp(name, "socketaccept") == 0 ||
         strcasecmp(name, "socketsend") == 0 ||

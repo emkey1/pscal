@@ -366,6 +366,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sinh", vmBuiltinSinh},
     {"socketaccept", vmBuiltinSocketAccept},
     {"socketbind", vmBuiltinSocketBind},
+    {"socketbindaddr", vmBuiltinSocketBindAddr},
     {"socketclose", vmBuiltinSocketClose},
     {"socketconnect", vmBuiltinSocketConnect},
     {"socketcreate", vmBuiltinSocketCreate},
