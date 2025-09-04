@@ -23,7 +23,6 @@
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
-#define MAX_WRITELN_ARGS_VM 32
 
 // Special sentinel values used in pointer.base_type_node to signal
 // non-standard dereference behavior in OP_GET_INDIRECT.
@@ -3054,87 +3053,6 @@ comparison_error_label:
             case OP_JUMP: {
                 uint16_t offset = READ_SHORT(vm);
                 vm->ip += (int16_t)offset;
-                break;
-            }
-            case OP_WRITE_LN:
-            case OP_WRITE: {
-                uint8_t argCount = READ_BYTE();
-                if (argCount > MAX_WRITELN_ARGS_VM) {
-                    runtimeError(vm, "VM Error: Too many arguments for WRITE/WRITELN (max %d).", MAX_WRITELN_ARGS_VM);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                FILE *output_stream = stdout;
-                int start_index = 0;
-
-                // First arg may be FILE or ^FILE; route output accordingly.
-                if (argCount > 0) {
-                    Value first = vm->stackTop[-argCount];
-                    const Value* f = &first;
-                    if (first.type == TYPE_POINTER && first.ptr_val) f = (const Value*)first.ptr_val;
-                    if (f->type == TYPE_FILE) {
-                        if (!f->f_val) {
-                            runtimeError(vm, "File not open for writing.");
-                            // pop & clean args then bail...
-                            for (int i = 0; i < argCount; i++) freeValue(&vm->stackTop[-i-1]);
-                            vm->stackTop -= argCount;
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        output_stream = f->f_val;
-                        start_index = 1;
-                    }
-                }
-
-                Value args_to_print[MAX_WRITELN_ARGS_VM];
-                int print_arg_count = argCount - start_index;
-
-                // Pop the printable arguments into a temporary array.
-                for (int i = 0; i < print_arg_count; i++) {
-                    args_to_print[print_arg_count - 1 - i] = pop(vm);
-                }
-                if (start_index > 0) {
-                    // DO NOT free the file here; ownership stays with the variable.
-                    Value file_arg = pop(vm);
-                    if (file_arg.type != TYPE_FILE) freeValue(&file_arg);
-                }
-
-                bool color_was_applied = false; // Flag to track if we change the color
-
-                // Apply console colors only if writing to stdout
-                if (output_stream == stdout) {
-                    color_was_applied = applyCurrentTextAttributes(output_stream);
-                }
-
-                // Print the arguments (strings as full buffers; chars as a single byte)
-                for (int i = 0; i < print_arg_count; i++) {
-                    Value val = args_to_print[i];
-                    if (val.type == TYPE_STRING) {
-                        if (output_stream == stdout) {
-                            fputs(val.s_val ? val.s_val : "", output_stream);
-                        } else {
-                            size_t len = val.s_val ? strlen(val.s_val) : 0;
-                            fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
-                        }
-                        freeValue(&val);
-                    } else if (val.type == TYPE_CHAR) {
-                        fputc(val.c_val, output_stream);
-                        freeValue(&val);
-                    } else {
-                        printValueToStream(val, output_stream);
-                        freeValue(&val);
-                    }
-                }
-
-                if (instruction_val == OP_WRITE_LN) {
-                    fprintf(output_stream, "\n");
-                }
-
-                // Reset console colors only if they were applied in this call.
-                if (color_was_applied) {
-                    resetTextAttributes(output_stream);
-                }
-
-                fflush(output_stream);
                 break;
             }
             case OP_POP: {

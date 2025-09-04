@@ -152,8 +152,6 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case OP_GET_FIELD_ADDRESS:
         case OP_GET_ELEMENT_ADDRESS:
         case OP_GET_CHAR_ADDRESS:
-        case OP_WRITE:
-        case OP_WRITE_LN:
         case OP_INIT_LOCAL_FILE:
             return 2; // 1-byte opcode + 1-byte operand
         case OP_INIT_LOCAL_POINTER:
@@ -654,16 +652,6 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
              fprintf(stderr, "%-16s (not fully impl.)\n", "OP_CALL_USER_PROC");
              return offset + 3;
 
-        case OP_WRITE_LN: {
-            uint8_t arg_count = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (args)\n", "OP_WRITE_LN", arg_count);
-            return offset + 2;
-        }
-        case OP_WRITE: {
-            uint8_t arg_count = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (args)\n", "OP_WRITE", arg_count);
-            return offset + 2;
-        }
         case OP_CALL_HOST: {
             uint8_t host_fn_id_val = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (ID: %d)\n", "OP_CALL_HOST", host_fn_id_val, host_fn_id_val);

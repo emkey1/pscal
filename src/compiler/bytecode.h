@@ -86,9 +86,6 @@ typedef enum {
     OP_CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
     OP_CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
 
-    OP_WRITE_LN,      // Specific opcode for WriteLn for now (simpler than generic call)
-                      // Operand: number of arguments to pop from stack for writeln
-    OP_WRITE,         // Specific opcode for Write
     OP_CALL_HOST,
 
     OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)

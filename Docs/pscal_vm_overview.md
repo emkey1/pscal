@@ -156,8 +156,9 @@ end;
    * `OP_LESS`
    * `OP_JUMP_IF_FALSE <exit_offset>`
 4. loop_body:
+   * `OP_CONSTANT <index_of_true>` – newline flag
    * `OP_GET_GLOBAL <index_of_i>`
-   * `OP_WRITE_LN 1`
+   * `OP_CALL_BUILTIN <index_of_write> 2`
    * `OP_GET_GLOBAL <index_of_i>`
    * `OP_CONSTANT <index_of_1>`
    * `OP_ADD`
@@ -313,9 +314,6 @@ MyFunction(a, b);
 
 #### **I/O and Miscellaneous Opcodes**
 
-* **`OP_WRITE_LN`** / **`OP_WRITE`**:
-    * **Operands:** 1-byte argument count.
-    * **Action:** Pops the specified number of arguments from the stack and prints them to the console. `OP_WRITE_LN` adds a newline.
 * **`OP_CALL_HOST`**:
     * **Operands:** 1-byte host function ID.
     * **Action:** Calls a C function that is registered with the VM.
