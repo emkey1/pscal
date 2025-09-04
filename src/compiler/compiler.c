@@ -93,6 +93,31 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     return index;
 }
 
+// Return an ordinal ranking for integer-like types so we can detect
+// potential narrowing conversions. Larger ranks represent wider types.
+static int intTypeRank(VarType t) {
+    switch (t) {
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            return 64;
+        case TYPE_INT32:
+        case TYPE_UINT32:
+            return 32;
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            return 16;
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_CHAR:
+            return 8;
+        default:
+            return 0;
+    }
+}
+
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
     if (constant_index < 0) {
         fprintf(stderr, "L%d: Compiler error: negative constant index.\n", line);
@@ -589,6 +614,14 @@ Value evaluateCompileTimeValue(AST* node) {
             if (node->token) {
                 if (node->var_type == TYPE_REAL || (node->token->type == TOKEN_REAL_CONST)) {
                     return makeReal(atof(node->token->value));
+                } else if (node->var_type == TYPE_INT64 || node->var_type == TYPE_UINT64) {
+                    /*
+                     * REA treats plain integer literals as 64-bit values.  The old
+                     * implementation always produced a TYPE_INT32 Value which caused
+                     * a runtime type mismatch when assigning to INT64 variables.
+                     * Use makeInt64 so the literal's type matches the AST node.
+                     */
+                    return makeInt64(atoll(node->token->value));
                 } else {
                     return makeInt(atoll(node->token->value));
                 }
@@ -1898,6 +1931,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             AST* lvalue = node->left;
             AST* rvalue = node->right;
 
+            if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
+                int lrank = intTypeRank(lvalue->var_type);
+                int rrank = intTypeRank(rvalue->var_type);
+                if (rrank > lrank) {
+                    fprintf(stderr, "L%d: Compiler warning: assigning %s to %s may lose precision.\n",
+                            line, varTypeToString(rvalue->var_type), varTypeToString(lvalue->var_type));
+                }
+            }
+
             compileRValue(rvalue, chunk, getLine(rvalue));
 
             if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
@@ -2622,6 +2664,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_ASSIGN: {
             AST* lvalue = node->left;
             AST* rvalue = node->right;
+
+            if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
+                int lrank = intTypeRank(lvalue->var_type);
+                int rrank = intTypeRank(rvalue->var_type);
+                if (rrank > lrank) {
+                    fprintf(stderr, "L%d: Compiler warning: assigning %s to %s may lose precision.\n",
+                            line, varTypeToString(rvalue->var_type), varTypeToString(lvalue->var_type));
+                }
+            }
 
             compileRValue(rvalue, chunk, getLine(rvalue));
             writeBytecodeChunk(chunk, OP_DUP, line); // Preserve assigned value as the expression result
