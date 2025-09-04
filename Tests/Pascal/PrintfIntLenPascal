@@ -1,0 +1,16 @@
+program PrintfIntLenPascal;
+begin
+  // Mix of length modifiers: ld, jd, zu, llu, hhd
+  printf('%ld %jd %zu %llu %hhd', 42, 43, 44, 45, -1);
+  writeln;
+  // More: hx, hhx, jd (negative), hhu (wrap), zu, td
+  printf('%hx %hhx', $1234, $123);
+  writeln;
+  printf('%jd', -123456789);
+  writeln;
+  printf('%hhu', -1);
+  writeln;
+  printf('%zu %td', 44, -5);
+  writeln;
+end.
+
