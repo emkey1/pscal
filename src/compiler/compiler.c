@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
 #include <math.h>
+#include <ctype.h>
+#include <strings.h>
 
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h" // For isBuiltin
@@ -399,6 +401,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
+static void compilePrintf(AST* node, BytecodeChunk* chunk, int line);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -1669,6 +1672,74 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     }
 }
 
+static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
+    if (!node) return;
+
+    bool first_is_literal =
+        node->child_count > 0 && node->children[0]->type == AST_STRING &&
+        node->children[0]->token && node->children[0]->token->value;
+
+    if (first_is_literal) {
+        const char* fmt = node->children[0]->token->value;
+        bool has_spec = false;
+        for (size_t i = 0; fmt[i]; i++) {
+            if (fmt[i] == '%') {
+                if (fmt[i + 1] == '%') { i++; continue; }
+                has_spec = true;
+                break;
+            }
+        }
+
+        if (!has_spec) {
+            size_t flen = strlen(fmt);
+            char* processed = (char*)malloc(flen + 1);
+            size_t out = 0;
+            for (size_t i = 0; i < flen; i++) {
+                if (fmt[i] == '%' && fmt[i + 1] == '%') {
+                    processed[out++] = '%';
+                    i++;
+                } else {
+                    processed[out++] = fmt[i];
+                }
+            }
+            processed[out] = '\0';
+
+            Value sv = makeString(processed);
+            int cidx = addConstantToChunk(chunk, &sv);
+            freeValue(&sv);
+            free(processed);
+
+            emitConstant(chunk, cidx, line);
+            int write_arg_count = 1;
+
+            for (int i = 1; i < node->child_count; i++) {
+                AST* arg = node->children[i];
+                compileRValue(arg, chunk, getLine(arg));
+                write_arg_count++;
+            }
+
+            writeBytecodeChunk(chunk, OP_WRITE, line);
+            writeBytecodeChunk(chunk, (uint8_t)write_arg_count, line);
+
+            Value zero = makeInt(0);
+            int zidx = addConstantToChunk(chunk, &zero);
+            freeValue(&zero);
+            emitConstant(chunk, zidx, line);
+            return;
+        }
+    }
+
+    for (int i = 0; i < node->child_count; i++) {
+        compileRValue(node->children[i], chunk, getLine(node->children[i]));
+    }
+    Value cnt = makeInt(node->child_count);
+    int idx = addConstantToChunk(chunk, &cnt);
+    freeValue(&cnt);
+    emitConstant(chunk, idx, line);
+    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_PRINTF, line);
+}
+
 static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -2111,6 +2182,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
             if (proc_symbol && proc_symbol->is_alias) {
                 proc_symbol = proc_symbol->real_symbol;
+            }
+
+            if (strcasecmp(calleeName, "printf") == 0) {
+                compilePrintf(node, chunk, line);
+                writeBytecodeChunk(chunk, OP_POP, line);
+                break;
             }
 
             if (strcasecmp(calleeName, "lock") == 0) {
@@ -2839,6 +2916,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
                 compiler_had_error = true;
                 emitConstant(chunk, addNilConstant(chunk), line);
+                break;
+            }
+
+            if (strcasecmp(functionName, "printf") == 0) {
+                compilePrintf(node, chunk, line);
                 break;
             }
 

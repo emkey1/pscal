@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h> // For bool, true, false
+#include <ctype.h>
 #include <pthread.h>
 #include <limits.h>
 #include <stdint.h>
@@ -692,6 +693,122 @@ static Value vmHostWaitThread(VM* vm) {
     return makeInt(0);
 }
 
+static Value vmHostPrintf(VM* vm) {
+    Value countVal = pop(vm);
+    int arg_count = 0;
+    if (IS_INTLIKE(countVal)) arg_count = (int)AS_INTEGER(countVal);
+    freeValue(&countVal);
+    if (arg_count <= 0) return makeInt(0);
+
+    Value* args = (Value*)malloc(sizeof(Value) * arg_count);
+    if (!args) return makeInt(0);
+    for (int i = 0; i < arg_count; ++i) {
+        args[arg_count - 1 - i] = pop(vm);
+    }
+
+    const char* fmt = (args[0].type == TYPE_STRING && args[0].s_val) ? args[0].s_val : "";
+    int arg_index = 1;
+    size_t flen = strlen(fmt);
+    for (size_t i = 0; i < flen; ++i) {
+        if (fmt[i] == '%' && i + 1 < flen) {
+            if (fmt[i + 1] == '%') {
+                fputc('%', stdout);
+                i++;
+            } else if (arg_index < arg_count) {
+                size_t j = i + 1;
+                int width = 0;
+                int precision = -1;
+                while (j < flen && isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
+                if (j < flen && fmt[j] == '.') {
+                    j++;
+                    precision = 0;
+                    while (j < flen && isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
+                }
+                const char* length_mods = "hlLjzt";
+                while (j < flen && strchr(length_mods, fmt[j]) != NULL) j++;
+                char spec = (j < flen) ? fmt[j] : '\0';
+
+                char fmtbuf[32];
+                char buf[DEFAULT_STRING_CAPACITY];
+                Value v = args[arg_index++];
+                switch (spec) {
+                    case 'd': case 'i': case 'u': case 'o': case 'x': case 'X': {
+                        unsigned long long u = 0ULL; long long s = 0LL;
+                        if (isIntlikeType(v.type) || v.type == TYPE_BOOLEAN || v.type == TYPE_CHAR) {
+                            s = AS_INTEGER(v);
+                            u = (unsigned long long)AS_INTEGER(v);
+                        }
+                        bool is_unsigned = (spec=='u'||spec=='o'||spec=='x'||spec=='X');
+                        if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+                        else if (width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+                        else
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+                        if (is_unsigned)
+                            snprintf(buf, sizeof(buf), fmtbuf, u);
+                        else
+                            snprintf(buf, sizeof(buf), fmtbuf, s);
+                        fputs(buf, stdout);
+                        break;
+                    }
+                    case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+                        long double rv = isRealType(v.type) ? AS_REAL(v) : (long double)AS_INTEGER(v);
+                        if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+                        else if (width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+                        else
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+                        snprintf(buf, sizeof(buf), fmtbuf, (double)rv);
+                        fputs(buf, stdout);
+                        break;
+                    }
+                    case 'c': {
+                        char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)AS_INTEGER(v);
+                        if (width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%dc", width);
+                        else
+                            strcpy(fmtbuf, "%c");
+                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        fputs(buf, stdout);
+                        break;
+                    }
+                    case 's': {
+                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%ds", width, precision);
+                        else if (width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%ds", width);
+                        else
+                            strcpy(fmtbuf, "%s");
+                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        fputs(buf, stdout);
+                        break;
+                    }
+                    default:
+                        printValueToStream(v, stdout);
+                        break;
+                }
+                freeValue(&v);
+                i = j;
+            } else {
+                fputc('%', stdout);
+            }
+        } else {
+            fputc(fmt[i], stdout);
+        }
+    }
+
+    for (int k = arg_index; k < arg_count; ++k) {
+        freeValue(&args[k]);
+    }
+    freeValue(&args[0]);
+    free(args);
+    fflush(stdout);
+    return makeInt(0);
+}
+
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
     if (!vm) return false;
@@ -739,6 +856,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     }
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
+    registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
 }
 
 void freeVM(VM* vm) {
