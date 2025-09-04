@@ -546,20 +546,22 @@ void runtimeError(VM* vm, const char* format, ...) {
     va_end(args);
     fputc('\n', stderr);
 
-    // Get approximate instruction offset and line for the error
+    // Get precise instruction offset and line for the error.
+    // vm->lastInstruction points at the start of the instruction that ran last
+    // (the one that triggered the runtime error).
     size_t instruction_offset = 0;
     int error_line = 0;
-    if (vm && vm->chunk && vm->ip && vm->chunk->code && vm->chunk->lines) {
-        // The instruction that *caused* the error is usually the one *before* vm->ip
-        if (vm->ip > vm->chunk->code) {
-            instruction_offset = (vm->ip - vm->chunk->code) - 1;
+    if (vm && vm->chunk && vm->lastInstruction && vm->chunk->code && vm->chunk->lines) {
+        if (vm->lastInstruction >= vm->chunk->code) {
+            instruction_offset = (size_t)(vm->lastInstruction - vm->chunk->code);
             if (instruction_offset < (size_t)vm->chunk->count) {
                 error_line = vm->chunk->lines[instruction_offset];
             }
-        } else if (vm->chunk->count > 0) { // Special case: error on the very first byte
-            instruction_offset = 0;
-            error_line = vm->chunk->lines[0];
         }
+    } else if (vm && vm->chunk && vm->chunk->count > 0) {
+        // Special case: error on the very first instruction
+        instruction_offset = 0;
+        error_line = vm->chunk->lines[0];
     }
     fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
 
@@ -869,6 +871,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     resetStack(vm);
     vm->chunk = NULL;
     vm->ip = NULL;
+    vm->lastInstruction = NULL;
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
     vm->vmConstGlobalSymbols = NULL;
     vm->procedureTable = NULL;
@@ -1256,6 +1259,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     vm->chunk = chunk;
     vm->ip = vm->chunk->code + entry;
+    vm->lastInstruction = vm->ip;
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
@@ -1504,6 +1508,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
+        vm->lastInstruction = vm->ip;
 /* #ifdef DEBUG
         if (dumpExec) {
             fprintf(stderr,"VM Stack: ");
