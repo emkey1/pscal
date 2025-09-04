@@ -5,6 +5,16 @@ language. At the moment the executable only loads a source file and executes
 an empty bytecode chunk, but the layout below sketches the path toward a full
 compiler.
 
+## Running
+
+The `rea` front end supports a few diagnostic options:
+
+```
+--dump-ast-json        Dump the parsed AST as JSON and exit.
+--dump-bytecode        Dump the compiled bytecode before execution.
+--dump-bytecode-only   Dump the compiled bytecode and exit without executing.
+```
+
 ## Roadmap
 
 - Build a lexer that produces tokens for the syntax described in

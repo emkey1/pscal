@@ -26,15 +26,29 @@ static void initSymbolSystem(void) {
 static const char *REA_USAGE =
     "Usage: rea <options> <source.rea> [program_parameters...]\n"
     "   Options:\n"
-    "     --dump-ast-json       Dump AST to JSON and exit.\n";
+    "     --dump-ast-json        Dump AST to JSON and exit.\n"
+    "     --dump-bytecode        Dump compiled bytecode before execution.\n"
+    "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
 
 int main(int argc, char **argv) {
     vmInitTerminalState();
 
     int dump_ast_json = 0;
+    int dump_bytecode_flag = 0;
+    int dump_bytecode_only_flag = 0;
     int argi = 1;
-    if (argc > argi && strcmp(argv[argi], "--dump-ast-json") == 0) {
-        dump_ast_json = 1;
+    while (argc > argi && argv[argi][0] == '-') {
+        if (strcmp(argv[argi], "--dump-ast-json") == 0) {
+            dump_ast_json = 1;
+        } else if (strcmp(argv[argi], "--dump-bytecode") == 0) {
+            dump_bytecode_flag = 1;
+        } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
+            dump_bytecode_flag = 1;
+            dump_bytecode_only_flag = 1;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n%s", argv[argi], REA_USAGE);
+            return vmExitWithCleanup(EXIT_FAILURE);
+        }
         argi++;
     }
 
@@ -43,7 +57,7 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(EXIT_FAILURE);
     }
 
-    const char *path = argv[argi];
+    const char *path = argv[argi++];
     FILE *f = fopen(path, "rb");
     if (!f) {
         perror("open");
@@ -92,15 +106,27 @@ int main(int argc, char **argv) {
     if (compilation_ok) {
         finalizeBytecode(&chunk);
 
-        if (argc > argi + 1) {
-            gParamCount = argc - (argi + 1);
-            gParamValues = &argv[argi + 1];
+        if (argc > argi) {
+            gParamCount = argc - argi;
+            gParamValues = &argv[argi];
         }
 
-        VM vm;
-        initVM(&vm);
-        result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
-        freeVM(&vm);
+        if (dump_bytecode_flag) {
+            fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
+            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            if (!dump_bytecode_only_flag) {
+                fprintf(stderr, "\n--- executing Program with VM ---\n");
+            }
+        }
+
+        if (dump_bytecode_only_flag) {
+            result = INTERPRET_OK;
+        } else {
+            VM vm;
+            initVM(&vm);
+            result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+            freeVM(&vm);
+        }
     }
 
     freeBytecodeChunk(&chunk);

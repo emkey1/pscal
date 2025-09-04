@@ -8,7 +8,12 @@ echo "Running CLike Tests"
 ./run_clike_tests.sh
 echo "CLike Tests End"
 echo "====================================="
-echo 
+echo
+echo "Running Rea Tests"
+./run_rea_tests.sh
+echo "Rea Tests End"
+echo "====================================="
+echo
 echo "Running Tiny Tests"
 ./run_tiny_tests.sh
 echo "Tiny Tests End"
