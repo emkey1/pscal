@@ -649,10 +649,11 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                     j++;
                 }
             }
-            const char* length_mods = "hlLjzt";
-            while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
-                j++;
-            }
+            // Parse length modifiers and record small-width flags; we normalize by truncating manually
+            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
+            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
+            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
+            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
@@ -673,17 +674,21 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 Value v = args[arg_index++];
                 switch (spec) {
                     case 'd':
-                    case 'i':
-                        snprintf(buf, sizeof(buf), fmtbuf, (long long)asI64(v));
+                    case 'i': {
+                        long long iv = asI64(v);
+                        if (mod_hh) iv = (signed char)iv; else if (mod_h) iv = (short)iv; // wider mods use default
+                        snprintf(buf, sizeof(buf), fmtbuf, iv);
                         fputs(buf, stdout);
-                        break;
+                        break; }
                     case 'u':
                     case 'o':
                     case 'x':
-                    case 'X':
-                        snprintf(buf, sizeof(buf), fmtbuf, (unsigned long long)asI64(v));
+                    case 'X': {
+                        unsigned long long uv = (unsigned long long)asI64(v);
+                        if (mod_hh) uv = (unsigned char)uv; else if (mod_h) uv = (unsigned short)uv;
+                        snprintf(buf, sizeof(buf), fmtbuf, uv);
                         fputs(buf, stdout);
-                        break;
+                        break; }
                     case 'f':
                     case 'F':
                     case 'e':
@@ -778,8 +783,10 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 j++; precision = 0;
                 while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
             }
-            const char* length_mods = "hlLjzt";
-            while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
+            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
+            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
+            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
             char spec = fmt[j]; if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
             char fmtbuf[32]; char buf[256];
             if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
@@ -790,11 +797,15 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 Value v = args[arg_index++];
                 switch (spec) {
                     case 'd': case 'i': {
-                        snprintf(buf, sizeof(buf), fmtbuf, (long long)asI64(v));
+                        long long iv = asI64(v);
+                        if (mod_hh) iv = (signed char)iv; else if (mod_h) iv = (short)iv;
+                        snprintf(buf, sizeof(buf), fmtbuf, iv);
                         fputs(buf, output_stream);
                         break; }
                     case 'u': case 'o': case 'x': case 'X': {
-                        snprintf(buf, sizeof(buf), fmtbuf, (unsigned long long)asI64(v));
+                        unsigned long long uv = (unsigned long long)asI64(v);
+                        if (mod_hh) uv = (unsigned char)uv; else if (mod_h) uv = (unsigned short)uv;
+                        snprintf(buf, sizeof(buf), fmtbuf, uv);
                         fputs(buf, output_stream);
                         break; }
                     case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {

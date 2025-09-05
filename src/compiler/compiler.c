@@ -617,6 +617,15 @@ Value evaluateCompileTimeValue(AST* node) {
             if (node->token) {
                 if (node->var_type == TYPE_REAL || (node->token->type == TOKEN_REAL_CONST)) {
                     return makeReal(atof(node->token->value));
+                } else if (node->token->type == TOKEN_HEX_CONST) {
+                    // Parse hex literal (value string contains only hex digits, no '$')
+                    if (node->var_type == TYPE_INT64 || node->var_type == TYPE_UINT64) {
+                        unsigned long long v = strtoull(node->token->value, NULL, 16);
+                        return makeInt64((long long)v);
+                    } else {
+                        unsigned long v = strtoul(node->token->value, NULL, 16);
+                        return makeInt((long long)v);
+                    }
                 } else if (node->var_type == TYPE_INT64 || node->var_type == TYPE_UINT64) {
                     /*
                      * REA treats plain integer literals as 64-bit values.  The old
@@ -2592,11 +2601,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_NUMBER: {
             if (!node_token || !node_token->value) { /* error */ break; }
-            
             int constIndex;
-            // Use the appropriate helper based on the token type
             if (node_token->type == TOKEN_REAL_CONST) {
                 constIndex = addRealConstant(chunk, atof(node_token->value));
+            } else if (node_token->type == TOKEN_HEX_CONST) {
+                unsigned long long v = strtoull(node_token->value, NULL, 16);
+                constIndex = addIntConstant(chunk, (long long)v);
             } else {
                 constIndex = addIntConstant(chunk, atoll(node_token->value));
             }

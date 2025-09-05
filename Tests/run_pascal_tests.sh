@@ -53,9 +53,9 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
     continue
   fi
 
-  # Skip network-dependent test when running on GitHub Actions
-  if [ "$test_name" = "SocketSendReceiveTest" ] && [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-    echo "Skipping $test_name (networking disabled on GitHub Actions)"
+  # Skip network-labeled tests unless RUN_NET_TESTS=1
+  if [ -f "$SCRIPT_DIR/Pascal/$test_name.net" ] && [ "${RUN_NET_TESTS:-0}" != "1" ]; then
+    echo "Skipping $test_name (network test; set RUN_NET_TESTS=1 to enable)"
     echo
     continue
   fi
