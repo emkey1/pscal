@@ -45,14 +45,14 @@ void spawnHandler(int c) {
   nextSlot = nextSlot + 1;
   connSlots[slot] = c;
   switch (slot) {
-    case 0: spawn(handler0); break;
-    case 1: spawn(handler1); break;
-    case 2: spawn(handler2); break;
-    case 3: spawn(handler3); break;
-    case 4: spawn(handler4); break;
-    case 5: spawn(handler5); break;
-    case 6: spawn(handler6); break;
-    case 7: spawn(handler7); break;
+    case 0: spawn handler0(); break;
+    case 1: spawn handler1(); break;
+    case 2: spawn handler2(); break;
+    case 3: spawn handler3(); break;
+    case 4: spawn handler4(); break;
+    case 5: spawn handler5(); break;
+    case 6: spawn handler6(); break;
+    case 7: spawn handler7(); break;
   }
 }
 
@@ -63,10 +63,12 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  // Write file via shell (dosExec) for simplicity
-  // Use sh -c to handle redirection
-  str cmd = "-c \"echo '" + Body + "' > " + IndexPath + "\"";
-  dosExec("/bin/sh", cmd);
+  // Write file using text file I/O builtins
+  text f;
+  assign(&f, IndexPath);
+  rewrite(&f);
+  writeln(&f, Body);
+  close(&f);
 }
 
 int main() {
