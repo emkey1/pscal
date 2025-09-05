@@ -1,0 +1,4 @@
+class Point { int x; int y; }
+// Read field as rvalue (no declaration for p; we only dump bytecode)
+int a = p.x;
+
