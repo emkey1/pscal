@@ -29,6 +29,7 @@ Value vmBuiltinRound(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHalt(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDelay(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinNew(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinNewObj(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDispose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinExit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinOrd(struct VM_s* vm, int arg_count, Value* args);

@@ -997,6 +997,36 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
             break;
         }
+        case AST_NEW: {
+            // new ClassName(args): allocate object pointer via builtin newobj("ClassName")
+            if (!node || !node->token || !node->token->value) { break; }
+            const char* className = node->token->value;
+            int nameIdx = addStringConstant(chunk, className);
+            emitConstant(chunk, nameIdx, line);
+            // call builtin newobj(string) -> pointer
+            int bi = addStringConstant(chunk, "newobj");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            emitShort(chunk, (uint16_t)bi, line);
+            writeBytecodeChunk(chunk, (uint8_t)1, line);
+
+            // If constructor exists (a routine named exactly the class) and there are args,
+            // call it with 'this' (the pointer) plus args.
+            if (node->child_count > 0) {
+                // Duplicate pointer for constructor call (one copy remains as expression result)
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                // Push args
+                for (int i = 0; i < node->child_count; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                int ctorNameIdx = addStringConstant(chunk, className);
+                writeBytecodeChunk(chunk, OP_CALL, line);
+                emitShort(chunk, (uint16_t)ctorNameIdx, line);
+                // We don't know address here; OP_CALL expects address next. Use 0xFFFF placeholder.
+                emitShort(chunk, 0xFFFF, line);
+                writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
+            }
+            break;
+        }
         case AST_DEREFERENCE: {
             // The L-Value of p^ is the address stored inside p.
             // So we just need the R-Value of p.

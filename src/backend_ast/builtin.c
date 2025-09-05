@@ -304,6 +304,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"mstreambuffer", vmBuiltinMstreambuffer},
+    {"newobj", vmBuiltinNewObj},
     {"new", vmBuiltinNew},
     {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
@@ -2358,6 +2359,29 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     // (debug logging removed)
 
     return makeVoid();
+}
+
+// newobj(typeName: string): pointer
+Value vmBuiltinNewObj(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "newobj expects 1 string type name.");
+        return makeNil();
+    }
+    const char* typeName = args[0].s_val;
+    AST* typeDef = lookupType(typeName);
+    if (!typeDef) {
+        runtimeError(vm, "newobj: unknown type '%s'", typeName ? typeName : "");
+        return makeNil();
+    }
+    VarType vt = typeDef->var_type;
+    Value* allocated = (Value*)malloc(sizeof(Value));
+    if (!allocated) { runtimeError(vm, "newobj: allocation failed"); return makeNil(); }
+    *allocated = makeValueForType(vt, typeDef, NULL);
+    Value ret = makeVoid();
+    ret.type = TYPE_POINTER;
+    ret.ptr_val = allocated;
+    ret.base_type_node = typeDef;
+    return ret;
 }
 
 Value vmBuiltinExit(VM* vm, int arg_count, Value* args) {

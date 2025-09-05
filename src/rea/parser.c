@@ -37,41 +37,39 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
 
 static AST *parseFactor(ReaParser *p) {
     if (p->current.type == REA_TOKEN_NEW) {
-        // new ClassName(args)
-        ReaToken newTok = p->current;
+        // new ClassName(args) -> AST_NEW(token=ClassName, children=args)
         reaAdvance(p); // consume 'new'
         if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) return NULL;
         memcpy(lex, p->current.start, p->current.length);
         lex[p->current.length] = '\0';
-        Token *ctorTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+        Token *clsTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
         reaAdvance(p); // consume class name
-
-        AST *call_args = NULL;
+        AST *args = NULL;
         if (p->current.type == REA_TOKEN_LEFT_PAREN) {
             reaAdvance(p);
-            call_args = newASTNode(AST_COMPOUND, NULL);
+            args = newASTNode(AST_COMPOUND, NULL);
             while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
                 AST *arg = parseExpression(p);
                 if (!arg) break;
-                addChild(call_args, arg);
+                addChild(args, arg);
                 if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
             }
             if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
         }
-        AST *call = newASTNode(AST_PROCEDURE_CALL, ctorTok);
-        if (call_args && call_args->child_count > 0) {
-            call->children = call_args->children;
-            call->child_count = call_args->child_count;
-            call->child_capacity = call_args->child_capacity;
-            for (int i = 0; i < call->child_count; i++) if (call->children[i]) call->children[i]->parent = call;
-            call_args->children = NULL; call_args->child_count = 0; call_args->child_capacity = 0;
+        AST *node = newASTNode(AST_NEW, clsTok);
+        if (args && args->child_count > 0) {
+            node->children = args->children;
+            node->child_count = args->child_count;
+            node->child_capacity = args->child_capacity;
+            for (int i = 0; i < node->child_count; i++) if (node->children[i]) node->children[i]->parent = node;
+            args->children = NULL; args->child_count = 0; args->child_capacity = 0;
         }
-        if (call_args) freeAST(call_args);
-        setTypeAST(call, TYPE_UNKNOWN);
-        return call;
+        if (args) freeAST(args);
+        setTypeAST(node, TYPE_POINTER);
+        return node;
     }
     if (p->current.type == REA_TOKEN_NUMBER) {
         char *lex = (char *)malloc(p->current.length + 1);
@@ -405,13 +403,29 @@ static AST *parseVarDecl(ReaParser *p) {
     ReaTokenType typeTok = p->current.type;
     VarType vtype = mapType(typeTok);
 
-    // Build a type identifier node for the declaration's type.
-    const char *tname = typeName(typeTok);
-    Token *typeToken = newToken(TOKEN_IDENTIFIER, tname, p->current.line, 0);
-    AST *typeNode = newASTNode(AST_TYPE_IDENTIFIER, typeToken);
-    setTypeAST(typeNode, vtype);
-
-    reaAdvance(p); // consume type keyword
+    AST *typeNode = NULL;
+    if (vtype != TYPE_VOID) {
+        // Built-in type keyword
+        const char *tname = typeName(typeTok);
+        Token *typeToken = newToken(TOKEN_IDENTIFIER, tname, p->current.line, 0);
+        typeNode = newASTNode(AST_TYPE_IDENTIFIER, typeToken);
+        setTypeAST(typeNode, vtype);
+        reaAdvance(p); // consume type keyword
+    } else if (p->current.type == REA_TOKEN_IDENTIFIER) {
+        // User-defined type (e.g., class name). Treat vars as POINTER to that type.
+        char *lex = (char *)malloc(p->current.length + 1);
+        if (!lex) return NULL;
+        memcpy(lex, p->current.start, p->current.length);
+        lex[p->current.length] = '\0';
+        Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+        free(lex);
+        typeNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+        setTypeAST(typeNode, TYPE_RECORD);
+        vtype = TYPE_POINTER; // store pointers to class instances by default
+        reaAdvance(p); // consume type identifier
+    } else {
+        return NULL;
+    }
 
     if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
 

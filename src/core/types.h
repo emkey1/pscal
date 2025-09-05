@@ -224,7 +224,8 @@ typedef enum {
     AST_PROC_PTR_TYPE,
     AST_DEREFERENCE,
     AST_ADDR_OF,
-    AST_NIL
+    AST_NIL,
+    AST_NEW
 } ASTNodeType;
 
 // Define the function pointer type for built-in handlers
