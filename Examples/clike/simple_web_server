@@ -38,6 +38,35 @@ str contentType(str path) {
   return "application/octet-stream";
 }
 
+// Percent-decode %XX sequences (valid hex only). Leaves other characters unchanged.
+str decodePercent(str s) {
+  str out = "";
+  int i = 1;
+  while (i <= length(s)) {
+    if (copy(s, i, 1) == "%" && i + 2 <= length(s)) {
+      str h1 = copy(s, i + 1, 1);
+      str h2 = copy(s, i + 2, 1);
+      int v1 = -1; int v2 = -1;
+      // hex digit to value
+      if (h1 >= "0" && h1 <= "9") v1 = ord(h1) - ord("0");
+      else if (h1 >= "a" && h1 <= "f") v1 = 10 + (ord(h1) - ord("a"));
+      else if (h1 >= "A" && h1 <= "F") v1 = 10 + (ord(h1) - ord("A"));
+      if (h2 >= "0" && h2 <= "9") v2 = ord(h2) - ord("0");
+      else if (h2 >= "a" && h2 <= "f") v2 = 10 + (ord(h2) - ord("a"));
+      else if (h2 >= "A" && h2 <= "F") v2 = 10 + (ord(h2) - ord("A"));
+      if (v1 >= 0 && v2 >= 0) {
+        int val = v1 * 16 + v2;
+        out = out + char(val);
+        i = i + 3;
+        continue;
+      }
+    }
+    out = out + copy(s, i, 1);
+    i = i + 1;
+  }
+  return out;
+}
+
 // Remove all occurrences of ".." to prevent directory traversal.
 // Normalize a relative path: remove "..", remove "./" and collapse "//".
 str normalizePath(str s) {
@@ -72,15 +101,27 @@ str normalizePath(str s) {
 }
 
 void serveConn(int c) {
-  // Read (ignore) request
+  // Read request
   mstream req = socketreceive(c, 2048);
   str reqText = mstreambuffer(req);
-  // Parse request line minimally: method SP path SP ...
-  int sp1 = pos(reqText, " ");
-  str method = (sp1 > 0) ? copy(reqText, 1, sp1 - 1) : "";
-  str rest = (sp1 > 0) ? copy(reqText, sp1 + 2, length(reqText) - sp1) : "";
-  int sp2 = pos(rest, " ");
-  str path = (sp2 > 0) ? copy(rest, 1, sp2 - 1) : "/";
+  // Parse request line robustly: take first line then split by spaces
+  int ln = pos(reqText, "\r\n");
+  if (ln == 0) ln = pos(reqText, "\n");
+  str firstLine = (ln > 0) ? copy(reqText, 1, ln - 1) : reqText;
+  int sp1 = pos(firstLine, " ");
+  str method = "";
+  str path = "/";
+  if (sp1 > 0) {
+    method = copy(firstLine, 1, sp1 - 1);
+    str rest = copy(firstLine, sp1 + 1, length(firstLine) - sp1);
+    int sp2 = pos(rest, " ");
+    if (sp2 > 0) path = copy(rest, 1, sp2 - 1);
+  }
+  // Strip query string
+  int qidx = pos(path, "?");
+  if (qidx > 0) path = copy(path, 1, qidx - 1);
+  // Percent-decode the URL path
+  path = decodePercent(path);
 
   str respBody;
   int code = 200;
@@ -112,10 +153,12 @@ void serveConn(int c) {
       respBody = mstreambuffer(ms);
       code = 200;
       ctype = contentType(rel);
+      mstreamfree(&ms);
     } else {
       respBody = "<html><body>Not Found</body></html>";
       code = 404;
       ctype = "text/html";
+      mstreamfree(&ms);
     }
   }
   int len = length(respBody);
@@ -161,22 +204,51 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  // Create an index.html file in the htdocs directory.
-  GFile = fopen(IndexPath, "w");
-  fprintf(GFile, "%s\n", Body);
-  fclose(GFile);
+  // Create an index.html file if it does not exist yet
+  text F;
+  F = fopen(IndexPath, "r");
+  if (F != NULL) {
+    fclose(F);
+  } else {
+    GFile = fopen(IndexPath, "w");
+    fprintf(GFile, "%s\n", Body);
+    fclose(GFile);
+  }
 }
 
 int main() {
   initFiles();
-  // Optional: read port from argv[1]
+  // Optional: read port and root dir from args: [port] [rootdir]
   if (paramcount() >= 1) {
-    str p = paramstr(1);
-    int parsed = 0;
-    int code = -1;
-    val(p, &parsed, &code);
+    str a1 = paramstr(1);
+    int parsed = 0; int code = -1;
+    val(a1, &parsed, &code);
     if (code == 0 && parsed > 0 && parsed < 65536) {
       Port = parsed;
+      if (paramcount() >= 2) {
+        RootDir = paramstr(2);
+        IndexPath = RootDir + "/index.html";
+      }
+    } else {
+      // First arg is root dir
+      RootDir = a1;
+      IndexPath = RootDir + "/index.html";
+      if (paramcount() >= 2) {
+        str a2 = paramstr(2);
+        parsed = 0; code = -1;
+        val(a2, &parsed, &code);
+        if (code == 0 && parsed > 0 && parsed < 65536) Port = parsed;
+      }
+    }
+    // Ensure directory exists and index.html present
+    mkdir(RootDir);
+    text F2;
+    F2 = fopen(IndexPath, "r");
+    if (F2 != NULL) { fclose(F2); }
+    else {
+      GFile = fopen(IndexPath, "w");
+      fprintf(GFile, "%s\n", Body);
+      fclose(GFile);
     }
   }
   printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
