@@ -3824,6 +3824,17 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("unlock", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("destroy", AST_PROCEDURE_DECL, NULL);
 
+    // Additional registrations to ensure CLike builtins are classified correctly
+    registerBuiltinFunction("Fopen", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Fclose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Fprintf", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Read", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ReadLn", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("DeLine", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("JsonGet", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ToUpper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("toupper", AST_FUNCTION_DECL, NULL);
+
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
     /* CLike-style cast helpers (exposed as lowercase names): */
