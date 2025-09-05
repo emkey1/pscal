@@ -73,6 +73,16 @@ void initFiles() {
 
 int main() {
   initFiles();
+  // Optional: read port from argv[1]
+  if (paramcount() >= 1) {
+    str p = paramstr(1);
+    int parsed = 0;
+    int code = -1;
+    val(p, &parsed, &code);
+    if (code == 0 && parsed > 0 && parsed < 65536) {
+      Port = parsed;
+    }
+  }
   printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
   printf("Root: %s\n", RootDir);
 
