@@ -32,6 +32,10 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_INT64;
     }
 
+    if (strcasecmp(name, "getpid") == 0) {
+        return TYPE_INT32;
+    }
+
     if (strcasecmp(name, "round")     == 0 ||
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
@@ -488,6 +492,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 } else {
                     // Known VM builtins not in clike's local map (HTTP helpers):
                     if (strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) {
+                        t = TYPE_INT32;
+                    } else if (strcasecmp(name, "getpid") == 0) {
                         t = TYPE_INT32;
                     } else {
                         // Allow indirect calls through variables (function pointers): if a variable
