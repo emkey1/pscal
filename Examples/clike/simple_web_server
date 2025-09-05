@@ -13,10 +13,21 @@ str IndexPath;
 str Body;
 text GFile;
 
-// Max concurrent handler wrappers
-const int MaxThreads = 8;
-int connSlots[MaxThreads];
-int nextSlot = 0;
+// Worker pool + simple ring queue for accepted connections
+int MaxThreads = 8;                   // configurable via CLI
+const int MaxQueueCapacity = 256;     // hard maximum for queue storage
+int QCap = 64;                        // effective queue capacity (<= MaxQueueCapacity)
+int q[MaxQueueCapacity];
+int qHead = 0;
+int qTail = 0;
+int qCount = 0;
+int qmu; // mutex handle
+
+// Simple metrics
+int GAccepted = 0;
+int GEnqueued = 0;
+int GDropped = 0;
+int GServed = 0;
 
 // Helpers
 int endswith(str s, str suffix) {
@@ -56,7 +67,7 @@ str decodePercent(str s) {
       else if (h2 >= "A" && h2 <= "F") v2 = 10 + (ord(h2) - ord("A"));
       if (v1 >= 0 && v2 >= 0) {
         int val = v1 * 16 + v2;
-        out = out + char(val);
+        out = out + tochar(val);
         i = i + 3;
         continue;
       }
@@ -108,15 +119,18 @@ void serveConn(int c) {
   int ln = pos(reqText, "\r\n");
   if (ln == 0) ln = pos(reqText, "\n");
   str firstLine = (ln > 0) ? copy(reqText, 1, ln - 1) : reqText;
-  int sp1 = pos(firstLine, " ");
-  str method = "";
-  str path = "/";
-  if (sp1 > 0) {
-    method = copy(firstLine, 1, sp1 - 1);
-    str rest = copy(firstLine, sp1 + 1, length(firstLine) - sp1);
-    int sp2 = pos(rest, " ");
-    if (sp2 > 0) path = copy(rest, 1, sp2 - 1);
-  }
+  // Manually parse method and path from firstLine to avoid any pos/copy off-by-one
+  int flen = length(firstLine);
+  int i = 1;
+  // skip leading spaces
+  while (i <= flen && copy(firstLine, i, 1) == " ") i = i + 1;
+  int mstart = i;
+  while (i <= flen && copy(firstLine, i, 1) != " ") i = i + 1;
+  str method = (mstart <= flen) ? copy(firstLine, mstart, i - mstart) : "";
+  while (i <= flen && copy(firstLine, i, 1) == " ") i = i + 1;
+  int pstart = i;
+  while (i <= flen && copy(firstLine, i, 1) != " ") i = i + 1;
+  str path = (pstart <= flen && i > pstart) ? copy(firstLine, pstart, i - pstart) : "/";
   // Strip query string
   int qidx = pos(path, "?");
   if (qidx > 0) path = copy(path, 1, qidx - 1);
@@ -126,39 +140,103 @@ void serveConn(int c) {
   str respBody;
   int code = 200;
   str ctype = "text/html";
+  // For logging: show what we served (listing, index, or resolved relative path)
+  str logDetail = "";
   if (path == "/") {
-    // Directory listing of RootDir
-    str listing = "<html><body><h1>Index of /</h1><ul>";
-    str name = findfirst(RootDir);
-    while (name != "") {
-      listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
-      name = findnext();
+    // Prefer index.html if present; otherwise return listing
+    if (fileexists(IndexPath)) {
+      str rel = "index.html";
+      str fullPath = IndexPath;
+      mstream ms = mstreamcreate();
+      int ok = mstreamloadfromfile(&ms, fullPath);
+      if (ok) {
+        respBody = mstreambuffer(ms);
+        code = 200;
+        ctype = "text/html";
+        logDetail = "index.html";
+        mstreamfree(&ms);
+      } else {
+        // Fallback to listing if read failed for any reason
+        mstreamfree(&ms);
+        str listing = "<html><body><h1>Index of /</h1><ul>";
+        str name = findfirst(RootDir);
+        while (name != "") {
+          listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
+          name = findnext();
+        }
+        listing = listing + "</ul></body></html>";
+        respBody = listing;
+        code = 200;
+        ctype = "text/html";
+        logDetail = "(listing)";
+      }
+    } else {
+      // Directory listing of RootDir
+      str listing = "<html><body><h1>Index of /</h1><ul>";
+      str name = findfirst(RootDir);
+      while (name != "") {
+        listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
+        name = findnext();
+      }
+      listing = listing + "</ul></body></html>";
+      respBody = listing;
+      code = 200;
+      ctype = "text/html";
+      logDetail = "(listing)";
     }
-    listing = listing + "</ul></body></html>";
-    respBody = listing;
-    code = 200;
-    ctype = "text/html";
   } else if (path == "/index.html") {
-    respBody = Body;
-    code = 200;
-    ctype = "text/html";
+    // If a real index.html exists on disk, serve it; otherwise use the default Body
+    if (fileexists(IndexPath)) {
+      mstream ms = mstreamcreate();
+      int ok = mstreamloadfromfile(&ms, IndexPath);
+      if (ok) {
+        respBody = mstreambuffer(ms);
+        code = 200;
+        ctype = "text/html";
+        logDetail = "index.html";
+        mstreamfree(&ms);
+      } else {
+        // Fallback to in-memory Body if disk read failed unexpectedly
+        mstreamfree(&ms);
+        respBody = Body;
+        code = 200;
+        ctype = "text/html";
+        logDetail = "index.html (fallback)";
+      }
+    } else {
+      respBody = Body;
+      code = 200;
+      ctype = "text/html";
+      logDetail = "index.html (default)";
+    }
   } else {
     // Serve file under RootDir
     str rel = (copy(path, 1, 1) == "/") ? copy(path, 2, length(path) - 1) : path;
     rel = normalizePath(rel);
     str fullPath = RootDir + "/" + rel;
-    mstream ms = mstreamcreate();
-    int ok = mstreamloadfromfile(&ms, fullPath);
-    if (ok) {
-      respBody = mstreambuffer(ms);
-      code = 200;
-      ctype = contentType(rel);
-      mstreamfree(&ms);
+    if (fileexists(fullPath)) {
+      mstream ms = mstreamcreate();
+      int ok = mstreamloadfromfile(&ms, fullPath);
+      if (ok) {
+        respBody = mstreambuffer(ms);
+        code = 200;
+        ctype = contentType(rel);
+        mstreamfree(&ms);
+        logDetail = rel;
+      } else {
+        // Read failed even though file exists; return 500
+        mstreamfree(&ms);
+        respBody = "<html><body>Internal Server Error</body></html>";
+        code = 500;
+        ctype = "text/html";
+        logDetail = rel;
+      }
     } else {
+      // Not found; do not attempt to load to avoid VM runtimeError
       respBody = "<html><body>Not Found</body></html>";
       code = 404;
       ctype = "text/html";
-      mstreamfree(&ms);
+      logDetail = rel;
     }
   }
   int len = length(respBody);
@@ -168,32 +246,60 @@ void serveConn(int c) {
             + "Content-Length: " + inttostr(len) + "\r\n\r\n";
   socketsend(c, hdr);
   socketsend(c, respBody);
-  printf("[%s] %s -> %d\n", method, path, code);
+  int depth = 0, served = 0, enq = 0, drop = 0;
+  lock(qmu); depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; unlock(qmu);
+  printf("[%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n", method, path, code, logDetail, depth, served, enq, drop);
   socketclose(c);
 }
 
-void handler0() { serveConn(connSlots[0]); }
-void handler1() { serveConn(connSlots[1]); }
-void handler2() { serveConn(connSlots[2]); }
-void handler3() { serveConn(connSlots[3]); }
-void handler4() { serveConn(connSlots[4]); }
-void handler5() { serveConn(connSlots[5]); }
-void handler6() { serveConn(connSlots[6]); }
-void handler7() { serveConn(connSlots[7]); }
+void qinit() { qmu = mutex(); qHead = 0; qTail = 0; qCount = 0; }
+int enqueue(int c) {
+  int ok = 0;
+  lock(qmu);
+  if (qCount < QCap) {
+    q[qTail] = c;
+    qTail = (qTail + 1) % QCap;
+    qCount = qCount + 1;
+    GEnqueued = GEnqueued + 1;
+    ok = 1;
+  }
+  unlock(qmu);
+  return ok;
+}
+int dequeue() {
+  int v = -1;
+  lock(qmu);
+  if (qCount > 0) {
+    v = q[qHead];
+    qHead = (qHead + 1) % QCap;
+    qCount = qCount - 1;
+  }
+  unlock(qmu);
+  return v;
+}
+void worker() {
+  while (1) {
+    int c = dequeue();
+    if (c >= 0) {
+      serveConn(c);
+      lock(qmu); GServed = GServed + 1; unlock(qmu);
+    } else {
+      delay(10);
+    }
+  }
+}
 
-void spawnHandler(int c) {
-  int slot = nextSlot % MaxThreads;
-  nextSlot = nextSlot + 1;
-  connSlots[slot] = c;
-  switch (slot) {
-    case 0: spawn handler0(); break;
-    case 1: spawn handler1(); break;
-    case 2: spawn handler2(); break;
-    case 3: spawn handler3(); break;
-    case 4: spawn handler4(); break;
-    case 5: spawn handler5(); break;
-    case 6: spawn handler6(); break;
-    case 7: spawn handler7(); break;
+void heartbeat() {
+  int prevServed = 0;
+  while (1) {
+    delay(60000); // ~60s
+    int depth = 0, served = 0, enq = 0, drop = 0, acc = 0, cap = 0, thr = 0;
+    lock(qmu);
+      depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; acc = GAccepted; cap = QCap; thr = MaxThreads;
+    unlock(qmu);
+    int dps = served - prevServed;
+    prevServed = served;
+    printf("[HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n", depth, cap, thr, acc, enq, served, drop, dps);
   }
 }
 
@@ -205,11 +311,7 @@ void initFiles() {
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
   // Create an index.html file if it does not exist yet
-  text F;
-  F = fopen(IndexPath, "r");
-  if (F != NULL) {
-    fclose(F);
-  } else {
+  if (!fileexists(IndexPath)) {
     GFile = fopen(IndexPath, "w");
     fprintf(GFile, "%s\n", Body);
     fclose(GFile);
@@ -218,6 +320,7 @@ void initFiles() {
 
 int main() {
   initFiles();
+  qinit();
   // Optional: read port and root dir from args: [port] [rootdir]
   if (paramcount() >= 1) {
     str a1 = paramstr(1);
@@ -242,13 +345,25 @@ int main() {
     }
     // Ensure directory exists and index.html present
     mkdir(RootDir);
-    text F2;
-    F2 = fopen(IndexPath, "r");
-    if (F2 != NULL) { fclose(F2); }
-    else {
+    if (!fileexists(IndexPath)) {
       GFile = fopen(IndexPath, "w");
       fprintf(GFile, "%s\n", Body);
       fclose(GFile);
+    }
+    // Optional: threads and queue capacity
+    if (paramcount() >= 3) {
+      int parsedT = 0; int codeT = -1;
+      val(paramstr(3), &parsedT, &codeT);
+      if (codeT == 0 && parsedT > 0 && parsedT <= 64) MaxThreads = parsedT;
+    }
+    if (paramcount() >= 4) {
+      int parsedQ = 0; int codeQ = -1;
+      val(paramstr(4), &parsedQ, &codeQ);
+      if (codeQ == 0) {
+        if (parsedQ < 8) parsedQ = 8;
+        if (parsedQ > MaxQueueCapacity) parsedQ = MaxQueueCapacity;
+        lock(qmu); QCap = parsedQ; qHead = 0; qTail = 0; qCount = 0; unlock(qmu);
+      }
     }
   }
   printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
@@ -270,10 +385,27 @@ int main() {
     return 1;
   }
   printf("Waiting for connections... (Ctrl+C to quit)\n");
+  // Heartbeat: periodically report metrics
+  spawn heartbeat();
+  // Start worker pool
+  int i = 0;
+  while (i < MaxThreads) { spawn worker(); i = i + 1; }
   while (1) {
     int c = socketaccept(srv);
     if (c >= 0) {
-      spawnHandler(c);
+      lock(qmu); GAccepted = GAccepted + 1; unlock(qmu);
+      // Backpressure: retry enq a few times, then drop
+      int tries = 0; int ok = 0;
+      while (tries < 5) {
+        ok = enqueue(c);
+        if (ok) break;
+        delay(10);
+        tries = tries + 1;
+      }
+      if (!ok) {
+        socketclose(c);
+        lock(qmu); GDropped = GDropped + 1; unlock(qmu);
+      }
     } else {
       // Small sleep to avoid busy loop on transient errors
       delay(10);
