@@ -20,14 +20,28 @@ int nextSlot = 0;
 void serveConn(int c) {
   // Read (ignore) request
   mstream req = socketreceive(c, 2048);
-  // Minimal HTTP response
-  int len = length(Body);
-  str hdr = "HTTP/1.1 200 OK\r\n"
-               "Content-Type: text/html\r\n"
-               "Content-Length: ";
-  hdr = hdr + inttostr(len) + "\r\n\r\n";
+  str reqText = mstreambuffer(req);
+  // Parse request line minimally: method SP path SP ...
+  int sp1 = pos(reqText, " ");
+  str rest = (sp1 > 0) ? copy(reqText, sp1 + 2, length(reqText) - sp1) : "";
+  int sp2 = pos(rest, " ");
+  str path = (sp2 > 0) ? copy(rest, 1, sp2 - 1) : "/";
+
+  str respBody;
+  int code = 200;
+  if (path == "/" || path == "/index.html") {
+    respBody = Body;
+  } else {
+    code = 404;
+    respBody = "<html><body>Not Found</body></html>";
+  }
+  int len = length(respBody);
+  str status = (code == 200) ? "200 OK" : "404 Not Found";
+  str hdr = "HTTP/1.1 " + status + "\r\n"
+            + "Content-Type: text/html\r\n"
+            + "Content-Length: " + inttostr(len) + "\r\n\r\n";
   socketsend(c, hdr);
-  socketsend(c, Body);
+  socketsend(c, respBody);
   socketclose(c);
 }
 
@@ -67,7 +81,7 @@ void initFiles() {
   text f;
   assign(&f, IndexPath);
   rewrite(&f);
-  writeln(&f, Body);
+  fprintf(&f, "%s\n", Body);
   close(&f);
 }
 

@@ -321,6 +321,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
     {"printf", vmBuiltinPrintf},
+    {"fprintf", vmBuiltinFprintf},
     {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
@@ -722,6 +723,110 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
         fputc(c, stdout);
     }
     fflush(stdout);
+    return makeInt(0);
+}
+
+// fprintf(file, fmt, ...)
+Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 2) {
+        runtimeError(vm, "fprintf expects at least (file, format).");
+        return makeInt(0);
+    }
+    // Determine output FILE*
+    FILE* output_stream = NULL;
+    const Value* farg = &args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (const Value*)farg->ptr_val;
+    if (farg->type == TYPE_FILE && farg->f_val) {
+        output_stream = farg->f_val;
+    } else {
+        runtimeError(vm, "fprintf first argument must be an open file.");
+        return makeInt(0);
+    }
+    if (args[1].type != TYPE_STRING || !args[1].s_val) {
+        runtimeError(vm, "fprintf expects a format string as the second argument.");
+        return makeInt(0);
+    }
+    const char* fmt = AS_STRING(args[1]);
+    int arg_index = 2;
+    for (size_t i = 0; fmt && fmt[i] != '\0'; i++) {
+        char c = fmt[i];
+        if (c == '\\' && fmt[i + 1] != '\0') {
+            char esc = fmt[++i];
+            switch (esc) {
+                case 'n': fputc('\n', output_stream); break;
+                case 'r': fputc('\r', output_stream); break;
+                case 't': fputc('\t', output_stream); break;
+                case '\\': fputc('\\', output_stream); break;
+                case '"': fputc('"', output_stream); break;
+                default: fputc(esc, output_stream); break;
+            }
+            continue;
+        }
+        if (c == '%' && fmt[i + 1] != '\0') {
+            if (fmt[i + 1] == '%') {
+                fputc('%', output_stream);
+                i++;
+                continue;
+            }
+            size_t j = i + 1;
+            int width = 0;
+            int precision = -1;
+            while (isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
+            if (fmt[j] == '.') {
+                j++; precision = 0;
+                while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
+            }
+            const char* length_mods = "hlLjzt";
+            while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+            char spec = fmt[j]; if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
+            char fmtbuf[32]; char buf[256];
+            if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+            else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+            else if (precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
+            else snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            if (arg_index < arg_count) {
+                Value v = args[arg_index++];
+                switch (spec) {
+                    case 'd': case 'i': {
+                        snprintf(buf, sizeof(buf), fmtbuf, (long long)asI64(v));
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'u': case 'o': case 'x': case 'X': {
+                        snprintf(buf, sizeof(buf), fmtbuf, (unsigned long long)asI64(v));
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+                        snprintf(buf, sizeof(buf), fmtbuf, (double)AS_REAL(v));
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'c': {
+                        char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
+                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        fputs(buf, output_stream);
+                        break; }
+                    case 's': {
+                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'p': {
+                        snprintf(buf, sizeof(buf), fmtbuf, (void*)(uintptr_t)asI64(v));
+                        fputs(buf, output_stream);
+                        break; }
+                    default:
+                        printValueToStream(v, output_stream);
+                        break;
+                }
+            } else {
+                fputc('%', output_stream);
+                fputc(spec, output_stream);
+            }
+            i = j;
+            continue;
+        }
+        fputc(c, output_stream);
+    }
+    fflush(output_stream);
     return makeInt(0);
 }
 

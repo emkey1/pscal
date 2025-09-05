@@ -44,6 +44,7 @@ Value vmBuiltinSucc(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinUpcase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPos(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPrintf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFprintf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCopy(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetlength(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRealtostr(struct VM_s* vm, int arg_count, Value* args);
