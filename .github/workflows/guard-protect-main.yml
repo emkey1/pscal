@@ -1,0 +1,18 @@
+name: Protect Main Branch
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  require-develop-merge-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allow only devel → main PRs
+        run: |
+          echo "base_ref=${{ github.base_ref }} head_ref=${{ github.head_ref }}"
+          if [[ "${{ github.base_ref }}" == "main" && "${{ github.head_ref }}" != "devel" ]]; then
+            echo "Only PRs from 'devel' into 'main' are allowed. Please retarget your PR to 'devel'." >&2
+            exit 1
+          fi
+

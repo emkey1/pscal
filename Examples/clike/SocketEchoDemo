@@ -1,3 +1,4 @@
+#!/usr/bin/env clike
 int ready = 0;
 
 void server() {

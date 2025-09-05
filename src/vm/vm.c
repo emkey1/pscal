@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -23,7 +24,6 @@
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
-#define MAX_WRITELN_ARGS_VM 32
 
 // Special sentinel values used in pointer.base_type_node to signal
 // non-standard dereference behavior in OP_GET_INDIRECT.
@@ -546,20 +546,22 @@ void runtimeError(VM* vm, const char* format, ...) {
     va_end(args);
     fputc('\n', stderr);
 
-    // Get approximate instruction offset and line for the error
+    // Get precise instruction offset and line for the error.
+    // vm->lastInstruction points at the start of the instruction that ran last
+    // (the one that triggered the runtime error).
     size_t instruction_offset = 0;
     int error_line = 0;
-    if (vm && vm->chunk && vm->ip && vm->chunk->code && vm->chunk->lines) {
-        // The instruction that *caused* the error is usually the one *before* vm->ip
-        if (vm->ip > vm->chunk->code) {
-            instruction_offset = (vm->ip - vm->chunk->code) - 1;
+    if (vm && vm->chunk && vm->lastInstruction && vm->chunk->code && vm->chunk->lines) {
+        if (vm->lastInstruction >= vm->chunk->code) {
+            instruction_offset = (size_t)(vm->lastInstruction - vm->chunk->code);
             if (instruction_offset < (size_t)vm->chunk->count) {
                 error_line = vm->chunk->lines[instruction_offset];
             }
-        } else if (vm->chunk->count > 0) { // Special case: error on the very first byte
-            instruction_offset = 0;
-            error_line = vm->chunk->lines[0];
         }
+    } else if (vm && vm->chunk && vm->chunk->count > 0) {
+        // Special case: error on the very first instruction
+        instruction_offset = 0;
+        error_line = vm->chunk->lines[0];
     }
     fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
 
@@ -725,7 +727,15 @@ static Value vmHostPrintf(VM* vm) {
                     while (j < flen && isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
                 }
                 const char* length_mods = "hlLjzt";
+                size_t mod_start = j;
                 while (j < flen && strchr(length_mods, fmt[j]) != NULL) j++;
+                char lenmod[4] = {0};
+                size_t mod_len = (j > mod_start) ? (j - mod_start) : 0;
+                if (mod_len > 0) {
+                    if (mod_len > sizeof(lenmod) - 1) mod_len = sizeof(lenmod) - 1;
+                    memcpy(lenmod, fmt + mod_start, mod_len);
+                    lenmod[mod_len] = '\0';
+                }
                 char spec = (j < flen) ? fmt[j] : '\0';
 
                 char fmtbuf[32];
@@ -739,28 +749,76 @@ static Value vmHostPrintf(VM* vm) {
                             u = (unsigned long long)AS_INTEGER(v);
                         }
                         bool is_unsigned = (spec=='u'||spec=='o'||spec=='x'||spec=='X');
-                        if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+                        if (precision >= 0 && width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
+                        else if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
                         else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
                         else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
-                        if (is_unsigned)
-                            snprintf(buf, sizeof(buf), fmtbuf, u);
-                        else
-                            snprintf(buf, sizeof(buf), fmtbuf, s);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
+
+                        // Cast to the correct type expected by the format length modifier
+                        if (is_unsigned) {
+                            if (strcmp(lenmod, "ll") == 0) {
+                                unsigned long long val = (unsigned long long)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "l") == 0) {
+                                unsigned long val = (unsigned long)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "j") == 0) {
+                                uintmax_t val = (uintmax_t)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "z") == 0) {
+                                size_t val = (size_t)u;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else {
+                                unsigned int val = (unsigned int)u; // includes h, hh, and default
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            }
+                        } else {
+                            if (strcmp(lenmod, "ll") == 0) {
+                                long long val = (long long)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "l") == 0) {
+                                long val = (long)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "j") == 0) {
+                                intmax_t val = (intmax_t)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else if (strcmp(lenmod, "t") == 0) {
+                                ptrdiff_t val = (ptrdiff_t)s;
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            } else {
+                                int val = (int)s; // includes h, hh, and default
+                                snprintf(buf, sizeof(buf), fmtbuf, val);
+                            }
+                        }
                         fputs(buf, stdout);
                         break;
                     }
                     case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
                         long double rv = isRealType(v.type) ? AS_REAL(v) : (long double)AS_INTEGER(v);
-                        if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+                        if (precision >= 0 && width > 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
+                        else if (precision >= 0)
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
                         else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
                         else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
-                        snprintf(buf, sizeof(buf), fmtbuf, (double)rv);
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
+
+                        // If 'L' modifier is present, pass a long double; otherwise pass double
+                        if (strcmp(lenmod, "L") == 0) {
+                            // Print directly with long double argument
+                            // Use a temporary buffer via vsnprintf-like call by delegating to snprintf
+                            // Note: snprintf supports %Lf on platforms where long double is distinct.
+                            // We still format into buf to keep existing behavior (collect into string before fputs)
+                            // Casting to long double explicitly for clarity.
+                            snprintf(buf, sizeof(buf), fmtbuf, (long double)rv);
+                        } else {
+                            snprintf(buf, sizeof(buf), fmtbuf, (double)rv);
+                        }
                         fputs(buf, stdout);
                         break;
                     }
@@ -826,6 +884,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     resetStack(vm);
     vm->chunk = NULL;
     vm->ip = NULL;
+    vm->lastInstruction = NULL;
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
     vm->vmConstGlobalSymbols = NULL;
     vm->procedureTable = NULL;
@@ -1213,6 +1272,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     vm->chunk = chunk;
     vm->ip = vm->chunk->code + entry;
+    vm->lastInstruction = vm->ip;
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
@@ -1461,6 +1521,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
+        vm->lastInstruction = vm->ip;
 /* #ifdef DEBUG
         if (dumpExec) {
             fprintf(stderr,"VM Stack: ");
@@ -3054,87 +3115,6 @@ comparison_error_label:
             case OP_JUMP: {
                 uint16_t offset = READ_SHORT(vm);
                 vm->ip += (int16_t)offset;
-                break;
-            }
-            case OP_WRITE_LN:
-            case OP_WRITE: {
-                uint8_t argCount = READ_BYTE();
-                if (argCount > MAX_WRITELN_ARGS_VM) {
-                    runtimeError(vm, "VM Error: Too many arguments for WRITE/WRITELN (max %d).", MAX_WRITELN_ARGS_VM);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                FILE *output_stream = stdout;
-                int start_index = 0;
-
-                // First arg may be FILE or ^FILE; route output accordingly.
-                if (argCount > 0) {
-                    Value first = vm->stackTop[-argCount];
-                    const Value* f = &first;
-                    if (first.type == TYPE_POINTER && first.ptr_val) f = (const Value*)first.ptr_val;
-                    if (f->type == TYPE_FILE) {
-                        if (!f->f_val) {
-                            runtimeError(vm, "File not open for writing.");
-                            // pop & clean args then bail...
-                            for (int i = 0; i < argCount; i++) freeValue(&vm->stackTop[-i-1]);
-                            vm->stackTop -= argCount;
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        output_stream = f->f_val;
-                        start_index = 1;
-                    }
-                }
-
-                Value args_to_print[MAX_WRITELN_ARGS_VM];
-                int print_arg_count = argCount - start_index;
-
-                // Pop the printable arguments into a temporary array.
-                for (int i = 0; i < print_arg_count; i++) {
-                    args_to_print[print_arg_count - 1 - i] = pop(vm);
-                }
-                if (start_index > 0) {
-                    // DO NOT free the file here; ownership stays with the variable.
-                    Value file_arg = pop(vm);
-                    if (file_arg.type != TYPE_FILE) freeValue(&file_arg);
-                }
-
-                bool color_was_applied = false; // Flag to track if we change the color
-
-                // Apply console colors only if writing to stdout
-                if (output_stream == stdout) {
-                    color_was_applied = applyCurrentTextAttributes(output_stream);
-                }
-
-                // Print the arguments (strings as full buffers; chars as a single byte)
-                for (int i = 0; i < print_arg_count; i++) {
-                    Value val = args_to_print[i];
-                    if (val.type == TYPE_STRING) {
-                        if (output_stream == stdout) {
-                            fputs(val.s_val ? val.s_val : "", output_stream);
-                        } else {
-                            size_t len = val.s_val ? strlen(val.s_val) : 0;
-                            fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
-                        }
-                        freeValue(&val);
-                    } else if (val.type == TYPE_CHAR) {
-                        fputc(val.c_val, output_stream);
-                        freeValue(&val);
-                    } else {
-                        printValueToStream(val, output_stream);
-                        freeValue(&val);
-                    }
-                }
-
-                if (instruction_val == OP_WRITE_LN) {
-                    fprintf(output_stream, "\n");
-                }
-
-                // Reset console colors only if they were applied in this call.
-                if (color_was_applied) {
-                    resetTextAttributes(output_stream);
-                }
-
-                fflush(output_stream);
                 break;
             }
             case OP_POP: {

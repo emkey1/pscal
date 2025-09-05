@@ -7,6 +7,9 @@
  * Signatures are approximate; consult Pascal documentation for exact usage.
  */
 int printf();
+int fprintf();
+int fopen();
+int fclose();
 int scanf();
 int strlen();
 

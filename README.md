@@ -126,6 +126,33 @@ Sample programs demonstrating the C like front end are available in
 `Examples/clike`. For a step-by-step guide see
 [Docs/clike_tutorial.md](Docs/clike_tutorial.md).
 
+### Simple Web Server (CLike)
+
+A minimal HTTP server written in CLike is available at
+`Examples/clike/simple_web_server`. It serves files from a specified directory,
+with `index.html` auto-detected for `/`, and includes a small worker pool and
+metrics.
+
+- Quick start (default port 5555, ephemeral root):
+  ```sh
+  build/bin/clike Examples/clike/simple_web_server
+  ```
+- Serve an existing directory on port 8080:
+  ```sh
+  build/bin/clike Examples/clike/simple_web_server 8080 /path/to/htdocs
+  # or
+  build/bin/clike Examples/clike/simple_web_server /path/to/htdocs 8080
+  ```
+- Optional tuning (threads, queue cap):
+  ```sh
+  build/bin/clike Examples/clike/simple_web_server /path 8080 16 128
+  ```
+
+Documentation: see [Docs/simple_web_server.md](Docs/simple_web_server.md).
+
+Tip: a basic `htdocs` directory for this server lives in the PSCAL clone under
+`lib/misc/simple_web_server/htdocs`.
+
 Options and semantics:
 
 - Command-line options:

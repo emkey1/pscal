@@ -1,0 +1,8 @@
+program PrintfFloatLenPascal;
+begin
+  printf('%.2Lf', 3.1415926535897932384626);
+  writeln;
+  printf('%.2f', 3.1415926535897932384626);
+  writeln;
+end.
+

@@ -1,3 +1,4 @@
+#!/usr/bin/env clike
 int main() {
     int s = httpsession();
     if (s < 0) {

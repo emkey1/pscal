@@ -84,6 +84,14 @@ export CLIKE_LIB_DIR=$(pwd)/Examples/clike
 - `CLIKE_LIB_DIR`: directory for imported `.cl` modules.
 - `SDL_VIDEODRIVER`, `SDL_AUDIODRIVER`: set to `dummy` for headless runs. Set `RUN_SDL=1` to run SDL content.
 
+## Examples
+
+- Simple Web Server (CLike):
+  - Source: `Examples/clike/simple_web_server`
+  - Quick start: `build/bin/clike Examples/clike/simple_web_server /path/to/htdocs 8080`
+  - Documentation: `Docs/simple_web_server.md`
+  - A basic `htdocs` tree is available in the PSCAL clone at `lib/misc/simple_web_server/htdocs`.
+
 ## HTTP networking (sync)
 
 The CLike front end can call VM HTTP builtins directly. Common helpers:

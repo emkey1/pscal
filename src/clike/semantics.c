@@ -32,6 +32,10 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_INT64;
     }
 
+    if (strcasecmp(name, "getpid") == 0) {
+        return TYPE_INT32;
+    }
+
     if (strcasecmp(name, "round")     == 0 ||
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
@@ -52,6 +56,14 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
         strcasecmp(name, "copy")      == 0) {
+        return TYPE_STRING;
+    }
+
+    // DOS/OS directory helpers return filenames as strings
+    if (strcasecmp(name, "findfirst") == 0 ||
+        strcasecmp(name, "findnext")  == 0 ||
+        strcasecmp(name, "dosfindfirst") == 0 ||
+        strcasecmp(name, "dosfindnext")  == 0) {
         return TYPE_STRING;
     }
 
@@ -84,6 +96,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "socketclose") == 0 ||
         strcasecmp(name, "socketconnect") == 0 ||
         strcasecmp(name, "socketbind") == 0 ||
+        strcasecmp(name, "socketbindaddr") == 0 ||
         strcasecmp(name, "socketlisten") == 0 ||
         strcasecmp(name, "socketaccept") == 0 ||
         strcasecmp(name, "socketsend") == 0 ||
@@ -97,6 +110,15 @@ static VarType builtinReturnType(const char* name) {
     }
     if (strcasecmp(name, "dnslookup") == 0) {
         return TYPE_STRING;
+    }
+    if (strcasecmp(name, "fopen") == 0) {
+        return TYPE_FILE;
+    }
+    if (strcasecmp(name, "fprintf") == 0) {
+        return TYPE_INT32;
+    }
+    if (strcasecmp(name, "fclose") == 0) {
+        return TYPE_VOID;
     }
 
     return TYPE_VOID;
@@ -487,6 +509,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 } else {
                     // Known VM builtins not in clike's local map (HTTP helpers):
                     if (strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) {
+                        t = TYPE_INT32;
+                    } else if (strcasecmp(name, "getpid") == 0) {
                         t = TYPE_INT32;
                     } else {
                         // Allow indirect calls through variables (function pointers): if a variable

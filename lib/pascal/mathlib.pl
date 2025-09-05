@@ -14,5 +14,5 @@ const
   PiOver2 = Pi / 2.0;
 
 implementation
-
+begin
 end.

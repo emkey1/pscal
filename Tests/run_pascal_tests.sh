@@ -53,9 +53,9 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
     continue
   fi
 
-  # Skip network-dependent test when running on GitHub Actions
-  if [ "$test_name" = "SocketSendReceiveTest" ] && [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-    echo "Skipping $test_name (networking disabled on GitHub Actions)"
+  # Skip network-labeled tests unless RUN_NET_TESTS=1
+  if [ -f "$SCRIPT_DIR/Pascal/$test_name.net" ] && [ "${RUN_NET_TESTS:-0}" != "1" ]; then
+    echo "Skipping $test_name (network test; set RUN_NET_TESTS=1 to enable)"
     echo
     continue
   fi
@@ -83,9 +83,11 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
   perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
   perl -ne 'print unless /Warning: user-defined .* overrides builtin/' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
+  perl -ne 'print unless /Compiler warning: assigning .* may lose precision/' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
   head -n 2 "$actual_err" > "$actual_err.trim" && mv "$actual_err.trim" "$actual_err"
   perl -pe 's/pid=[0-9]+/pid=<PID>/g' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
-  perl -ne 'print unless /^[0-9]{4}/' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
+  # Remove ISO-like date lines (e.g., 2024-09-01 ...), not generic 4-digit prefixes
+  perl -ne 'print unless /^[12][0-9]{3}-[01][0-9]-[0-3][0-9]/' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
 
   if [ -f "$out_file" ]; then
     if ! diff -u "$out_file" "$actual_out"; then

@@ -23,6 +23,7 @@ Value vmBuiltinSocketCreate(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSocketClose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSocketConnect(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSocketBind(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSocketBindAddr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSocketListen(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSocketAccept(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSocketSend(struct VM_s* vm, int arg_count, Value* args);

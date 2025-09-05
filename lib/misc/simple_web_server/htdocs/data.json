@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "message": "Data fetched from the server!",
+  "items": [
+    "Item 1",
+    "Item 2",
+    "Item 3"
+  ]
+}

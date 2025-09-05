@@ -44,6 +44,9 @@ Value vmBuiltinSucc(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinUpcase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPos(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPrintf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFprintf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFopen(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFclose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCopy(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetlength(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRealtostr(struct VM_s* vm, int arg_count, Value* args);
@@ -98,6 +101,7 @@ Value vmBuiltinRename(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinErase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRead(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReadln(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWrite(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinEof(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinIoresult(struct VM_s* vm, int arg_count, Value* args);
 

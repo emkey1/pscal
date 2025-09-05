@@ -1078,6 +1078,12 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;
+                Value nl = makeInt(0);
+                int nlidx = addConstantToChunk(chunk, &nl);
+                freeValue(&nl);
+                writeBytecodeChunk(chunk, OP_CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)nlidx, node->token.line);
+                write_arg_count++;
                 if (node->child_count > 0 && node->children[0]->type == TCAST_STRING) {
                     arg_index = 1;
                     char* fmt = tokenStringToCString(node->children[0]->token);
@@ -1154,7 +1160,9 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     compileExpression(node->children[arg_index], chunk, ctx);
                     write_arg_count++;
                 }
-                writeBytecodeChunk(chunk, OP_WRITE, node->token.line);
+                int nameIndex = addStringConstant(chunk, "write");
+                writeBytecodeChunk(chunk, OP_CALL_BUILTIN, node->token.line);
+                emitShort(chunk, (uint16_t)nameIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)write_arg_count, node->token.line);
                 Value zero = makeInt(0);
                 int zidx = addConstantToChunk(chunk, &zero);

@@ -35,6 +35,12 @@ if [ -d "lib/rea" ]; then
     cp -r lib/rea/* /usr/local/pscal/rea/lib/
 fi
 
+# Install misc library if present
+mkdir -p /usr/local/misc
+if [ -d "lib/misc" ]; then
+    cp -r lib/misc/* /usr/local/pscal/misc
+fi
+
 # Install fonts
 mkdir -p /usr/local/pscal/fonts
 cp -r fonts/* /usr/local/pscal/fonts

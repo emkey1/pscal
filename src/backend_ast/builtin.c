@@ -30,6 +30,9 @@
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 
+// Maximum number of arguments allowed for write/writeln
+#define MAX_WRITE_ARGS_VM 32
+
 // Per-thread state to keep core builtins thread-safe
 static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
 static _Thread_local unsigned int rand_seed = 1;
@@ -318,6 +321,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
     {"printf", vmBuiltinPrintf},
+    {"fprintf", vmBuiltinFprintf},
+    {"fopen", vmBuiltinFopen},
+    {"fclose", vmBuiltinFclose},
     {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
@@ -363,6 +369,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sinh", vmBuiltinSinh},
     {"socketaccept", vmBuiltinSocketAccept},
     {"socketbind", vmBuiltinSocketBind},
+    {"socketbindaddr", vmBuiltinSocketBindAddr},
     {"socketclose", vmBuiltinSocketClose},
     {"socketconnect", vmBuiltinSocketConnect},
     {"socketcreate", vmBuiltinSocketCreate},
@@ -396,9 +403,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
 #endif
-    {"window", vmBuiltinWindow},
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
+    {"window", vmBuiltinWindow},
+    {"write", vmBuiltinWrite},
     {"to be filled", NULL}
 };
 
@@ -641,10 +649,11 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                     j++;
                 }
             }
-            const char* length_mods = "hlLjzt";
-            while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
-                j++;
-            }
+            // Parse length modifiers and record small-width flags; we normalize by truncating manually
+            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
+            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
+            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
+            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
@@ -665,17 +674,21 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 Value v = args[arg_index++];
                 switch (spec) {
                     case 'd':
-                    case 'i':
-                        snprintf(buf, sizeof(buf), fmtbuf, (long long)asI64(v));
+                    case 'i': {
+                        long long iv = asI64(v);
+                        if (mod_hh) iv = (signed char)iv; else if (mod_h) iv = (short)iv; // wider mods use default
+                        snprintf(buf, sizeof(buf), fmtbuf, iv);
                         fputs(buf, stdout);
-                        break;
+                        break; }
                     case 'u':
                     case 'o':
                     case 'x':
-                    case 'X':
-                        snprintf(buf, sizeof(buf), fmtbuf, (unsigned long long)asI64(v));
+                    case 'X': {
+                        unsigned long long uv = (unsigned long long)asI64(v);
+                        if (mod_hh) uv = (unsigned char)uv; else if (mod_h) uv = (unsigned short)uv;
+                        snprintf(buf, sizeof(buf), fmtbuf, uv);
                         fputs(buf, stdout);
-                        break;
+                        break; }
                     case 'f':
                     case 'F':
                     case 'e':
@@ -718,6 +731,152 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
     }
     fflush(stdout);
     return makeInt(0);
+}
+
+// fprintf(file, fmt, ...)
+Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 2) {
+        runtimeError(vm, "fprintf expects at least (file, format).");
+        return makeInt(0);
+    }
+    // Determine output FILE*
+    FILE* output_stream = NULL;
+    const Value* farg = &args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (const Value*)farg->ptr_val;
+    if (farg->type == TYPE_FILE && farg->f_val) {
+        output_stream = farg->f_val;
+    } else {
+        runtimeError(vm, "fprintf first argument must be an open file.");
+        return makeInt(0);
+    }
+    if (args[1].type != TYPE_STRING || !args[1].s_val) {
+        runtimeError(vm, "fprintf expects a format string as the second argument.");
+        return makeInt(0);
+    }
+    const char* fmt = AS_STRING(args[1]);
+    int arg_index = 2;
+    for (size_t i = 0; fmt && fmt[i] != '\0'; i++) {
+        char c = fmt[i];
+        if (c == '\\' && fmt[i + 1] != '\0') {
+            char esc = fmt[++i];
+            switch (esc) {
+                case 'n': fputc('\n', output_stream); break;
+                case 'r': fputc('\r', output_stream); break;
+                case 't': fputc('\t', output_stream); break;
+                case '\\': fputc('\\', output_stream); break;
+                case '"': fputc('"', output_stream); break;
+                default: fputc(esc, output_stream); break;
+            }
+            continue;
+        }
+        if (c == '%' && fmt[i + 1] != '\0') {
+            if (fmt[i + 1] == '%') {
+                fputc('%', output_stream);
+                i++;
+                continue;
+            }
+            size_t j = i + 1;
+            int width = 0;
+            int precision = -1;
+            while (isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
+            if (fmt[j] == '.') {
+                j++; precision = 0;
+                while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
+            }
+            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
+            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
+            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
+            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
+            char spec = fmt[j]; if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
+            char fmtbuf[32]; char buf[256];
+            if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
+            else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
+            else if (precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
+            else snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            if (arg_index < arg_count) {
+                Value v = args[arg_index++];
+                switch (spec) {
+                    case 'd': case 'i': {
+                        long long iv = asI64(v);
+                        if (mod_hh) iv = (signed char)iv; else if (mod_h) iv = (short)iv;
+                        snprintf(buf, sizeof(buf), fmtbuf, iv);
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'u': case 'o': case 'x': case 'X': {
+                        unsigned long long uv = (unsigned long long)asI64(v);
+                        if (mod_hh) uv = (unsigned char)uv; else if (mod_h) uv = (unsigned short)uv;
+                        snprintf(buf, sizeof(buf), fmtbuf, uv);
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+                        snprintf(buf, sizeof(buf), fmtbuf, (double)AS_REAL(v));
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'c': {
+                        char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
+                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        fputs(buf, output_stream);
+                        break; }
+                    case 's': {
+                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        fputs(buf, output_stream);
+                        break; }
+                    case 'p': {
+                        snprintf(buf, sizeof(buf), fmtbuf, (void*)(uintptr_t)asI64(v));
+                        fputs(buf, output_stream);
+                        break; }
+                    default:
+                        printValueToStream(v, output_stream);
+                        break;
+                }
+            } else {
+                fputc('%', output_stream);
+                fputc(spec, output_stream);
+            }
+            i = j;
+            continue;
+        }
+        fputc(c, output_stream);
+    }
+    fflush(output_stream);
+    return makeInt(0);
+}
+
+// fopen(path, mode) -> FILE
+Value vmBuiltinFopen(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+        runtimeError(vm, "fopen expects (path:string, mode:string).");
+        return makeVoid();
+    }
+    const char* path = AS_STRING(args[0]);
+    const char* mode = AS_STRING(args[1]);
+    FILE* f = fopen(path, mode);
+    if (!f) {
+        runtimeError(vm, "fopen failed for '%s'", path);
+        return makeVoid();
+    }
+    Value v = makeVoid();
+    v.type = TYPE_FILE;
+    v.f_val = f;
+    v.filename = strdup(path);
+    return v;
+}
+
+// fclose(file)
+Value vmBuiltinFclose(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "fclose expects (file).");
+        return makeVoid();
+    }
+    const Value* farg = &args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (const Value*)farg->ptr_val;
+    if (farg->type != TYPE_FILE || !farg->f_val) {
+        runtimeError(vm, "fclose requires a valid file argument.");
+        return makeVoid();
+    }
+    fclose(farg->f_val);
+    return makeVoid();
 }
 
 Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
@@ -2711,6 +2870,83 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1) {
+        runtimeError(vm, "Write expects at least a newline flag.");
+        return makeVoid();
+    }
+
+    bool newline = false;
+    Value flag = args[0];
+    if (isRealType(flag.type)) {
+        newline = (AS_REAL(flag) != 0.0);
+    } else if (IS_INTLIKE(flag)) {
+        newline = (AS_INTEGER(flag) != 0);
+    } else if (flag.type == TYPE_BOOLEAN) {
+        newline = flag.i_val != 0;
+    } else if (flag.type == TYPE_CHAR) {
+        newline = flag.c_val != 0;
+    }
+
+    FILE* output_stream = stdout;
+    int start_index = 1;
+    bool first_arg_is_file_by_value = false;
+
+    if (arg_count > 1) {
+        const Value* first = &args[1];
+        if (first->type == TYPE_POINTER && first->ptr_val) first = (const Value*)first->ptr_val;
+        if (first->type == TYPE_FILE) {
+            if (!first->f_val) {
+                runtimeError(vm, "File not open for writing.");
+                return makeVoid();
+            }
+            output_stream = first->f_val;
+            start_index = 2;
+            if (args[1].type == TYPE_FILE) first_arg_is_file_by_value = true;
+        }
+    }
+
+    int print_arg_count = arg_count - start_index;
+    if (print_arg_count > MAX_WRITE_ARGS_VM) {
+        runtimeError(vm, "VM Error: Too many arguments for WRITE/WRITELN (max %d).", MAX_WRITE_ARGS_VM);
+        return makeVoid();
+    }
+
+    bool color_was_applied = false;
+    if (output_stream == stdout) {
+        color_was_applied = applyCurrentTextAttributes(output_stream);
+    }
+
+    for (int i = start_index; i < arg_count; i++) {
+        Value val = args[i];
+        if (val.type == TYPE_STRING) {
+            if (output_stream == stdout) {
+                fputs(val.s_val ? val.s_val : "", output_stream);
+            } else {
+                size_t len = val.s_val ? strlen(val.s_val) : 0;
+                fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
+            }
+        } else if (val.type == TYPE_CHAR) {
+            fputc(val.c_val, output_stream);
+        } else {
+            printValueToStream(val, output_stream);
+        }
+    }
+
+    if (newline) {
+        fprintf(output_stream, "\n");
+    }
+
+    if (color_was_applied) {
+        resetTextAttributes(output_stream);
+    }
+
+    fflush(output_stream);
+    if (first_arg_is_file_by_value) { args[1].type = TYPE_NIL; args[1].f_val = NULL; }
+
+    return makeVoid();
+}
+
 
 Value vmBuiltinIoresult(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "IOResult requires 0 arguments."); return makeInt(0); }
@@ -3454,6 +3690,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("DnsLookup", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketAccept", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketBind", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketBindAddr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketClose", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("SocketConnect", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketCreate", AST_FUNCTION_DECL, NULL);
@@ -3586,6 +3823,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("VMVersion", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Write", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
@@ -3596,6 +3834,17 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("lock", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("unlock", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("destroy", AST_PROCEDURE_DECL, NULL);
+
+    // Additional registrations to ensure CLike builtins are classified correctly
+    registerBuiltinFunction("Fopen", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Fclose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Fprintf", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("Read", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("ReadLn", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("DeLine", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("JsonGet", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("ToUpper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("toupper", AST_FUNCTION_DECL, NULL);
 
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();

@@ -1,2 +1,2 @@
 Warning: Range check error assigning REAL 100000000000000000000.000000 to INTEGER.
-[Error Location] Offset: 47, Line: 15
+[Error Location] Offset: 51, Line: 15

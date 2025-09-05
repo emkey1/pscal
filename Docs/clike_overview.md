@@ -112,3 +112,14 @@ For tutorials and additional details, see
 [`clike_repl_tutorial.md`](clike_repl_tutorial.md). The complete
 specification is available in
 [`clike_language_reference.md`](clike_language_reference.md).
+
+## Examples
+
+- Simple Web Server:
+  - Source: `Examples/clike/simple_web_server`
+  - Serves static files from a root directory with a small worker pool and safe path handling.
+  - Usage and details: see `Docs/simple_web_server.md`.
+  - A basic `htdocs` tree is provided in the PSCAL clone at `lib/misc/simple_web_server/htdocs`.
+
+- HTTP client and sockets:
+  - See `Examples/clike/Http*` for HTTP demos and `Examples/clike/SocketEchoDemo` for a TCP echo server/client.

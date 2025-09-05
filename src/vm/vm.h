@@ -75,6 +75,7 @@ typedef struct {
 typedef struct VM_s {
     BytecodeChunk* chunk;     // The chunk of bytecode to execute
     uint8_t* ip;              // Instruction Pointer: points to the *next* byte to be read
+    uint8_t* lastInstruction; // Start of the last executed instruction
 
     Value stack[VM_STACK_MAX]; // The operand stack
     Value* stackTop;          // Pointer to the element just above the top of the stack
