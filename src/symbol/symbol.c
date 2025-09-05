@@ -743,11 +743,7 @@ void updateSymbol(const char *name, Value val) {
         else if (sym->type == TYPE_POINTER && (val.type == TYPE_POINTER || val.type == TYPE_NIL)) types_compatible = true;
         else if (sym->type == TYPE_SET && val.type == TYPE_SET) types_compatible = true;
         else if (sym->type == TYPE_MEMORYSTREAM && val.type == TYPE_MEMORYSTREAM) types_compatible = true;
-        else if (sym->type == TYPE_FILE && val.type == TYPE_FILE) {
-              fprintf(stderr, "Runtime error: Direct assignment of FILE variables is not supported.\n");
-              freeValue(&val);
-              EXIT_FAILURE_HANDLER();
-        }
+        else if (sym->type == TYPE_FILE && val.type == TYPE_FILE) types_compatible = true;
     }
 
     if (!types_compatible) {
@@ -857,6 +853,17 @@ void updateSymbol(const char *name, Value val) {
         case TYPE_ARRAY:
         case TYPE_SET:
             *(sym->value) = makeCopyOfValue(&val);
+            break;
+
+        case TYPE_FILE:
+            if (val.type == TYPE_FILE) {
+                if (sym->value->f_val) fclose(sym->value->f_val);
+                sym->value->f_val = val.f_val;
+                if (sym->value->filename) free(sym->value->filename);
+                sym->value->filename = val.filename ? strdup(val.filename) : NULL;
+                val.f_val = NULL;
+                val.filename = NULL;
+            }
             break;
 
         case TYPE_BOOLEAN:
