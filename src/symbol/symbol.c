@@ -870,11 +870,6 @@ void updateSymbol(const char *name, Value val) {
             if (isIntlikeType(val.type)) SET_INT_VALUE(sym->value, asI64(val) != 0 ? 1 : 0);
             break;
 
-        case TYPE_FILE:
-            fprintf(stderr, "Runtime error: Direct assignment of FILE variables is not supported.\n");
-            EXIT_FAILURE_HANDLER();
-            break;
-
         case TYPE_CHAR:
             if (isIntlikeType(val.type)) {
                 sym->value->c_val = (int)asI64(val);
