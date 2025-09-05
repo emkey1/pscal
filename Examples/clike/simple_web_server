@@ -11,12 +11,31 @@ int Port = 5555;
 str RootDir;
 str IndexPath;
 str Body;
-text GFile;
 
 // Max concurrent handler wrappers
 const int MaxThreads = 8;
 int connSlots[MaxThreads];
 int nextSlot = 0;
+
+// Helpers
+int endswith(str s, str suffix) {
+  int ls = length(s);
+  int lf = length(suffix);
+  if (lf > ls) return 0;
+  str tail = copy(s, ls - lf + 1, lf);
+  return tail == suffix ? 1 : 0;
+}
+
+str contentType(str path) {
+  if (endswith(path, ".html") || endswith(path, ".htm")) return "text/html";
+  if (endswith(path, ".css")) return "text/css";
+  if (endswith(path, ".js")) return "application/javascript";
+  if (endswith(path, ".json")) return "application/json";
+  if (endswith(path, ".txt")) return "text/plain";
+  if (endswith(path, ".png")) return "image/png";
+  if (endswith(path, ".jpg") || endswith(path, ".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
 
 void serveConn(int c) {
   // Read (ignore) request
@@ -31,16 +50,43 @@ void serveConn(int c) {
 
   str respBody;
   int code = 200;
-  if (path == "/" || path == "/index.html") {
+  str ctype = "text/html";
+  if (path == "/") {
+    // Directory listing of RootDir
+    str listing = "<html><body><h1>Index of /</h1><ul>";
+    str name = findfirst(RootDir);
+    while (name != "") {
+      listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
+      name = findnext();
+    }
+    listing = listing + "</ul></body></html>";
+    respBody = listing;
+    code = 200;
+    ctype = "text/html";
+  } else if (path == "/index.html") {
     respBody = Body;
+    code = 200;
+    ctype = "text/html";
   } else {
-    code = 404;
-    respBody = "<html><body>Not Found</body></html>";
+    // Serve file under RootDir
+    str rel = (copy(path, 1, 1) == "/") ? copy(path, 2, length(path) - 1) : path;
+    str fullPath = RootDir + "/" + rel;
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, fullPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = contentType(rel);
+    } else {
+      respBody = "<html><body>Not Found</body></html>";
+      code = 404;
+      ctype = "text/html";
+    }
   }
   int len = length(respBody);
   str status = (code == 200) ? "200 OK" : "404 Not Found";
   str hdr = "HTTP/1.1 " + status + "\r\n"
-            + "Content-Type: text/html\r\n"
+            + "Content-Type: " + ctype + "\r\n"
             + "Content-Length: " + inttostr(len) + "\r\n\r\n";
   socketsend(c, hdr);
   socketsend(c, respBody);
@@ -80,10 +126,7 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  // Write file using standard file I/O builtins
-  GFile = fopen(IndexPath, "w");
-  fprintf(GFile, "%s\n", Body);
-  fclose(GFile);
+  // Note: skip writing Body to disk; serve from memory instead.
 }
 
 int main() {
@@ -99,13 +142,16 @@ int main() {
     }
   }
   printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+
+
   printf("Root: %s\n", RootDir);
 
   int srv = socketcreate(0);
   if (srv < 0) { printf("socketcreate failed\n"); return 1; }
   // Bind and listen; current API binds all interfaces (INADDR_ANY)
   // Bind explicitly to localhost by default
-  if (socketbindaddr(srv, "127.0.0.1", Port) != 0) {
+  int bindrc = socketbindaddr(srv, "127.0.0.1", Port);
+  if (bindrc != 0) {
     printf("socketbind failed: %d\n", socketlasterror());
     return 1;
   }

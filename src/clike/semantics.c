@@ -59,6 +59,14 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_STRING;
     }
 
+    // DOS/OS directory helpers return filenames as strings
+    if (strcasecmp(name, "findfirst") == 0 ||
+        strcasecmp(name, "findnext")  == 0 ||
+        strcasecmp(name, "dosfindfirst") == 0 ||
+        strcasecmp(name, "dosfindnext")  == 0) {
+        return TYPE_STRING;
+    }
+
     if (strcasecmp(name, "readkey") == 0 ||
         strcasecmp(name, "upcase")  == 0 ||
         strcasecmp(name, "toupper")  == 0) {

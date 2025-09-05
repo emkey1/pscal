@@ -3679,6 +3679,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("DnsLookup", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketAccept", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketBind", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("SocketBindAddr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketClose", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("SocketConnect", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("SocketCreate", AST_FUNCTION_DECL, NULL);
