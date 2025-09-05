@@ -103,6 +103,15 @@ static VarType builtinReturnType(const char* name) {
     if (strcasecmp(name, "dnslookup") == 0) {
         return TYPE_STRING;
     }
+    if (strcasecmp(name, "fopen") == 0) {
+        return TYPE_FILE;
+    }
+    if (strcasecmp(name, "fprintf") == 0) {
+        return TYPE_INT32;
+    }
+    if (strcasecmp(name, "fclose") == 0) {
+        return TYPE_VOID;
+    }
 
     return TYPE_VOID;
 }

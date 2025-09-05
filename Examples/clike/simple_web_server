@@ -78,11 +78,9 @@ void initFiles() {
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
   // Write file using text file I/O builtins
-  text f;
-  assign(&f, IndexPath);
-  rewrite(&f);
-  fprintf(&f, "%s\n", Body);
-  close(&f);
+  text f = fopen(IndexPath, "w");
+  fprintf(f, "%s\n", Body);
+  fclose(f);
 }
 
 int main() {

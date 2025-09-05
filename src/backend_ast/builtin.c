@@ -322,6 +322,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"power", vmBuiltinPower},
     {"printf", vmBuiltinPrintf},
     {"fprintf", vmBuiltinFprintf},
+    {"fopen", vmBuiltinFopen},
+    {"fclose", vmBuiltinFclose},
     {"pushscreen", vmBuiltinPushscreen},
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
@@ -828,6 +830,42 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
     }
     fflush(output_stream);
     return makeInt(0);
+}
+
+// fopen(path, mode) -> FILE
+Value vmBuiltinFopen(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+        runtimeError(vm, "fopen expects (path:string, mode:string).");
+        return makeVoid();
+    }
+    const char* path = AS_STRING(args[0]);
+    const char* mode = AS_STRING(args[1]);
+    FILE* f = fopen(path, mode);
+    if (!f) {
+        runtimeError(vm, "fopen failed for '%s'", path);
+        return makeVoid();
+    }
+    Value v = makeVoid();
+    v.type = TYPE_FILE;
+    v.f_val = f;
+    v.filename = strdup(path);
+    return v;
+}
+
+// fclose(file)
+Value vmBuiltinFclose(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "fclose expects (file).");
+        return makeVoid();
+    }
+    const Value* farg = &args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (const Value*)farg->ptr_val;
+    if (farg->type != TYPE_FILE || !farg->f_val) {
+        runtimeError(vm, "fclose requires a valid file argument.");
+        return makeVoid();
+    }
+    fclose(farg->f_val);
+    return makeVoid();
 }
 
 Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
