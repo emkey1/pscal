@@ -39,16 +39,34 @@ str contentType(str path) {
 }
 
 // Remove all occurrences of ".." to prevent directory traversal.
-str stripDotDot(str s) {
+// Normalize a relative path: remove "..", remove "./" and collapse "//".
+str normalizePath(str s) {
+  // Canonicalize path by processing segments and handling '.' and '..'.
+  // Input is expected to be relative (no leading '/').
   str out = "";
   int i = 1;
   while (i <= length(s)) {
-    if (i + 1 <= length(s) && copy(s, i, 2) == "..") {
-      i = i + 2;
+    // Skip any slashes
+    while (i <= length(s) && copy(s, i, 1) == "/") i = i + 1;
+    if (i > length(s)) break;
+    // Capture next segment until slash or end
+    int j = i;
+    while (j <= length(s) && copy(s, j, 1) != "/") j = j + 1;
+    int segLen = j - i;
+    str seg = copy(s, i, segLen);
+    if (seg == "" || seg == ".") {
+      // skip
+    } else if (seg == "..") {
+      // pop last segment from out if any
+      if (length(out) > 0) {
+        int k = 1; int last = 0;
+        while (k <= length(out)) { if (copy(out, k, 1) == "/") last = k; k = k + 1; }
+        if (last > 0) out = copy(out, 1, last - 1); else out = "";
+      }
     } else {
-      out = out + copy(s, i, 1);
-      i = i + 1;
+      out = (length(out) > 0) ? out + "/" + seg : seg;
     }
+    i = j + 1;
   }
   return out;
 }
@@ -86,7 +104,7 @@ void serveConn(int c) {
   } else {
     // Serve file under RootDir
     str rel = (copy(path, 1, 1) == "/") ? copy(path, 2, length(path) - 1) : path;
-    rel = stripDotDot(rel);
+    rel = normalizePath(rel);
     str fullPath = RootDir + "/" + rel;
     mstream ms = mstreamcreate();
     int ok = mstreamloadfromfile(&ms, fullPath);
