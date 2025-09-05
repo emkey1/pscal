@@ -11,6 +11,7 @@ int Port = 5555;
 str RootDir;
 str IndexPath;
 str Body;
+text GFile;
 
 // Max concurrent handler wrappers
 const int MaxThreads = 8;
@@ -23,6 +24,7 @@ void serveConn(int c) {
   str reqText = mstreambuffer(req);
   // Parse request line minimally: method SP path SP ...
   int sp1 = pos(reqText, " ");
+  str method = (sp1 > 0) ? copy(reqText, 1, sp1 - 1) : "";
   str rest = (sp1 > 0) ? copy(reqText, sp1 + 2, length(reqText) - sp1) : "";
   int sp2 = pos(rest, " ");
   str path = (sp2 > 0) ? copy(rest, 1, sp2 - 1) : "/";
@@ -42,6 +44,7 @@ void serveConn(int c) {
             + "Content-Length: " + inttostr(len) + "\r\n\r\n";
   socketsend(c, hdr);
   socketsend(c, respBody);
+  printf("[%s] %s -> %d\n", method, path, code);
   socketclose(c);
 }
 
@@ -77,10 +80,10 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  // Write file using text file I/O builtins
-  text f = fopen(IndexPath, "w");
-  fprintf(f, "%s\n", Body);
-  fclose(f);
+  // Write file using standard file I/O builtins
+  GFile = fopen(IndexPath, "w");
+  fprintf(GFile, "%s\n", Body);
+  fclose(GFile);
 }
 
 int main() {
