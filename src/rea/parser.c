@@ -125,11 +125,15 @@ static AST *parseFactor(ReaParser *p) {
         node->i_val = (tt == TOKEN_TRUE) ? 1 : 0;
         reaAdvance(p);
         return node;
-    } else if (p->current.type == REA_TOKEN_IDENTIFIER) {
+    } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_THIS) {
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) return NULL;
-        memcpy(lex, p->current.start, p->current.length);
-        lex[p->current.length] = '\0';
+        if (p->current.type == REA_TOKEN_THIS) {
+            strcpy(lex, "this");
+        } else {
+            memcpy(lex, p->current.start, p->current.length);
+            lex[p->current.length] = '\0';
+        }
         Token *tok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
         reaAdvance(p); // consume identifier
@@ -358,7 +362,7 @@ static AST *parseEquality(ReaParser *p) {
 static AST *parseAssignment(ReaParser *p) {
     AST *left = parseEquality(p);
     if (!left) return NULL;
-    if (left->type == AST_VARIABLE && p->current.type == REA_TOKEN_EQUAL) {
+    if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS) && p->current.type == REA_TOKEN_EQUAL) {
         ReaToken op = p->current;
         reaAdvance(p);
         AST *value = parseAssignment(p);
@@ -463,6 +467,20 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     // Parse parameter list
     reaAdvance(p); // consume '('
     AST *params = newASTNode(AST_COMPOUND, NULL);
+    // Inject implicit 'this' parameter as first parameter when inside a class
+    if (p->currentClassName) {
+        Token *ptypeTok = newToken(TOKEN_IDENTIFIER, p->currentClassName, p->current.line, 0);
+        AST *ptypeNode = newASTNode(AST_TYPE_IDENTIFIER, ptypeTok);
+        setTypeAST(ptypeNode, TYPE_RECORD); // annotate later based on actual type table
+        Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", p->current.line, 0);
+        AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+        setTypeAST(thisVar, TYPE_RECORD);
+        AST *thisDecl = newASTNode(AST_VAR_DECL, NULL);
+        addChild(thisDecl, thisVar);
+        setRight(thisDecl, ptypeNode);
+        setTypeAST(thisDecl, TYPE_RECORD);
+        addChild(params, thisDecl);
+    }
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
         ReaTokenType paramTypeTok = p->current.type;
         VarType pvtype = mapType(paramTypeTok);
@@ -653,6 +671,7 @@ static AST *parseStatement(ReaParser *p) {
 
         // Parse class body
         AST *recordAst = newASTNode(AST_RECORD_TYPE, NULL);
+        AST *methods = newASTNode(AST_COMPOUND, NULL);
         const char* prevClass = p->currentClassName;
         p->currentClassName = classNameTok->value;
         if (p->current.type == REA_TOKEN_LEFT_BRACE) {
@@ -667,8 +686,7 @@ static AST *parseStatement(ReaParser *p) {
                     AST *decl = parseVarDecl(p);
                     if (decl) {
                         if (decl->type == AST_FUNCTION_DECL) {
-                            // For now, we don't attach methods to recordAst; they are global with mangled names
-                            // Nothing to do here
+                            addChild(methods, decl);
                         } else {
                             addChild(recordAst, decl);
                         }
@@ -694,7 +712,19 @@ static AST *parseStatement(ReaParser *p) {
         if (classNameTok && classNameTok->value) {
             insertType(classNameTok->value, recordAst);
         }
-        return typeDecl;
+        // Return both type and methods in a compound so top-level gets both
+        AST *bundle = newASTNode(AST_COMPOUND, NULL);
+        addChild(bundle, typeDecl);
+        // append methods
+        if (methods && methods->child_count > 0) {
+            for (int mi = 0; mi < methods->child_count; mi++) {
+                addChild(bundle, methods->children[mi]);
+                methods->children[mi] = NULL;
+            }
+            methods->child_count = 0;
+        }
+        freeAST(methods);
+        return bundle;
     }
     if (p->current.type == REA_TOKEN_LEFT_BRACE) {
         return parseBlock(p);
