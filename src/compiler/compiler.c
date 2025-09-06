@@ -983,8 +983,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Recursively compile the L-Value of the base (e.g., myRec or p^)
-            compileLValue(node->left, chunk, getLine(node->left));
+            // For field address we need the base VALUE (record or pointer), not the variable's address.
+            compileRValue(node->left, chunk, getLine(node->left));
 
             // Now, get the address of the specific field.
             int fieldNameIndex = addStringConstant(chunk, node->token->value);
@@ -2314,6 +2314,47 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
+            // Fallback: receiver-aware method call mangle
+            // If unresolved and first argument exists, try Class_method(receiver, ...)
+            if (!proc_symbol && node->child_count > 0 && node->children[0]) {
+                AST* recv = node->children[0];
+                AST* tdef = recv->type_def;
+                // Resolve TYPE_REFERENCE chain
+                while (tdef && tdef->type == AST_TYPE_REFERENCE) tdef = tdef->right;
+                const char* cls_name = NULL;
+                if (tdef && tdef->token && tdef->token->value &&
+                    (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE || tdef->type == AST_RECORD_TYPE)) {
+                    // Prefer explicit type identifier token value
+                    if (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE) {
+                        cls_name = tdef->token->value;
+                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "this") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
+                        // Derive from current function name 'Class_method' if available
+                        const char* fname = current_function_compiler->function_symbol->name;
+                        const char* us = fname ? strchr(fname, '_') : NULL;
+                        static char buf[256];
+                        if (fname && us && (us - fname) < (int)sizeof(buf)) {
+                            size_t n = (size_t)(us - fname);
+                            memcpy(buf, fname, n); buf[n] = '\0';
+                            cls_name = buf;
+                        }
+                    }
+                }
+                if (cls_name && calleeName) {
+                    char mangled[MAX_SYMBOL_LENGTH * 2 + 2];
+                    snprintf(mangled, sizeof(mangled), "%s_%s", cls_name, calleeName);
+                    char mangled_lower[MAX_SYMBOL_LENGTH * 2 + 2];
+                    strncpy(mangled_lower, mangled, sizeof(mangled_lower) - 1);
+                    mangled_lower[sizeof(mangled_lower) - 1] = '\0';
+                    toLowerString(mangled_lower);
+                    Symbol* m = lookupProcedure(mangled_lower);
+                    if (m && m->is_alias) m = m->real_symbol;
+                    if (m) {
+                        proc_symbol = m;
+                        calleeName = m->name; // use resolved name for emission
+                    }
+                }
+            }
+
             if (strcasecmp(calleeName, "printf") == 0) {
                 compilePrintf(node, chunk, line);
                 writeBytecodeChunk(chunk, OP_POP, line);
@@ -2393,6 +2434,14 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
 
                 if (!param_mismatch) {
+                    // Align first argument type with declared 'this' when available.
+                    if (proc_symbol && proc_symbol->type_def && node->child_count > 0 && proc_symbol->type_def->child_count > 0) {
+                        AST* declared_this = proc_symbol->type_def->children[0];
+                        if (declared_this && node->children[0]) {
+                            node->children[0]->var_type = declared_this->var_type;
+                            node->children[0]->type_def = declared_this->type_def ? declared_this->type_def : declared_this;
+                        }
+                    }
                     for (int i = 0; i < node->child_count; i++) {
                         AST* param_node = proc_symbol->type_def->children[i];
                         AST* arg_node = node->children[i];
@@ -3076,6 +3125,29 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
+            // If this is a qualified call like receiver.method(...), attempt to
+            // mangle to ClassName_method by inspecting the receiver's static type.
+            char mangled_name_buf[MAX_SYMBOL_LENGTH * 2 + 2];
+            if (isCallQualified && node->left) {
+                const char* cls_name = NULL;
+                AST* type_ref = node->left->type_def;
+                if (type_ref) {
+                    // Resolve possible type alias to get to TYPE_REFERENCE
+                    while (type_ref && type_ref->type == AST_TYPE_REFERENCE && type_ref->right) {
+                        type_ref = type_ref->right;
+                    }
+                    if (node->left->type_def && node->left->type_def->token && node->left->type_def->token->value) {
+                        cls_name = node->left->type_def->token->value;
+                    } else if (type_ref && type_ref->token && type_ref->token->value) {
+                        cls_name = type_ref->token->value;
+                    }
+                }
+                if (cls_name) {
+                    snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s_%s", cls_name, functionName);
+                    functionName = mangled_name_buf;
+                }
+            }
+
             if (strcasecmp(functionName, "printf") == 0) {
                 compilePrintf(node, chunk, line);
                 break;
@@ -3251,6 +3323,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
                 
                 if (func_symbol) {
+                    // Align first argument type for qualified calls with declared 'this'
+                    if (isCallQualified && func_symbol->type_def && node->child_count > 0 && func_symbol->type_def->child_count > 0) {
+                        AST* declared_this = func_symbol->type_def->children[0];
+                        if (declared_this && node->children[0]) {
+                            node->children[0]->var_type = declared_this->var_type;
+                            node->children[0]->type_def = declared_this->type_def ? declared_this->type_def : declared_this;
+                        }
+                    }
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                         compiler_had_error = true;

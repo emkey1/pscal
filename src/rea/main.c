@@ -184,6 +184,10 @@ int main(int argc, char **argv) {
     initBytecodeChunk(&chunk);
     // Handle #import directives by loading and linking Pascal units before compiling the main program
     walkUsesClauses(program, &chunk);
+
+    // Annotate types for the entire program prior to compilation so that
+    // qualified method calls can be resolved to their class-mangled routines.
+    annotateTypes(program, NULL, program);
     bool compilation_ok = compileASTToBytecode(program, &chunk);
 
     InterpretResult result = INTERPRET_COMPILE_ERROR;

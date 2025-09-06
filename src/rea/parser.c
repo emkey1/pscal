@@ -18,6 +18,7 @@ typedef struct {
     VarType currentFunctionType;
     bool hadError;
     const char* currentClassName; // non-owning pointer to current class name while parsing class body
+    const char* currentParentClassName; // non-owning pointer to current parent class name while in class body
 } ReaParser;
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
@@ -44,6 +45,9 @@ static AST *parseSwitch(ReaParser *p);
 static AST *parseConstDecl(ReaParser *p);
 static AST *parseImport(ReaParser *p);
 
+// Access to global type table provided by Pascal front end
+AST *lookupType(const char* name);
+
 // Helper to rewrite 'continue' statements to 'post; continue' inside for-loop bodies
 static AST *rewriteContinueWithPost(AST *node, AST *postStmt) {
     if (!node) return NULL;
@@ -64,6 +68,91 @@ static AST *rewriteContinueWithPost(AST *node, AST *postStmt) {
 }
 
 static AST *parseFactor(ReaParser *p) {
+    if (p->current.type == REA_TOKEN_SUPER) {
+        // super(...) or super.method(...)
+        ReaToken supTok = p->current;
+        reaAdvance(p); // consume 'super'
+        if (!p->currentParentClassName) {
+            // Outside of a subclass context; treat as error-like no-op
+            return NULL;
+        }
+        // Case: super(args)
+        if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+            reaAdvance(p);
+            AST *args = newASTNode(AST_COMPOUND, NULL);
+            while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+                AST *arg = parseExpression(p);
+                if (!arg) break;
+                addChild(args, arg);
+                if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
+            }
+            if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
+            // Build call to parent constructor alias: ParentName(this, ...)
+            Token *ctorTok = newToken(TOKEN_IDENTIFIER, p->currentParentClassName, supTok.line, 0);
+            AST *call = newASTNode(AST_PROCEDURE_CALL, ctorTok);
+            // Prepend implicit 'this'
+            Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
+            AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+            addChild(call, thisVar);
+            if (args && args->child_count > 0) {
+                for (int i = 0; i < args->child_count; i++) {
+                    addChild(call, args->children[i]);
+                    args->children[i] = NULL;
+                }
+                args->child_count = 0;
+            }
+            if (args) freeAST(args);
+            setTypeAST(call, TYPE_UNKNOWN);
+            return call;
+        }
+        // Case: super.method(args)
+        if (p->current.type == REA_TOKEN_DOT) {
+            reaAdvance(p);
+            if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
+            char *mlex = (char*)malloc(p->current.length + 1);
+            if (!mlex) return NULL;
+            memcpy(mlex, p->current.start, p->current.length);
+            mlex[p->current.length] = '\0';
+            reaAdvance(p); // consume method name
+            // Optional args
+            AST *args = NULL;
+            if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+                reaAdvance(p);
+                args = newASTNode(AST_COMPOUND, NULL);
+                while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+                    AST *arg = parseExpression(p);
+                    if (!arg) break;
+                    addChild(args, arg);
+                    if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
+                }
+                if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
+            }
+            // Build mangled name Parent_Method
+            size_t ln = strlen(p->currentParentClassName) + 1 + strlen(mlex) + 1;
+            char *mangled = (char*)malloc(ln);
+            if (!mangled) { free(mlex); return NULL; }
+            snprintf(mangled, ln, "%s_%s", p->currentParentClassName, mlex);
+            free(mlex);
+            Token *nameTok = newToken(TOKEN_IDENTIFIER, mangled, supTok.line, 0);
+            free(mangled);
+            AST *call = newASTNode(AST_PROCEDURE_CALL, nameTok);
+            // Prepend implicit 'this'
+            Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
+            AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+            addChild(call, thisVar);
+            if (args && args->child_count > 0) {
+                for (int i = 0; i < args->child_count; i++) {
+                    addChild(call, args->children[i]);
+                    args->children[i] = NULL;
+                }
+                args->child_count = 0;
+            }
+            if (args) freeAST(args);
+            setTypeAST(call, TYPE_UNKNOWN);
+            return call;
+        }
+        return NULL;
+    }
     if (p->current.type == REA_TOKEN_NEW) {
         // new ClassName(args) -> AST_NEW(token=ClassName, children=args)
         reaAdvance(p); // consume 'new'
@@ -208,18 +297,64 @@ static AST *parseFactor(ReaParser *p) {
             while (p->current.type == REA_TOKEN_DOT) {
                 reaAdvance(p);
                 if (p->current.type != REA_TOKEN_IDENTIFIER) break;
+                // Capture method/field name
                 char *f = (char*)malloc(p->current.length + 1);
                 if (!f) break;
                 memcpy(f, p->current.start, p->current.length);
                 f[p->current.length] = '\0';
-                Token *fieldTok = newToken(TOKEN_IDENTIFIER, f, p->current.line, 0);
+                Token *nameTok = newToken(TOKEN_IDENTIFIER, f, p->current.line, 0);
                 free(f);
                 reaAdvance(p);
-                AST *fieldVar = newASTNode(AST_VARIABLE, fieldTok);
-                AST *fa = newASTNode(AST_FIELD_ACCESS, fieldTok);
-                setLeft(fa, node);
-                setRight(fa, fieldVar);
-                node = fa;
+                // If this is a qualified method call like receiver.method(...), build a call
+                if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+                    // Parse call args
+                    reaAdvance(p); // consume '('
+                    AST *args = newASTNode(AST_COMPOUND, NULL);
+                    while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+                        AST *arg = parseExpression(p);
+                        if (!arg) break;
+                        addChild(args, arg);
+                        if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
+                    }
+                    if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
+                    // Build call node and prepend receiver as first arg
+                    // Potentially mangle if receiver is 'this' or freshly constructed 'new Class'
+                    const char* cls = NULL;
+                    if (node->type == AST_VARIABLE && node->token && node->token->value && strcasecmp(node->token->value, "this") == 0) {
+                        cls = p->currentClassName;
+                    } else if (node->type == AST_NEW && node->token && node->token->value) {
+                        cls = node->token->value;
+                    }
+                    if (cls) {
+                        size_t ln = strlen(cls) + 1 + strlen(nameTok->value) + 1;
+                        char *m = (char*)malloc(ln);
+                        if (m) {
+                            snprintf(m, ln, "%s_%s", cls, nameTok->value);
+                            free(nameTok->value);
+                            nameTok->value = m;
+                        }
+                    }
+                    AST *call = newASTNode(AST_PROCEDURE_CALL, nameTok);
+                    // Receiver as qualifier and also as first argument
+                    setLeft(call, node);
+                    addChild(call, node);
+                    if (args && args->child_count > 0) {
+                        for (int i = 0; i < args->child_count; i++) {
+                            addChild(call, args->children[i]);
+                            args->children[i] = NULL;
+                        }
+                        args->child_count = 0;
+                    }
+                    if (args) freeAST(args);
+                    node = call;
+                } else {
+                    // Simple field access
+                    AST *fieldVar = newASTNode(AST_VARIABLE, nameTok);
+                    AST *fa = newASTNode(AST_FIELD_ACCESS, nameTok);
+                    setLeft(fa, node);
+                    setRight(fa, fieldVar);
+                    node = fa;
+                }
             }
             return node;
         } else {
@@ -235,11 +370,36 @@ static AST *parseFactor(ReaParser *p) {
                 Token *fieldTok = newToken(TOKEN_IDENTIFIER, f, p->current.line, 0);
                 free(f);
                 reaAdvance(p);
-                AST *fieldVar = newASTNode(AST_VARIABLE, fieldTok);
-                AST *fa = newASTNode(AST_FIELD_ACCESS, fieldTok);
-                setLeft(fa, node);
-                setRight(fa, fieldVar);
-                node = fa;
+                if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+                    // Method call on arbitrary receiver: parse args and build call node with receiver first
+                    reaAdvance(p); // consume '('
+                    AST *args = newASTNode(AST_COMPOUND, NULL);
+                    while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+                        AST *arg = parseExpression(p);
+                        if (!arg) break;
+                        addChild(args, arg);
+                        if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
+                    }
+                    if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
+                    AST *call = newASTNode(AST_PROCEDURE_CALL, fieldTok);
+                    setLeft(call, node);
+                    addChild(call, node);
+                    if (args && args->child_count > 0) {
+                        for (int i = 0; i < args->child_count; i++) {
+                            addChild(call, args->children[i]);
+                            args->children[i] = NULL;
+                        }
+                        args->child_count = 0;
+                    }
+                    if (args) freeAST(args);
+                    node = call;
+                } else {
+                    AST *fieldVar = newASTNode(AST_VARIABLE, fieldTok);
+                    AST *fa = newASTNode(AST_FIELD_ACCESS, fieldTok);
+                    setLeft(fa, node);
+                    setRight(fa, fieldVar);
+                    node = fa;
+                }
             }
             return node;
         }
@@ -509,7 +669,25 @@ static AST *parseVarDecl(ReaParser *p) {
     VarType vtype = mapType(typeTok);
 
     AST *typeNode = NULL;
-    if (vtype != TYPE_VOID) {
+    if (typeTok == REA_TOKEN_VOID) {
+        // Procedures: void name(...)
+        reaAdvance(p); // consume 'void'
+        if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
+        char *lex = (char *)malloc(p->current.length + 1);
+        if (!lex) return NULL;
+        memcpy(lex, p->current.start, p->current.length);
+        lex[p->current.length] = '\0';
+        Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+        free(lex);
+        reaAdvance(p); // consume identifier
+        if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+            return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID);
+        } else {
+            fprintf(stderr, "L%d: Variable cannot have type void.\n", p->current.line);
+            p->hadError = true;
+            return NULL;
+        }
+    } else if (vtype != TYPE_VOID) {
         // Built-in type keyword
         const char *tname = typeName(typeTok);
         Token *typeToken = newToken(TOKEN_IDENTIFIER, tname, p->current.line, 0);
@@ -589,15 +767,15 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     // Inject implicit 'this' parameter as first parameter when inside a class
     if (p->currentClassName) {
         Token *ptypeTok = newToken(TOKEN_IDENTIFIER, p->currentClassName, p->current.line, 0);
-        AST *ptypeNode = newASTNode(AST_TYPE_IDENTIFIER, ptypeTok);
-        setTypeAST(ptypeNode, TYPE_RECORD); // annotate later based on actual type table
+        AST *ptypeNode = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
+        setTypeAST(ptypeNode, TYPE_RECORD);
         Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", p->current.line, 0);
         AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-        setTypeAST(thisVar, TYPE_RECORD);
+        setTypeAST(thisVar, TYPE_POINTER);
         AST *thisDecl = newASTNode(AST_VAR_DECL, NULL);
         addChild(thisDecl, thisVar);
         setRight(thisDecl, ptypeNode);
-        setTypeAST(thisDecl, TYPE_RECORD);
+        setTypeAST(thisDecl, TYPE_POINTER);
         addChild(params, thisDecl);
     }
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
@@ -659,7 +837,8 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         addChild(block, stmts);
     }
 
-    AST *func = newASTNode(AST_FUNCTION_DECL, nameTok);
+    AST *func = (vtype == TYPE_VOID) ? newASTNode(AST_PROCEDURE_DECL, nameTok)
+                                     : newASTNode(AST_FUNCTION_DECL, nameTok);
     if (params->child_count > 0) {
         func->children = params->children;
         func->child_count = params->child_count;
@@ -672,8 +851,13 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         params->child_capacity = 0;
     }
     freeAST(params);
-    setRight(func, typeNode);
-    setExtra(func, block);
+    if (vtype == TYPE_VOID) {
+        // Procedures carry body in right; no return type node
+        setRight(func, block);
+    } else {
+        setRight(func, typeNode);
+        setExtra(func, block);
+    }
     setTypeAST(func, vtype);
 
     // Register function in procedure table
@@ -689,6 +873,53 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         sym->type = vtype;
         sym->type_def = copyAST(func);
         hashTableInsert(procedure_table, sym);
+    }
+
+    // If inside a class, also add a bare-name alias so 'obj.method(...)' can resolve.
+    if (p->currentClassName && sym && sym->name) {
+        const char* us2 = strchr(sym->name, '_');
+        const char* bare = NULL;
+        if (us2 && *(us2+1)) bare = us2 + 1;
+        if (bare) {
+            Symbol* alias2 = (Symbol*)malloc(sizeof(Symbol));
+            if (alias2) {
+                memset(alias2, 0, sizeof(Symbol));
+                alias2->name = strdup(bare);
+                // already lower case since sym->name is lower
+                alias2->is_alias = true;
+                alias2->real_symbol = sym;
+                alias2->type = vtype;
+                alias2->type_def = copyAST(sym->type_def);
+                hashTableInsert(procedure_table, alias2);
+            }
+        }
+    }
+
+    // If this is a constructor (method name equals class name), add alias 'ClassName' -> real symbol
+    if (p->currentClassName && nameTok && nameTok->value) {
+        const char* us = strchr(nameTok->value, '_');
+        if (us) {
+            // Check if name is ClassName_ClassName
+            size_t cls_len = (size_t)(us - nameTok->value);
+            if (strlen(p->currentClassName) == cls_len && strncasecmp(nameTok->value, p->currentClassName, cls_len) == 0) {
+                const char* after = us + 1;
+                if (strncasecmp(after, p->currentClassName, cls_len) == 0 && after[cls_len] == '\0') {
+                    Symbol* alias = (Symbol*)malloc(sizeof(Symbol));
+                    if (alias) {
+                        memset(alias, 0, sizeof(Symbol));
+                        alias->name = strdup(p->currentClassName);
+                        if (alias->name) {
+                            for (int i = 0; alias->name[i]; i++) alias->name[i] = tolower((unsigned char)alias->name[i]);
+                        }
+                        alias->is_alias = true;
+                        alias->real_symbol = sym;
+                        alias->type = vtype;
+                        alias->type_def = sym ? copyAST(sym->type_def) : NULL;
+                        hashTableInsert(procedure_table, alias);
+                    }
+                }
+            }
+        }
     }
 
     p->currentFunctionType = prevType;
@@ -1029,20 +1260,31 @@ static AST *parseStatement(ReaParser *p) {
         free(lex);
         reaAdvance(p); // consume class name
 
-        // Optional 'extends' <Identifier> (ignored in phase 1)
+        // Optional 'extends' <Identifier>
+        AST *parentRef = NULL;
         if (p->current.type == REA_TOKEN_EXTENDS) {
             reaAdvance(p); // consume extends
             if (p->current.type == REA_TOKEN_IDENTIFIER) {
-                // Skip parent name for now
+                char *plex = (char *)malloc(p->current.length + 1);
+                if (plex) {
+                    memcpy(plex, p->current.start, p->current.length);
+                    plex[p->current.length] = '\0';
+                    Token *ptypeTok = newToken(TOKEN_IDENTIFIER, plex, p->current.line, 0);
+                    free(plex);
+                    parentRef = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
+                }
                 reaAdvance(p);
             }
         }
 
         // Parse class body
         AST *recordAst = newASTNode(AST_RECORD_TYPE, NULL);
+        if (parentRef) setExtra(recordAst, parentRef);
         AST *methods = newASTNode(AST_COMPOUND, NULL);
         const char* prevClass = p->currentClassName;
+        const char* prevParent = p->currentParentClassName;
         p->currentClassName = classNameTok->value;
+        p->currentParentClassName = parentRef && parentRef->token ? parentRef->token->value : NULL;
         if (p->current.type == REA_TOKEN_LEFT_BRACE) {
             reaAdvance(p); // consume '{'
             while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
@@ -1053,12 +1295,16 @@ static AST *parseStatement(ReaParser *p) {
                     p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
                     p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
                     p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-                    p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL) {
+                    p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
+                    p->current.type == REA_TOKEN_VOID ||
+                    p->current.type == REA_TOKEN_IDENTIFIER) {
                     // Consume type and identifier into a fake varDecl to reuse existing parser
                     // Consume type and identifier into a fake varDecl to reuse existing parser
                     AST *decl = parseVarDecl(p);
                     if (decl) {
                         if (decl->type == AST_FUNCTION_DECL) {
+                            addChild(methods, decl);
+                        } else if (decl->type == AST_PROCEDURE_DECL) {
                             addChild(methods, decl);
                         } else {
                             addChild(recordAst, decl);
@@ -1076,6 +1322,7 @@ static AST *parseStatement(ReaParser *p) {
             if (p->current.type == REA_TOKEN_RIGHT_BRACE) reaAdvance(p);
         }
         p->currentClassName = prevClass;
+        p->currentParentClassName = prevParent;
 
         // Build TYPE_DECL(Name = <recordAst>) and register type
         AST *typeDecl = newASTNode(AST_TYPE_DECL, classNameTok);
@@ -1143,8 +1390,21 @@ static AST *parseStatement(ReaParser *p) {
         p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
         p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
         p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-        p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL) {
+        p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
+        p->current.type == REA_TOKEN_VOID) {
         return parseVarDecl(p);
+    }
+    // Allow declarations that start with user-defined type identifiers
+    if (p->current.type == REA_TOKEN_IDENTIFIER) {
+        // Peek the identifier text and check type table
+        char namebuf[256];
+        size_t n = p->current.length < sizeof(namebuf)-1 ? p->current.length : sizeof(namebuf)-1;
+        memcpy(namebuf, p->current.start, n);
+        namebuf[n] = '\0';
+        AST *tdef = lookupType(namebuf);
+        if (tdef) {
+            return parseVarDecl(p);
+        }
     }
     AST *expr = parseExpression(p);
     if (!expr) return NULL;
@@ -1162,6 +1422,8 @@ AST *parseRea(const char *source) {
     reaInitLexer(&p.lexer, source);
     p.currentFunctionType = TYPE_VOID;
     p.hadError = false;
+    p.currentClassName = NULL;
+    p.currentParentClassName = NULL;
     reaAdvance(&p);
 
     AST *program = newASTNode(AST_PROGRAM, NULL);

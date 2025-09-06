@@ -33,6 +33,7 @@ add_custom_target(run_rea_examples
     COMMAND ${CMAKE_COMMAND} -E echo "Running Rea examples..."
     COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/hello.rea
     COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/showcase.rea
+    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/method_demo.rea
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

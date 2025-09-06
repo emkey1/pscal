@@ -653,7 +653,10 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                     if (record_definition_node->type == AST_TYPE_REFERENCE && record_definition_node->right) {
                         record_definition_node = record_definition_node->right;
                     }
-                    if (record_definition_node && record_definition_node->type == AST_RECORD_TYPE) {
+                    while (record_definition_node && record_definition_node->type == AST_TYPE_REFERENCE && record_definition_node->right) {
+                        record_definition_node = record_definition_node->right;
+                    }
+                    while (record_definition_node && record_definition_node->type == AST_RECORD_TYPE) {
                         const char* field_to_find = node->token ? node->token->value : NULL;
                         if (field_to_find) {
                             for (int i = 0; i < record_definition_node->child_count; i++) {
@@ -670,13 +673,31 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                                     }
                                 }
                             }
+                            // If not found, follow parent via record_definition_node->extra (TYPE_REFERENCE to parent)
+                            AST* parent = record_definition_node->extra;
+                            if (parent) {
+                                // Resolve parent reference to actual type definition
+                                AST* pref = parent;
+                                if (pref->type == AST_TYPE_REFERENCE && pref->token && pref->token->value) {
+                                    AST* looked = lookupType(pref->token->value);
+                                    if (looked) {
+                                        record_definition_node = looked;
+                                        if (record_definition_node->type == AST_TYPE_REFERENCE && record_definition_node->right)
+                                            record_definition_node = record_definition_node->right;
+                                        // Continue while-loop to search parent
+                                        continue;
+                                    }
+                                }
+                            }
                             #ifdef DEBUG
                             fprintf(stderr, "[Annotate Warning] Field '%s' not found in record type '%s'.\n",
                                     field_to_find,
                                     node->left->token ? node->left->token->value : "UNKNOWN_RECORD");
                             #endif
                         }
-                    } else { /* ... debug warnings ... */ }
+                        // If we got here without continue, break out of while
+                        break;
+                    }
                 } else if (node->left) { /* ... debug warnings ... */ }
                 field_found_annotate:;
                 break;

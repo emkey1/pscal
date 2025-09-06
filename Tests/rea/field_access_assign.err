@@ -3,7 +3,7 @@
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    3 OP_CONSTANT         0 '1'
-0002    | OP_GET_GLOBAL_ADDRESS    1 'p'
+0002    | OP_GET_GLOBAL       1 'p'
 0004    | OP_GET_FIELD_ADDRESS    2 'x'
 0006    | OP_SWAP
 0007    | OP_SET_INDIRECT
