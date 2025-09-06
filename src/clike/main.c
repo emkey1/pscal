@@ -183,6 +183,10 @@ int main(int argc, char **argv) {
     }
 
     VM vm; initVM(&vm);
+    // Inline trace toggle via comment: /* trace on */ or // trace on
+    if ((pre_src && strstr(pre_src, "trace on")) || (src && strstr(src, "trace on"))) {
+        vm.trace_head_instructions = 16;
+    }
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     freeVM(&vm);
     freeBytecodeChunk(&chunk);

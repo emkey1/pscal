@@ -3693,6 +3693,8 @@ void registerAllBuiltins(void) {
 #endif
 
     /* General built-in functions and procedures */
+    // Rea/CLike: object allocation helper
+    registerBuiltinFunction("newobj", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);

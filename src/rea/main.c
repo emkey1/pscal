@@ -216,6 +216,8 @@ int main(int argc, char **argv) {
             VM vm;
             initVM(&vm);
             if (vm_trace_head > 0) vm.trace_head_instructions = vm_trace_head;
+            // Inline trace toggle via comment directives: trace on/off inside source
+            if (!vm_trace_head && src && strstr(src, "trace on")) vm.trace_head_instructions = 16;
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
         }
