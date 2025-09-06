@@ -203,6 +203,11 @@ ReaToken reaNextToken(ReaLexer *lexer) {
     }
 
     if (isDigit(c)) {
+        if (c == '0' && (peek(lexer) == 'x' || peek(lexer) == 'X')) {
+            advance(lexer); // consume 'x'
+            while (isxdigit(peek(lexer))) advance(lexer);
+            return makeToken(lexer, REA_TOKEN_NUMBER, start);
+        }
         while (isDigit(peek(lexer))) advance(lexer);
         if (peek(lexer) == '.' && isDigit(peekNext(lexer))) {
             advance(lexer);

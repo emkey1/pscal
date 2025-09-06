@@ -189,24 +189,31 @@ static AST *parseFactor(ReaParser *p) {
         return node;
     }
     if (p->current.type == REA_TOKEN_NUMBER) {
-        char *lex = (char *)malloc(p->current.length + 1);
-        if (!lex) return NULL;
-        memcpy(lex, p->current.start, p->current.length);
-        lex[p->current.length] = '\0';
-
+        size_t len = p->current.length;
+        const char *start = p->current.start;
         TokenType ttype = TOKEN_INTEGER_CONST;
         VarType vtype = TYPE_INT64;
-        bool is_real = false;
-        for (size_t i = 0; i < p->current.length; i++) {
-            if (lex[i] == '.' || lex[i] == 'e' || lex[i] == 'E') {
-                is_real = true;
-                break;
+
+        bool is_hex = false;
+        if (len > 2 && start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
+            is_hex = true;
+            start += 2;
+            len -= 2;
+            ttype = TOKEN_HEX_CONST;
+        } else {
+            for (size_t i = 0; i < len; i++) {
+                if (start[i] == '.' || start[i] == 'e' || start[i] == 'E') {
+                    ttype = TOKEN_REAL_CONST;
+                    vtype = TYPE_DOUBLE;
+                    break;
+                }
             }
         }
-        if (is_real) {
-            ttype = TOKEN_REAL_CONST;
-            vtype = TYPE_DOUBLE;
-        }
+
+        char *lex = (char *)malloc(len + 1);
+        if (!lex) return NULL;
+        memcpy(lex, start, len);
+        lex[len] = '\0';
 
         Token *tok = newToken(ttype, lex, p->current.line, 0);
         free(lex);
