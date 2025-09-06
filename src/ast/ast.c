@@ -598,10 +598,21 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                               }
                           }
                       }
-                  }
-                 /*
-                  * Some builtins (e.g., succ/pred) return the same type as
-                  * their first argument.  If no explicit return type was
+                 }
+                // If this call was built with a receiver in node->left (e.g., obj.method(...)),
+                // ensure the first argument (receiver) carries at least the same type as the left expr
+                // so downstream checks/dispatch have a sensible type to work with.
+                if (node->left && node->child_count > 0 && node->children[0]) {
+                    if (node->children[0]->var_type == TYPE_VOID || node->children[0]->var_type == TYPE_UNKNOWN) {
+                        node->children[0]->var_type = node->left->var_type;
+                    }
+                    if (!node->children[0]->type_def && node->left->type_def) {
+                        node->children[0]->type_def = node->left->type_def;
+                    }
+                }
+                /*
+                 * Some builtins (e.g., succ/pred) return the same type as
+                 * their first argument.  If no explicit return type was
                  * resolved above, infer it from the argument so enum literals
                  * retain their declared type.
                  */
