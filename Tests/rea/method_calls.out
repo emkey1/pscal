@@ -1,3 +1,799 @@
-5
-6
-10
+{
+
+  "node_type": "PROGRAM",
+  "var_type_annotated": "VOID",
+  "main_block": 
+  {
+
+    "node_type": "BLOCK",
+    "var_type_annotated": "VOID",
+    "is_global_scope": false,
+    "declarations": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "POINTER",
+          "left": 
+          {
+
+            "node_type": "UNKNOWN_AST_TYPE",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "Point"
+            },
+            "var_type_annotated": "POINTER"
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_REFERENCE",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "Point"
+            },
+            "var_type_annotated": "RECORD"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "p"
+              },
+              "var_type_annotated": "POINTER"
+            }
+          ]
+        },
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "POINTER",
+          "left": 
+          {
+
+            "node_type": "UNKNOWN_AST_TYPE",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "Point"
+            },
+            "var_type_annotated": "POINTER"
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_REFERENCE",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "Point"
+            },
+            "var_type_annotated": "RECORD"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "q"
+              },
+              "var_type_annotated": "POINTER"
+            }
+          ]
+        }
+      ]
+    }
+,
+    "body": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "COMPOUND",
+          "var_type_annotated": "VOID",
+          "children": [
+            {
+
+              "node_type": "TYPE_DECL",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "Point"
+              },
+              "var_type_annotated": "VOID",
+              "left": 
+              {
+
+                "node_type": "RECORD_TYPE",
+                "var_type_annotated": "VOID",
+                "children": [
+                  {
+
+                    "node_type": "VAR_DECL",
+                    "var_type_annotated": "INT64",
+                    "right": 
+                    {
+
+                      "node_type": "TYPE_IDENTIFIER",
+                      "token": {
+                          "type": "IDENTIFIER",
+                          "value": "int"
+                      },
+                      "var_type_annotated": "INT64"
+                    }
+,
+                    "children": [
+                      {
+
+                        "node_type": "VARIABLE",
+                        "token": {
+                            "type": "IDENTIFIER",
+                            "value": "x"
+                        },
+                        "var_type_annotated": "INT64"
+                      }
+                    ]
+                  }
+                ]
+              }
+
+            },
+            {
+
+              "node_type": "FUNCTION_DECL",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "Point_setX"
+              },
+              "var_type_annotated": "INT64",
+              "is_inline": false,
+              "right": 
+              {
+
+                "node_type": "TYPE_IDENTIFIER",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "int"
+                },
+                "var_type_annotated": "INT64"
+              }
+,
+              "extra": 
+              {
+
+                "node_type": "BLOCK",
+                "var_type_annotated": "VOID",
+                "is_global_scope": false,
+                "declarations": 
+                {
+
+                  "node_type": "COMPOUND",
+                  "var_type_annotated": "VOID"
+                }
+,
+                "body": 
+                {
+
+                  "node_type": "COMPOUND",
+                  "var_type_annotated": "VOID",
+                  "children": [
+                    {
+
+                      "node_type": "ASSIGN",
+                      "token": {
+                          "type": "ASSIGN",
+                          "value": "="
+                      },
+                      "var_type_annotated": "VOID",
+                      "left": 
+                      {
+
+                        "node_type": "FIELD_ACCESS",
+                        "token": {
+                            "type": "IDENTIFIER",
+                            "value": "x"
+                        },
+                        "var_type_annotated": "VOID",
+                        "left": 
+                        {
+
+                          "node_type": "VARIABLE",
+                          "token": {
+                              "type": "IDENTIFIER",
+                              "value": "this"
+                          },
+                          "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                        }
+,
+                        "right": 
+                        {
+
+                          "node_type": "VARIABLE",
+                          "token": {
+                              "type": "IDENTIFIER",
+                              "value": "x"
+                          },
+                          "var_type_annotated": "VOID"
+                        }
+
+                      }
+,
+                      "right": 
+                      {
+
+                        "node_type": "VARIABLE",
+                        "token": {
+                            "type": "IDENTIFIER",
+                            "value": "nx"
+                        },
+                        "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                      }
+
+                    },
+                    {
+
+                      "node_type": "RETURN",
+                      "token": {
+                          "type": "RETURN",
+                          "value": "return"
+                      },
+                      "var_type_annotated": "VOID",
+                      "left": 
+                      {
+
+                        "node_type": "FIELD_ACCESS",
+                        "token": {
+                            "type": "IDENTIFIER",
+                            "value": "x"
+                        },
+                        "var_type_annotated": "VOID",
+                        "left": 
+                        {
+
+                          "node_type": "VARIABLE",
+                          "token": {
+                              "type": "IDENTIFIER",
+                              "value": "this"
+                          },
+                          "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                        }
+,
+                        "right": 
+                        {
+
+                          "node_type": "VARIABLE",
+                          "token": {
+                              "type": "IDENTIFIER",
+                              "value": "x"
+                          },
+                          "var_type_annotated": "VOID"
+                        }
+
+                      }
+
+                    }
+                  ]
+                }
+
+              }
+,
+              "children": [
+                {
+
+                  "node_type": "VAR_DECL",
+                  "var_type_annotated": "POINTER",
+                  "by_ref": false,
+                  "right": 
+                  {
+
+                    "node_type": "TYPE_REFERENCE",
+                    "token": {
+                        "type": "IDENTIFIER",
+                        "value": "Point"
+                    },
+                    "var_type_annotated": "RECORD"
+                  }
+,
+                  "children": [
+                    {
+
+                      "node_type": "VARIABLE",
+                      "token": {
+                          "type": "IDENTIFIER",
+                          "value": "this"
+                      },
+                      "var_type_annotated": "POINTER"
+                    }
+                  ]
+                },
+                {
+
+                  "node_type": "VAR_DECL",
+                  "var_type_annotated": "INT64",
+                  "by_ref": false,
+                  "right": 
+                  {
+
+                    "node_type": "TYPE_IDENTIFIER",
+                    "token": {
+                        "type": "IDENTIFIER",
+                        "value": "int"
+                    },
+                    "var_type_annotated": "INT64"
+                  }
+,
+                  "children": [
+                    {
+
+                      "node_type": "VARIABLE",
+                      "token": {
+                          "type": "IDENTIFIER",
+                          "value": "nx"
+                      },
+                      "var_type_annotated": "INT64"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+
+              "node_type": "PROCEDURE_DECL",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "Point_incX"
+              },
+              "var_type_annotated": "VOID",
+              "is_inline": false,
+              "right": 
+              {
+
+                "node_type": "BLOCK",
+                "var_type_annotated": "VOID",
+                "is_global_scope": false,
+                "declarations": 
+                {
+
+                  "node_type": "COMPOUND",
+                  "var_type_annotated": "VOID"
+                }
+,
+                "body": 
+                {
+
+                  "node_type": "COMPOUND",
+                  "var_type_annotated": "VOID",
+                  "children": [
+                    {
+
+                      "node_type": "EXPR_STMT",
+                      "token": {
+                          "type": "IDENTIFIER",
+                          "value": "setX"
+                      },
+                      "var_type_annotated": "VOID",
+                      "left": 
+                      {
+
+                        "node_type": "PROCEDURE_CALL",
+                        "token": {
+                            "type": "IDENTIFIER",
+                            "value": "setX"
+                        },
+                        "var_type_annotated": "VOID",
+                        "left": 
+                        {
+
+                          "node_type": "VARIABLE",
+                          "token": {
+                              "type": "IDENTIFIER",
+                              "value": "this"
+                          },
+                          "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                        }
+,
+                        "children": [
+                          {
+
+                            "node_type": "VARIABLE",
+                            "token": {
+                                "type": "IDENTIFIER",
+                                "value": "this"
+                            },
+                            "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                          },
+                          {
+
+                            "node_type": "BINARY_OP",
+                            "token": {
+                                "type": "PLUS",
+                                "value": "+"
+                            },
+                            "var_type_annotated": "INT64",
+                            "left": 
+                            {
+
+                              "node_type": "FIELD_ACCESS",
+                              "token": {
+                                  "type": "IDENTIFIER",
+                                  "value": "x"
+                              },
+                              "var_type_annotated": "VOID",
+                              "left": 
+                              {
+
+                                "node_type": "VARIABLE",
+                                "token": {
+                                    "type": "IDENTIFIER",
+                                    "value": "this"
+                                },
+                                "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                              }
+,
+                              "right": 
+                              {
+
+                                "node_type": "VARIABLE",
+                                "token": {
+                                    "type": "IDENTIFIER",
+                                    "value": "x"
+                                },
+                                "var_type_annotated": "VOID"
+                              }
+
+                            }
+,
+                            "right": 
+                            {
+
+                              "node_type": "NUMBER",
+                              "token": {
+                                  "type": "INTEGER_CONST",
+                                  "value": "1"
+                              },
+                              "var_type_annotated": "INT64",
+                              "i_val": 0
+                            }
+
+                          }
+                        ]
+                      }
+
+                    }
+                  ]
+                }
+
+              }
+,
+              "children": [
+                {
+
+                  "node_type": "VAR_DECL",
+                  "var_type_annotated": "POINTER",
+                  "by_ref": false,
+                  "right": 
+                  {
+
+                    "node_type": "TYPE_REFERENCE",
+                    "token": {
+                        "type": "IDENTIFIER",
+                        "value": "Point"
+                    },
+                    "var_type_annotated": "RECORD"
+                  }
+,
+                  "children": [
+                    {
+
+                      "node_type": "VARIABLE",
+                      "token": {
+                          "type": "IDENTIFIER",
+                          "value": "this"
+                      },
+                      "var_type_annotated": "POINTER"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+
+          "node_type": "EXPR_STMT",
+          "token": {
+              "type": "IDENTIFIER",
+              "value": "setX"
+          },
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "PROCEDURE_CALL",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "setX"
+            },
+            "var_type_annotated": "VOID",
+            "left": 
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "p"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE"
+            }
+,
+            "children": [
+              {
+
+                "node_type": "VARIABLE",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "p"
+                },
+                "var_type_annotated": "UNKNOWN_VAR_TYPE"
+              },
+              {
+
+                "node_type": "NUMBER",
+                "token": {
+                    "type": "INTEGER_CONST",
+                    "value": "5"
+                },
+                "var_type_annotated": "INT64",
+                "i_val": 0
+              }
+            ]
+          }
+
+        },
+        {
+
+          "node_type": "EXPR_STMT",
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "WRITELN",
+            "var_type_annotated": "UNKNOWN_VAR_TYPE",
+            "children": [
+              {
+
+                "node_type": "FIELD_ACCESS",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "x"
+                },
+                "var_type_annotated": "VOID",
+                "left": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "p"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                }
+,
+                "right": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "x"
+                  },
+                  "var_type_annotated": "VOID"
+                }
+
+              }
+            ]
+          }
+
+        },
+        {
+
+          "node_type": "EXPR_STMT",
+          "token": {
+              "type": "IDENTIFIER",
+              "value": "incX"
+          },
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "PROCEDURE_CALL",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "incX"
+            },
+            "var_type_annotated": "VOID",
+            "left": 
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "p"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE"
+            }
+,
+            "children": [
+              {
+
+                "node_type": "VARIABLE",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "p"
+                },
+                "var_type_annotated": "UNKNOWN_VAR_TYPE"
+              }
+            ]
+          }
+
+        },
+        {
+
+          "node_type": "EXPR_STMT",
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "WRITELN",
+            "var_type_annotated": "UNKNOWN_VAR_TYPE",
+            "children": [
+              {
+
+                "node_type": "FIELD_ACCESS",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "x"
+                },
+                "var_type_annotated": "VOID",
+                "left": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "p"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                }
+,
+                "right": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "x"
+                  },
+                  "var_type_annotated": "VOID"
+                }
+
+              }
+            ]
+          }
+
+        },
+        {
+
+          "node_type": "EXPR_STMT",
+          "token": {
+              "type": "IDENTIFIER",
+              "value": "setX"
+          },
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "PROCEDURE_CALL",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "setX"
+            },
+            "var_type_annotated": "VOID",
+            "left": 
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "q"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE"
+            }
+,
+            "children": [
+              {
+
+                "node_type": "VARIABLE",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "q"
+                },
+                "var_type_annotated": "UNKNOWN_VAR_TYPE"
+              },
+              {
+
+                "node_type": "NUMBER",
+                "token": {
+                    "type": "INTEGER_CONST",
+                    "value": "10"
+                },
+                "var_type_annotated": "INT64",
+                "i_val": 0
+              }
+            ]
+          }
+
+        },
+        {
+
+          "node_type": "EXPR_STMT",
+          "var_type_annotated": "VOID",
+          "left": 
+          {
+
+            "node_type": "WRITELN",
+            "var_type_annotated": "UNKNOWN_VAR_TYPE",
+            "children": [
+              {
+
+                "node_type": "FIELD_ACCESS",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "x"
+                },
+                "var_type_annotated": "VOID",
+                "left": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "q"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                }
+,
+                "right": 
+                {
+
+                  "node_type": "VARIABLE",
+                  "token": {
+                      "type": "IDENTIFIER",
+                      "value": "x"
+                  },
+                  "var_type_annotated": "VOID"
+                }
+
+              }
+            ]
+          }
+
+        }
+      ]
+    }
+
+  }
+
+}
+
