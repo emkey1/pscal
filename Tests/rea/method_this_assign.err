@@ -6,7 +6,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 
 --- Function point_setx (at 0003) ---
 0003    4 OP_GET_LOCAL        1 (slot)
-0005    | OP_GET_LOCAL        0 (slot)
+0005    | OP_GET_LOCAL_ADDRESS    0 (slot)
 0007    | OP_GET_FIELD_ADDRESS    0 'x'
 0009    | OP_SWAP
 0010    | OP_SET_INDIRECT
