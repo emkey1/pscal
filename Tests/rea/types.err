@@ -1,0 +1,41 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/types.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 OP_DEFINE_GLOBAL NameIdx:0   'a' Type:INT64 ('int64')
+0005    2 OP_DEFINE_GLOBAL NameIdx:2   'b' Type:INTEGER ('int32')
+0010    3 OP_DEFINE_GLOBAL NameIdx:4   'c' Type:INT16 ('int16')
+0015    4 OP_DEFINE_GLOBAL NameIdx:6   'd' Type:INT8 ('int8')
+0020    5 OP_DEFINE_GLOBAL NameIdx:8   'e' Type:REAL ('float32')
+0025    6 OP_DEFINE_GLOBAL NameIdx:10  'f' Type:LONG_DOUBLE ('long double')
+0030    7 OP_DEFINE_GLOBAL NameIdx:12  'g' Type:CHAR ('char')
+0035    8 OP_DEFINE_GLOBAL NameIdx:14  'h' Type:BYTE ('byte')
+0040    9 OP_DEFINE_GLOBAL NameIdx:16  't' Type:FILE ('text')
+0045   10 OP_DEFINE_GLOBAL NameIdx:18  'ms' Type:MEMORY_STREAM ('mstream')
+0050   11 OP_DEFINE_GLOBAL NameIdx:20  'v' Type:VOID ('void')
+0055    0 OP_HALT
+== End Disassembly: Tests/rea/types.rea ==
+
+Constants (22):\n  0000: STR   "a"
+  0001: STR   "int64"
+  0002: STR   "b"
+  0003: STR   "int32"
+  0004: STR   "c"
+  0005: STR   "int16"
+  0006: STR   "d"
+  0007: STR   "int8"
+  0008: STR   "e"
+  0009: STR   "float32"
+  0010: STR   "f"
+  0011: STR   "long double"
+  0012: STR   "g"
+  0013: STR   "char"
+  0014: STR   "h"
+  0015: STR   "byte"
+  0016: STR   "t"
+  0017: STR   "text"
+  0018: STR   "ms"
+  0019: STR   "mstream"
+  0020: STR   "v"
+  0021: STR   "void"
+

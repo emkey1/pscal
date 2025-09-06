@@ -98,6 +98,10 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "true", 4) == 0) return REA_TOKEN_TRUE;
             if (strncmp(start, "void", 4) == 0) return REA_TOKEN_VOID;
             if (strncmp(start, "bool", 4) == 0) return REA_TOKEN_BOOL;
+            if (strncmp(start, "int8", 4) == 0) return REA_TOKEN_INT8;
+            if (strncmp(start, "char", 4) == 0) return REA_TOKEN_CHAR;
+            if (strncmp(start, "byte", 4) == 0) return REA_TOKEN_BYTE;
+            if (strncmp(start, "text", 4) == 0) return REA_TOKEN_TEXT;
             break;
         case 5:
             if (strncmp(start, "class", 5) == 0) return REA_TOKEN_CLASS;
@@ -107,6 +111,9 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "float", 5) == 0) return REA_TOKEN_FLOAT;
             if (strncmp(start, "const", 5) == 0) return REA_TOKEN_CONST;
             if (strncmp(start, "false", 5) == 0) return REA_TOKEN_FALSE;
+            if (strncmp(start, "int64", 5) == 0) return REA_TOKEN_INT64;
+            if (strncmp(start, "int32", 5) == 0) return REA_TOKEN_INT32;
+            if (strncmp(start, "int16", 5) == 0) return REA_TOKEN_INT16;
             break;
         case 6:
             if (strncmp(start, "return", 6) == 0) return REA_TOKEN_RETURN;
@@ -116,9 +123,14 @@ static ReaTokenType keywordType(const char *start, size_t length) {
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;
             if (strncmp(start, "default", 7) == 0) return REA_TOKEN_DEFAULT;
+            if (strncmp(start, "float32", 7) == 0) return REA_TOKEN_FLOAT32;
+            if (strncmp(start, "mstream", 7) == 0) return REA_TOKEN_MSTREAM;
             break;
         case 8:
             if (strncmp(start, "continue", 8) == 0) return REA_TOKEN_CONTINUE;
+            break;
+        case 10:
+            if (strncmp(start, "longdouble", 10) == 0) return REA_TOKEN_LONG_DOUBLE;
             break;
     }
     return REA_TOKEN_IDENTIFIER;
@@ -196,7 +208,23 @@ ReaToken reaNextToken(ReaLexer *lexer) {
 
     if (isAlpha(c)) {
         while (isAlphaNumeric(peek(lexer))) advance(lexer);
-        ReaTokenType type = keywordType(lexer->source + start, lexer->pos - start);
+        size_t len = lexer->pos - start;
+        ReaTokenType type = keywordType(lexer->source + start, len);
+        if (type == REA_TOKEN_IDENTIFIER && len == 4 && strncmp(lexer->source + start, "long", 4) == 0) {
+            size_t savePos = lexer->pos;
+            int saveLine = lexer->line;
+            while (isspace(peek(lexer))) {
+                if (peek(lexer) == '\n') lexer->line++;
+                advance(lexer);
+            }
+            size_t after = lexer->pos;
+            if (strncmp(lexer->source + after, "double", 6) == 0 && !isAlphaNumeric(lexer->source[after + 6])) {
+                lexer->pos = after + 6;
+                return makeToken(lexer, REA_TOKEN_LONG_DOUBLE, start);
+            }
+            lexer->pos = savePos;
+            lexer->line = saveLine;
+        }
         return makeToken(lexer, type, start);
     }
 

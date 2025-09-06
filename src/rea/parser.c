@@ -383,21 +383,66 @@ static AST *parseExpression(ReaParser *p) {
 
 static VarType mapType(ReaTokenType t) {
     switch (t) {
-        case REA_TOKEN_INT: return TYPE_INT64;
-        case REA_TOKEN_FLOAT: return TYPE_DOUBLE;
-        case REA_TOKEN_STR: return TYPE_STRING;
-        case REA_TOKEN_BOOL: return TYPE_BOOLEAN;
-        default: return TYPE_VOID;
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64:    return TYPE_INT64;
+        case REA_TOKEN_INT32:    return TYPE_INT32;
+        case REA_TOKEN_INT16:    return TYPE_INT16;
+        case REA_TOKEN_INT8:     return TYPE_INT8;
+        case REA_TOKEN_FLOAT:    return TYPE_DOUBLE;
+        case REA_TOKEN_FLOAT32:  return TYPE_FLOAT;
+        case REA_TOKEN_LONG_DOUBLE: return TYPE_LONG_DOUBLE;
+        case REA_TOKEN_STR:      return TYPE_STRING;
+        case REA_TOKEN_TEXT:     return TYPE_FILE;
+        case REA_TOKEN_MSTREAM:  return TYPE_MEMORYSTREAM;
+        case REA_TOKEN_CHAR:     return TYPE_CHAR;
+        case REA_TOKEN_BYTE:     return TYPE_BYTE;
+        case REA_TOKEN_BOOL:     return TYPE_BOOLEAN;
+        case REA_TOKEN_VOID:     return TYPE_VOID;
+        default:                 return TYPE_VOID;
     }
 }
 
 static const char *typeName(ReaTokenType t) {
     switch (t) {
-        case REA_TOKEN_INT: return "int";
-        case REA_TOKEN_FLOAT: return "float";
-        case REA_TOKEN_STR: return "str";
-        case REA_TOKEN_BOOL: return "bool";
-        default: return "";
+        case REA_TOKEN_INT:       return "int";
+        case REA_TOKEN_INT64:     return "int64";
+        case REA_TOKEN_INT32:     return "int32";
+        case REA_TOKEN_INT16:     return "int16";
+        case REA_TOKEN_INT8:      return "int8";
+        case REA_TOKEN_FLOAT:     return "float";
+        case REA_TOKEN_FLOAT32:   return "float32";
+        case REA_TOKEN_LONG_DOUBLE: return "long double";
+        case REA_TOKEN_STR:       return "str";
+        case REA_TOKEN_TEXT:      return "text";
+        case REA_TOKEN_MSTREAM:   return "mstream";
+        case REA_TOKEN_CHAR:      return "char";
+        case REA_TOKEN_BYTE:      return "byte";
+        case REA_TOKEN_BOOL:      return "bool";
+        case REA_TOKEN_VOID:      return "void";
+        default:                  return "";
+    }
+}
+
+static bool isTypeToken(ReaTokenType t) {
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64:
+        case REA_TOKEN_INT32:
+        case REA_TOKEN_INT16:
+        case REA_TOKEN_INT8:
+        case REA_TOKEN_FLOAT:
+        case REA_TOKEN_FLOAT32:
+        case REA_TOKEN_LONG_DOUBLE:
+        case REA_TOKEN_STR:
+        case REA_TOKEN_TEXT:
+        case REA_TOKEN_MSTREAM:
+        case REA_TOKEN_BOOL:
+        case REA_TOKEN_CHAR:
+        case REA_TOKEN_BYTE:
+        case REA_TOKEN_VOID:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -678,8 +723,7 @@ static AST *parseStatement(ReaParser *p) {
             reaAdvance(p); // consume '{'
             while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
                 // Field or method: both start with a type keyword
-                if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_FLOAT ||
-                    p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_BOOL) {
+                if (isTypeToken(p->current.type)) {
                     // Peek ahead to decide var vs method based on presence of '('
                     ReaToken save = p->current;
                     // Consume type and identifier into a fake varDecl to reuse existing parser
@@ -735,8 +779,7 @@ static AST *parseStatement(ReaParser *p) {
     if (p->current.type == REA_TOKEN_RETURN) {
         return parseReturn(p);
     }
-    if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_FLOAT ||
-        p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_BOOL) {
+    if (isTypeToken(p->current.type)) {
         return parseVarDecl(p);
     }
     AST *expr = parseExpression(p);

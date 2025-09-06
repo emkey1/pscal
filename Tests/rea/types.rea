@@ -1,0 +1,11 @@
+int64 a;
+int32 b;
+int16 c;
+int8 d;
+float32 e;
+long double f;
+char g;
+byte h;
+text t;
+mstream ms;
+void v;
