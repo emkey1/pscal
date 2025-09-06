@@ -983,8 +983,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // For field address we need the base VALUE (record or pointer), not the variable's address.
-            compileRValue(node->left, chunk, getLine(node->left));
+            // Recursively compile the L-Value of the base (e.g., myRec or p^)
+            compileLValue(node->left, chunk, getLine(node->left));
 
             // Now, get the address of the specific field.
             int fieldNameIndex = addStringConstant(chunk, node->token->value);
@@ -2314,8 +2314,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
-            // Fallback: receiver-aware method call mangle
-            // If unresolved and first argument exists, try Class_method(receiver, ...)
+#ifdef FRONTEND_REA
+            // Fallback: receiver-aware method call mangle (Rea-only)
             if (!proc_symbol && node->child_count > 0 && node->children[0]) {
                 AST* recv = node->children[0];
                 AST* tdef = recv->type_def;
@@ -2354,6 +2354,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                 }
             }
+#endif
 
             if (strcasecmp(calleeName, "printf") == 0) {
                 compilePrintf(node, chunk, line);
@@ -2434,14 +2435,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
 
                 if (!param_mismatch) {
-                    // Align first argument type with declared 'this' when available.
-                    if (proc_symbol && proc_symbol->type_def && node->child_count > 0 && proc_symbol->type_def->child_count > 0) {
-                        AST* declared_this = proc_symbol->type_def->children[0];
-                        if (declared_this && node->children[0]) {
-                            node->children[0]->var_type = declared_this->var_type;
-                            node->children[0]->type_def = declared_this->type_def ? declared_this->type_def : declared_this;
-                        }
-                    }
                     for (int i = 0; i < node->child_count; i++) {
                         AST* param_node = proc_symbol->type_def->children[i];
                         AST* arg_node = node->children[i];
@@ -3323,14 +3316,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
                 
                 if (func_symbol) {
-                    // Align first argument type for qualified calls with declared 'this'
-                    if (isCallQualified && func_symbol->type_def && node->child_count > 0 && func_symbol->type_def->child_count > 0) {
-                        AST* declared_this = func_symbol->type_def->children[0];
-                        if (declared_this && node->children[0]) {
-                            node->children[0]->var_type = declared_this->var_type;
-                            node->children[0]->type_def = declared_this->type_def ? declared_this->type_def : declared_this;
-                        }
-                    }
+                    
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                         compiler_had_error = true;

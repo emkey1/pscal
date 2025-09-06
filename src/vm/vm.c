@@ -918,6 +918,10 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
+
+    // Default: tracing disabled
+    vm->trace_head_instructions = 0;
+    vm->trace_executed = 0;
 }
 
 void freeVM(VM* vm) {

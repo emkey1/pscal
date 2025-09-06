@@ -38,8 +38,8 @@ void worker() {
 }
 
 int main() {
-  PORT = read_port();
-  int n = 8;
+  PORT = 5555;
+  int n = 16;
   if (paramcount() >= 1) {
     str a1 = paramstr(1);
     int parsed = 0; int code = -1;
