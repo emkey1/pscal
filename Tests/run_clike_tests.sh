@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CLIKE_BIN="$ROOT_DIR/build/bin/clike"
+RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
+TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
@@ -56,9 +58,9 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
 
   set +e
   if [ -f "$in_file" ]; then
-    "$CLIKE_BIN" "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
   else
-    "$CLIKE_BIN" "$src" > "$actual_out" 2> "$actual_err"
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "$src" > "$actual_out" 2> "$actual_err"
   fi
   run_status=$?
   set -e
@@ -107,6 +109,8 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
 
   if [ -n "$server_pid" ]; then
     kill "$server_pid" 2>/dev/null || true
+    sleep 0.2
+    kill -9 "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
 

@@ -1,4 +1,5 @@
 #/bin/bash
+export RUN_NET_TESTS=1
 echo "Running Pascal Tests"
 ./run_pascal_tests.sh
 echo "Pascal Tests End"

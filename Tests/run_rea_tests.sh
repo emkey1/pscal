@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 REA_BIN="$ROOT_DIR/build/bin/rea"
+RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
+TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
 if [ ! -x "$REA_BIN" ]; then
   echo "rea binary not found at $REA_BIN" >&2
@@ -31,9 +33,9 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   echo "---- $test_name ----"
   set +e
   if [ -f "$in_file" ]; then
-    "$REA_BIN" $args "$src_rel" < "$in_file" > "$actual_out" 2> "$actual_err"
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" $args "$src_rel" < "$in_file" > "$actual_out" 2> "$actual_err"
   else
-    "$REA_BIN" $args "$src_rel" > "$actual_out" 2> "$actual_err"
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" $args "$src_rel" > "$actual_out" 2> "$actual_err"
   fi
   run_status=$?
   set -e

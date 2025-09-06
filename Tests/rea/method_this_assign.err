@@ -1,0 +1,19 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/method_this_assign.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    3 OP_JUMP            11 (to 0014)
+
+--- Function point_setx (at 0003) ---
+0003    4 OP_GET_LOCAL        1 (slot)
+0005    | OP_GET_LOCAL_ADDRESS    0 (slot)
+0007    | OP_GET_FIELD_ADDRESS    0 'x'
+0009    | OP_SWAP
+0010    | OP_SET_INDIRECT
+0011    3 OP_GET_LOCAL        2 (slot)
+0013    | OP_RETURN
+0014    0 OP_HALT
+== End Disassembly: Tests/rea/method_this_assign.rea ==
+
+Constants (1):\n  0000: STR   "x"
+

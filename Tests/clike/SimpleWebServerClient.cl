@@ -1,4 +1,17 @@
-int PORT = 5577;
+int read_port() {
+  str pf = "/tmp/pscal_sws_port";
+  if (!fileexists(pf)) return 5577;
+  mstream ms = mstreamcreate();
+  int ok = mstreamloadfromfile(&ms, pf);
+  if (ok == 0) { mstreamfree(&ms); return 5577; }
+  str s = mstreambuffer(ms);
+  int p = atoi(s);
+  mstreamfree(&ms);
+  if (p <= 0) p = 5577;
+  return p;
+}
+
+int PORT = read_port();
 
 int send_request(int port, str path, str expect_substr, str expect_status) {
   int s = socketcreate(0);
@@ -29,4 +42,3 @@ int main() {
 
   return 0;
 }
-

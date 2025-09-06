@@ -33,6 +33,9 @@ typedef struct {
     int start;          // Address of the loop's start
     int* break_jumps;   // Dynamic array of jump instructions from 'break'
     int break_count;    // Number of 'break' statements
+    int* continue_jumps; // Dynamic array of jump instructions from 'continue'
+    int continue_count;  // Number of 'continue' statements
+    int continue_target; // If known, 'continue' jumps directly here
     int scope_depth;    // The scope depth of this loop
 } Loop;
 
@@ -436,6 +439,9 @@ static void startLoop(int start_address) {
     loop_stack[loop_depth].start = start_address;
     loop_stack[loop_depth].break_jumps = NULL;
     loop_stack[loop_depth].break_count = 0;
+    loop_stack[loop_depth].continue_jumps = NULL;
+    loop_stack[loop_depth].continue_count = 0;
+    loop_stack[loop_depth].continue_target = -1;
     loop_stack[loop_depth].scope_depth = current_function_compiler ? current_function_compiler->scope_depth : 0;
 }
 
@@ -477,6 +483,47 @@ static void patchBreaks(BytecodeChunk* chunk) {
     }
 }
 
+static void addContinueJump(BytecodeChunk* chunk, int line) {
+    if (loop_depth < 0) {
+        fprintf(stderr, "L%d: Compiler error: 'continue' statement outside of a loop.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    Loop* current_loop = &loop_stack[loop_depth];
+    writeBytecodeChunk(chunk, OP_JUMP, line);
+    if (current_loop->continue_target >= 0) {
+        int from = chunk->count + 2; // after operand
+        int to = current_loop->continue_target;
+        int16_t rel = (int16_t)(to - from);
+        emitShort(chunk, (uint16_t)rel, line);
+    } else {
+        current_loop->continue_count++;
+        int* temp = realloc(current_loop->continue_jumps, sizeof(int) * current_loop->continue_count);
+        if (!temp) {
+            fprintf(stderr, "L%d: Compiler error: memory allocation failed for continue jumps.\\n", line);
+            compiler_had_error = true;
+            return;
+        }
+        current_loop->continue_jumps = temp;
+        current_loop->continue_jumps[current_loop->continue_count - 1] = chunk->count; // operand offset
+        emitShort(chunk, 0xFFFF, line);
+    }
+}
+
+static void patchContinuesTo(BytecodeChunk* chunk, int targetAddress) {
+    if (loop_depth < 0) return;
+    Loop* current_loop = &loop_stack[loop_depth];
+    for (int i = 0; i < current_loop->continue_count; i++) {
+        int jump_offset = current_loop->continue_jumps[i];
+        patchShort(chunk, jump_offset, (uint16_t)(targetAddress - (jump_offset + 2)));
+    }
+    if (current_loop->continue_jumps) {
+        free(current_loop->continue_jumps);
+        current_loop->continue_jumps = NULL;
+    }
+    current_loop->continue_count = 0;
+}
+
 static void endLoop(void) {
     if (loop_depth < 0) return;
 
@@ -484,11 +531,15 @@ static void endLoop(void) {
     // The patching and freeing of break_jumps is handled entirely by patchBreaks().
     // A check has been added to catch logic errors where endLoop is called
     // without a preceding patchBreaks() call.
-    if (loop_stack[loop_depth].break_jumps != NULL) {
+    if (loop_stack[loop_depth].break_jumps != NULL || loop_stack[loop_depth].continue_jumps != NULL) {
         fprintf(stderr, "Compiler internal warning: endLoop called but break_jumps was not freed. Indicates missing patchBreaks() call.\n");
         // Safeguard free, though the call site is the real issue.
         free(loop_stack[loop_depth].break_jumps);
         loop_stack[loop_depth].break_jumps = NULL;
+        if (loop_stack[loop_depth].continue_jumps) {
+            free(loop_stack[loop_depth].continue_jumps);
+            loop_stack[loop_depth].continue_jumps = NULL;
+        }
     }
 
     loop_depth--;
@@ -1798,6 +1849,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, OP_RETURN, line);
             break;
         }
+        case AST_CONTINUE: {
+            addContinueJump(chunk, line);
+            break;
+        }
         case AST_BREAK: {
             addBreakJump(chunk, line);
             break;
@@ -1816,8 +1871,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_EXPR_STMT: {
             if (node->left) {
-                compileRValue(node->left, chunk, getLine(node->left));
-                writeBytecodeChunk(chunk, OP_POP, line);
+                if (node->left->type == AST_PROCEDURE_CALL ||
+                    node->left->type == AST_WRITE ||
+                    node->left->type == AST_WRITELN) {
+                    // Compile as a statement to avoid treating procedures as R-values
+                    compileNode(node->left, chunk, getLine(node->left));
+                } else {
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    writeBytecodeChunk(chunk, OP_POP, line);
+                }
             }
             break;
         }
@@ -1854,6 +1916,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             startLoop(chunk->count); // <<< MODIFIED: Mark loop start
 
             int loopStart = chunk->count;
+            // In WHILE, 'continue' jumps to re-evaluate the condition
+            loop_stack[loop_depth].continue_target = loopStart;
 
             compileRValue(node->left, chunk, line);
 
@@ -1862,6 +1926,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             emitShort(chunk, 0xFFFF, line);
 
             compileStatement(node->right, chunk, getLine(node->right));
+
+            // All 'continue' statements in the body should jump to loopStart to re-evaluate condition
+            patchContinuesTo(chunk, loopStart);
 
             writeBytecodeChunk(chunk, OP_JUMP, line);
             int backwardJumpOffset = loopStart - (chunk->count + 2);
@@ -1983,6 +2050,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (node->left) {
                 compileStatement(node->left, chunk, getLine(node->left));
             }
+
+            // In REPEAT..UNTIL, 'continue' jumps to the condition check point (here)
+            patchContinuesTo(chunk, chunk->count);
 
             if (node->right) {
                 compileRValue(node->right, chunk, getLine(node->right));
@@ -2153,6 +2223,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             compileStatement(body_node, chunk, getLine(body_node));
             
             // 5. Increment/Decrement the loop variable
+            // Any 'continue' in the body should land here (the post step), not at the condition.
+            loop_stack[loop_depth].continue_target = chunk->count;
+            patchContinuesTo(chunk, chunk->count);
             if (var_slot != -1) {
                 writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
@@ -2580,6 +2653,32 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
     Token* node_token = node->token;
 
     switch (node->type) {
+        case AST_NEW: {
+            // new ClassName(args): allocate object pointer via builtin newobj("ClassName")
+            if (!node || !node->token || !node->token->value) { break; }
+            const char* className = node->token->value;
+            int nameIdx = addStringConstant(chunk, className);
+            emitConstant(chunk, nameIdx, line);
+            // call builtin newobj(string) -> pointer
+            int bi = addStringConstant(chunk, "newobj");
+            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            emitShort(chunk, (uint16_t)bi, line);
+            writeBytecodeChunk(chunk, (uint8_t)1, line);
+
+            // If constructor exists and there are args, call it with 'this' + args.
+            if (node->child_count > 0) {
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                for (int i = 0; i < node->child_count; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                int ctorNameIdx = addStringConstant(chunk, className);
+                writeBytecodeChunk(chunk, OP_CALL, line);
+                emitShort(chunk, (uint16_t)ctorNameIdx, line);
+                emitShort(chunk, 0xFFFF, line);
+                writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
+            }
+            break;
+        }
         case AST_SET: {
             Value set_const_val;
             memset(&set_const_val, 0, sizeof(Value));

@@ -660,6 +660,8 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 runtimeError(vm, "printf: incomplete format specifier.");
                 return makeInt(0);
             }
+            // Suppress unused warnings for length modifiers we don't currently use explicitly
+            (void)mod_l; (void)mod_ll;
             char fmtbuf[32];
             char buf[256];
             if (width > 0 && precision >= 0) {
@@ -789,6 +791,8 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
             else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
             else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
             char spec = fmt[j]; if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
+            // Suppress unused warnings for length modifiers we don't currently use explicitly
+            (void)mod_l; (void)mod_ll;
             char fmtbuf[32]; char buf[256];
             if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
             else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);

@@ -11,6 +11,8 @@
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h"
 #include "rea/parser.h"
+#include "Pascal/lexer.h"
+#include "Pascal/parser.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -27,7 +29,91 @@ static const char *REA_USAGE =
     "   Options:\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
-    "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
+"     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
+
+static void processUnitList(List* unit_list, BytecodeChunk* chunk) {
+    if (!unit_list) return;
+    for (int i = 0; i < listSize(unit_list); i++) {
+        char *used_unit_name_str_from_list = (char*)listGet(unit_list, i);
+        if (!used_unit_name_str_from_list) continue;
+
+        char lower_used_unit_name[MAX_SYMBOL_LENGTH];
+        strncpy(lower_used_unit_name, used_unit_name_str_from_list, MAX_SYMBOL_LENGTH - 1);
+        lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
+        for (int k = 0; lower_used_unit_name[k]; k++) {
+            lower_used_unit_name[k] = tolower((unsigned char)lower_used_unit_name[k]);
+        }
+
+        char *unit_file_path = findUnitFile(lower_used_unit_name);
+        if (!unit_file_path) {
+            if (!isUnitDocumented(lower_used_unit_name)) {
+                fprintf(stderr, "Warning: unit '%s' not found. Skipping.\n", used_unit_name_str_from_list);
+            }
+            continue; // skip missing unit regardless
+        }
+
+        // Read unit file
+        char* unit_source_buffer = NULL;
+        FILE *unit_file = fopen(unit_file_path, "r");
+        if (unit_file) {
+            fseek(unit_file, 0, SEEK_END);
+            long fsize = ftell(unit_file);
+            rewind(unit_file);
+            unit_source_buffer = malloc(fsize + 1);
+            if (!unit_source_buffer) { fclose(unit_file); free(unit_file_path); EXIT_FAILURE_HANDLER(); }
+            size_t bytes_read = fread(unit_source_buffer, 1, fsize, unit_file);
+            if (bytes_read != (size_t)fsize) {
+                fprintf(stderr, "Error reading unit file '%s'.\n", unit_file_path);
+                free(unit_source_buffer);
+                fclose(unit_file);
+                free(unit_file_path);
+                EXIT_FAILURE_HANDLER();
+            }
+            unit_source_buffer[fsize] = '\0';
+            fclose(unit_file);
+        } else {
+            fprintf(stderr, "Error opening unit file '%s'.\n", unit_file_path);
+            free(unit_file_path);
+            EXIT_FAILURE_HANDLER();
+        }
+        free(unit_file_path);
+
+        // Parse the unit using Pascal's unit parser
+        Lexer nested_lexer;
+        initLexer(&nested_lexer, unit_source_buffer);
+        Parser nested_parser_instance;
+        nested_parser_instance.lexer = &nested_lexer;
+        nested_parser_instance.current_token = getNextToken(&nested_lexer);
+        nested_parser_instance.current_unit_name_context = lower_used_unit_name;
+
+        AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
+
+        if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
+        if (unit_source_buffer) free(unit_source_buffer);
+
+        if (parsed_unit_ast) {
+            // Annotate and compile implementation to assign addresses
+            annotateTypes(parsed_unit_ast, NULL, parsed_unit_ast);
+            compileUnitImplementation(parsed_unit_ast, chunk);
+            // Link globals and alias unqualified names
+            linkUnit(parsed_unit_ast, 1);
+            freeAST(parsed_unit_ast);
+        }
+    }
+}
+
+static void walkUsesClauses(AST* node, BytecodeChunk* chunk) {
+    if (!node) return;
+    if (node->type == AST_USES_CLAUSE && node->unit_list) {
+        processUnitList(node->unit_list, chunk);
+    }
+    if (node->left) walkUsesClauses(node->left, chunk);
+    if (node->right) walkUsesClauses(node->right, chunk);
+    if (node->extra) walkUsesClauses(node->extra, chunk);
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i]) walkUsesClauses(node->children[i], chunk);
+    }
+}
 
 int main(int argc, char **argv) {
     vmInitTerminalState();
@@ -96,6 +182,8 @@ int main(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
+    // Handle #import directives by loading and linking Pascal units before compiling the main program
+    walkUsesClauses(program, &chunk);
     bool compilation_ok = compileASTToBytecode(program, &chunk);
 
     InterpretResult result = INTERPRET_COMPILE_ERROR;
@@ -137,4 +225,3 @@ int main(int argc, char **argv) {
     free(src);
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
-

@@ -190,6 +190,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_SET:            return "SET";
         case AST_ARRAY_LITERAL:  return "ARRAY_LITERAL";
         case AST_BREAK:          return "BREAK";
+        case AST_CONTINUE:       return "CONTINUE";
         case AST_THREAD_SPAWN:   return "THREAD_SPAWN";
         case AST_THREAD_JOIN:    return "THREAD_JOIN";
         case AST_POINTER_TYPE:   return "POINTER_TYPE";

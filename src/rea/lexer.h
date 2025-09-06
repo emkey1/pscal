@@ -35,6 +35,8 @@ typedef enum {
     REA_TOKEN_EQUAL_EQUAL,
     REA_TOKEN_BANG,
     REA_TOKEN_BANG_EQUAL,
+    REA_TOKEN_AND_AND,
+    REA_TOKEN_OR_OR,
     REA_TOKEN_GREATER,
     REA_TOKEN_GREATER_EQUAL,
     REA_TOKEN_LESS,
@@ -97,4 +99,3 @@ void reaInitLexer(ReaLexer *lexer, const char *source);
 ReaToken reaNextToken(ReaLexer *lexer);
 
 #endif
-

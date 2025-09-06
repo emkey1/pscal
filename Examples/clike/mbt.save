@@ -1,0 +1,124 @@
+#!/usr/bin/env clike
+/*
+ * Threaded SDL Mandelbrot set renderer using mandelbrotrow.
+ * The window updates as rows are drawn. Press Q in the console to quit.
+ */
+
+int WindowWidth = 1024;
+int WindowHeight = 768;
+int MaxIterations = 128;
+float MinRe = -2.0;
+float MaxRe = 1.0;
+int ScreenUpdateInterval = 1;
+int MandelBytesPerPixel = 4;
+
+byte  pixelData[1024 * 768 * 4];
+int   textureID;
+
+float ImRange, MinIm, MaxIm, ReFactor, ImFactor;
+int   MaxX, MaxY;
+
+int threadCount = 4;
+int threadStart[4];
+int threadEnd[4];
+int rowDone[768];
+
+void computeRows(int startY, int endY) {
+    int row[1024], x, y, n, R, G, B, bufferBaseIdx;
+    float c_im;
+
+    for (y = startY; y <= endY; y++) {
+        c_im = MaxIm - y * ImFactor;
+        mandelbrotrow(MinRe, ReFactor, c_im, MaxIterations, MaxX, &row);
+        for (x = 0; x <= MaxX; x++) {
+            n = row[x];
+            if (n == MaxIterations) { R = G = B = 0; }
+            else {
+                R = (n * 5) % 256;
+                G = (n * 7 + 85) % 256;
+                B = (n * 11 + 170) % 256;
+            }
+            bufferBaseIdx = (y * (MaxX + 1) + x) * MandelBytesPerPixel;
+            pixelData[bufferBaseIdx + 0] = R;
+            pixelData[bufferBaseIdx + 1] = G;
+            pixelData[bufferBaseIdx + 2] = B;
+            pixelData[bufferBaseIdx + 3] = 255;
+        }
+        rowDone[y] = 1;
+    }
+}
+
+// parameterless wrappers for spawn()
+void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
+void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
+void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
+void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+
+int main() {
+    int i, startY, endY, rowsPerThread, extra, tid[4], y, quit;
+
+    printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
+    initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
+    textureID = createtexture(WindowWidth, WindowHeight);
+    if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
+    cleardevice(); updatescreen();
+    MaxX = getmaxx(); MaxY = getmaxy();
+
+    ImRange = (MaxRe - MinRe) * MaxY / MaxX;
+    MinIm = -ImRange / 2.0; MaxIm = MinIm + ImRange;
+    ReFactor = (MaxRe - MinRe) / (MaxX - 1);
+    ImFactor = (MaxIm - MinIm) / (MaxY - 1);
+
+    for (i = 0; i <= MaxY; i++) rowDone[i] = 0;
+
+    rowsPerThread = (MaxY + 1) / threadCount;
+    extra = (MaxY + 1) % threadCount;
+    startY = 0;
+    for (i = 0; i < threadCount; i++) {
+        endY = startY + rowsPerThread - 1;
+        if (extra > 0) { endY++; extra--; }
+        threadStart[i] = startY;
+        threadEnd[i]   = endY;
+        startY = endY + 1;
+    }
+
+    tid[0] = spawn computeRowsThread0();
+    tid[1] = spawn computeRowsThread1();
+    tid[2] = spawn computeRowsThread2();
+    tid[3] = spawn computeRowsThread3();
+
+    y = 0;
+    while (y <= MaxY) {
+        if (rowDone[y]) {
+            if (((y + 1) % ScreenUpdateInterval) == 0 || y == MaxY) {
+                updatetexture(textureID, pixelData);
+                cleardevice();
+                rendercopy(textureID);
+                updatescreen();
+                graphloop(0);
+            }
+            y++;
+        } else {
+            graphloop(0);
+        }
+    }
+
+    for (i = 0; i < threadCount; i++)
+        join tid[i];
+
+    printf("Mandelbrot rendered. Press Q in the console to quit.\n");
+    quit = 0;
+        while (!quit) {
+        if (keypressed()) {
+            char c;
+            c = readkey();
+            if (upcase(c) == 'Q') {
+                quit = 1;
+            }
+        }
+        graphloop(16);
+    }
+    destroytexture(textureID); closegraph();
+    return 0;
+}
+

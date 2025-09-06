@@ -1,0 +1,10 @@
+// Rea SDL demo (requires building with -DSDL=ON)
+//#import "sdl";  // Not a real unit name; SDL builtins are linked directly
+
+writeln("Starting Rea SDL demo (initializing text system)...");
+InitTextSystem();
+SetColor(255, 255, 255, 255);
+writeln("Text system initialized. (No window shown in this demo.)");
+QuitTextSystem();
+writeln("Rea SDL demo finished.");
+
