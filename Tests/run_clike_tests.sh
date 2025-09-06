@@ -53,6 +53,9 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
     python3 "$server_script" &
     server_pid=$!
+    # Detach the server process from job control so terminating it later does
+    # not emit noisy "Terminated" messages that interfere with test output.
+    disown "$server_pid" 2>/dev/null || true
     sleep 1
   fi
 
