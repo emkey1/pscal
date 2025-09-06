@@ -102,6 +102,10 @@ typedef struct VM_s {
     pthread_mutex_t mutexRegistryLock; // Protects mutex registry updates
     struct VM_s* mutexOwner; // VM that owns the mutex registry
 
+    // Optional tracing: when >0, print execution of first N instructions
+    int trace_head_instructions;
+    int trace_executed;
+
 } VM;
 
 // --- Public VM Interface ---

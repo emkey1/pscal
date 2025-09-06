@@ -145,6 +145,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 } else {
                 VM vm;
                 initVM(&vm);
+                // Inline trace toggle via source comment: {trace on} / {trace off}
+                if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
                 InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                 freeVM(&vm);
                 globalSymbols = NULL;

@@ -121,6 +121,7 @@ int main(int argc, char **argv) {
     int dump_ast_json = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int vm_trace_head = 0;
     int argi = 1;
     while (argc > argi && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "--dump-ast-json") == 0) {
@@ -130,6 +131,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strncmp(argv[argi], "--vm-trace-head=", 16) == 0) {
+            vm_trace_head = atoi(argv[argi] + 16);
         } else {
             fprintf(stderr, "Unknown option: %s\n%s", argv[argi], REA_USAGE);
             return vmExitWithCleanup(EXIT_FAILURE);
@@ -212,6 +215,9 @@ int main(int argc, char **argv) {
         } else {
             VM vm;
             initVM(&vm);
+            if (vm_trace_head > 0) vm.trace_head_instructions = vm_trace_head;
+            // Inline trace toggle via comment directives: trace on/off inside source
+            if (!vm_trace_head && src && strstr(src, "trace on")) vm.trace_head_instructions = 16;
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
         }

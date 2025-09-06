@@ -598,10 +598,11 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                               }
                           }
                       }
-                  }
-                 /*
-                  * Some builtins (e.g., succ/pred) return the same type as
-                  * their first argument.  If no explicit return type was
+                 }
+                // Note: language-specific frontends may handle receiver typing separately.
+                /*
+                 * Some builtins (e.g., succ/pred) return the same type as
+                 * their first argument.  If no explicit return type was
                  * resolved above, infer it from the argument so enum literals
                  * retain their declared type.
                  */

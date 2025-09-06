@@ -127,6 +127,8 @@ static int createThreadWithArg(VM* vm, uint16_t entry, Value arg) {
     t->vm->chunk = vm->chunk;
     t->vm->mutexOwner = vm->mutexOwner ? vm->mutexOwner : vm;
     t->vm->mutexCount = t->vm->mutexOwner->mutexCount;
+    t->vm->trace_head_instructions = vm->trace_head_instructions;
+    t->vm->trace_executed = 0;
 
     ThreadStartArgs* args = malloc(sizeof(ThreadStartArgs));
     if (!args) {
@@ -916,6 +918,10 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
+
+    // Default: tracing disabled
+    vm->trace_head_instructions = 0;
+    vm->trace_executed = 0;
 }
 
 void freeVM(VM* vm) {
@@ -1537,6 +1543,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         //vmDumpStackInfo(vm); // Call new helper at the start of each instruction
 
         instruction_val = READ_BYTE();
+        if (vm->trace_head_instructions > 0 && vm->trace_executed < vm->trace_head_instructions) {
+            int offset = (int)(vm->ip - vm->chunk->code) - 1;
+            long stacksz = (long)(vm->stackTop - vm->stack);
+            fprintf(stderr, "[VM-TRACE] IP=%04d OPC=%u STACK=%ld\n", offset, (unsigned)instruction_val, stacksz);
+            vm->trace_executed++;
+        }
         switch (instruction_val) {
             case OP_RETURN: {
                 bool halted = false;
