@@ -111,6 +111,22 @@ str normalizePath(str s) {
   return out;
 }
 
+str pad2(int n) {
+  str s = inttostr(n);
+  if (length(s) < 2) s = "0" + s;
+  return s;
+}
+
+str timestamp() {
+  int yr = 0, mo = 0, dy = 0, dow = 0;
+  int hh = 0, mi = 0, ss = 0, hs = 0;
+  getdate(&yr, &mo, &dy, &dow);
+  gettime(&hh, &mi, &ss, &hs);
+  str ts = inttostr(yr) + "-" + pad2(mo) + "-" + pad2(dy)
+           + " " + pad2(hh) + ":" + pad2(mi) + ":" + pad2(ss);
+  return ts;
+}
+
 void serveConn(int c) {
   // Read request
   mstream req = socketreceive(c, 2048);
@@ -248,7 +264,8 @@ void serveConn(int c) {
   socketsend(c, respBody);
   int depth = 0, served = 0, enq = 0, drop = 0;
   lock(qmu); depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; unlock(qmu);
-  printf("[%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n", method, path, code, logDetail, depth, served, enq, drop);
+  str ts = timestamp();
+  printf("%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n", ts, method, path, code, logDetail, depth, served, enq, drop);
   socketclose(c);
 }
 
@@ -299,7 +316,7 @@ void heartbeat() {
     unlock(qmu);
     int dps = served - prevServed;
     prevServed = served;
-    printf("[HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n", depth, cap, thr, acc, enq, served, drop, dps);
+    printf("%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n", timestamp(), depth, cap, thr, acc, enq, served, drop, dps);
   }
 }
 

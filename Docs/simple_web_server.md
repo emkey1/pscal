@@ -11,7 +11,7 @@
 - Path safety: Percent-decodes, strips query string, canonicalizes `.`/`..`, collapses duplicate `/`.
 - Worker pool: Fixed-size pool consumes from a bounded queue; prevents unbounded thread growth.
 - Metrics: Counters for accepted, enqueued, served, dropped; queue depth. Periodic heartbeat logs once/minute.
-- Logging: Per-request line with method, path, status, and detail; periodic heartbeat with throughput.
+- Logging: Per-request line with date/time, method, path, status, and detail; periodic heartbeat with throughput.
 
 ## Usage
 Binary: `build/bin/clike`
@@ -63,8 +63,8 @@ Examples:
 
 ## Metrics & Heartbeat
 - Counters: `accepted`, `enqueued`, `served`, `dropped`; live queue depth.
-- Per‑request log: `[GET] /path -> 200 detail | q=depth served=S enq=E drop=D`.
-- Heartbeat (every 60s): `[HB] q=depth/cap thr=T accepted=A enq=E served=S drop=D dps=ΔS`.
+- Per‑request log: `YYYY-MM-DD HH:MM:SS [GET] /path -> 200 detail | q=depth served=S enq=E drop=D`.
+- Heartbeat (every 60s): `YYYY-MM-DD HH:MM:SS [HB] q=depth/cap thr=T accepted=A enq=E served=S drop=D dps=ΔS`.
 
 ## Tests
 - Network test: `Tests/clike/SimpleWebServerClient.cl` (marked `.net`).
