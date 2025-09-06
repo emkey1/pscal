@@ -32,6 +32,10 @@ static AST *parseStatement(ReaParser *p);
 static AST *parseVarDecl(ReaParser *p);
 static AST *parseReturn(ReaParser *p);
 static AST *parseIf(ReaParser *p);
+static AST *parseWhile(ReaParser *p);
+static AST *parseFor(ReaParser *p);
+static AST *parseDoWhile(ReaParser *p);
+static AST *parseSwitch(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype);
 
@@ -646,6 +650,172 @@ static AST *parseIf(ReaParser *p) {
     return node;
 }
 
+static AST *parseWhile(ReaParser *p) {
+    reaAdvance(p); // consume 'while'
+    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+        reaAdvance(p);
+    }
+    AST *condition = parseExpression(p);
+    if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+        reaAdvance(p);
+    }
+    AST *body = NULL;
+    if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+        body = parseBlock(p);
+    } else {
+        body = parseStatement(p);
+    }
+    AST *node = newASTNode(AST_WHILE, NULL);
+    setLeft(node, condition);
+    setRight(node, body);
+    return node;
+}
+
+static AST *parseDoWhile(ReaParser *p) {
+    reaAdvance(p); // consume 'do'
+    AST *body = NULL;
+    if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+        body = parseBlock(p);
+    } else {
+        body = parseStatement(p);
+    }
+    if (p->current.type == REA_TOKEN_WHILE) {
+        reaAdvance(p);
+    }
+    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+        reaAdvance(p);
+    }
+    AST *condition = parseExpression(p);
+    if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+        reaAdvance(p);
+    }
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+    AST *node = newASTNode(AST_REPEAT, NULL);
+    setLeft(node, body);
+    setRight(node, condition);
+    return node;
+}
+
+static AST *parseFor(ReaParser *p) {
+    reaAdvance(p); // consume 'for'
+    if (p->current.type != REA_TOKEN_LEFT_PAREN) return NULL;
+    reaAdvance(p); // consume '('
+
+    if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
+    char *lex = (char *)malloc(p->current.length + 1);
+    if (!lex) return NULL;
+    memcpy(lex, p->current.start, p->current.length);
+    lex[p->current.length] = '\0';
+    Token *varTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+    free(lex);
+    reaAdvance(p); // consume identifier
+
+    if (p->current.type != REA_TOKEN_EQUAL) return NULL;
+    reaAdvance(p); // consume '='
+    AST *startExpr = parseExpression(p);
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+
+    // Condition: skip optional loop variable and comparison operator
+    if (p->current.type == REA_TOKEN_IDENTIFIER) {
+        reaAdvance(p);
+        if (p->current.type == REA_TOKEN_LESS || p->current.type == REA_TOKEN_LESS_EQUAL ||
+            p->current.type == REA_TOKEN_GREATER || p->current.type == REA_TOKEN_GREATER_EQUAL) {
+            reaAdvance(p);
+        }
+    }
+    AST *endExpr = parseExpression(p);
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+
+    // Increment part (ignored, but parsed for correctness)
+    AST *inc = parseExpression(p);
+    if (inc) freeAST(inc);
+
+    if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+        reaAdvance(p);
+    }
+
+    AST *body = NULL;
+    if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+        body = parseBlock(p);
+    } else {
+        body = parseStatement(p);
+    }
+
+    AST *varNode = newASTNode(AST_VARIABLE, varTok);
+    AST *node = newASTNode(AST_FOR_TO, NULL);
+    setLeft(node, startExpr);
+    setRight(node, endExpr);
+    setExtra(node, body);
+    addChild(node, varNode);
+    return node;
+}
+
+static AST *parseSwitch(ReaParser *p) {
+    reaAdvance(p); // consume 'switch'
+    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+        reaAdvance(p);
+    }
+    AST *expr = parseExpression(p);
+    if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+        reaAdvance(p);
+    }
+    if (p->current.type != REA_TOKEN_LEFT_BRACE) return NULL;
+    reaAdvance(p); // consume '{'
+
+    AST *node = newASTNode(AST_CASE, NULL);
+    setLeft(node, expr);
+
+    while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
+        if (p->current.type == REA_TOKEN_CASE) {
+            reaAdvance(p);
+            AST *label = parseExpression(p);
+            if (p->current.type == REA_TOKEN_COLON) {
+                reaAdvance(p);
+            }
+            AST *stmt = NULL;
+            if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+                stmt = parseBlock(p);
+            } else {
+                stmt = parseStatement(p);
+            }
+            AST *branch = newASTNode(AST_CASE_BRANCH, NULL);
+            setLeft(branch, label);
+            setRight(branch, stmt);
+            addChild(node, branch);
+            if (p->current.type == REA_TOKEN_SEMICOLON) {
+                reaAdvance(p);
+            }
+        } else if (p->current.type == REA_TOKEN_DEFAULT) {
+            reaAdvance(p);
+            if (p->current.type == REA_TOKEN_COLON) {
+                reaAdvance(p);
+            }
+            AST *stmt = NULL;
+            if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+                stmt = parseBlock(p);
+            } else {
+                stmt = parseStatement(p);
+            }
+            setExtra(node, stmt);
+            if (p->current.type == REA_TOKEN_SEMICOLON) {
+                reaAdvance(p);
+            }
+        } else {
+            reaAdvance(p);
+        }
+    }
+    if (p->current.type == REA_TOKEN_RIGHT_BRACE) {
+        reaAdvance(p);
+    }
+    return node;
+}
+
 static AST *parseStatement(ReaParser *p) {
     if (p->current.type == REA_TOKEN_CLASS) {
         // class Name { field declarations ; ... }
@@ -731,6 +901,18 @@ static AST *parseStatement(ReaParser *p) {
     }
     if (p->current.type == REA_TOKEN_IF) {
         return parseIf(p);
+    }
+    if (p->current.type == REA_TOKEN_WHILE) {
+        return parseWhile(p);
+    }
+    if (p->current.type == REA_TOKEN_FOR) {
+        return parseFor(p);
+    }
+    if (p->current.type == REA_TOKEN_DO) {
+        return parseDoWhile(p);
+    }
+    if (p->current.type == REA_TOKEN_SWITCH) {
+        return parseSwitch(p);
     }
     if (p->current.type == REA_TOKEN_RETURN) {
         return parseReturn(p);
