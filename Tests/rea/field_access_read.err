@@ -3,7 +3,7 @@
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    3 OP_DEFINE_GLOBAL NameIdx:0   'a' Type:INT64 ('int')
-0005    | OP_GET_GLOBAL       2 'p'
+0005    | OP_GET_GLOBAL_ADDRESS    2 'p'
 0007    | OP_GET_FIELD_ADDRESS    3 'x'
 0009    | OP_GET_INDIRECT
 0010    | OP_SET_GLOBAL       0 'a'
