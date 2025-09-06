@@ -40,6 +40,7 @@ static VarType builtinReturnType(const char* name) {
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
         strcasecmp(name, "ioresult")  == 0 ||
+        strcasecmp(name, "atoi")      == 0 ||
         strcasecmp(name, "length")    == 0 ||
         strcasecmp(name, "strlen")    == 0 ||
         strcasecmp(name, "pos")       == 0 ||
