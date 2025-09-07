@@ -384,6 +384,7 @@ set(REA_SOURCES
     src/rea/main.c
     src/rea/lexer.c
     src/rea/parser.c
+    src/rea/semantic.c
     src/Pascal/lexer.c
     src/Pascal/parser.c
     src/ast/ast.c
