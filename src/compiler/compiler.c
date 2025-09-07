@@ -305,7 +305,9 @@ static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line) {
 
 // Resolve type references to their concrete definitions.
 static AST* resolveTypeAlias(AST* type_node) {
-    while (type_node && type_node->type == AST_TYPE_REFERENCE && type_node->token && type_node->token->value) {
+    while (type_node &&
+           (type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+           type_node->token && type_node->token->value) {
         AST* looked = lookupType(type_node->token->value);
         if (!looked || looked == type_node) break;
         type_node = looked;
@@ -319,7 +321,19 @@ static AST* resolveTypeAlias(AST* type_node) {
 static int getRecordFieldCount(AST* recordType) {
     recordType = resolveTypeAlias(recordType);
     if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
-    int count = recordType->child_count; // local fields
+
+    int count = 0;
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        if (!decl) continue;
+        if (decl->type == AST_VAR_DECL) {
+            count += decl->child_count; // each child is a field name
+        } else if (decl->token) {
+            // Some passes may have flattened fields directly into the record.
+            count++;
+        }
+    }
+
     if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
         AST* parent = lookupType(recordType->extra->token->value);
         count += getRecordFieldCount(parent);
@@ -340,11 +354,23 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
         parentCount = getRecordFieldCount(parent);
     }
 
+    int offset = parentCount;
     for (int i = 0; i < recordType->child_count; i++) {
         AST* decl = recordType->children[i];
-        AST* var = (decl && decl->child_count > 0) ? decl->children[0] : NULL;
-        if (var && var->token && strcmp(var->token->value, fieldName) == 0) {
-            return parentCount + i;
+        if (!decl) continue;
+        if (decl->type == AST_VAR_DECL) {
+            for (int j = 0; j < decl->child_count; j++) {
+                AST* var = decl->children[j];
+                if (var && var->token && strcmp(var->token->value, fieldName) == 0) {
+                    return offset;
+                }
+                offset++;
+            }
+        } else if (decl->token) {
+            if (strcmp(decl->token->value, fieldName) == 0) {
+                return offset;
+            }
+            offset++;
         }
     }
     return -1;
