@@ -103,7 +103,40 @@ typedef struct {
     int method_count;
     int capacity;
     int* addrs;
+    bool merged;
 } VTableInfo;
+
+static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
+    for (int i = 0; i < table_count; i++) {
+        if (strcmp(tables[i].class_name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt) {
+    if (!vt || vt->merged) return;
+    AST* cls = lookupType(vt->class_name);
+    const char* parent_name = NULL;
+    if (cls && cls->extra && cls->extra->token) parent_name = cls->extra->token->value;
+    if (parent_name) {
+        int pidx = findVTableIndex(tables, table_count, parent_name);
+        if (pidx != -1) {
+            mergeParentTable(tables, table_count, &tables[pidx]);
+            VTableInfo* parent = &tables[pidx];
+            if (vt->capacity < parent->method_count) {
+                int newcap = parent->method_count;
+                vt->addrs = realloc(vt->addrs, sizeof(int) * newcap);
+                for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = 0;
+                vt->capacity = newcap;
+            }
+            for (int j = 0; j < parent->method_count; j++) {
+                if (vt->addrs[j] == 0) vt->addrs[j] = parent->addrs[j];
+            }
+            if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
+        }
+    }
+    vt->merged = true;
+}
 
 static void emitVTables(BytecodeChunk* chunk) {
     VTableInfo* tables = NULL;
@@ -131,6 +164,7 @@ static void emitVTables(BytecodeChunk* chunk) {
                             tables[idx].method_count = 0;
                             tables[idx].capacity = 0;
                             tables[idx].addrs = NULL;
+                            tables[idx].merged = false;
                         }
                         int mindex = base->type_def->i_val;
                         if (mindex >= tables[idx].capacity) {
@@ -146,6 +180,10 @@ static void emitVTables(BytecodeChunk* chunk) {
             }
             sym = sym->next;
         }
+    }
+
+    for (int i = 0; i < table_count; i++) {
+        mergeParentTable(tables, table_count, &tables[i]);
     }
 
     for (int i = 0; i < table_count; i++) {
