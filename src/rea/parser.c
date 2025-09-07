@@ -67,6 +67,33 @@ static AST *rewriteContinueWithPost(AST *node, AST *postStmt) {
     return node;
 }
 
+// Unescape standard escape sequences within a string literal segment
+static char *reaUnescapeString(const char *src, size_t len, size_t *out_len) {
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = src[i];
+        if (c == '\\' && i + 1 < len) {
+            char n = src[++i];
+            switch (n) {
+                case 'n': buf[j++] = '\n'; break;
+                case 'r': buf[j++] = '\r'; break;
+                case 't': buf[j++] = '\t'; break;
+                case '\\': buf[j++] = '\\'; break;
+                case 0x27: buf[j++] = 0x27; break;
+                case '"': buf[j++] = '"'; break;
+                default: buf[j++] = n; break;
+            }
+        } else {
+            buf[j++] = c;
+        }
+    }
+    buf[j] = '\0';
+    if (out_len) *out_len = j;
+    return buf;
+}
+
 static AST *parseFactor(ReaParser *p) {
     if (p->current.type == REA_TOKEN_SUPER) {
         // super(...) or super.method(...)
@@ -226,14 +253,15 @@ static AST *parseFactor(ReaParser *p) {
     } else if (p->current.type == REA_TOKEN_STRING) {
         size_t len = p->current.length;
         if (len < 2) return NULL;
-        char *lex = (char *)malloc(len - 1);
+        size_t inner_len = len - 2;
+        size_t unesc_len = 0;
+        char *lex = reaUnescapeString(p->current.start + 1, inner_len, &unesc_len);
         if (!lex) return NULL;
-        memcpy(lex, p->current.start + 1, len - 2);
-        lex[len - 2] = '\0';
         Token *tok = newToken(TOKEN_STRING_CONST, lex, p->current.line, 0);
         free(lex);
         AST *node = newASTNode(AST_STRING, tok);
-        setTypeAST(node, TYPE_STRING);
+        VarType vtype = (p->current.start[0] == '\'' && unesc_len == 1) ? TYPE_CHAR : TYPE_STRING;
+        setTypeAST(node, vtype);
         reaAdvance(p);
         return node;
     } else if (p->current.type == REA_TOKEN_TRUE || p->current.type == REA_TOKEN_FALSE) {

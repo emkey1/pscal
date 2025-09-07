@@ -200,6 +200,13 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             }
             if (peek(lexer) == '"') advance(lexer);
             return makeToken(lexer, REA_TOKEN_STRING, start);
+        case '\'':
+            while (peek(lexer) != '\'' && peek(lexer) != '\0') {
+                if (peek(lexer) == '\n') lexer->line++;
+                advance(lexer);
+            }
+            if (peek(lexer) == '\'') advance(lexer);
+            return makeToken(lexer, REA_TOKEN_STRING, start);
         default:
             break;
     }
