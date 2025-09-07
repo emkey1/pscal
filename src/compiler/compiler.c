@@ -70,6 +70,13 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
+static int addStringConstantLen(BytecodeChunk* chunk, const char* str, size_t len) {
+    Value val = makeStringLen(str, len);
+    int index = addConstantToChunk(chunk, &val);
+    freeValue(&val);
+    return index;
+}
+
 static int addIntConstant(BytecodeChunk* chunk, long long intValue) {
     Value val = makeInt(intValue);
     int index = addConstantToChunk(chunk, &val);
@@ -691,9 +698,15 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_STRING:
-            if (node->token && strlen(node->token->value) == 1)
-                return makeChar((unsigned char)node->token->value[0]);
-            if (node->token) return makeString(node->token->value);
+            if (node->token) {
+                size_t len = (size_t)node->i_val;
+                if (len == 1) {
+                    return makeChar((unsigned char)node->token->value[0]);
+                }
+                if (len > 0) {
+                    return makeStringLen(node->token->value, len);
+                }
+            }
             break;
         case AST_BOOLEAN:
             return makeBoolean(node->i_val);
@@ -2803,8 +2816,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_STRING: {
             if (!node_token || !node_token->value) { /* error */ break; }
 
-            // If the string literal has a length of 1, treat it as a character constant
-            if (strlen(node_token->value) == 1) {
+            size_t len = (size_t)node->i_val;
+            if (len == 1) {
                 /* Single-character string literals represent CHAR constants.
                  * Cast through unsigned char so values in the 128..255 range
                  * are preserved correctly. */
@@ -2813,8 +2826,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitConstant(chunk, constIndex, line);
                 // The temporary char value `val` does not need `freeValue`
             } else {
-                // For strings longer than 1 character, use the existing logic
-                int constIndex = addStringConstant(chunk, node_token->value);
+                int constIndex = addStringConstantLen(chunk, node_token->value, len);
                 emitConstant(chunk, constIndex, line);
             }
             break;
