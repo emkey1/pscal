@@ -1161,8 +1161,6 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            fieldOffset++;
-
             if (fieldOffset <= 0xFF) {
                 writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
