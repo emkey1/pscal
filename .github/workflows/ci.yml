@@ -22,6 +22,8 @@ jobs:
         run: Tests/run_clike_tests.sh
       - name: Run Pascal tests
         run: Tests/run_pascal_tests.sh
+      - name: Run Rea tests
+        run: Tests/run_rea_tests.sh
       - name: Compile CLike examples (dump-only)
         run: |
           set -e

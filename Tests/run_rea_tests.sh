@@ -23,7 +23,9 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   src_rel=${src#$ROOT_DIR/}
   args_file="$SCRIPT_DIR/rea/$test_name.args"
   if [ -f "$args_file" ]; then
-    read -r args < "$args_file"
+    if ! read -r args < "$args_file"; then
+      args=""
+    fi
   else
     args="--dump-bytecode-only"
   fi

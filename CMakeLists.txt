@@ -461,3 +461,4 @@ endif()
 
 add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
+add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
