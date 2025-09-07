@@ -3418,23 +3418,23 @@ comparison_error_label:
                 }
 
                 FieldValue* current = objVal->record_val;
-                uint16_t* vtable_ptr = NULL;
+                Value* vtable_arr = NULL;
                 while (current) {
                     if (strcmp(current->name, "__vtable") == 0) {
-                        if (current->value.type == TYPE_POINTER) {
-                            vtable_ptr = (uint16_t*)current->value.ptr_val;
+                        if (current->value.type == TYPE_ARRAY) {
+                            vtable_arr = current->value.array_val;
                         }
                         break;
                     }
                     current = current->next;
                 }
 
-                if (!vtable_ptr) {
+                if (!vtable_arr) {
                     runtimeError(vm, "VM Error: Object missing V-table.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                uint16_t target_address = vtable_ptr[method_index];
+                uint16_t target_address = (uint16_t)vtable_arr[method_index].u_val;
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
                     runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -3442,7 +3442,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity - 1;
-                frame->vtable = vtable_ptr;
+                frame->vtable = vtable_arr;
 
                 Symbol* method_symbol = NULL;
                 const char* className = NULL;
