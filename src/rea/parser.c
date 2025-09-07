@@ -35,6 +35,7 @@ static AST *parseLogicalOr(ReaParser *p);
 static AST *parseStatement(ReaParser *p);
 static AST *parseVarDecl(ReaParser *p);
 static AST *parseReturn(ReaParser *p);
+static AST *parseBreak(ReaParser *p);
 static AST *parseIf(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype);
@@ -1001,6 +1002,14 @@ static AST *parseReturn(ReaParser *p) {
     return node;
 }
 
+static AST *parseBreak(ReaParser *p) {
+    reaAdvance(p); // consume 'break'
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+    return newASTNode(AST_BREAK, NULL);
+}
+
 static AST *parseIf(ReaParser *p) {
     reaAdvance(p); // consume 'if'
     if (p->current.type == REA_TOKEN_LEFT_PAREN) {
@@ -1409,10 +1418,7 @@ static AST *parseStatement(ReaParser *p) {
         return newASTNode(AST_CONTINUE, NULL);
     }
     if (p->current.type == REA_TOKEN_BREAK) {
-        reaAdvance(p);
-        if (p->current.type == REA_TOKEN_SEMICOLON) reaAdvance(p);
-        AST *br = newASTNode(AST_BREAK, NULL);
-        return br;
+        return parseBreak(p);
     }
     if (p->current.type == REA_TOKEN_CONST) {
         return parseConstDecl(p);
