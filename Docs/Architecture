@@ -1,21 +1,29 @@
 flowchart LR
+    Source[Source files] --> FrontEnds
     subgraph FrontEnds
-        Pascal
-        CLike
-        Tiny
+        Pascal[Pascal]
+        CLike[C-like]
+        Tiny[Tiny]
     end
 
-    FrontEnds --> AST[AST & semantics]
+    FrontEnds --> AST[AST & semantic analysis]
     AST --> Compiler[Bytecode compiler]
-    Compiler --> Bytecode
+    StdLib[Standard library units] --> Compiler
+    Compiler --> Bytecode[Bytecode]
+    Bytecode --> Cache[Bytecode cache]
+    Cache --> VM
     Bytecode --> VM[Stack-based VM]
 
-    VM --> Backend[Core built-ins]
-    Backend --> SDL[SDL2]
-    Backend --> libcurl
+    VM --> CoreBuiltins[Core built-ins]
+    CoreBuiltins --> SDL[SDL2]
+    CoreBuiltins --> Curl[libcurl]
     VM --> ExtBuiltins[Extended built-ins]
 
-    Core[Utilities & symbol tables] --- FrontEnds
+    subgraph Core["Core utilities"]
+        Symbols[Symbol tables]
+        Helpers[Lists & helpers]
+    end
+    Core --- FrontEnds
     Core --- Compiler
     Core --- VM
 
