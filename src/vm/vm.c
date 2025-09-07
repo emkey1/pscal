@@ -2221,17 +2221,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* target = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && target; i++) {
-                    target = target->next;
+
+                FieldValue* current = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && current; i++) {
+                    current = current->next;
                 }
-                if (target == NULL) {
-                    runtimeError(vm, "VM Error: Field index out of bounds.");
+                if (!current) {
+                    runtimeError(vm, "VM Error: Field index out of range.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(&target->value, NULL));
+                push(vm, makePointer(&current->value, NULL));
                 break;
             }
             case OP_GET_FIELD_OFFSET16: {
@@ -2258,17 +2259,18 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* target = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && target; i++) {
-                    target = target->next;
+                FieldValue* current = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && current; i++) {
+                    current = current->next;
                 }
-                if (target == NULL) {
-                    runtimeError(vm, "VM Error: Field index out of bounds.");
+                if (!current) {
+                    runtimeError(vm, "VM Error: Field index out of range.");
+
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(&target->value, NULL));
+                push(vm, makePointer(&current->value, NULL));
                 break;
             }
             case OP_GET_FIELD_ADDRESS: {
