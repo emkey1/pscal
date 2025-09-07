@@ -7,6 +7,18 @@ REA_BIN="$ROOT_DIR/build/bin/rea"
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
+IFS=' ' read -r -a SKIP_TESTS <<< "${REA_SKIP_TESTS:-}"
+
+should_skip() {
+  local t="$1"
+  for s in "${SKIP_TESTS[@]}"; do
+    if [[ "$s" == "$t" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [ ! -x "$REA_BIN" ]; then
   echo "rea binary not found at $REA_BIN" >&2
   exit 1
@@ -17,6 +29,10 @@ EXIT_CODE=0
 
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)
+  if should_skip "$test_name"; then
+    echo "---- $test_name (skipped) ----"
+    continue
+  fi
   in_file="$SCRIPT_DIR/rea/$test_name.in"
   out_file="$SCRIPT_DIR/rea/$test_name.out"
   err_file="$SCRIPT_DIR/rea/$test_name.err"
