@@ -2221,8 +2221,14 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* fields = record_struct_ptr->record_val;
-                FieldValue* target = &fields[field_index];
+                FieldValue* target = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && target; i++) {
+                    target = target->next;
+                }
+                if (target == NULL) {
+                    runtimeError(vm, "VM Error: Field index out of bounds.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
                 push(vm, makePointer(&target->value, NULL));
@@ -2252,8 +2258,14 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* fields = record_struct_ptr->record_val;
-                FieldValue* target = &fields[field_index];
+                FieldValue* target = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && target; i++) {
+                    target = target->next;
+                }
+                if (target == NULL) {
+                    runtimeError(vm, "VM Error: Field index out of bounds.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
                 push(vm, makePointer(&target->value, NULL));
