@@ -150,6 +150,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case OP_SET_UPVALUE:
         case OP_GET_UPVALUE_ADDRESS:
         case OP_GET_FIELD_ADDRESS:
+        case OP_GET_FIELD_OFFSET:
+        case OP_ALLOC_OBJECT:
         case OP_GET_ELEMENT_ADDRESS:
         case OP_GET_CHAR_ADDRESS:
         case OP_INIT_LOCAL_FILE:
@@ -167,6 +169,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         }
         case OP_CONSTANT16:
         case OP_GET_FIELD_ADDRESS16:
+        case OP_GET_FIELD_OFFSET16:
+        case OP_ALLOC_OBJECT16:
         case OP_GET_GLOBAL16:
         case OP_SET_GLOBAL16:
         case OP_GET_GLOBAL_ADDRESS16:
@@ -606,6 +610,28 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             } else {
                 fprintf(stderr, "<INVALID FIELD CONST>\n");
             }
+            return offset + 3;
+        }
+        case OP_ALLOC_OBJECT: {
+            uint8_t fields = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (fields)\n", "OP_ALLOC_OBJECT", fields);
+            return offset + 2;
+        }
+        case OP_ALLOC_OBJECT16: {
+            uint16_t fields = (uint16_t)(chunk->code[offset + 1] << 8) |
+                              chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (fields)\n", "OP_ALLOC_OBJECT16", fields);
+            return offset + 3;
+        }
+        case OP_GET_FIELD_OFFSET: {
+            uint8_t idx = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (index)\n", "OP_GET_FIELD_OFFSET", idx);
+            return offset + 2;
+        }
+        case OP_GET_FIELD_OFFSET16: {
+            uint16_t idx = (uint16_t)(chunk->code[offset + 1] << 8) |
+                            chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (index)\n", "OP_GET_FIELD_OFFSET16", idx);
             return offset + 3;
         }
         case OP_GET_ELEMENT_ADDRESS: {

@@ -79,6 +79,17 @@ typedef enum {
     
     OP_GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
 
+    // --- Object support --------------------------------------------------
+    // Allocate a record/object with the given number of fields.  The first
+    // slot is always reserved for the hidden __vtable pointer.
+    OP_ALLOC_OBJECT,       // Operand: 1-byte field count
+    OP_ALLOC_OBJECT16,     // Operand: 2-byte field count
+    // Fetch the address of a field using a zero based offset.  Pops the base
+    // pointer/record from the stack and pushes the address of the selected
+    // field.
+    OP_GET_FIELD_OFFSET,   // Operand: 1-byte field index
+    OP_GET_FIELD_OFFSET16, // Operand: 2-byte field index
+
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
                       // Operands: 2-byte name index, 1-byte argument count
