@@ -92,6 +92,8 @@ typedef enum {
     OP_CALL,          // For user-defined procedure/function calls.
                       // Operands: 2-byte name_idx, 2-byte address, 1-byte arg count
     OP_CALL_INDIRECT,     // Indirect call via address on stack. Operands: 1-byte arg count
+    OP_CALL_METHOD,       // Virtual method call using object's V-table
+                          // Operands: 1-byte method index, 1-byte arg count
     OP_PROC_CALL_INDIRECT,// Indirect call used in statement context; discards any return value. Operands: 1-byte arg count
     OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
     OP_EXIT,          // Early exit from the current function without halting the VM
