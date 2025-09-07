@@ -93,6 +93,7 @@ static AST *parseFactor(ReaParser *p) {
             // Prepend implicit 'this'
             Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
             AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+            setTypeAST(thisVar, TYPE_POINTER);
             addChild(call, thisVar);
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
@@ -139,6 +140,7 @@ static AST *parseFactor(ReaParser *p) {
             // Prepend implicit 'this'
             Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
             AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+            setTypeAST(thisVar, TYPE_POINTER);
             addChild(call, thisVar);
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
@@ -672,6 +674,36 @@ static const char *typeName(ReaTokenType t) {
 }
 
 static AST *parseVarDecl(ReaParser *p) {
+    // Allow constructor shorthand: inside a class, the constructor may omit
+    // the return type and start directly with the class name, e.g.:
+    //   ClassName(arg1, arg2) { ... }
+    // Detect this before normal type parsing by peeking at the next
+    // non-whitespace character. If it is an opening parenthesis and the
+    // identifier matches the current class name, treat it as a constructor
+    // with an implicit void return type.
+    if (p->current.type == REA_TOKEN_IDENTIFIER && p->currentClassName) {
+        size_t len = p->current.length;
+        if (strlen(p->currentClassName) == len &&
+            strncasecmp(p->current.start, p->currentClassName, len) == 0) {
+            size_t look = p->lexer.pos;
+            const char *src = p->lexer.source;
+            while (src[look] == ' ' || src[look] == '\t' ||
+                   src[look] == '\r' || src[look] == '\n') {
+                look++;
+            }
+            if (src[look] == '(') {
+                char *lex = (char *)malloc(len + 1);
+                if (!lex) return NULL;
+                memcpy(lex, p->current.start, len);
+                lex[len] = '\0';
+                Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+                free(lex);
+                reaAdvance(p); // consume constructor name
+                return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID);
+            }
+        }
+    }
+
     ReaTokenType typeTok = p->current.type;
     VarType vtype = mapType(typeTok);
 

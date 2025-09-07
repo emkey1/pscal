@@ -1,0 +1,11 @@
+int x = 2;
+switch (x) {
+  case 1:
+    writeln(1);
+    break;
+  case 2:
+    writeln(2);
+    break;
+  default:
+    writeln(3);
+}

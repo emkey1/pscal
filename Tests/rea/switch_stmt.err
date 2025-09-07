@@ -1,0 +1,40 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/switch_stmt.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 OP_DEFINE_GLOBAL NameIdx:0   'x' Type:INT64 ('int')
+0005    | OP_CONSTANT         2 '2'
+0007    | OP_SET_GLOBAL       0 'x'
+0009    2 OP_GET_GLOBAL       0 'x'
+0011    | OP_DUP
+0012    3 OP_CONSTANT         3 '1'
+0014    2 OP_EQUAL
+0015    | OP_JUMP_IF_FALSE   12 (to 0030)
+0018    | OP_POP
+0019    4 OP_CONSTANT         3 '1'
+0021    | OP_CONSTANT         3 '1'
+0023    | OP_CALL_BUILTIN      4 'write' (2 args)
+0027    2 OP_JUMP            28 (to 0058)
+0030    | OP_DUP
+0031    6 OP_CONSTANT         2 '2'
+0033    2 OP_EQUAL
+0034    | OP_JUMP_IF_FALSE   12 (to 0049)
+0037    | OP_POP
+0038    7 OP_CONSTANT         3 '1'
+0040    | OP_CONSTANT         2 '2'
+0042    | OP_CALL_BUILTIN      4 'write' (2 args)
+0046    2 OP_JUMP             9 (to 0058)
+0049    | OP_POP
+0050   10 OP_CONSTANT         3 '1'
+0052    | OP_CONSTANT         5 '3'
+0054    | OP_CALL_BUILTIN      4 'write' (2 args)
+0058    0 OP_HALT
+== End Disassembly: Tests/rea/switch_stmt.rea ==
+
+Constants (6):\n  0000: STR   "x"
+  0001: STR   "int"
+  0002: INT   2
+  0003: INT   1
+  0004: STR   "write"
+  0005: INT   3
+
