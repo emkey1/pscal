@@ -96,6 +96,7 @@ static Token* makeIdentTokenLocal(const char* s) {
     Token* t = (Token*)malloc(sizeof(Token));
     t->type = TOKEN_IDENTIFIER;
     t->value = strdup(s);
+    t->length = t->value ? strlen(t->value) : 0;
     t->line = 0;
     t->column = 0;
     return t;

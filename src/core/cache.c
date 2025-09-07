@@ -73,7 +73,7 @@ static bool writeToken(FILE* f, const Token* tok) {
     fwrite(&has, sizeof(has), 1, f);
     if (!has) return true;
     fwrite(&tok->type, sizeof(tok->type), 1, f);
-    int len = tok->value ? (int)strlen(tok->value) : 0;
+    int len = tok && tok->value ? (int)tok->length : 0;
     fwrite(&len, sizeof(len), 1, f);
     if (len > 0) fwrite(tok->value, 1, len, f);
     return true;
@@ -87,18 +87,17 @@ static Token* readToken(FILE* f) {
     if (fread(&type, sizeof(type), 1, f) != 1) return NULL;
     int len = 0;
     if (fread(&len, sizeof(len), 1, f) != 1) return NULL;
-    char* buf = NULL;
-    if (len > 0) {
-        buf = (char*)malloc(len + 1);
-        if (!buf) return NULL;
-        if (fread(buf, 1, len, f) != (size_t)len) { free(buf); return NULL; }
-        buf[len] = '\0';
-    } else {
-        buf = strdup("");
-        if (!buf) return NULL;
-    }
-    Token* tok = newToken(type, buf, 0, 0);
-    free(buf);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    if (len > 0 && fread(buf, 1, len, f) != (size_t)len) { free(buf); return NULL; }
+    buf[len] = '\0';
+    Token* tok = (Token*)malloc(sizeof(Token));
+    if (!tok) { free(buf); return NULL; }
+    tok->type = type;
+    tok->value = buf;
+    tok->length = (size_t)len;
+    tok->line = 0;
+    tok->column = 0;
     return tok;
 }
 
