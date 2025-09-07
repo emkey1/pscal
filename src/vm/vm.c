@@ -30,13 +30,6 @@
 #define STRING_CHAR_PTR_SENTINEL   ((AST*)0xDEADBEEF)
 #define STRING_LENGTH_SENTINEL     ((AST*)0xFEEDBEEF)
 
-// Object header used for dynamic dispatch: every heap object begins with a
-// pointer to its defining class symbol and that class's V-table.
-typedef struct {
-    Symbol* class_symbol;   // Class descriptor for the instance
-    uint16_t* vtable;       // Array of bytecode addresses for virtual methods
-} ObjectHeader;
-
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
@@ -3417,12 +3410,31 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Method call receiver must be an object pointer.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                ObjectHeader* obj = (ObjectHeader*)receiverVal.ptr_val;
-                if (!obj->vtable) {
+
+                Value* objVal = receiverVal.ptr_val;
+                if (objVal->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Method call receiver must be an object record.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FieldValue* current = objVal->record_val;
+                Value* vtable_arr = NULL;
+                while (current) {
+                    if (strcmp(current->name, "__vtable") == 0) {
+                        if (current->value.type == TYPE_ARRAY) {
+                            vtable_arr = current->value.array_val;
+                        }
+                        break;
+                    }
+                    current = current->next;
+                }
+
+                if (!vtable_arr) {
                     runtimeError(vm, "VM Error: Object missing V-table.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                uint16_t target_address = obj->vtable[method_index];
+
+                uint16_t target_address = (uint16_t)vtable_arr[method_index].u_val;
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
                     runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -3430,11 +3442,15 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity - 1;
-                frame->vtable = obj->vtable;
+                frame->vtable = vtable_arr;
 
                 Symbol* method_symbol = NULL;
-                if (obj->class_symbol) {
-                    method_symbol = vmFindClassMethod(vm, obj->class_symbol->name, method_index);
+                const char* className = NULL;
+                if (objVal->base_type_node && objVal->base_type_node->token) {
+                    className = objVal->base_type_node->token->value;
+                }
+                if (className) {
+                    method_symbol = vmFindClassMethod(vm, className, method_index);
                 }
                 if (!method_symbol) {
                     method_symbol = findProcedureByAddress(vm->procedureTable, target_address);

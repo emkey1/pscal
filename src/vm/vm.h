@@ -57,7 +57,7 @@ typedef struct {
     uint8_t upvalue_count;
     Value** upvalues;
     bool discard_result_on_return; // If true, drop any function result on return
-    uint16_t* vtable;            // Reference to class V-table when executing a method
+    Value* vtable;               // Reference to class V-table when executing a method
 } CallFrame;
 
 // Thread structure representing a lightweight VM thread
