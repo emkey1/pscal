@@ -31,7 +31,7 @@ from typing import List, Optional, Tuple, Dict, Any, Set
 def load_opcodes(root: Path) -> Dict[str, int]:
     """Parse ``bytecode.h`` to recover opcode values."""
     header = root / "src" / "compiler" / "bytecode.h"
-    pattern = re.compile(r"^\s*(OP_[A-Z0-9_]+)\s*,")
+    pattern = re.compile(r"^\s*([A-Z0-9_]+)\s*,")
     opcodes: Dict[str, int] = {}
     enum_started = False
     index = 0
@@ -300,10 +300,10 @@ class BytecodeBuilder:
     def emit_constant(self, value: int) -> None:
         idx = self.add_constant(TYPE_INTEGER, value)
         if idx <= 0xFF:
-            self.emit(self.opcodes["OP_CONSTANT"])
+            self.emit(self.opcodes["CONSTANT"])
             self.emit(idx)
         else:
-            self.emit(self.opcodes["OP_CONSTANT16"])
+            self.emit(self.opcodes["CONSTANT16"])
             self.emit_short(idx)
 
 # ---------------------------------------------------------------------------
@@ -343,10 +343,10 @@ class tinyCompiler:
             name_idx = self.builder.add_constant(TYPE_STRING, name)
             self.var_name_idx[name] = name_idx
             if name_idx <= 0xFF:
-                self.builder.emit(self.opcodes["OP_DEFINE_GLOBAL"])
+                self.builder.emit(self.opcodes["DEFINE_GLOBAL"])
                 self.builder.emit(name_idx)
             else:
-                self.builder.emit(self.opcodes["OP_DEFINE_GLOBAL16"])
+                self.builder.emit(self.opcodes["DEFINE_GLOBAL16"])
                 self.builder.emit_short(name_idx)
             self.builder.emit(TYPE_INTEGER)
             self.builder.emit_short(self.type_integer_idx)
@@ -355,12 +355,12 @@ class tinyCompiler:
             self.compile_statement(stmt)
 
         # Ensure every program terminates with a newline for clean output
-        self.builder.emit(self.opcodes["OP_CONSTANT"])
+        self.builder.emit(self.opcodes["CONSTANT"])
         self.builder.emit(self.const_true_idx)
-        self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+        self.builder.emit(self.opcodes["CALL_BUILTIN"])
         self.builder.emit_short(self.write_idx)
         self.builder.emit(1)
-        self.builder.emit(self.opcodes["OP_HALT"])
+        self.builder.emit(self.opcodes["HALT"])
         return self.builder
 
     # --- Statement compilation ---
@@ -369,37 +369,37 @@ class tinyCompiler:
             self.compile_expression(stmt.expr)
             name_idx = self.var_name_idx[stmt.name]
             self.emit_global_addr(name_idx)
-            self.builder.emit(self.opcodes["OP_SWAP"])
-            self.builder.emit(self.opcodes["OP_SET_INDIRECT"])
+            self.builder.emit(self.opcodes["SWAP"])
+            self.builder.emit(self.opcodes["SET_INDIRECT"])
         elif isinstance(stmt, Read):
             name_idx = self.var_name_idx[stmt.name]
             self.emit_global_addr(name_idx)
-            self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+            self.builder.emit(self.opcodes["CALL_BUILTIN"])
             self.builder.emit_short(self.read_idx)
             self.builder.emit(1)  # argument count
         elif isinstance(stmt, Write):
             if stmt.expr is None:
-                self.builder.emit(self.opcodes["OP_CONSTANT"])
+                self.builder.emit(self.opcodes["CONSTANT"])
                 self.builder.emit(self.const_true_idx)
-                self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+                self.builder.emit(self.opcodes["CALL_BUILTIN"])
                 self.builder.emit_short(self.write_idx)
                 self.builder.emit(1)
             else:
-                self.builder.emit(self.opcodes["OP_CONSTANT"])
+                self.builder.emit(self.opcodes["CONSTANT"])
                 self.builder.emit(self.const_false_idx)
                 self.compile_expression(stmt.expr)
-                self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+                self.builder.emit(self.opcodes["CALL_BUILTIN"])
                 self.builder.emit_short(self.write_idx)
                 self.builder.emit(2)
         elif isinstance(stmt, If):
             self.compile_expression(stmt.cond)
-            self.builder.emit(self.opcodes["OP_JUMP_IF_FALSE"])
+            self.builder.emit(self.opcodes["JUMP_IF_FALSE"])
             jump_to_else = len(self.builder.code)
             self.builder.emit_short(0)
             for s in stmt.then_branch:
                 self.compile_statement(s)
             if stmt.else_branch:
-                self.builder.emit(self.opcodes["OP_JUMP"])
+                self.builder.emit(self.opcodes["JUMP"])
                 jump_over_else = len(self.builder.code)
                 self.builder.emit_short(0)
                 offset = len(self.builder.code) - (jump_to_else + 2)
@@ -416,7 +416,7 @@ class tinyCompiler:
             for s in stmt.body:
                 self.compile_statement(s)
             self.compile_expression(stmt.cond)
-            self.builder.emit(self.opcodes["OP_JUMP_IF_FALSE"])
+            self.builder.emit(self.opcodes["JUMP_IF_FALSE"])
             backward = loop_start - (len(self.builder.code) + 2)
             self.builder.emit_short(backward)
         else:
@@ -428,10 +428,10 @@ class tinyCompiler:
 
     def emit_global_addr(self, name_idx: int) -> None:
         if name_idx <= 0xFF:
-            self.builder.emit(self.opcodes["OP_GET_GLOBAL_ADDRESS"])
+            self.builder.emit(self.opcodes["GET_GLOBAL_ADDRESS"])
             self.builder.emit(name_idx)
         else:
-            self.builder.emit(self.opcodes["OP_GET_GLOBAL_ADDRESS16"])
+            self.builder.emit(self.opcodes["GET_GLOBAL_ADDRESS16"])
             self.builder.emit_short(name_idx)
 
     # --- Expression compilation ---
@@ -441,21 +441,21 @@ class tinyCompiler:
         elif isinstance(expr, Var):
             name_idx = self.var_name_idx[expr.name]
             if name_idx <= 0xFF:
-                self.builder.emit(self.opcodes["OP_GET_GLOBAL"])
+                self.builder.emit(self.opcodes["GET_GLOBAL"])
                 self.builder.emit(name_idx)
             else:
-                self.builder.emit(self.opcodes["OP_GET_GLOBAL16"])
+                self.builder.emit(self.opcodes["GET_GLOBAL16"])
                 self.builder.emit_short(name_idx)
         elif isinstance(expr, BinOp):
             self.compile_expression(expr.left)
             self.compile_expression(expr.right)
             opmap = {
-                "+": "OP_ADD",
-                "-": "OP_SUBTRACT",
-                "*": "OP_MULTIPLY",
-                "/": "OP_DIVIDE",
-                "<": "OP_LESS",
-                "=": "OP_EQUAL",
+                "+": "ADD",
+                "-": "SUBTRACT",
+                "*": "MULTIPLY",
+                "/": "DIVIDE",
+                "<": "LESS",
+                "=": "EQUAL",
             }
             self.builder.emit(self.opcodes[opmap[expr.op]])
         else:

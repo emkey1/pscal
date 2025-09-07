@@ -2,15 +2,15 @@
 == Disassembly: Tests/rea/assign_expr.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    1 OP_DEFINE_GLOBAL NameIdx:0   'b' Type:INT64 ('int')
-0005    2 OP_DEFINE_GLOBAL NameIdx:2   'a' Type:INT64 ('int')
-0010    | OP_CONSTANT         3 '3'
-0012    | OP_DUP
-0013    | OP_GET_GLOBAL_ADDRESS    0 'b'
-0015    | OP_SWAP
-0016    | OP_SET_INDIRECT
-0017    | OP_SET_GLOBAL       2 'a'
-0019    0 OP_HALT
+0000    1 DEFINE_GLOBAL    NameIdx:0   'b' Type:INT64 ('int')
+0005    2 DEFINE_GLOBAL    NameIdx:2   'a' Type:INT64 ('int')
+0010    | CONSTANT            3 '3'
+0012    | DUP
+0013    | GET_GLOBAL_ADDRESS    0 'b'
+0015    | SWAP
+0016    | SET_INDIRECT
+0017    | SET_GLOBAL          2 'a'
+0019    0 HALT
 == End Disassembly: Tests/rea/assign_expr.rea ==
 
 Constants (4):\n  0000: STR   "b"

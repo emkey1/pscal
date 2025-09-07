@@ -2,21 +2,21 @@
 == Disassembly: Tests/rea/block_decl.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    1 OP_DEFINE_GLOBAL NameIdx:0   'x' Type:INT64 ('int')
-0005    | OP_CONSTANT         2 '0'
-0007    | OP_SET_GLOBAL       0 'x'
-0009    2 OP_GET_GLOBAL       0 'x'
-0011    | OP_CONSTANT         2 '0'
-0013    | OP_EQUAL
-0014    | OP_JUMP_IF_FALSE   15 (to 0032)
-0017    3 OP_DEFINE_GLOBAL NameIdx:3   'y' Type:INT64 ('int')
-0022    | OP_CONSTANT         4 '1'
-0024    | OP_SET_GLOBAL       3 'y'
-0026    4 OP_GET_GLOBAL       3 'y'
-0028    | OP_GET_GLOBAL_ADDRESS    0 'x'
-0030    | OP_SWAP
-0031    | OP_SET_INDIRECT
-0032    0 OP_HALT
+0000    1 DEFINE_GLOBAL    NameIdx:0   'x' Type:INT64 ('int')
+0005    | CONSTANT            2 '0'
+0007    | SET_GLOBAL          0 'x'
+0009    2 GET_GLOBAL          0 'x'
+0011    | CONSTANT            2 '0'
+0013    | EQUAL
+0014    | JUMP_IF_FALSE      15 (to 0032)
+0017    3 DEFINE_GLOBAL    NameIdx:3   'y' Type:INT64 ('int')
+0022    | CONSTANT            4 '1'
+0024    | SET_GLOBAL          3 'y'
+0026    4 GET_GLOBAL          3 'y'
+0028    | GET_GLOBAL_ADDRESS    0 'x'
+0030    | SWAP
+0031    | SET_INDIRECT
+0032    0 HALT
 == End Disassembly: Tests/rea/block_decl.rea ==
 
 Constants (5):\n  0000: STR   "x"

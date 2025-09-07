@@ -2,12 +2,12 @@
 == Disassembly: Tests/rea/new_assign_ptr.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    2 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
-0005    3 OP_ALLOC_OBJECT     2 (fields)
-0007    | OP_GET_GLOBAL_ADDRESS    0 'p'
-0009    | OP_SWAP
-0010    | OP_SET_INDIRECT
-0011    0 OP_HALT
+0000    2 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
+0005    3 ALLOC_OBJECT        2 (fields)
+0007    | GET_GLOBAL_ADDRESS    0 'p'
+0009    | SWAP
+0010    | SET_INDIRECT
+0011    0 HALT
 == End Disassembly: Tests/rea/new_assign_ptr.rea ==
 
 Constants (2):\n  0000: STR   "p"

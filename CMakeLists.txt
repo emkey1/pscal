@@ -27,6 +27,7 @@ add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
 # Optionally build the debug "dascal" binary
 option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
+option(BUILD_DISASSEMBLER "Build the standalone disassembler" OFF)
 
 # Optionally enable SDL-based features
 option(SDL "Enable SDL-based graphics and audio" OFF)
@@ -275,6 +276,16 @@ set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
 add_pscal_executable(pscalvm)
 set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
 
+if(BUILD_DISASSEMBLER)
+    set(DISASSEMBLER_SOURCES ${PSCAL_VM_SOURCES})
+    list(REMOVE_ITEM DISASSEMBLER_SOURCES src/vm/vm_main.c)
+    list(APPEND DISASSEMBLER_SOURCES src/disassembler/main.c)
+    set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
+    set(PSCAL_SOURCES ${DISASSEMBLER_SOURCES})
+    add_pscal_executable(disassembler)
+    set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+endif()
+
 # Tiny C front-end executable
 set(CLIKE_SOURCES
     src/clike/main.c
@@ -456,6 +467,10 @@ install(TARGETS pascal pscalvm
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 if(BUILD_DASCAL)
     install(TARGETS dascal
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
+if(BUILD_DISASSEMBLER)
+    install(TARGETS disassembler
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 

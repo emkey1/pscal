@@ -14,112 +14,112 @@
 
 // --- Opcode Definitions ---
 typedef enum {
-    OP_RETURN,        // Return from current function/script (implicit at end of main block)
-    OP_CONSTANT,      // Push a constant from the constant pool onto the stack
-    OP_CONSTANT16,   // For cases where the number exceeds a byte
-    OP_ADD,           // Pop two values, add, push result
-    OP_SUBTRACT,      // Pop two values, subtract, push result
-    OP_MULTIPLY,      // Pop two values, multiply, push result
-    OP_DIVIDE,        // Pop two values, divide, push result (handle integer/real later)
-    OP_NEGATE,        // Pop one value, negate it, push result (for unary minus)
-    OP_NOT,           // Pop one value (boolean), invert, push result
-    OP_EQUAL,
-    OP_NOT_EQUAL,
-    OP_GREATER,
-    OP_GREATER_EQUAL,
-    OP_LESS,
-    OP_LESS_EQUAL,
-    OP_INT_DIV,
-    OP_MOD,
-    OP_AND,
-    OP_OR,
-    OP_SHL,           // Bit Shift Left
-    OP_SHR,           // Bit Shift Right
+    RETURN,        // Return from current function/script (implicit at end of main block)
+    CONSTANT,      // Push a constant from the constant pool onto the stack
+    CONSTANT16,   // For cases where the number exceeds a byte
+    ADD,           // Pop two values, add, push result
+    SUBTRACT,      // Pop two values, subtract, push result
+    MULTIPLY,      // Pop two values, multiply, push result
+    DIVIDE,        // Pop two values, divide, push result (handle integer/real later)
+    NEGATE,        // Pop one value, negate it, push result (for unary minus)
+    NOT,           // Pop one value (boolean), invert, push result
+    EQUAL,
+    NOT_EQUAL,
+    GREATER,
+    GREATER_EQUAL,
+    LESS,
+    LESS_EQUAL,
+    INT_DIV,
+    MOD,
+    AND,
+    OR,
+    SHL,           // Bit Shift Left
+    SHR,           // Bit Shift Right
 
-    OP_JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
-    OP_JUMP,          // Unconditionally jumps by a 16-bit signed offset
-    OP_SWAP,          // OPCODE to swap the top two stack items.
-    OP_DUP,           // Duplicate the top value on the stack
+    JUMP_IF_FALSE, // Pops value; if false, jumps by a 16-bit signed offset
+    JUMP,          // Unconditionally jumps by a 16-bit signed offset
+    SWAP,          // OPCODE to swap the top two stack items.
+    DUP,           // Duplicate the top value on the stack
 
-    // OP_DEFINE_GLOBAL encoding used by VM/disassembler:
+    // DEFINE_GLOBAL encoding used by VM/disassembler:
     //   [name_const_idx][var_type_enum][payload...]
     //   If var_type_enum == TYPE_ARRAY:
     //       [dim_count] { [lower_idx][upper_idx] }*dim_count [elem_var_type][elem_type_name_idx]
     //   Else:
     //       [type_name_const_idx] [len_const_idx if var_type_enum == TYPE_STRING]
     //         // len_const_idx references an integer constant; 0 means dynamic length
-    OP_DEFINE_GLOBAL,
-    OP_DEFINE_GLOBAL16, // 16-bit name index variant of OP_DEFINE_GLOBAL
-    OP_GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
-    OP_SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
-    OP_GET_GLOBAL_ADDRESS,
-    OP_GET_GLOBAL16,  // 16-bit name index variant of OP_GET_GLOBAL
-    OP_SET_GLOBAL16,  // 16-bit name index variant of OP_SET_GLOBAL
-    OP_GET_GLOBAL_ADDRESS16, // 16-bit name index variant of OP_GET_GLOBAL_ADDRESS
+    DEFINE_GLOBAL,
+    DEFINE_GLOBAL16, // 16-bit name index variant of DEFINE_GLOBAL
+    GET_GLOBAL,    // Get a global variable's value (takes constant index for name)
+    SET_GLOBAL,    // Set a global variable's value (takes constant index for name)
+    GET_GLOBAL_ADDRESS,
+    GET_GLOBAL16,  // 16-bit name index variant of GET_GLOBAL
+    SET_GLOBAL16,  // 16-bit name index variant of SET_GLOBAL
+    GET_GLOBAL_ADDRESS16, // 16-bit name index variant of GET_GLOBAL_ADDRESS
 
-    OP_GET_LOCAL,     // Get local scoped variables
-    OP_SET_LOCAL,     // Set local scoped variables
-    OP_INIT_LOCAL_ARRAY, // Initialize local array variable
-    OP_INIT_LOCAL_FILE,  // Initialize local file variable
-    OP_INIT_LOCAL_POINTER, // Initialize local pointer variable
-    OP_GET_LOCAL_ADDRESS,
+    GET_LOCAL,     // Get local scoped variables
+    SET_LOCAL,     // Set local scoped variables
+    INIT_LOCAL_ARRAY, // Initialize local array variable
+    INIT_LOCAL_FILE,  // Initialize local file variable
+    INIT_LOCAL_POINTER, // Initialize local pointer variable
+    GET_LOCAL_ADDRESS,
 
-    OP_GET_UPVALUE,
-    OP_SET_UPVALUE,
-    OP_GET_UPVALUE_ADDRESS,
+    GET_UPVALUE,
+    SET_UPVALUE,
+    GET_UPVALUE_ADDRESS,
 
-    OP_GET_FIELD_ADDRESS,
-    OP_GET_FIELD_ADDRESS16,
-    OP_GET_ELEMENT_ADDRESS,
-    OP_GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
-    OP_SET_INDIRECT,
-    OP_GET_INDIRECT,
+    GET_FIELD_ADDRESS,
+    GET_FIELD_ADDRESS16,
+    GET_ELEMENT_ADDRESS,
+    GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
+    SET_INDIRECT,
+    GET_INDIRECT,
     
-    OP_IN, // For set membership
+    IN, // For set membership
     
-    OP_GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
+    GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
 
     // --- Object support --------------------------------------------------
     // Allocate a record/object with the given number of fields.  The first
     // slot is always reserved for the hidden __vtable pointer.
-    OP_ALLOC_OBJECT,       // Operand: 1-byte field count
-    OP_ALLOC_OBJECT16,     // Operand: 2-byte field count
+    ALLOC_OBJECT,       // Operand: 1-byte field count
+    ALLOC_OBJECT16,     // Operand: 2-byte field count
     // Fetch the address of a field using a zero based offset.  Pops the base
     // pointer/record from the stack and pushes the address of the selected
     // field.
-    OP_GET_FIELD_OFFSET,   // Operand: 1-byte field index
-    OP_GET_FIELD_OFFSET16, // Operand: 2-byte field index
+    GET_FIELD_OFFSET,   // Operand: 1-byte field index
+    GET_FIELD_OFFSET16, // Operand: 2-byte field index
 
     // For now, built-ins might be handled specially, or we can add a generic call
-    OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
+    CALL_BUILTIN,  // Placeholder for calling built-in functions
                       // Operands: 2-byte name index, 1-byte argument count
     
-    OP_CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
-    OP_CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
+    CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
+    CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
 
-    OP_CALL_HOST,
+    CALL_HOST,
 
-    OP_POP,           // Pop the top value from the stack (e.g., after an expression statement)
-    OP_CALL,          // For user-defined procedure/function calls.
+    POP,           // Pop the top value from the stack (e.g., after an expression statement)
+    CALL,          // For user-defined procedure/function calls.
                       // Operands: 2-byte name_idx, 2-byte address, 1-byte arg count
-    OP_CALL_INDIRECT,     // Indirect call via address on stack. Operands: 1-byte arg count
-    OP_CALL_METHOD,       // Virtual method call using object's V-table
+    CALL_INDIRECT,     // Indirect call via address on stack. Operands: 1-byte arg count
+    CALL_METHOD,       // Virtual method call using object's V-table
                           // Operands: 1-byte method index, 1-byte arg count
-    OP_PROC_CALL_INDIRECT,// Indirect call used in statement context; discards any return value. Operands: 1-byte arg count
-    OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
-    OP_EXIT,          // Early exit from the current function without halting the VM
-    OP_FORMAT_VALUE,  // Format the value on top of the stack. Operands: width (byte), precision (byte)
+    PROC_CALL_INDIRECT,// Indirect call used in statement context; discards any return value. Operands: 1-byte arg count
+    HALT,          // Stop the VM (though RETURN from main might suffice)
+    EXIT,          // Early exit from the current function without halting the VM
+    FORMAT_VALUE,  // Format the value on top of the stack. Operands: width (byte), precision (byte)
 
     // --- Threading Opcodes ---
-    OP_THREAD_CREATE,      // Create a new lightweight thread. Operand: 2-byte entry offset
-    OP_THREAD_JOIN,        // Join on a thread. Operand: none (pops thread id from stack)
+    THREAD_CREATE,      // Create a new lightweight thread. Operand: 2-byte entry offset
+    THREAD_JOIN,        // Join on a thread. Operand: none (pops thread id from stack)
 
     // --- Mutex Opcodes ---
-    OP_MUTEX_CREATE,       // Create a standard mutex. Pushes mutex id
-    OP_RCMUTEX_CREATE,     // Create a recursive mutex. Pushes mutex id
-    OP_MUTEX_LOCK,         // Lock mutex whose id is on top of stack
-    OP_MUTEX_UNLOCK,       // Unlock mutex whose id is on top of stack
-    OP_MUTEX_DESTROY       // Destroy mutex whose id is on top of stack
+    MUTEX_CREATE,       // Create a standard mutex. Pushes mutex id
+    RCMUTEX_CREATE,     // Create a recursive mutex. Pushes mutex id
+    MUTEX_LOCK,         // Lock mutex whose id is on top of stack
+    MUTEX_UNLOCK,       // Unlock mutex whose id is on top of stack
+    MUTEX_DESTROY       // Destroy mutex whose id is on top of stack
 
 } OpCode;
 

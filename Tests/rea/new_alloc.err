@@ -2,10 +2,10 @@
 == Disassembly: Tests/rea/new_alloc.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    3 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
-0005    | OP_ALLOC_OBJECT     3 (fields)
-0007    | OP_SET_GLOBAL       0 'p'
-0009    0 OP_HALT
+0000    3 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
+0005    | ALLOC_OBJECT        3 (fields)
+0007    | SET_GLOBAL          0 'p'
+0009    0 HALT
 == End Disassembly: Tests/rea/new_alloc.rea ==
 
 Constants (2):\n  0000: STR   "p"

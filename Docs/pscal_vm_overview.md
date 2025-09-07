@@ -30,7 +30,7 @@ The VM's execution is driven by the `interpretBytecode` function in `src/vm/vm.c
 2.  Decodes the instruction and its operands.
 3.  Performs the operation defined by the instruction, which typically involves pushing, popping, or manipulating values on the stack.
 4.  Updates the instruction pointer to the next instruction.
-5.  This loop continues until it encounters an `OP_HALT` instruction or a `OP_RETURN` from the main program body.
+5.  This loop continues until it encounters an `HALT` instruction or a `RETURN` from the main program body.
 
 ---
 
@@ -40,37 +40,37 @@ The following is a complete list of opcodes supported by the Pscal VM, as define
 
 #### **Stack Manipulation Opcodes**
 
-* **`OP_CONSTANT`**:
+* **`CONSTANT`**:
     * **Operands:** 1-byte index into the constant pool.
     * **Action:** Pushes the constant value at the specified index onto the stack.
-* **`OP_CONSTANT16`**:
+* **`CONSTANT16`**:
     * **Operands:** 2-byte index into the constant pool.
-    * **Action:** Same as `OP_CONSTANT`, but for constant pools with more than 256 entries.
-* **`OP_POP`**:
+    * **Action:** Same as `CONSTANT`, but for constant pools with more than 256 entries.
+* **`POP`**:
     * **Operands:** None.
     * **Action:** Pops the top value from the stack and discards it.
-* **`OP_SWAP`**:
+* **`SWAP`**:
     * **Operands:** None.
     * **Action:** Swaps the top two values on the stack.
-* **`OP_DUP`**:
+* **`DUP`**:
     * **Operands:** None.
     * **Action:** Duplicates the top value on the stack.
 
 #### **Arithmetic and Logical Opcodes**
 
-* **`OP_ADD`**, **`OP_SUBTRACT`**, **`OP_MULTIPLY`**, **`OP_DIVIDE`**, **`OP_INT_DIV`**, **`OP_MOD`**:
+* **`ADD`**, **`SUBTRACT`**, **`MULTIPLY`**, **`DIVIDE`**, **`INT_DIV`**, **`MOD`**:
     * **Operands:** None.
-    * **Action:** Pop two values from the stack, perform the specified arithmetic operation, and push the result. `OP_DIVIDE` always produces a real result, while `OP_INT_DIV` performs integer division. `OP_ADD` is also overloaded for string concatenation.
-* **`OP_NEGATE`**:
+    * **Action:** Pop two values from the stack, perform the specified arithmetic operation, and push the result. `DIVIDE` always produces a real result, while `INT_DIV` performs integer division. `ADD` is also overloaded for string concatenation.
+* **`NEGATE`**:
     * **Operands:** None.
     * **Action:** Pops one value, negates it, and pushes the result.
-* **`OP_NOT`**:
+* **`NOT`**:
     * **Operands:** None.
     * **Action:** Pops one boolean value, inverts it, and pushes the result.
-* **`OP_AND`**, **`OP_OR`**, **`OP_SHL`**, **`OP_SHR`**:
+* **`AND`**, **`OR`**, **`SHL`**, **`SHR`**:
     * **Operands:** None.
-    * **Action:** Pop two integer values, perform the specified bitwise operation, and push the result. `OP_AND` and `OP_OR` also support logical operations on booleans.
-* **`OP_EQUAL`**, **`OP_NOT_EQUAL`**, **`OP_GREATER`**, **`OP_GREATER_EQUAL`**, **`OP_LESS`**, **`OP_LESS_EQUAL`**:
+    * **Action:** Pop two integer values, perform the specified bitwise operation, and push the result. `AND` and `OR` also support logical operations on booleans.
+* **`EQUAL`**, **`NOT_EQUAL`**, **`GREATER`**, **`GREATER_EQUAL`**, **`LESS`**, **`LESS_EQUAL`**:
     * **Operands:** None.
     * **Action:** Pop two values, perform the specified comparison, and push the boolean result (`true` or `false`).
 
@@ -85,26 +85,26 @@ a := 5 + 3;
 
 The compiler would translate this into the following sequence of bytecode instructions:
 
-1.  `OP_CONSTANT <index_of_5>`
+1.  `CONSTANT <index_of_5>`
     * **Action:** The VM pushes the integer value `5` from the constant pool onto the stack.
     * **Stack:** `[5]`
-2.  `OP_CONSTANT <index_of_3>`
+2.  `CONSTANT <index_of_3>`
     * **Action:** The VM pushes the integer value `3` from the constant pool onto the stack.
     * **Stack:** `[5, 3]`
-3.  `OP_ADD`
+3.  `ADD`
     * **Action:** The VM pops the top two values (`3` and `5`), adds them together, and pushes the result (`8`) back onto the stack.
     * **Stack:** `[8]`
-4.  `OP_SET_GLOBAL <index_of_a>`
+4.  `SET_GLOBAL <index_of_a>`
     * **Action:** The VM pops the result (`8`) from the stack and stores it in the global variable `a`.
     * **Stack:** `[]`
 ---
 
 #### **Control Flow Opcodes**
 
-* **`OP_JUMP`**:
+* **`JUMP`**:
     * **Operands:** 2-byte signed offset.
     * **Action:** Unconditionally jumps the instruction pointer by the specified offset.
-* **`OP_JUMP_IF_FALSE`**:
+* **`JUMP_IF_FALSE`**:
     * **Operands:** 2-byte signed offset.
     * **Action:** Pops a value from the stack. If the value is `false` (or numerically zero), jumps the instruction pointer by the specified offset.
 
@@ -118,20 +118,20 @@ if a > b then
   c := 10;
 ```
 
-1.  `OP_GET_GLOBAL <index_of_a>`
+1.  `GET_GLOBAL <index_of_a>`
     * **Action:** Push the value of `a`.
     * **Stack:** `[8]`
-2.  `OP_GET_GLOBAL <index_of_b>`
+2.  `GET_GLOBAL <index_of_b>`
     * **Action:** Push the value of `b`.
     * **Stack:** `[8, 8]`
-3.  `OP_GREATER`
+3.  `GREATER`
     * **Action:** Pop `8` and `8`, compare them (`8 > 8` is false), and push the boolean result.
     * **Stack:** `[false]`
-4.  `OP_JUMP_IF_FALSE <offset>`
+4.  `JUMP_IF_FALSE <offset>`
     * **Action:** Pop the boolean value. Since it's `false`, the VM jumps the instruction pointer forward by the specified offset, skipping the code for the `then` block.
     * **Stack:** `[]`
 
-If `a` had been greater than `b`, the `OP_JUMP_IF_FALSE` would not have jumped, and the code to assign `10` to `c` would have been executed.
+If `a` had been greater than `b`, the `JUMP_IF_FALSE` would not have jumped, and the code to assign `10` to `c` would have been executed.
 
 ---
 
@@ -146,79 +146,79 @@ begin
 end;
 ```
 
-1. `OP_CONSTANT <index_of_0>`
+1. `CONSTANT <index_of_0>`
    * Push integer `0`.
-2. `OP_SET_GLOBAL <index_of_i>`
+2. `SET_GLOBAL <index_of_i>`
    * Store in variable `i`.
 3. loop_start:
-   * `OP_GET_GLOBAL <index_of_i>`
-   * `OP_CONSTANT <index_of_3>`
-   * `OP_LESS`
-   * `OP_JUMP_IF_FALSE <exit_offset>`
+   * `GET_GLOBAL <index_of_i>`
+   * `CONSTANT <index_of_3>`
+   * `LESS`
+   * `JUMP_IF_FALSE <exit_offset>`
 4. loop_body:
-   * `OP_CONSTANT <index_of_true>` – newline flag
-   * `OP_GET_GLOBAL <index_of_i>`
-   * `OP_CALL_BUILTIN <index_of_write> 2`
-   * `OP_GET_GLOBAL <index_of_i>`
-   * `OP_CONSTANT <index_of_1>`
-   * `OP_ADD`
-   * `OP_SET_GLOBAL <index_of_i>`
-   * `OP_JUMP <loop_start>`
+   * `CONSTANT <index_of_true>` – newline flag
+   * `GET_GLOBAL <index_of_i>`
+   * `CALL_BUILTIN <index_of_write> 2`
+   * `GET_GLOBAL <index_of_i>`
+   * `CONSTANT <index_of_1>`
+   * `ADD`
+   * `SET_GLOBAL <index_of_i>`
+   * `JUMP <loop_start>`
 5. exit:
    * (next instruction after loop)
 
-This sequence uses `OP_JUMP_IF_FALSE` to exit the loop and `OP_JUMP` to repeat.
+This sequence uses `JUMP_IF_FALSE` to exit the loop and `JUMP` to repeat.
 
 ---
 
 #### **Variable and Data Structure Opcodes**
 
-* **`OP_DEFINE_GLOBAL`** / **`OP_DEFINE_GLOBAL16`**:
-    * **Operands:** Variable-length. Includes a constant index for the variable's name (8-bit for `OP_DEFINE_GLOBAL`, 16-bit for `OP_DEFINE_GLOBAL16`), the variable's type, and additional type information (e.g., array dimensions, record structure).
+* **`DEFINE_GLOBAL`** / **`DEFINE_GLOBAL16`**:
+    * **Operands:** Variable-length. Includes a constant index for the variable's name (8-bit for `DEFINE_GLOBAL`, 16-bit for `DEFINE_GLOBAL16`), the variable's type, and additional type information (e.g., array dimensions, record structure).
     * **Action:** Defines a new global variable in the VM's global symbol table.
-* **`OP_GET_GLOBAL`** / **`OP_GET_GLOBAL16`**:
+* **`GET_GLOBAL`** / **`GET_GLOBAL16`**:
     * **Operands:** 8-bit or 16-bit constant index for the variable's name.
     * **Action:** Pushes the value of the specified global variable onto the stack.
-* **`OP_SET_GLOBAL`** / **`OP_SET_GLOBAL16`**:
+* **`SET_GLOBAL`** / **`SET_GLOBAL16`**:
     * **Operands:** 8-bit or 16-bit constant index for the variable's name.
     * **Action:** Pops a value from the stack and assigns it to the specified global variable.
-* **`OP_GET_GLOBAL_ADDRESS`** / **`OP_GET_GLOBAL_ADDRESS16`**:
+* **`GET_GLOBAL_ADDRESS`** / **`GET_GLOBAL_ADDRESS16`**:
     * **Operands:** 8-bit or 16-bit constant index for the variable's name.
     * **Action:** Pushes a pointer to the specified global variable's `Value` struct onto the stack.
-* **`OP_GET_LOCAL`** / **`OP_SET_LOCAL`**:
+* **`GET_LOCAL`** / **`SET_LOCAL`**:
     * **Operands:** 1-byte slot index within the current call frame.
-    * **Action:** `OP_GET_LOCAL` pushes the value of the local variable at the given slot. `OP_SET_LOCAL` pops a value and assigns it to the local variable.
-* **`OP_GET_LOCAL_ADDRESS`**:
+    * **Action:** `GET_LOCAL` pushes the value of the local variable at the given slot. `SET_LOCAL` pops a value and assigns it to the local variable.
+* **`GET_LOCAL_ADDRESS`**:
     * **Operands:** 1-byte slot index.
     * **Action:** Pushes a pointer to the specified local variable's `Value` struct onto the stack.
-* **`OP_GET_UPVALUE`** / **`OP_SET_UPVALUE`**:
+* **`GET_UPVALUE`** / **`SET_UPVALUE`**:
     * **Operands:** 1-byte upvalue index.
-    * **Action:** Accesses a variable from an enclosing function's scope (a "closure"). `OP_GET_UPVALUE` pushes the value, and `OP_SET_UPVALUE` assigns to it.
-* **`OP_GET_UPVALUE_ADDRESS`**:
+    * **Action:** Accesses a variable from an enclosing function's scope (a "closure"). `GET_UPVALUE` pushes the value, and `SET_UPVALUE` assigns to it.
+* **`GET_UPVALUE_ADDRESS`**:
     * **Operands:** 1-byte upvalue index.
     * **Action:** Pushes a pointer to the specified upvalue's `Value` struct.
-* **`OP_INIT_LOCAL_ARRAY`**, **`OP_INIT_LOCAL_FILE`**, **`OP_INIT_LOCAL_POINTER`**:
+* **`INIT_LOCAL_ARRAY`**, **`INIT_LOCAL_FILE`**, **`INIT_LOCAL_POINTER`**:
     * **Operands:** Variable-length, including a slot index and type metadata.
     * **Action:** Initializes a local variable of a complex type (array, file, or pointer) at the specified slot. For arrays, any dimension using the sentinel bound index `0xFFFF` will pop its size from the stack (treated as an upper bound plus one) and assume a lower bound of `0`.
-* **`OP_GET_FIELD_ADDRESS`** / **`OP_GET_FIELD_ADDRESS16`**:
+* **`GET_FIELD_ADDRESS`** / **`GET_FIELD_ADDRESS16`**:
     * **Operands:** Constant index for the field's name.
     * **Action:** Pops a record or a pointer to a record from the stack and pushes a pointer to the specified field's `Value` struct.
-* **`OP_GET_ELEMENT_ADDRESS`**:
+* **`GET_ELEMENT_ADDRESS`**:
     * **Operands:** 1-byte dimension count.
     * **Action:** Pops an array or pointer to an array, and then pops the indices for each dimension. Pushes a pointer to the specified element's `Value` struct.
-* **`OP_GET_CHAR_ADDRESS`**:
+* **`GET_CHAR_ADDRESS`**:
     * **Operands:** None.
     * **Action:** Pops an index and a pointer to a string. Pushes a pointer to the character at that index within the string.
-* **`OP_SET_INDIRECT`**:
+* **`SET_INDIRECT`**:
     * **Operands:** None.
     * **Action:** Pops a value and a pointer. Assigns the value to the memory location indicated by the pointer.
-* **`OP_GET_INDIRECT`**:
+* **`GET_INDIRECT`**:
     * **Operands:** None.
     * **Action:** Pops a pointer and pushes a copy of the value it points to.
-* **`OP_IN`**:
+* **`IN`**:
     * **Operands:** None.
     * **Action:** Pops an item and a set. Pushes `true` if the item is in the set, `false` otherwise.
-* **`OP_GET_CHAR_FROM_STRING`**:
+* **`GET_CHAR_FROM_STRING`**:
     * **Operands:** None.
     * **Action:** Pops an index and a string. Pushes the character at that index.
 
@@ -237,29 +237,29 @@ end.
 
 Bytecode emitted:
 
-1. `OP_GET_GLOBAL_ADDRESS <index_of_p>`
+1. `GET_GLOBAL_ADDRESS <index_of_p>`
    * Push a pointer to the global variable `p`.
-2. `OP_GET_FIELD_ADDRESS <index_of_x>`
+2. `GET_FIELD_ADDRESS <index_of_x>`
    * Pop the record pointer, push a pointer to field `x`.
-3. `OP_CONSTANT <index_of_10>`
+3. `CONSTANT <index_of_10>`
    * Push the integer constant `10`.
-4. `OP_SET_INDIRECT`
+4. `SET_INDIRECT`
    * Pop value and pointer; store `10` in `p.x`.
 
 ---
 
 #### **Function and Procedure Call Opcodes**
 
-* **`OP_CALL`**:
+* **`CALL`**:
     * **Operands:** 2-byte name index (for disassembly), 2-byte bytecode address, 1-byte argument count.
     * **Action:** Calls a user-defined function or procedure at the specified address.
-* **`OP_CALL_BUILTIN`**:
+* **`CALL_BUILTIN`**:
     * **Operands:** 2-byte name index, 1-byte argument count.
     * **Action:** Calls a built-in function or procedure by name.
-* **`OP_RETURN`**:
+* **`RETURN`**:
     * **Operands:** None.
     * **Action:** Returns from the current function or procedure. If it's a function, it expects the return value to be on top of the stack.
-* **`OP_EXIT`**:
+* **`EXIT`**:
     * **Operands:** None.
     * **Action:** Performs an early return from the current function or procedure.
 
@@ -272,14 +272,14 @@ Finally, let's look at a function call:
 MyFunction(a, b);
 ```
 
-1.  `OP_GET_GLOBAL <index_of_a>`
+1.  `GET_GLOBAL <index_of_a>`
     * **Action:** Push the first argument (`a`) onto the stack.
     * **Stack:** `[8]`
-2.  `OP_GET_GLOBAL <index_of_b>`
+2.  `GET_GLOBAL <index_of_b>`
     * **Action:** Push the second argument (`b`) onto the stack.
     * **Stack:** `[8, 8]`
-3.  `OP_CALL <name_index> <address> <arg_count>`
-    * **Action:** The VM uses the `OP_CALL` instruction to execute the function.
+3.  `CALL <name_index> <address> <arg_count>`
+    * **Action:** The VM uses the `CALL` instruction to execute the function.
         * **`<name_index>`:** An index into the constant pool for the function's name (used for disassembly and debugging).
         * **`<address>`:** The bytecode address of the first instruction of `MyFunction`. The VM jumps to this address.
         * **`<arg_count>`:** The number of arguments (2 in this case). The VM knows to use the top 2 values on the stack as the arguments for the new function's stack frame.
@@ -287,40 +287,40 @@ MyFunction(a, b);
 
 #### **Threading Opcodes**
 
-* **`OP_THREAD_CREATE`**:
+* **`THREAD_CREATE`**:
     * **Operands:** 2-byte bytecode address.
     * **Action:** Starts a new thread at the given instruction and pushes its thread identifier.
-* **`OP_THREAD_JOIN`**:
+* **`THREAD_JOIN`**:
     * **Operands:** None.
     * **Action:** Pops a thread identifier and waits for that thread to finish, yielding control if it is still running.
 
 #### **Synchronization Opcodes**
 
-* **`OP_MUTEX_CREATE`**:
+* **`MUTEX_CREATE`**:
     * **Operands:** None.
     * **Action:** Creates a standard mutex and pushes its integer identifier on the stack.
-* **`OP_RCMUTEX_CREATE`**:
+* **`RCMUTEX_CREATE`**:
     * **Operands:** None.
     * **Action:** Creates a recursive mutex and pushes its integer identifier.
-* **`OP_MUTEX_LOCK`**:
+* **`MUTEX_LOCK`**:
     * **Operands:** None (uses mutex id on stack).
     * **Action:** Pops a mutex identifier and blocks until that mutex is acquired.
-* **`OP_MUTEX_UNLOCK`**:
+* **`MUTEX_UNLOCK`**:
     * **Operands:** None (uses mutex id on stack).
     * **Action:** Pops a mutex identifier and releases the corresponding mutex.
-* **`OP_MUTEX_DESTROY`**:
+* **`MUTEX_DESTROY`**:
     * **Operands:** None (uses mutex id on stack).
     * **Action:** Pops a mutex identifier and destroys the corresponding mutex.
 
 #### **I/O and Miscellaneous Opcodes**
 
-* **`OP_CALL_HOST`**:
+* **`CALL_HOST`**:
     * **Operands:** 1-byte host function ID.
     * **Action:** Calls a C function that is registered with the VM.
-* **`OP_HALT`**:
+* **`HALT`**:
     * **Operands:** None.
     * **Action:** Stops the VM's execution.
-* **`OP_FORMAT_VALUE`**:
+* **`FORMAT_VALUE`**:
     * **Operands:** 1-byte width, 1-byte precision.
     * **Action:** Pops a value and formats it into a string with the specified width and precision. Pushes the formatted string back onto the stack.
 
