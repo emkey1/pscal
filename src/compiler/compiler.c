@@ -16,6 +16,7 @@
 #include "compiler/bytecode.h"
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
+#define NO_VTABLE_ENTRY -1
 
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
@@ -103,7 +104,40 @@ typedef struct {
     int method_count;
     int capacity;
     int* addrs;
+    bool merged;
 } VTableInfo;
+
+static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
+    for (int i = 0; i < table_count; i++) {
+        if (strcmp(tables[i].class_name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt) {
+    if (!vt || vt->merged) return;
+    AST* cls = lookupType(vt->class_name);
+    const char* parent_name = NULL;
+    if (cls && cls->extra && cls->extra->token) parent_name = cls->extra->token->value;
+    if (parent_name) {
+        int pidx = findVTableIndex(tables, table_count, parent_name);
+        if (pidx != -1) {
+            mergeParentTable(tables, table_count, &tables[pidx]);
+            VTableInfo* parent = &tables[pidx];
+            if (vt->capacity < parent->method_count) {
+                int newcap = parent->method_count;
+                vt->addrs = realloc(vt->addrs, sizeof(int) * newcap);
+                for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = NO_VTABLE_ENTRY;
+                vt->capacity = newcap;
+            }
+            for (int j = 0; j < parent->method_count; j++) {
+                if (vt->addrs[j] == NO_VTABLE_ENTRY) vt->addrs[j] = parent->addrs[j];
+            }
+            if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
+        }
+    }
+    vt->merged = true;
+}
 
 static void emitVTables(BytecodeChunk* chunk) {
     VTableInfo* tables = NULL;
@@ -131,12 +165,13 @@ static void emitVTables(BytecodeChunk* chunk) {
                             tables[idx].method_count = 0;
                             tables[idx].capacity = 0;
                             tables[idx].addrs = NULL;
+                            tables[idx].merged = false;
                         }
                         int mindex = base->type_def->i_val;
                         if (mindex >= tables[idx].capacity) {
                             int newcap = mindex + 1;
                             tables[idx].addrs = realloc(tables[idx].addrs, sizeof(int) * newcap);
-                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = 0;
+                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = NO_VTABLE_ENTRY;
                             tables[idx].capacity = newcap;
                         }
                         tables[idx].addrs[mindex] = base->bytecode_address;
@@ -149,13 +184,18 @@ static void emitVTables(BytecodeChunk* chunk) {
     }
 
     for (int i = 0; i < table_count; i++) {
+        mergeParentTable(tables, table_count, &tables[i]);
+    }
+
+    for (int i = 0; i < table_count; i++) {
         VTableInfo* vt = &tables[i];
         if (vt->method_count == 0) continue;
         int lb = 0;
         int ub = vt->method_count - 1;
         Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
         for (int j = 0; j < vt->method_count; j++) {
-            arr.array_val[j] = makeInt(vt->addrs[j]);
+            int addr = vt->addrs[j];
+            arr.array_val[j] = makeInt(addr == NO_VTABLE_ENTRY ? 0 : addr);
         }
         int cidx = addConstantToChunk(chunk, &arr);
         freeValue(&arr);
