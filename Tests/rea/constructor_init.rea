@@ -1,0 +1,2 @@
+class Point { int x; Point(int v) { this.x = v; } }
+Point p = new Point(5);
