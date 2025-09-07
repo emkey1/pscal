@@ -233,7 +233,8 @@ static AST *parseFactor(ReaParser *p) {
         Token *tok = newToken(TOKEN_STRING_CONST, lex, p->current.line, 0);
         free(lex);
         AST *node = newASTNode(AST_STRING, tok);
-        setTypeAST(node, TYPE_STRING);
+        VarType vtype = (p->current.start[0] == '\'' && (len - 2 == 1)) ? TYPE_CHAR : TYPE_STRING;
+        setTypeAST(node, vtype);
         reaAdvance(p);
         return node;
     } else if (p->current.type == REA_TOKEN_TRUE || p->current.type == REA_TOKEN_FALSE) {
