@@ -2,33 +2,33 @@
 == Disassembly: Tests/rea/switch_stmt.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    1 OP_DEFINE_GLOBAL NameIdx:0   'x' Type:INT64 ('int')
-0005    | OP_CONSTANT         2 '2'
-0007    | OP_SET_GLOBAL       0 'x'
-0009    2 OP_GET_GLOBAL       0 'x'
-0011    | OP_DUP
-0012    3 OP_CONSTANT         3 '1'
-0014    2 OP_EQUAL
-0015    | OP_JUMP_IF_FALSE   12 (to 0030)
-0018    | OP_POP
-0019    4 OP_CONSTANT         3 '1'
-0021    | OP_CONSTANT         3 '1'
-0023    | OP_CALL_BUILTIN      4 'write' (2 args)
-0027    2 OP_JUMP            28 (to 0058)
-0030    | OP_DUP
-0031    6 OP_CONSTANT         2 '2'
-0033    2 OP_EQUAL
-0034    | OP_JUMP_IF_FALSE   12 (to 0049)
-0037    | OP_POP
-0038    7 OP_CONSTANT         3 '1'
-0040    | OP_CONSTANT         2 '2'
-0042    | OP_CALL_BUILTIN      4 'write' (2 args)
-0046    2 OP_JUMP             9 (to 0058)
-0049    | OP_POP
-0050   10 OP_CONSTANT         3 '1'
-0052    | OP_CONSTANT         5 '3'
-0054    | OP_CALL_BUILTIN      4 'write' (2 args)
-0058    0 OP_HALT
+0000    1 DEFINE_GLOBAL    NameIdx:0   'x' Type:INT64 ('int')
+0005    | CONSTANT            2 '2'
+0007    | SET_GLOBAL          0 'x'
+0009    2 GET_GLOBAL          0 'x'
+0011    | DUP
+0012    3 CONSTANT            3 '1'
+0014    2 EQUAL
+0015    | JUMP_IF_FALSE      12 (to 0030)
+0018    | POP
+0019    4 CONSTANT            3 '1'
+0021    | CONSTANT            3 '1'
+0023    | CALL_BUILTIN         4 'write' (2 args)
+0027    2 JUMP               28 (to 0058)
+0030    | DUP
+0031    6 CONSTANT            2 '2'
+0033    2 EQUAL
+0034    | JUMP_IF_FALSE      12 (to 0049)
+0037    | POP
+0038    7 CONSTANT            3 '1'
+0040    | CONSTANT            2 '2'
+0042    | CALL_BUILTIN         4 'write' (2 args)
+0046    2 JUMP                9 (to 0058)
+0049    | POP
+0050   10 CONSTANT            3 '1'
+0052    | CONSTANT            5 '3'
+0054    | CALL_BUILTIN         4 'write' (2 args)
+0058    0 HALT
 == End Disassembly: Tests/rea/switch_stmt.rea ==
 
 Constants (6):\n  0000: STR   "x"

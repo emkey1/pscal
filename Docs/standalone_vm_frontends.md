@@ -26,7 +26,7 @@ illustrates the entire pipeline for targeting the VM.
 ```python
 def load_opcodes(root: Path) -> Dict[str, int]:
     header = root / "src" / "compiler" / "bytecode.h"
-    pattern = re.compile(r"^\s*(OP_[A-Z0-9_]+)\s*,")
+    pattern = re.compile(r"^\s*([A-Z0-9_]+)\s*,")
     opcodes: Dict[str, int] = {}
     enum_started = False
     index = 0
@@ -66,7 +66,7 @@ When a `read` statement is parsed the compiler emits an instruction to call the
 builtin:
 
 ```python
-self.builder.emit(self.opcodes["OP_CALL_BUILTIN"])
+self.builder.emit(self.opcodes["CALL_BUILTIN"])
 self.builder.emit_short(self.read_idx)
 self.builder.emit(1)  # argument count
 ```
@@ -138,7 +138,7 @@ definitions directly:
 #include "compiler/bytecode.h"
 ```
 
-This header defines the `OP_*` enum so the compiler and VM share identical
+This header defines the opcode enum so the compiler and VM share identical
 numeric opcode values.
 
 ### Preparing constants and builtins
@@ -158,7 +158,7 @@ When a `read` statement is parsed the compiler emits an instruction to call the
 builtin:
 
 ```c
-writeBytecodeChunk(&chunk, OP_CALL_BUILTIN, line);
+writeBytecodeChunk(&chunk, CALL_BUILTIN, line);
 emitShort(&chunk, (uint16_t)read_idx, line);
 writeBytecodeChunk(&chunk, 1, line); /* argument count */
 ```
@@ -168,7 +168,7 @@ demonstrated in `src/clike/codegen.c`.
 
 ## Calling VM builtins
 
-Opcodes `OP_CALL_BUILTIN` and `OP_CALL_BUILTIN_PROC` invoke the VM's built-in
+Opcodes `CALL_BUILTIN` and `CALL_BUILTIN_PROC` invoke the VM's built-in
 functions and procedures. The VM exposes a large catalog of routines described in
 `Docs/pscal_vm_builtins.md`. To add your own, see
 [`extended_builtins.md`](extended_builtins.md).
@@ -176,7 +176,7 @@ functions and procedures. The VM exposes a large catalog of routines described i
 To invoke a builtin from generated code:
 
 1. Add the builtin name as a string constant.
-2. Emit `OP_CALL_BUILTIN` for functions or `OP_CALL_BUILTIN_PROC` for procedures,
+2. Emit `CALL_BUILTIN` for functions or `CALL_BUILTIN_PROC` for procedures,
    passing the constant index and argument count.
 3. At runtime the VM resolves the name and dispatches to the builtin
    implementation.
@@ -187,7 +187,7 @@ Python:
 
 ```python
 rand_idx = builder.add_constant(TYPE_STRING, "random")
-builder.emit(opcodes["OP_CALL_BUILTIN"])
+builder.emit(opcodes["CALL_BUILTIN"])
 builder.emit_short(rand_idx)
 builder.emit(0)  # no arguments; result left on stack
 ```
@@ -196,7 +196,7 @@ C:
 
 ```c
 int rand_idx = addStringConstant(&chunk, "random");
-writeBytecodeChunk(&chunk, OP_CALL_BUILTIN, line);
+writeBytecodeChunk(&chunk, CALL_BUILTIN, line);
 emitShort(&chunk, (uint16_t)rand_idx, line);
 writeBytecodeChunk(&chunk, 0, line); /* no arguments */
 ```
@@ -207,7 +207,7 @@ Python:
 
 ```python
 halt_idx = builder.add_constant(TYPE_STRING, "halt")
-builder.emit(opcodes["OP_CALL_BUILTIN_PROC"])
+builder.emit(opcodes["CALL_BUILTIN_PROC"])
 builder.emit_short(halt_idx)
 builder.emit(0)  # no arguments; no return value
 ```
@@ -216,7 +216,7 @@ C:
 
 ```c
 int halt_idx = addStringConstant(&chunk, "halt");
-writeBytecodeChunk(&chunk, OP_CALL_BUILTIN_PROC, line);
+writeBytecodeChunk(&chunk, CALL_BUILTIN_PROC, line);
 emitShort(&chunk, (uint16_t)halt_idx, line);
 writeBytecodeChunk(&chunk, 0, line); /* no arguments */
 ```

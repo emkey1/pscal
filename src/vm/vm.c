@@ -26,7 +26,7 @@
 
 
 // Special sentinel values used in pointer.base_type_node to signal
-// non-standard dereference behavior in OP_GET_INDIRECT.
+// non-standard dereference behavior in GET_INDIRECT.
 #define STRING_CHAR_PTR_SENTINEL   ((AST*)0xDEADBEEF)
 #define STRING_LENGTH_SENTINEL     ((AST*)0xFEEDBEEF)
 
@@ -104,7 +104,7 @@ static void* threadStart(void* arg) {
     if (proc_symbol && proc_symbol->type_def) {
         int param_count = proc_symbol->type_def->child_count;
         if (param_count > 0) {
-            // Coerce int->real if needed for the first param, mirroring OP_CALL behavior.
+            // Coerce int->real if needed for the first param, mirroring CALL behavior.
             AST* param_ast = proc_symbol->type_def->children[0];
             Value coerced = start_arg;
             if (param_ast && isRealType(param_ast->var_type) && isIntlikeType(start_arg.type)) {
@@ -1077,7 +1077,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     // (debug logging removed)
 
     sym->is_alias = false;
-    sym->is_const = false; // Constants handled at compile time won't use OP_DEFINE_GLOBAL
+    sym->is_const = false; // Constants handled at compile time won't use DEFINE_GLOBAL
                            // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
     sym->is_inline = false;
@@ -1087,7 +1087,7 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     return sym;
 }
 
-// Shared logic for OP_DEFINE_GLOBAL and OP_DEFINE_GLOBAL16.
+// Shared logic for DEFINE_GLOBAL and DEFINE_GLOBAL16.
 // Assumes the name has already been read (as Value) and the IP is positioned
 // at the declared type byte.
 static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
@@ -1243,7 +1243,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
         }
 
         if (varNameVal.type != TYPE_STRING || !varNameVal.s_val) {
-            runtimeError(vm, "VM Error: Invalid variable name for OP_DEFINE_GLOBAL.");
+            runtimeError(vm, "VM Error: Invalid variable name for DEFINE_GLOBAL.");
             return INTERPRET_RUNTIME_ERROR;
         }
 
@@ -1362,8 +1362,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         Value result_val; \
         bool op_is_handled = false; \
         \
-        /* String/char concatenation for OP_ADD */ \
-        if (current_instruction_code == OP_ADD) { \
+        /* String/char concatenation for ADD */ \
+        if (current_instruction_code == ADD) { \
             while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
                 Value tmp = makeCopyOfValue(a_val_popped.ptr_val); \
                 freeValue(&a_val_popped); \
@@ -1414,7 +1414,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 \
         /* Enum +/- intlike */ \
         if (!op_is_handled) { \
-            if (current_instruction_code == OP_ADD || current_instruction_code == OP_SUBTRACT) { \
+            if (current_instruction_code == ADD || current_instruction_code == SUBTRACT) { \
                 bool a_enum_b_int = (a_val_popped.type == TYPE_ENUM && IS_INTLIKE(b_val_popped)); \
                 bool a_int_b_enum = (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_ENUM); \
                 if (a_enum_b_int || a_int_b_enum) { \
@@ -1422,7 +1422,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     Value int_val  = a_enum_b_int ? b_val_popped : a_val_popped; \
                     long long delta = asI64(int_val); \
                     int new_ord = enum_val.enum_val.ordinal + \
-                        ((current_instruction_code == OP_ADD) ? (int)delta : -(int)delta); \
+                        ((current_instruction_code == ADD) ? (int)delta : -(int)delta); \
                     if (enum_val.enum_meta && \
                         (new_ord < 0 || new_ord >= enum_val.enum_meta->member_count)) { \
                         runtimeError(vm, "Runtime Error: Enum '%s' out of range.", \
@@ -1442,13 +1442,13 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         if (!op_is_handled) { \
             if (a_val_popped.type == TYPE_SET && b_val_popped.type == TYPE_SET) { \
                 switch (current_instruction_code) { \
-                    case OP_ADD: \
+                    case ADD: \
                         result_val = setUnion(a_val_popped, b_val_popped); \
                         break; \
-                    case OP_SUBTRACT: \
+                    case SUBTRACT: \
                         result_val = setDifference(a_val_popped, b_val_popped); \
                         break; \
-                    case OP_MULTIPLY: \
+                    case MULTIPLY: \
                         result_val = setIntersection(a_val_popped, b_val_popped); \
                         break; \
                     default: \
@@ -1477,17 +1477,17 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     long double fb = asLd(b_tmp); \
                     freeValue(&a_tmp); \
                     freeValue(&b_tmp); \
-                    if (current_instruction_code == OP_DIVIDE && fb == 0.0L) { \
+                    if (current_instruction_code == DIVIDE && fb == 0.0L) { \
                         runtimeError(vm, "Runtime Error: Division by zero."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
                     int useLong = (a_val_popped.type == TYPE_LONG_DOUBLE || b_val_popped.type == TYPE_LONG_DOUBLE); \
                     switch (current_instruction_code) { \
-                        case OP_ADD:      result_val = useLong ? makeLongDouble(fa + fb) : makeReal(fa + fb); break; \
-                        case OP_SUBTRACT: result_val = useLong ? makeLongDouble(fa - fb) : makeReal(fa - fb); break; \
-                        case OP_MULTIPLY: result_val = useLong ? makeLongDouble(fa * fb) : makeReal(fa * fb); break; \
-                        case OP_DIVIDE:   result_val = useLong ? makeLongDouble(fa / fb) : makeReal(fa / fb); break; \
+                        case ADD:      result_val = useLong ? makeLongDouble(fa + fb) : makeReal(fa + fb); break; \
+                        case SUBTRACT: result_val = useLong ? makeLongDouble(fa - fb) : makeReal(fa - fb); break; \
+                        case MULTIPLY: result_val = useLong ? makeLongDouble(fa * fb) : makeReal(fa * fb); break; \
+                        case DIVIDE:   result_val = useLong ? makeLongDouble(fa / fb) : makeReal(fa / fb); break; \
                         default: \
                             runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for real numbers.", current_instruction_code); \
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
@@ -1496,7 +1496,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } else { \
                     long long ia = asI64(a_val_popped); \
                     long long ib = asI64(b_val_popped); \
-                    if (current_instruction_code == OP_DIVIDE && ib == 0) { \
+                    if (current_instruction_code == DIVIDE && ib == 0) { \
                         runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
@@ -1504,19 +1504,19 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     long long iresult = 0; \
                     bool overflow = false; \
                     switch (current_instruction_code) { \
-                        case OP_ADD: \
+                        case ADD: \
                             overflow = __builtin_add_overflow(ia, ib, &iresult); \
                             break; \
-                        case OP_SUBTRACT: \
+                        case SUBTRACT: \
                             overflow = __builtin_sub_overflow(ia, ib, &iresult); \
                             break; \
-                        case OP_MULTIPLY: \
+                        case MULTIPLY: \
                             overflow = __builtin_mul_overflow(ia, ib, &iresult); \
                             break; \
-                        case OP_DIVIDE: \
+                        case DIVIDE: \
                             result_val = makeReal((long double)ia / (long double)ib); \
                             break; \
-                        case OP_MOD: \
+                        case MOD: \
                             iresult = ib == 0 ? 0 : ia % ib; \
                             break; \
         default: \
@@ -1524,7 +1524,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
                             return INTERPRET_RUNTIME_ERROR; \
                     } \
-                    if (current_instruction_code == OP_DIVIDE) { \
+                    if (current_instruction_code == DIVIDE) { \
                         /* result_val already set for division */ \
                     } else if (overflow) { \
                         runtimeError(vm, "Runtime Error: Integer overflow."); \
@@ -1576,37 +1576,37 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             vm->trace_executed++;
         }
         switch (instruction_val) {
-            case OP_RETURN: {
+            case RETURN: {
                 bool halted = false;
                 InterpretResult res = returnFromCall(vm, &halted);
                 if (res != INTERPRET_OK) return res;
                 if (halted) return INTERPRET_OK;
                 break;
             }
-            case OP_EXIT: {
+            case EXIT: {
                 bool halted = false;
                 InterpretResult res = returnFromCall(vm, &halted);
                 if (res != INTERPRET_OK) return res;
                 if (halted) return INTERPRET_OK;
                 break;
             }
-            case OP_CONSTANT: {
+            case CONSTANT: {
                 Value constant = READ_CONSTANT();
                 push(vm, makeCopyOfValue(&constant));
                 break;
             }
                 
-            case OP_CONSTANT16: {
+            case CONSTANT16: {
                 uint16_t idx = READ_SHORT(vm);
                 if (idx >= vm->chunk->constants_count) {
-                    runtimeError(vm, "VM Error: Constant index %u out of bounds for OP_CONSTANT16.", idx);
+                    runtimeError(vm, "VM Error: Constant index %u out of bounds for CONSTANT16.", idx);
                    return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makeCopyOfValue(&vm->chunk->constants[idx]));
                 break;
             }
 
-            case OP_GET_CHAR_ADDRESS: {
+            case GET_CHAR_ADDRESS: {
                 Value index_val = pop(vm);
                 Value* string_ptr_val = vm->stackTop - 1; // Peek at the string pointer
 
@@ -1642,7 +1642,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makePointer(&string_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
                 break;
             }
-            case OP_GET_GLOBAL_ADDRESS: {
+            case GET_GLOBAL_ADDRESS: {
                 uint8_t name_idx = READ_BYTE();
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL_ADDRESS.", name_idx);
@@ -1674,7 +1674,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makePointer(sym->value, NULL));
                 break;
             }
-            case OP_GET_GLOBAL_ADDRESS16: {
+            case GET_GLOBAL_ADDRESS16: {
                 uint16_t name_idx = READ_SHORT(vm);
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL_ADDRESS16.", name_idx);
@@ -1706,7 +1706,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makePointer(sym->value, NULL));
                 break;
             }
-            case OP_GET_LOCAL_ADDRESS: {
+            case GET_LOCAL_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 size_t frame_window = (size_t)(vm->stackTop - frame->slots); // args + locals
@@ -1717,12 +1717,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
-            case OP_ADD:      BINARY_OP("+", instruction_val); break;
-            case OP_SUBTRACT: BINARY_OP("-", instruction_val); break;
-            case OP_MULTIPLY: BINARY_OP("*", instruction_val); break;
-            case OP_DIVIDE:   BINARY_OP("/", instruction_val); break;
+            case ADD:      BINARY_OP("+", instruction_val); break;
+            case SUBTRACT: BINARY_OP("-", instruction_val); break;
+            case MULTIPLY: BINARY_OP("*", instruction_val); break;
+            case DIVIDE:   BINARY_OP("/", instruction_val); break;
 
-            case OP_NEGATE: {
+            case NEGATE: {
                 Value val_popped = pop(vm);
                 Value result_val;
                 if (IS_INTEGER(val_popped)) result_val = makeInt(-AS_INTEGER(val_popped));
@@ -1739,7 +1739,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&val_popped);
                 break;
             }
-            case OP_NOT: {
+            case NOT: {
                 Value val_popped = pop(vm);
                 bool condition_truth = false;
                 bool value_valid = true;
@@ -1768,7 +1768,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&val_popped);
                 break;
             }
-            case OP_SWAP: {
+            case SWAP: {
                 if (vm->stackTop - vm->stack < 2) {
                     runtimeError(vm, "VM Error: Not enough values on stack to swap.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -1779,7 +1779,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 vm->stackTop[-2] = temp;
                 break;
             }
-            case OP_DUP: {
+            case DUP: {
                 if (vm->stackTop == vm->stack) {
                     runtimeError(vm, "VM Error: Stack underflow (dup from empty stack).");
                     return INTERPRET_RUNTIME_ERROR;
@@ -1787,8 +1787,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 push(vm, makeCopyOfValue(&vm->stackTop[-1]));
                 break;
             }
-            case OP_AND:
-            case OP_OR: {
+            case AND:
+            case OR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 Value result_val;
@@ -1796,7 +1796,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
                     bool ba = AS_BOOLEAN(a_val);
                     bool bb = AS_BOOLEAN(b_val);
-                    if (instruction_val == OP_AND) {
+                    if (instruction_val == AND) {
                         result_val = makeBoolean(ba && bb);
                     } else {
                         result_val = makeBoolean(ba || bb);
@@ -1804,7 +1804,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val))  {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
-                    if (instruction_val == OP_AND) {
+                    if (instruction_val == AND) {
                         result_val = makeInt(ia & ib);
                     } else {
                         result_val = makeInt(ia | ib);
@@ -1820,7 +1820,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val);
                 break;
             }
-            case OP_INT_DIV: {
+            case INT_DIV: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
@@ -1847,7 +1847,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val);
                 break;
             }
-            case OP_MOD: {
+            case MOD: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
@@ -1869,8 +1869,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val);
                 break;
             }
-            case OP_SHL:
-            case OP_SHR: {
+            case SHL:
+            case SHR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
@@ -1881,7 +1881,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         freeValue(&a_val); freeValue(&b_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    if (instruction_val == OP_SHL) {
+                    if (instruction_val == SHL) {
                         push(vm, makeInt(ia << ib));
                     } else {
                         push(vm, makeInt(ia >> ib));
@@ -1896,12 +1896,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val);
                 break;
             }
-            case OP_EQUAL:
-            case OP_NOT_EQUAL:
-            case OP_GREATER:
-            case OP_GREATER_EQUAL:
-            case OP_LESS:
-            case OP_LESS_EQUAL: {
+            case EQUAL:
+            case NOT_EQUAL:
+            case GREATER:
+            case GREATER_EQUAL:
+            case LESS:
+            case LESS_EQUAL: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 Value result_val;
@@ -1910,9 +1910,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 // Handle explicit NIL-to-NIL comparisons first.  Pointer/NIL
                 // comparisons are handled in the pointer block below.
                 if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
-                    if (instruction_val == OP_EQUAL) {
+                    if (instruction_val == EQUAL) {
                         result_val = makeBoolean(true);
-                    } else if (instruction_val == OP_NOT_EQUAL) {
+                    } else if (instruction_val == NOT_EQUAL) {
                         result_val = makeBoolean(false);
                     } else {
                         goto comparison_error_label;
@@ -1928,24 +1928,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         long double fa = asLd(a_val);
                         long double fb = asLd(b_val);
                         switch (instruction_val) {
-                            case OP_EQUAL:         result_val = makeBoolean(fa == fb); break;
-                            case OP_NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
-                            case OP_GREATER:       result_val = makeBoolean(fa >  fb); break;
-                            case OP_GREATER_EQUAL: result_val = makeBoolean(fa >= fb); break;
-                            case OP_LESS:          result_val = makeBoolean(fa <  fb); break;
-                            case OP_LESS_EQUAL:    result_val = makeBoolean(fa <= fb); break;
+                            case EQUAL:         result_val = makeBoolean(fa == fb); break;
+                            case NOT_EQUAL:     result_val = makeBoolean(fa != fb); break;
+                            case GREATER:       result_val = makeBoolean(fa >  fb); break;
+                            case GREATER_EQUAL: result_val = makeBoolean(fa >= fb); break;
+                            case LESS:          result_val = makeBoolean(fa <  fb); break;
+                            case LESS_EQUAL:    result_val = makeBoolean(fa <= fb); break;
                             default: goto comparison_error_label;
                         }
                     } else {
                         long long ia = asI64(a_val);
                         long long ib = asI64(b_val);
                         switch (instruction_val) {
-                            case OP_EQUAL:         result_val = makeBoolean(ia == ib); break;
-                            case OP_NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
-                            case OP_GREATER:       result_val = makeBoolean(ia >  ib); break;
-                            case OP_GREATER_EQUAL: result_val = makeBoolean(ia >= ib); break;
-                            case OP_LESS:          result_val = makeBoolean(ia <  ib); break;
-                            case OP_LESS_EQUAL:    result_val = makeBoolean(ia <= ib); break;
+                            case EQUAL:         result_val = makeBoolean(ia == ib); break;
+                            case NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
+                            case GREATER:       result_val = makeBoolean(ia >  ib); break;
+                            case GREATER_EQUAL: result_val = makeBoolean(ia >= ib); break;
+                            case LESS:          result_val = makeBoolean(ia <  ib); break;
+                            case LESS_EQUAL:    result_val = makeBoolean(ia <= ib); break;
                             default: goto comparison_error_label;
                         }
                     }
@@ -1963,9 +1963,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
 
                     if (strlen(str_val) == 1 && str_val[0] == char_val) {
-                        result_val = makeBoolean(instruction_val == OP_EQUAL);
+                        result_val = makeBoolean(instruction_val == EQUAL);
                     } else {
-                        result_val = makeBoolean(instruction_val != OP_EQUAL);
+                        result_val = makeBoolean(instruction_val != EQUAL);
                     }
                     comparison_succeeded = true;
                 }
@@ -1975,12 +1975,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     const char* sb = AS_STRING(b_val) ? AS_STRING(b_val) : "";
                     int cmp = strcmp(sa, sb);
                     switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean(cmp == 0); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean(cmp != 0); break;
-                        case OP_GREATER:       result_val = makeBoolean(cmp > 0);  break;
-                        case OP_GREATER_EQUAL: result_val = makeBoolean(cmp >= 0); break;
-                        case OP_LESS:          result_val = makeBoolean(cmp < 0);  break;
-                        case OP_LESS_EQUAL:    result_val = makeBoolean(cmp <= 0); break;
+                        case EQUAL:         result_val = makeBoolean(cmp == 0); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(cmp != 0); break;
+                        case GREATER:       result_val = makeBoolean(cmp > 0);  break;
+                        case GREATER_EQUAL: result_val = makeBoolean(cmp >= 0); break;
+                        case LESS:          result_val = makeBoolean(cmp < 0);  break;
+                        case LESS_EQUAL:    result_val = makeBoolean(cmp <= 0); break;
                         default:
                             runtimeError(vm, "VM Error: Unexpected string comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
@@ -1991,12 +1991,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     long long int_val = IS_INTEGER(a_val) ? AS_INTEGER(a_val) : AS_INTEGER(b_val);
 
                     switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean((long long)char_val == int_val); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean((long long)char_val != int_val); break;
-                        case OP_GREATER:       result_val = makeBoolean((long long)char_val > int_val);  break;
-                        case OP_GREATER_EQUAL: result_val = makeBoolean((long long)char_val >= int_val); break;
-                        case OP_LESS:          result_val = makeBoolean((long long)char_val < int_val);  break;
-                        case OP_LESS_EQUAL:    result_val = makeBoolean((long long)char_val <= int_val); break;
+                        case EQUAL:         result_val = makeBoolean((long long)char_val == int_val); break;
+                        case NOT_EQUAL:     result_val = makeBoolean((long long)char_val != int_val); break;
+                        case GREATER:       result_val = makeBoolean((long long)char_val > int_val);  break;
+                        case GREATER_EQUAL: result_val = makeBoolean((long long)char_val >= int_val); break;
+                        case LESS:          result_val = makeBoolean((long long)char_val < int_val);  break;
+                        case LESS_EQUAL:    result_val = makeBoolean((long long)char_val <= int_val); break;
                         default:
                             runtimeError(vm, "VM Error: Unexpected char/integer comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
@@ -2008,12 +2008,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     int ca = AS_CHAR(a_val);
                     int cb = AS_CHAR(b_val);
                     switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean(ca == cb); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean(ca != cb); break;
-                        case OP_GREATER:       result_val = makeBoolean(ca > cb);  break;
-                        case OP_GREATER_EQUAL: result_val = makeBoolean(ca >= cb); break;
-                        case OP_LESS:          result_val = makeBoolean(ca < cb);  break;
-                        case OP_LESS_EQUAL:    result_val = makeBoolean(ca <= cb); break;
+                        case EQUAL:         result_val = makeBoolean(ca == cb); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(ca != cb); break;
+                        case GREATER:       result_val = makeBoolean(ca > cb);  break;
+                        case GREATER_EQUAL: result_val = makeBoolean(ca >= cb); break;
+                        case LESS:          result_val = makeBoolean(ca < cb);  break;
+                        case LESS_EQUAL:    result_val = makeBoolean(ca <= cb); break;
                         default:
                             runtimeError(vm, "VM Error: Unexpected char comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
@@ -2038,12 +2038,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
 
                     switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean(eq); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean(!eq); break;
-                        case OP_GREATER:
-                        case OP_GREATER_EQUAL:
-                        case OP_LESS:
-                        case OP_LESS_EQUAL:
+                        case EQUAL:         result_val = makeBoolean(eq); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(!eq); break;
+                        case GREATER:
+                        case GREATER_EQUAL:
+                        case LESS:
+                        case LESS_EQUAL:
                             runtimeError(vm, "Runtime Error: Relational comparison between CHAR and STRING is not supported.");
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                         default:
@@ -2058,12 +2058,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                           bool ba = IS_BOOLEAN(a_val) ? AS_BOOLEAN(a_val) : (AS_INTEGER(a_val) != 0);
                           bool bb = IS_BOOLEAN(b_val) ? AS_BOOLEAN(b_val) : (AS_INTEGER(b_val) != 0);
                     switch (instruction_val) {
-                        case OP_EQUAL:         result_val = makeBoolean(ba == bb); break;
-                        case OP_NOT_EQUAL:     result_val = makeBoolean(ba != bb); break;
-                        case OP_GREATER:       result_val = makeBoolean(ba > bb);  break;
-                        case OP_GREATER_EQUAL: result_val = makeBoolean(ba >= bb); break;
-                        case OP_LESS:          result_val = makeBoolean(ba < bb);  break;
-                        case OP_LESS_EQUAL:    result_val = makeBoolean(ba <= bb); break;
+                        case EQUAL:         result_val = makeBoolean(ba == bb); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(ba != bb); break;
+                        case GREATER:       result_val = makeBoolean(ba > bb);  break;
+                        case GREATER_EQUAL: result_val = makeBoolean(ba >= bb); break;
+                        case LESS:          result_val = makeBoolean(ba < bb);  break;
+                        case LESS_EQUAL:    result_val = makeBoolean(ba <= bb); break;
                         default:
                             runtimeError(vm, "VM Error: Unexpected boolean comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
@@ -2078,9 +2078,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     int ord_a = a_val.enum_val.ordinal;
                     int ord_b = b_val.enum_val.ordinal;
 
-                    if (instruction_val == OP_EQUAL) {
+                    if (instruction_val == EQUAL) {
                         result_val = makeBoolean(types_match && (ord_a == ord_b));
-                    } else if (instruction_val == OP_NOT_EQUAL) {
+                    } else if (instruction_val == NOT_EQUAL) {
                         result_val = makeBoolean(!types_match || (ord_a != ord_b));
                     } else {
                         if (!types_match) {
@@ -2091,10 +2091,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                         }
                         switch (instruction_val) {
-                            case OP_GREATER:       result_val = makeBoolean(ord_a > ord_b);  break;
-                            case OP_GREATER_EQUAL: result_val = makeBoolean(ord_a >= ord_b); break;
-                            case OP_LESS:          result_val = makeBoolean(ord_a < ord_b);  break;
-                            case OP_LESS_EQUAL:    result_val = makeBoolean(ord_a <= ord_b); break;
+                            case GREATER:       result_val = makeBoolean(ord_a > ord_b);  break;
+                            case GREATER_EQUAL: result_val = makeBoolean(ord_a >= ord_b); break;
+                            case LESS:          result_val = makeBoolean(ord_a < ord_b);  break;
+                            case LESS_EQUAL:    result_val = makeBoolean(ord_a <= ord_b); break;
                             default:
                                 runtimeError(vm, "VM Error: Unexpected enum comparison opcode %d.", instruction_val);
                                 freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
@@ -2116,9 +2116,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         ptrs_equal = (a_val.ptr_val == b_val.ptr_val);
                     }
 
-                    if (instruction_val == OP_EQUAL) {
+                    if (instruction_val == EQUAL) {
                         result_val = makeBoolean(ptrs_equal);
-                    } else if (instruction_val == OP_NOT_EQUAL) {
+                    } else if (instruction_val == NOT_EQUAL) {
                         result_val = makeBoolean(!ptrs_equal);
                     } else {
                         runtimeError(vm, "Runtime Error: Invalid operator for pointer comparison. Only '=' and '<>' are allowed. Got opcode %d.", instruction_val);
@@ -2133,12 +2133,12 @@ comparison_error_label:
                 } else {
                     const char* op_str = "unknown_comparison_op";
                     switch (instruction_val) {
-                        case OP_EQUAL:         op_str = "="; break;
-                        case OP_NOT_EQUAL:     op_str = "<>"; break;
-                        case OP_GREATER:       op_str = ">";  break;
-                        case OP_GREATER_EQUAL: op_str = ">="; break;
-                        case OP_LESS:          op_str = "<";  break;
-                        case OP_LESS_EQUAL:    op_str = "<="; break;
+                        case EQUAL:         op_str = "="; break;
+                        case NOT_EQUAL:     op_str = "<>"; break;
+                        case GREATER:       op_str = ">";  break;
+                        case GREATER_EQUAL: op_str = ">="; break;
+                        case LESS:          op_str = "<";  break;
+                        case LESS_EQUAL:    op_str = "<="; break;
                         default: op_str = "unknown_comparison_op_code"; break;
                     }
 
@@ -2153,7 +2153,7 @@ comparison_error_label:
                 freeValue(&b_val);
                 break;
             }
-            case OP_ALLOC_OBJECT: {
+            case ALLOC_OBJECT: {
                 uint8_t field_count = READ_BYTE();
                 FieldValue* fields = calloc(field_count, sizeof(FieldValue));
                 if (!fields) {
@@ -2175,7 +2175,7 @@ comparison_error_label:
                 push(vm, makePointer(obj, NULL));
                 break;
             }
-            case OP_ALLOC_OBJECT16: {
+            case ALLOC_OBJECT16: {
                 uint16_t field_count = READ_SHORT(vm);
                 FieldValue* fields = calloc(field_count, sizeof(FieldValue));
                 if (!fields) {
@@ -2197,7 +2197,7 @@ comparison_error_label:
                 push(vm, makePointer(obj, NULL));
                 break;
             }
-            case OP_GET_FIELD_OFFSET: {
+            case GET_FIELD_OFFSET: {
                 uint8_t field_index = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
 
@@ -2235,7 +2235,7 @@ comparison_error_label:
                 push(vm, makePointer(&current->value, NULL));
                 break;
             }
-            case OP_GET_FIELD_OFFSET16: {
+            case GET_FIELD_OFFSET16: {
                 uint16_t field_index = READ_SHORT(vm);
                 Value* base_val_ptr = vm->stackTop - 1;
 
@@ -2273,7 +2273,7 @@ comparison_error_label:
                 push(vm, makePointer(&current->value, NULL));
                 break;
             }
-            case OP_GET_FIELD_ADDRESS: {
+            case GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
 
@@ -2312,7 +2312,7 @@ comparison_error_label:
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
             }
-            case OP_GET_FIELD_ADDRESS16: {
+            case GET_FIELD_ADDRESS16: {
                 uint16_t field_name_idx = READ_SHORT(vm);
                 Value* base_val_ptr = vm->stackTop - 1;
 
@@ -2351,7 +2351,7 @@ comparison_error_label:
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
             }
-            case OP_GET_ELEMENT_ADDRESS: {
+            case GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
 
                 // Pop the base operand first so type checking does not
@@ -2492,7 +2492,7 @@ comparison_error_label:
 
                 break;
             }
-            case OP_SET_INDIRECT: {
+            case SET_INDIRECT: {
                 Value value_to_set = pop(vm);
                 Value pointer_to_lvalue = pop(vm);
 
@@ -2670,7 +2670,7 @@ comparison_error_label:
                 freeValue(&pointer_to_lvalue);
                 break;
             }
-            case OP_IN: {
+            case IN: {
                 Value set_val = pop(vm);
                 Value item_val = pop(vm);
 
@@ -2690,7 +2690,7 @@ comparison_error_label:
                 break;
             }
 
-            case OP_GET_INDIRECT: {
+            case GET_INDIRECT: {
                 Value pointer_val = pop(vm);
                 if (pointer_val.type != TYPE_POINTER) {
                     runtimeError(vm, "VM Error: GET_INDIRECT requires an address on the stack.");
@@ -2723,7 +2723,7 @@ comparison_error_label:
                 break;
             }
 
-            case OP_GET_CHAR_FROM_STRING: {
+            case GET_CHAR_FROM_STRING: {
                  Value index_val = pop(vm);
                  Value base_val = pop(vm); // Can be string or char
 
@@ -2764,7 +2764,7 @@ comparison_error_label:
                  freeValue(&base_val);
                  break;
              }
-            case OP_DEFINE_GLOBAL: {
+            case DEFINE_GLOBAL: {
                 Value varNameVal = READ_CONSTANT();
                 pthread_mutex_lock(&globals_mutex);
                 InterpretResult r = handleDefineGlobal(vm, varNameVal);
@@ -2772,7 +2772,7 @@ comparison_error_label:
                 if (r != INTERPRET_OK) return r;
                 break;
             }
-            case OP_DEFINE_GLOBAL16: {
+            case DEFINE_GLOBAL16: {
                 Value varNameVal = READ_CONSTANT16();
                 pthread_mutex_lock(&globals_mutex);
                 InterpretResult r = handleDefineGlobal(vm, varNameVal);
@@ -2780,7 +2780,7 @@ comparison_error_label:
                 if (r != INTERPRET_OK) return r;
                 break;
             }
-            case OP_GET_GLOBAL: {
+            case GET_GLOBAL: {
                 uint8_t name_idx = READ_BYTE();
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL.", name_idx);
@@ -2813,7 +2813,7 @@ comparison_error_label:
                 push(vm, makeCopyOfValue(sym->value));
                 break;
             }
-            case OP_GET_GLOBAL16: {
+            case GET_GLOBAL16: {
                 uint16_t name_idx = READ_SHORT(vm);
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL16.", name_idx);
@@ -2846,7 +2846,7 @@ comparison_error_label:
                 push(vm, makeCopyOfValue(sym->value));
                 break;
             }
-            case OP_SET_GLOBAL: {
+            case SET_GLOBAL: {
                 uint8_t name_idx = READ_BYTE();
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL.", name_idx);
@@ -2881,7 +2881,7 @@ comparison_error_label:
                 pthread_mutex_unlock(&globals_mutex);
                 break;
             }
-            case OP_SET_GLOBAL16: {
+            case SET_GLOBAL16: {
                 uint16_t name_idx = READ_SHORT(vm);
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL16.", name_idx);
@@ -2916,7 +2916,7 @@ comparison_error_label:
                 pthread_mutex_unlock(&globals_mutex);
                 break;
             }
-            case OP_GET_LOCAL: {
+            case GET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 size_t frame_window = (size_t)(vm->stackTop - frame->slots);
@@ -2927,7 +2927,7 @@ comparison_error_label:
                 push(vm, makeCopyOfValue(&frame->slots[slot]));
                 break;
             }
-            case OP_SET_LOCAL: {
+            case SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 size_t frame_window = (size_t)(vm->stackTop - frame->slots);
@@ -3013,7 +3013,7 @@ comparison_error_label:
                 freeValue(&value_from_stack);
                 break;
             }
-            case OP_GET_UPVALUE: {
+            case GET_UPVALUE: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 if (slot >= frame->upvalue_count) {
@@ -3023,7 +3023,7 @@ comparison_error_label:
                 push(vm, makeCopyOfValue(frame->upvalues[slot]));
                 break;
             }
-            case OP_SET_UPVALUE: {
+            case SET_UPVALUE: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 if (slot >= frame->upvalue_count) {
@@ -3083,7 +3083,7 @@ comparison_error_label:
                 freeValue(&value_from_stack);
                 break;
             }
-            case OP_GET_UPVALUE_ADDRESS: {
+            case GET_UPVALUE_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 if (slot >= frame->upvalue_count) {
@@ -3093,7 +3093,7 @@ comparison_error_label:
                 push(vm, makePointer(frame->upvalues[slot], NULL));
                 break;
             }
-            case OP_INIT_LOCAL_ARRAY: {
+            case INIT_LOCAL_ARRAY: {
                 uint8_t slot = READ_BYTE();
                 uint8_t dimension_count = READ_BYTE();
                 if (dimension_count == 0) {
@@ -3179,7 +3179,7 @@ comparison_error_label:
                 *target_slot = array_val;
                 break;
             }
-            case OP_INIT_LOCAL_FILE: {
+            case INIT_LOCAL_FILE: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 Value* target_slot = &frame->slots[slot];
@@ -3187,7 +3187,7 @@ comparison_error_label:
                 *target_slot = makeValueForType(TYPE_FILE, NULL, NULL);
                 break;
             }
-            case OP_INIT_LOCAL_POINTER: {
+            case INIT_LOCAL_POINTER: {
                 uint8_t slot = READ_BYTE();
                 uint16_t type_name_idx = READ_SHORT(vm);
                 AST* type_def = NULL;
@@ -3237,7 +3237,7 @@ comparison_error_label:
                 *target_slot = ptr;
                 break;
             }
-            case OP_JUMP_IF_FALSE: {
+            case JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
                 bool condition_truth = false;
@@ -3270,17 +3270,17 @@ comparison_error_label:
                 }
                 break;
             }
-            case OP_JUMP: {
+            case JUMP: {
                 uint16_t offset = READ_SHORT(vm);
                 vm->ip += (int16_t)offset;
                 break;
             }
-            case OP_POP: {
+            case POP: {
                 Value popped_val = pop(vm);
                 freeValue(&popped_val);
                 break;
             }
-            case OP_CALL_BUILTIN: {
+            case CALL_BUILTIN: {
                 uint16_t name_const_idx = READ_SHORT(vm);
                 uint8_t arg_count = READ_BYTE();
 
@@ -3343,7 +3343,7 @@ comparison_error_label:
                 }
                 break;
             }
-            case OP_CALL: {
+            case CALL: {
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
                     runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -3428,7 +3428,7 @@ comparison_error_label:
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
-            case OP_CALL_INDIRECT: {
+            case CALL_INDIRECT: {
                 uint8_t declared_arity = READ_BYTE();
                 // Stack layout expected: [... args] [addr]
                 Value addrVal = pop(vm);
@@ -3517,7 +3517,7 @@ comparison_error_label:
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
-            case OP_CALL_METHOD: {
+            case CALL_METHOD: {
                 uint8_t method_index = READ_BYTE();
                 uint8_t declared_arity = READ_BYTE();
                 if (vm->stackTop - vm->stack < declared_arity + 1) {
@@ -3632,9 +3632,9 @@ comparison_error_label:
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
-            case OP_PROC_CALL_INDIRECT: {
+            case PROC_CALL_INDIRECT: {
                 uint8_t declared_arity = READ_BYTE();
-                // Reuse OP_CALL_INDIRECT machinery by rewinding ip to interpret the common path,
+                // Reuse CALL_INDIRECT machinery by rewinding ip to interpret the common path,
                 // but we need to know when to discard a return value. Implement inline duplication instead.
 
                 Value addrVal = pop(vm);
@@ -3727,9 +3727,9 @@ comparison_error_label:
                 break;
             }
 
-            case OP_HALT:
+            case HALT:
                 return INTERPRET_OK;
-            case OP_CALL_HOST: {
+            case CALL_HOST: {
                 HostFunctionID host_id = READ_HOST_ID();
                 if (host_id >= HOST_FN_COUNT || vm->host_functions[host_id] == NULL) {
                     runtimeError(vm, "Invalid host function ID %d or function not registered.", host_id);
@@ -3743,7 +3743,7 @@ comparison_error_label:
                 push(vm, result);
                 break;
             }
-            case OP_THREAD_CREATE: {
+            case THREAD_CREATE: {
                 uint16_t entry = READ_SHORT(vm);
                 int id = createThread(vm, entry);
                 if (id < 0) {
@@ -3753,7 +3753,7 @@ comparison_error_label:
                 push(vm, makeInt(id));
                 break;
             }
-            case OP_THREAD_JOIN: {
+            case THREAD_JOIN: {
                 Value tidVal = peek(vm, 0);
                 if (!IS_INTLIKE(tidVal)) {
                     runtimeError(vm, "Thread id must be integer.");
@@ -3767,7 +3767,7 @@ comparison_error_label:
                 freeValue(&popped_tid);
                 break;
             }
-            case OP_MUTEX_CREATE: {
+            case MUTEX_CREATE: {
                 int id = createMutex(vm, false);
                 if (id < 0) {
                     runtimeError(vm, "Mutex limit exceeded.");
@@ -3776,7 +3776,7 @@ comparison_error_label:
                 push(vm, makeInt(id));
                 break;
             }
-            case OP_RCMUTEX_CREATE: {
+            case RCMUTEX_CREATE: {
                 int id = createMutex(vm, true);
                 if (id < 0) {
                     runtimeError(vm, "Mutex limit exceeded.");
@@ -3785,7 +3785,7 @@ comparison_error_label:
                 push(vm, makeInt(id));
                 break;
             }
-            case OP_MUTEX_LOCK: {
+            case MUTEX_LOCK: {
                 Value midVal = peek(vm, 0);
                 if (!IS_INTLIKE(midVal)) {
                     runtimeError(vm, "Mutex id must be integer.");
@@ -3804,7 +3804,7 @@ comparison_error_label:
                 freeValue(&popped_mid);
                 break;
             }
-            case OP_MUTEX_UNLOCK: {
+            case MUTEX_UNLOCK: {
                 Value midVal = peek(vm, 0);
                 if (!IS_INTLIKE(midVal)) {
                     runtimeError(vm, "Mutex id must be integer.");
@@ -3823,7 +3823,7 @@ comparison_error_label:
                 freeValue(&popped_mid);
                 break;
             }
-            case OP_MUTEX_DESTROY: {
+            case MUTEX_DESTROY: {
                 Value midVal = peek(vm, 0);
                 if (!IS_INTLIKE(midVal)) {
                     runtimeError(vm, "Mutex id must be integer.");
@@ -3842,7 +3842,7 @@ comparison_error_label:
                 freeValue(&popped_mid);
                 break;
             }
-            case OP_FORMAT_VALUE: {
+            case FORMAT_VALUE: {
                 uint8_t width = READ_BYTE();
                 uint8_t precision_raw = READ_BYTE();
                 int precision = (precision_raw == 0xFF) ? -1 : precision_raw;

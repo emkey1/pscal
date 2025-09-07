@@ -66,14 +66,14 @@ This is where the translation to PSCAL VM opcodes occurs.
 
 * **Class Representation:** A class will be represented in the bytecode as a type definition with a list of its fields and methods. An object instance will be a structured block of memory similar to a Pascal `record` or C `struct`.
 * **Object & Field Opcodes:**
-    * `new ClassName(...)` → A call to a runtime built-in function that allocates a block of memory for the object and initializes it. This could use the `OP_INIT_LOCAL_ARRAY` opcode with a new type for objects.
-    * `obj.field = value` → `OP_GET_GLOBAL_ADDRESS` (or `OP_GET_LOCAL_ADDRESS`) to get a pointer to the object, followed by `OP_GET_FIELD_ADDRESS` to get a pointer to the field. Finally, `OP_SET_INDIRECT` to write the value to the field.
+    * `new ClassName(...)` → A call to a runtime built-in function that allocates a block of memory for the object and initializes it. This could use the `INIT_LOCAL_ARRAY` opcode with a new type for objects.
+    * `obj.field = value` → `GET_GLOBAL_ADDRESS` (or `GET_LOCAL_ADDRESS`) to get a pointer to the object, followed by `GET_FIELD_ADDRESS` to get a pointer to the field. Finally, `SET_INDIRECT` to write the value to the field.
 * **Method Dispatch Opcodes:**
     * `obj.method()` → The compiler will determine if `method` is a virtual method (i.e., overridden). If it is, the compiler will emit opcodes to:
         1. Push the object reference onto the stack.
         2. Push arguments.
         3. Look up the correct function pointer from the object's V-table based on its type.
-        4. Call the function using a modified `OP_CALL`.
+        4. Call the function using a modified `CALL`.
     * **VM Extension:** The VM's `CallFrame` and `procedureTable` will be extended to store and look up class and method information to support the V-table mechanism.
 
 ***

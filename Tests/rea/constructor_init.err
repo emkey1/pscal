@@ -2,22 +2,22 @@
 == Disassembly: Tests/rea/constructor_init.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    2 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
-0005    | OP_ALLOC_OBJECT     2 (fields)
-0007    | OP_DUP
-0008    | OP_CONSTANT         2 '5'
-0010    | OP_CALL          0021 (Point) (2 args)
-0016    | OP_SET_GLOBAL       0 'p'
-0018    1 OP_JUMP             9 (to 0030)
+0000    2 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
+0005    | ALLOC_OBJECT        2 (fields)
+0007    | DUP
+0008    | CONSTANT            2 '5'
+0010    | CALL             0021 (Point) (2 args)
+0016    | SET_GLOBAL          0 'p'
+0018    1 JUMP                9 (to 0030)
 
 --- Procedure point_point (at 0021) ---
-0021    | OP_GET_LOCAL        1 (slot)
-0023    | OP_GET_LOCAL_ADDRESS    0 (slot)
-0025    | OP_GET_FIELD_OFFSET    1 (index)
-0027    | OP_SWAP
-0028    | OP_SET_INDIRECT
-0029    | OP_RETURN
-0030    0 OP_HALT
+0021    | GET_LOCAL           1 (slot)
+0023    | GET_LOCAL_ADDRESS    0 (slot)
+0025    | GET_FIELD_OFFSET    1 (index)
+0027    | SWAP
+0028    | SET_INDIRECT
+0029    | RETURN
+0030    0 HALT
 == End Disassembly: Tests/rea/constructor_init.rea ==
 
 Constants (3):\n  0000: STR   "p"

@@ -51,8 +51,8 @@ typedef struct {
     uint8_t* return_address;    // IP in the caller to return to
     Value* slots;               // Pointer to this frame's window on the VM value stack
     Symbol* function_symbol;    // Pointer to the Symbol of the function being called (for arity/locals_count)
-                                // Note: Storing Symbol* is one way; alternatively, OP_CALL could carry locals_count,
-                                // or OP_RETURN could be generic if stack is always reset to frame->slots.
+                                // Note: Storing Symbol* is one way; alternatively, CALL could carry locals_count,
+                                // or RETURN could be generic if stack is always reset to frame->slots.
     uint8_t locals_count;       // Number of local variables (excluding params)
     uint8_t upvalue_count;
     Value** upvalues;
