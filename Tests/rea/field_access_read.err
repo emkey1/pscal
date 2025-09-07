@@ -10,4 +10,8 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0012    0 OP_HALT
 == End Disassembly: Tests/rea/field_access_read.rea ==
 
-Constants (4):\n  0000: STR   "a"\n  0001: STR   "int"\n  0002: STR   "p"\n  0003: STR   "x"\n
+Constants (4):\n  0000: STR   "a"
+  0001: STR   "int"
+  0002: STR   "p"
+  0003: STR   "x"
+
