@@ -372,6 +372,7 @@ AST *parseArrayType(Parser *parser) {
             snprintf(val_str_lower, sizeof(val_str_lower), "%lld", lower_eval.i_val);
             temp_token_lower.type = TOKEN_INTEGER_CONST;
             temp_token_lower.value = val_str_lower; // Points to stack, but newASTNode copies
+            temp_token_lower.length = strlen(val_str_lower);
             temp_token_lower.line = lower_expr_node->token ? lower_expr_node->token->line : parser->lexer->line;
             temp_token_lower.column = lower_expr_node->token ? lower_expr_node->token->column : parser->lexer->column;
             
@@ -419,6 +420,7 @@ AST *parseArrayType(Parser *parser) {
             snprintf(val_str_upper, sizeof(val_str_upper), "%lld", upper_eval.i_val);
             temp_token_upper.type = TOKEN_INTEGER_CONST;
             temp_token_upper.value = val_str_upper;
+            temp_token_upper.length = strlen(val_str_upper);
             temp_token_upper.line = upper_expr_node->token ? upper_expr_node->token->line : parser->lexer->line;
             temp_token_upper.column = upper_expr_node->token ? upper_expr_node->token->column : parser->lexer->column;
 

@@ -67,6 +67,69 @@ static AST *rewriteContinueWithPost(AST *node, AST *postStmt) {
     return node;
 }
 
+// Unescape standard escape sequences within a string literal segment
+static char *reaUnescapeString(const char *src, size_t len, size_t *out_len) {
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = src[i];
+        if (c == '\\' && i + 1 < len) {
+            char n = src[++i];
+            switch (n) {
+                case 'n': buf[j++] = '\n'; break;
+                case 'r': buf[j++] = '\r'; break;
+                case 't': buf[j++] = '\t'; break;
+                case '\\': buf[j++] = '\\'; break;
+                case 0x27: buf[j++] = 0x27; break;
+                case '"': buf[j++] = '"'; break;
+                case 'x':
+                case 'X': {
+                    int val = 0;
+                    size_t digits = 0;
+                    while (i + 1 < len && digits < 2) {
+                        char h = src[i + 1];
+                        if ((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F')) {
+                            i++;
+                            digits++;
+                            val = val * 16 + (h >= '0' && h <= '9' ? h - '0' : (h & 0x5f) - 'A' + 10);
+                        } else {
+                            break;
+                        }
+                    }
+                    if (digits > 0) {
+                        buf[j++] = (char)val;
+                    } else {
+                        buf[j++] = '\\';
+                        buf[j++] = n;
+                    }
+                    break;
+                }
+                default:
+                    if (n >= '0' && n <= '7') {
+                        int val = n - '0';
+                        size_t digits = 1;
+                        while (i + 1 < len && digits < 3 && src[i + 1] >= '0' && src[i + 1] <= '7') {
+                            val = (val << 3) + (src[++i] - '0');
+                            digits++;
+                        }
+                        buf[j++] = (char)val;
+                    } else {
+                        // Preserve unknown escape sequences verbatim
+                        buf[j++] = '\\';
+                        buf[j++] = n;
+                    }
+                    break;
+            }
+        } else {
+            buf[j++] = c;
+        }
+    }
+    buf[j] = '\0';
+    if (out_len) *out_len = j;
+    return buf;
+}
+
 static AST *parseFactor(ReaParser *p) {
     if (p->current.type == REA_TOKEN_SUPER) {
         // super(...) or super.method(...)
@@ -226,14 +289,21 @@ static AST *parseFactor(ReaParser *p) {
     } else if (p->current.type == REA_TOKEN_STRING) {
         size_t len = p->current.length;
         if (len < 2) return NULL;
-        char *lex = (char *)malloc(len - 1);
+        size_t inner_len = len - 2;
+        size_t unesc_len = 0;
+        char *lex = reaUnescapeString(p->current.start + 1, inner_len, &unesc_len);
         if (!lex) return NULL;
-        memcpy(lex, p->current.start + 1, len - 2);
-        lex[len - 2] = '\0';
-        Token *tok = newToken(TOKEN_STRING_CONST, lex, p->current.line, 0);
-        free(lex);
+        Token *tok = (Token*)malloc(sizeof(Token));
+        if (!tok) { free(lex); return NULL; }
+        tok->type = TOKEN_STRING_CONST;
+        tok->value = lex; // already NUL-terminated by reaUnescapeString
+        tok->length = unesc_len;
+        tok->line = p->current.line;
+        tok->column = 0;
         AST *node = newASTNode(AST_STRING, tok);
-        setTypeAST(node, TYPE_STRING);
+        node->i_val = (int)unesc_len; // track literal length explicitly
+        VarType vtype = (p->current.start[0] == '\'' && unesc_len == 1) ? TYPE_CHAR : TYPE_STRING;
+        setTypeAST(node, vtype);
         reaAdvance(p);
         return node;
     } else if (p->current.type == REA_TOKEN_TRUE || p->current.type == REA_TOKEN_FALSE) {
@@ -449,6 +519,7 @@ static TokenType mapOp(ReaTokenType t) {
         case REA_TOKEN_MINUS: return TOKEN_MINUS;
         case REA_TOKEN_STAR: return TOKEN_MUL;
         case REA_TOKEN_SLASH: return TOKEN_SLASH;
+        case REA_TOKEN_PERCENT: return TOKEN_MOD;
         case REA_TOKEN_EQUAL_EQUAL: return TOKEN_EQUAL;
         case REA_TOKEN_BANG_EQUAL: return TOKEN_NOT_EQUAL;
         case REA_TOKEN_GREATER: return TOKEN_GREATER;
@@ -465,6 +536,7 @@ static const char *opLexeme(TokenType t) {
         case TOKEN_MINUS: return "-";
         case TOKEN_MUL: return "*";
         case TOKEN_SLASH: return "/";
+        case TOKEN_MOD: return "%";
         case TOKEN_EQUAL: return "==";
         case TOKEN_NOT_EQUAL: return "!=";
         case TOKEN_GREATER: return ">";
@@ -478,7 +550,9 @@ static const char *opLexeme(TokenType t) {
 static AST *parseTerm(ReaParser *p) {
     AST *node = parseFactor(p);
     if (!node) return NULL;
-    while (p->current.type == REA_TOKEN_STAR || p->current.type == REA_TOKEN_SLASH) {
+    while (p->current.type == REA_TOKEN_STAR ||
+           p->current.type == REA_TOKEN_SLASH ||
+           p->current.type == REA_TOKEN_PERCENT) {
         ReaToken op = p->current;
         reaAdvance(p);
         AST *right = parseFactor(p);

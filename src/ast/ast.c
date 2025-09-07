@@ -6,6 +6,7 @@
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
 #include "backend_ast/builtin.h"
+#include <string.h>
 
 bool isNodeInTypeTable(AST* nodeToFind) {
     if (!nodeToFind || !type_table) return false; // No node or no table
@@ -770,12 +771,16 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 node->var_type = (node->token && node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER;
                 break;
             case AST_STRING:
-                if (node->token && node->token->value && strlen(node->token->value) == 1) {
-                    node->var_type = TYPE_CHAR;
-                    node->type_def = lookupType("char");
-                } else {
-                    node->var_type = TYPE_STRING;
+                if (node->token && node->token->value) {
+                    size_t literal_len = (node->i_val > 0) ? (size_t)node->i_val
+                                                : strlen(node->token->value);
+                    if (literal_len == 1) {
+                        node->var_type = TYPE_CHAR;
+                        node->type_def = lookupType("char");
+                        break;
+                    }
                 }
+                node->var_type = TYPE_STRING;
                 break;
             case AST_BOOLEAN:
                 node->var_type = TYPE_BOOLEAN;

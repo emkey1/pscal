@@ -161,6 +161,7 @@ typedef enum {
 typedef struct {
     TokenType type;
     char *value;
+    size_t length;
     int line;
     int column;
 } Token;
