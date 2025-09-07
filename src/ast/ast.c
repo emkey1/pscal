@@ -55,6 +55,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->type = type;
     node->is_global_scope = false;
     node->is_inline = false;
+    node->is_virtual = false;
     node->i_val = 0; // Initialize i_val
     node->symbol_table = NULL; // Initialize symbol_table
     node->unit_list = NULL; // Initialize unit_list
@@ -965,6 +966,7 @@ AST *copyAST(AST *node) {
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
     newNode->is_inline = node->is_inline;
+    newNode->is_virtual = node->is_virtual;
     newNode->i_val = node->i_val;
     // Preserve pointers for unit_list and symbol_table (shallow copy).
     // These structures are managed elsewhere and do not require deep copies
