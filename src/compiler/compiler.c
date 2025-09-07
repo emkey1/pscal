@@ -20,6 +20,7 @@
 
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
+static AST* gCurrentProgramRoot = NULL;
 
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
@@ -352,7 +353,17 @@ static AST* getRecordTypeFromExpr(AST* expr) {
         }
         return NULL;
     }
-    return resolveTypeAlias(expr->type_def);
+    AST* t = resolveTypeAlias(expr->type_def);
+    if (!t && expr->token && expr->token->value && gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
+        if (decl && decl->right) {
+            t = resolveTypeAlias(decl->right);
+        }
+    }
+    if (t && t->type == AST_POINTER_TYPE) {
+        return resolveTypeAlias(t->right);
+    }
+    return t;
 }
 
 // Find the canonical name for a type AST node.
@@ -1179,8 +1190,12 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Recursively compile the base (e.g., myRec or p^)
-            compileLValue(node->left, chunk, getLine(node->left));
+            // Base expression might be a record value or a pointer to a record.
+            if (node->left && node->left->var_type == TYPE_POINTER) {
+                compileRValue(node->left, chunk, getLine(node->left));
+            } else {
+                compileLValue(node->left, chunk, getLine(node->left));
+            }
 
             AST* recType = getRecordTypeFromExpr(node->left);
             int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
@@ -1311,6 +1326,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    gCurrentProgramRoot = rootNode;
     // Do NOT re-initialize the chunk here, it's already populated with unit code.
     // initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;

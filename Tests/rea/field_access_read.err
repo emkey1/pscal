@@ -2,15 +2,17 @@
 == Disassembly: Tests/rea/field_access_read.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    3 OP_DEFINE_GLOBAL NameIdx:0   'a' Type:INT64 ('int')
-0005    | OP_GET_GLOBAL       2 'p'
-0007    | OP_GET_FIELD        3 'x'
-0009    | OP_SET_GLOBAL       0 'a'
-0011    0 OP_HALT
+0000    2 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
+0005    4 OP_DEFINE_GLOBAL NameIdx:2   'a' Type:INT64 ('int')
+0010    | OP_GET_GLOBAL_ADDRESS    0 'p'
+0012    | OP_GET_FIELD_OFFSET    1 (index)
+0014    | OP_GET_INDIRECT
+0015    | OP_SET_GLOBAL       2 'a'
+0017    0 OP_HALT
 == End Disassembly: Tests/rea/field_access_read.rea ==
 
-Constants (4):\n  0000: STR   "a"
-  0001: STR   "int"
-  0002: STR   "p"
-  0003: STR   "x"
+Constants (4):\n  0000: STR   "p"
+  0001: STR   "Point"
+  0002: STR   "a"
+  0003: STR   "int"
 
