@@ -1256,7 +1256,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
             AST* classType = lookupType(className);
-            int fieldCount = getRecordFieldCount(classType) + 1;
+            bool hasVTable = recordTypeHasVTable(classType);
+            int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
                 writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
@@ -1265,17 +1266,19 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            // Initialise hidden __vtable field (offset 0)
-            writeBytecodeChunk(chunk, OP_DUP, line);
-            writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
-            writeBytecodeChunk(chunk, (uint8_t)0, line);
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            char vtName[512];
-            snprintf(vtName, sizeof(vtName), "%s_vtable", className);
-            int vtNameIdx = addStringConstant(chunk, vtName);
-            emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            if (hasVTable) {
+                // Initialise hidden __vtable field (offset 0)
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                char vtName[512];
+                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                int vtNameIdx = addStringConstant(chunk, vtName);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            }
 
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, OP_DUP, line);
@@ -2948,7 +2951,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
             AST* classType = lookupType(className);
-            int fieldCount = getRecordFieldCount(classType) + 1;
+            bool hasVTable = recordTypeHasVTable(classType);
+            int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
                 writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
@@ -2957,17 +2961,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            // Store class vtable pointer into hidden __vtable field (offset 0)
-            writeBytecodeChunk(chunk, OP_DUP, line);
-            writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
-            writeBytecodeChunk(chunk, (uint8_t)0, line);
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            char vtName[512];
-            snprintf(vtName, sizeof(vtName), "%s_vtable", className);
-            int vtNameIdx = addStringConstant(chunk, vtName);
-            emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
-            writeBytecodeChunk(chunk, OP_SWAP, line);
-            writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            if (hasVTable) {
+                // Store class vtable pointer into hidden __vtable field (offset 0)
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                char vtName[512];
+                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                int vtNameIdx = addStringConstant(chunk, vtName);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            }
 
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, OP_DUP, line);
