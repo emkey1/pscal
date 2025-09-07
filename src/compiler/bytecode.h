@@ -79,6 +79,17 @@ typedef enum {
     
     OP_GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
 
+    // --- Object support --------------------------------------------------
+    // Allocate a record/object with the given number of fields.  The first
+    // slot is always reserved for the hidden __vtable pointer.
+    OP_ALLOC_OBJECT,       // Operand: 1-byte field count
+    OP_ALLOC_OBJECT16,     // Operand: 2-byte field count
+    // Fetch the address of a field using a zero based offset.  Pops the base
+    // pointer/record from the stack and pushes the address of the selected
+    // field.
+    OP_GET_FIELD_OFFSET,   // Operand: 1-byte field index
+    OP_GET_FIELD_OFFSET16, // Operand: 2-byte field index
+
     // For now, built-ins might be handled specially, or we can add a generic call
     OP_CALL_BUILTIN,  // Placeholder for calling built-in functions
                       // Operands: 2-byte name index, 1-byte argument count
@@ -92,6 +103,8 @@ typedef enum {
     OP_CALL,          // For user-defined procedure/function calls.
                       // Operands: 2-byte name_idx, 2-byte address, 1-byte arg count
     OP_CALL_INDIRECT,     // Indirect call via address on stack. Operands: 1-byte arg count
+    OP_CALL_METHOD,       // Virtual method call using object's V-table
+                          // Operands: 1-byte method index, 1-byte arg count
     OP_PROC_CALL_INDIRECT,// Indirect call used in statement context; discards any return value. Operands: 1-byte arg count
     OP_HALT,          // Stop the VM (though OP_RETURN from main might suffice)
     OP_EXIT,          // Early exit from the current function without halting the VM

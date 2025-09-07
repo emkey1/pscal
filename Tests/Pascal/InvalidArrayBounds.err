@@ -1,1 +1,1 @@
-Parser error at line 3, column 17: Array lower bound is not a constant integer expression (got type CHAR) (found token: DOTDOT)
+Parser error at line 3, column 17: Array bounds must be compile-time integer constants (found type CHAR) (found token: DOTDOT)

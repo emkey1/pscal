@@ -3,27 +3,24 @@
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
-0005    | OP_CONSTANT         1 'Point'
-0007    | OP_CALL_BUILTIN      2 'newobj' (1 args)
-0011    | OP_DUP
-0012    | OP_CONSTANT         3 '5'
-0014    | OP_CALL          0025 (Point) (2 args)
-0020    | OP_SET_GLOBAL       0 'p'
-0022    1 OP_JUMP             9 (to 0034)
+0005    | OP_ALLOC_OBJECT     2 (fields)
+0007    | OP_DUP
+0008    | OP_CONSTANT         2 '5'
+0010    | OP_CALL          0021 (Point) (2 args)
+0016    | OP_SET_GLOBAL       0 'p'
+0018    1 OP_JUMP             9 (to 0030)
 
---- Procedure point_point (at 0025) ---
-0025    | OP_GET_LOCAL        1 (slot)
-0027    | OP_GET_LOCAL_ADDRESS    0 (slot)
-0029    | OP_GET_FIELD_ADDRESS    4 'x'
-0031    | OP_SWAP
-0032    | OP_SET_INDIRECT
-0033    | OP_RETURN
-0034    0 OP_HALT
+--- Procedure point_point (at 0021) ---
+0021    | OP_GET_LOCAL        1 (slot)
+0023    | OP_GET_LOCAL_ADDRESS    0 (slot)
+0025    | OP_GET_FIELD_OFFSET    1 (index)
+0027    | OP_SWAP
+0028    | OP_SET_INDIRECT
+0029    | OP_RETURN
+0030    0 OP_HALT
 == End Disassembly: Tests/rea/constructor_init.rea ==
 
-Constants (5):\n  0000: STR   "p"
+Constants (3):\n  0000: STR   "p"
   0001: STR   "Point"
-  0002: STR   "newobj"
-  0003: INT   5
-  0004: STR   "x"
+  0002: INT   5
 

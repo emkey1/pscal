@@ -35,6 +35,30 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
+// --- Class method registration helpers ---
+void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol) {
+    if (!vm || !vm->procedureTable || !className || !methodSymbol) return;
+    char key[256];
+    snprintf(key, sizeof(key), "%s::%u", className, methodIndex);
+    Symbol* alias = (Symbol*)malloc(sizeof(Symbol));
+    if (!alias) return;
+    *alias = *methodSymbol;
+    alias->name = strdup(key);
+    alias->is_alias = true;
+    alias->real_symbol = methodSymbol;
+    alias->next = NULL;
+    hashTableInsert(vm->procedureTable, alias);
+}
+
+Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex) {
+    if (!vm || !vm->procedureTable || !className) return NULL;
+    char key[256];
+    snprintf(key, sizeof(key), "%s::%u", className, methodIndex);
+    Symbol* sym = hashTableLookup(vm->procedureTable, key);
+    if (sym && sym->is_alias && sym->real_symbol) return sym->real_symbol;
+    return sym;
+}
+
 // --- Threading Helpers ---
 typedef struct {
     Thread* thread;
@@ -65,6 +89,7 @@ static void* threadStart(void* arg) {
     frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
     frame->upvalues = NULL;
     frame->discard_result_on_return = false;
+    frame->vtable = NULL;
 
     if (proc_symbol && proc_symbol->upvalue_count > 0) {
         frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
@@ -1314,6 +1339,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         baseFrame->locals_count = 0;
         baseFrame->upvalue_count = 0;
         baseFrame->upvalues = NULL;
+        baseFrame->vtable = NULL;
     }
 
     #ifdef DEBUG
@@ -2125,6 +2151,126 @@ comparison_error_label:
                 }
                 freeValue(&a_val);
                 freeValue(&b_val);
+                break;
+            }
+            case OP_ALLOC_OBJECT: {
+                uint8_t field_count = READ_BYTE();
+                FieldValue* fields = calloc(field_count, sizeof(FieldValue));
+                if (!fields) {
+                    runtimeError(vm, "VM Error: Out of memory allocating object.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                for (uint16_t i = 0; i < field_count; i++) {
+                    fields[i].name = NULL;
+                    fields[i].value = makeNil();
+                    fields[i].next = (i + 1 < field_count) ? &fields[i + 1] : NULL;
+                }
+                Value* obj = malloc(sizeof(Value));
+                if (!obj) {
+                    free(fields);
+                    runtimeError(vm, "VM Error: Out of memory allocating object value.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                *obj = makeRecord(fields);
+                push(vm, makePointer(obj, NULL));
+                break;
+            }
+            case OP_ALLOC_OBJECT16: {
+                uint16_t field_count = READ_SHORT(vm);
+                FieldValue* fields = calloc(field_count, sizeof(FieldValue));
+                if (!fields) {
+                    runtimeError(vm, "VM Error: Out of memory allocating object.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                for (uint16_t i = 0; i < field_count; i++) {
+                    fields[i].name = NULL;
+                    fields[i].value = makeNil();
+                    fields[i].next = (i + 1 < field_count) ? &fields[i + 1] : NULL;
+                }
+                Value* obj = malloc(sizeof(Value));
+                if (!obj) {
+                    free(fields);
+                    runtimeError(vm, "VM Error: Out of memory allocating object value.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                *obj = makeRecord(fields);
+                push(vm, makePointer(obj, NULL));
+                break;
+            }
+            case OP_GET_FIELD_OFFSET: {
+                uint8_t field_index = READ_BYTE();
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+
+                FieldValue* current = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && current; i++) {
+                    current = current->next;
+                }
+                if (!current) {
+                    runtimeError(vm, "VM Error: Field index out of range.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_base_val = pop(vm);
+                freeValue(&popped_base_val);
+                push(vm, makePointer(&current->value, NULL));
+                break;
+            }
+            case OP_GET_FIELD_OFFSET16: {
+                uint16_t field_index = READ_SHORT(vm);
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FieldValue* current = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && current; i++) {
+                    current = current->next;
+                }
+                if (!current) {
+                    runtimeError(vm, "VM Error: Field index out of range.");
+
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value popped_base_val = pop(vm);
+                freeValue(&popped_base_val);
+                push(vm, makePointer(&current->value, NULL));
                 break;
             }
             case OP_GET_FIELD_ADDRESS: {
@@ -3244,6 +3390,8 @@ comparison_error_label:
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
                 frame->discard_result_on_return = false;
+                frame->vtable = NULL;
+                frame->vtable = NULL;
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
@@ -3369,6 +3517,121 @@ comparison_error_label:
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
+            case OP_CALL_METHOD: {
+                uint8_t method_index = READ_BYTE();
+                uint8_t declared_arity = READ_BYTE();
+                if (vm->stackTop - vm->stack < declared_arity + 1) {
+                    runtimeError(vm, "VM Error: Stack underflow for method call arguments. Expected %d, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value receiverVal = vm->stackTop[-declared_arity - 1];
+                if (receiverVal.type != TYPE_POINTER || receiverVal.ptr_val == NULL) {
+                    runtimeError(vm, "VM Error: Method call receiver must be an object pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* objVal = receiverVal.ptr_val;
+                if (objVal->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Method call receiver must be an object record.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FieldValue* current = objVal->record_val;
+                Value* vtable_arr = NULL;
+                while (current) {
+                    if (strcmp(current->name, "__vtable") == 0) {
+                        if (current->value.type == TYPE_ARRAY) {
+                            vtable_arr = current->value.array_val;
+                        }
+                        break;
+                    }
+                    current = current->next;
+                }
+
+                if (!vtable_arr) {
+                    runtimeError(vm, "VM Error: Object missing V-table.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                uint16_t target_address = (uint16_t)vtable_arr[method_index].u_val;
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity - 1;
+                frame->vtable = vtable_arr;
+
+                Symbol* method_symbol = NULL;
+                const char* className = NULL;
+                if (objVal->base_type_node && objVal->base_type_node->token) {
+                    className = objVal->base_type_node->token->value;
+                }
+                if (className) {
+                    method_symbol = vmFindClassMethod(vm, className, method_index);
+                }
+                if (!method_symbol) {
+                    method_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                }
+                if (!method_symbol) {
+                    runtimeError(vm, "VM Error: Method not found for index %d.", method_index);
+                    vm->frameCount--;
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (method_symbol->type_def && method_symbol->type_def->child_count >= declared_arity + 1) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = method_symbol->type_def->children[i + 1];
+                        Value* arg_val = frame->slots + 1 + i;
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
+                frame->function_symbol = method_symbol;
+                frame->locals_count = method_symbol->locals_count;
+                frame->upvalue_count = method_symbol->upvalue_count;
+                frame->upvalues = NULL;
+                frame->discard_result_on_return = false;
+
+                if (method_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * method_symbol->upvalue_count);
+                    CallFrame* parent_frame = NULL;
+                    if (method_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == method_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
+                        }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", method_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    for (int i = 0; i < method_symbol->upvalue_count; i++) {
+                        if (method_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = parent_frame->slots + method_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = parent_frame->upvalues[method_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < method_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                vm->ip = vm->chunk->code + target_address;
+                break;
+            }
             case OP_PROC_CALL_INDIRECT: {
                 uint8_t declared_arity = READ_BYTE();
                 // Reuse OP_CALL_INDIRECT machinery by rewinding ip to interpret the common path,
@@ -3422,6 +3685,7 @@ comparison_error_label:
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
                 frame->discard_result_on_return = true;
+                frame->vtable = NULL;
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);

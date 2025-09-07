@@ -16,9 +16,15 @@
 #include "compiler/bytecode.h"
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
+#define NO_VTABLE_ENTRY -1
 
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
+static AST* gCurrentProgramRoot = NULL;
+
+// Forward declarations for helpers used before definition
+static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
+static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
 
 typedef struct {
     char* name;
@@ -103,6 +109,117 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     int index = addConstantToChunk(chunk, &val);
     // No freeValue needed for simple boolean types.
     return index;
+}
+
+typedef struct {
+    char* class_name;
+    int method_count;
+    int capacity;
+    int* addrs;
+    bool merged;
+} VTableInfo;
+
+static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
+    for (int i = 0; i < table_count; i++) {
+        if (strcmp(tables[i].class_name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt) {
+    if (!vt || vt->merged) return;
+    AST* cls = lookupType(vt->class_name);
+    const char* parent_name = NULL;
+    if (cls && cls->extra && cls->extra->token) parent_name = cls->extra->token->value;
+    if (parent_name) {
+        int pidx = findVTableIndex(tables, table_count, parent_name);
+        if (pidx != -1) {
+            mergeParentTable(tables, table_count, &tables[pidx]);
+            VTableInfo* parent = &tables[pidx];
+            if (vt->capacity < parent->method_count) {
+                int newcap = parent->method_count;
+                vt->addrs = realloc(vt->addrs, sizeof(int) * newcap);
+                for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = NO_VTABLE_ENTRY;
+                vt->capacity = newcap;
+            }
+            for (int j = 0; j < parent->method_count; j++) {
+                if (vt->addrs[j] == NO_VTABLE_ENTRY) vt->addrs[j] = parent->addrs[j];
+            }
+            if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
+        }
+    }
+    vt->merged = true;
+}
+
+static void emitVTables(BytecodeChunk* chunk) {
+    VTableInfo* tables = NULL;
+    int table_count = 0;
+    for (int b = 0; b < HASHTABLE_SIZE; b++) {
+        Symbol* sym = procedure_table->buckets[b];
+        while (sym) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (base && base->type_def && base->type_def->is_virtual && base->name) {
+                const char* us = strchr(base->name, '_');
+                if (us) {
+                    size_t cls_len = (size_t)(us - base->name);
+                    char cls[256];
+                    if (cls_len < sizeof(cls)) {
+                        memcpy(cls, base->name, cls_len);
+                        cls[cls_len] = '\0';
+                        int idx = -1;
+                        for (int i = 0; i < table_count; i++) {
+                            if (strcmp(tables[i].class_name, cls) == 0) { idx = i; break; }
+                        }
+                        if (idx == -1) {
+                            tables = realloc(tables, sizeof(VTableInfo) * (table_count + 1));
+                            idx = table_count++;
+                            tables[idx].class_name = strdup(cls);
+                            tables[idx].method_count = 0;
+                            tables[idx].capacity = 0;
+                            tables[idx].addrs = NULL;
+                            tables[idx].merged = false;
+                        }
+                        int mindex = base->type_def->i_val;
+                        if (mindex >= tables[idx].capacity) {
+                            int newcap = mindex + 1;
+                            tables[idx].addrs = realloc(tables[idx].addrs, sizeof(int) * newcap);
+                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = NO_VTABLE_ENTRY;
+                            tables[idx].capacity = newcap;
+                        }
+                        tables[idx].addrs[mindex] = base->bytecode_address;
+                        if (mindex + 1 > tables[idx].method_count) tables[idx].method_count = mindex + 1;
+                    }
+                }
+            }
+            sym = sym->next;
+        }
+    }
+
+    for (int i = 0; i < table_count; i++) {
+        mergeParentTable(tables, table_count, &tables[i]);
+    }
+
+    for (int i = 0; i < table_count; i++) {
+        VTableInfo* vt = &tables[i];
+        if (vt->method_count == 0) continue;
+        int lb = 0;
+        int ub = vt->method_count - 1;
+        Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
+        for (int j = 0; j < vt->method_count; j++) {
+            int addr = vt->addrs[j];
+            arr.array_val[j] = makeInt(addr == NO_VTABLE_ENTRY ? 0 : addr);
+        }
+        int cidx = addConstantToChunk(chunk, &arr);
+        freeValue(&arr);
+        emitConstant(chunk, cidx, 0);
+        char gname[512];
+        snprintf(gname, sizeof(gname), "%s_vtable", vt->class_name);
+        int nameIdx = addStringConstant(chunk, gname);
+        emitDefineGlobal(chunk, nameIdx, 0);
+        free(vt->class_name);
+        free(vt->addrs);
+    }
+    free(tables);
 }
 
 // Return an ordinal ranking for integer-like types so we can detect
@@ -194,6 +311,96 @@ static AST* resolveTypeAlias(AST* type_node) {
         type_node = looked;
     }
     return type_node;
+}
+
+// --- Object layout helpers -------------------------------------------------
+
+// Recursively count fields in a record, including inherited ones.
+static int getRecordFieldCount(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
+    int count = recordType->child_count; // local fields
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        count += getRecordFieldCount(parent);
+    }
+    return count;
+}
+
+// Retrieve zero-based offset of a field within a record hierarchy.
+static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE || !fieldName) return -1;
+
+    int parentCount = 0;
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        int parentOffset = getRecordFieldOffset(parent, fieldName);
+        if (parentOffset != -1) return parentOffset;
+        parentCount = getRecordFieldCount(parent);
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        AST* var = (decl && decl->child_count > 0) ? decl->children[0] : NULL;
+        if (var && var->token && strcmp(var->token->value, fieldName) == 0) {
+            return parentCount + i;
+        }
+    }
+    return -1;
+}
+
+// Determine the record type for an expression used as an object base.
+static AST* getRecordTypeFromExpr(AST* expr) {
+    if (!expr) return NULL;
+    if (expr->type == AST_DEREFERENCE) {
+        AST* ptr_type = resolveTypeAlias(expr->left->type_def);
+        if (ptr_type && ptr_type->type == AST_POINTER_TYPE) {
+            return resolveTypeAlias(ptr_type->right);
+        }
+        return NULL;
+    }
+    AST* t = resolveTypeAlias(expr->type_def);
+    if (!t && expr->token && expr->token->value && gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
+        if (decl && decl->right) {
+            t = resolveTypeAlias(decl->right);
+        }
+    }
+    if (t && t->type == AST_POINTER_TYPE) {
+        return resolveTypeAlias(t->right);
+    }
+    return t;
+}
+
+// Find the canonical name for a type AST node.
+static const char* getTypeNameFromAST(AST* typeAst) {
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        if (entry->typeAST == typeAst) return entry->name;
+    }
+    return NULL;
+}
+
+// Check if a record type defines methods and therefore reserves a vtable slot.
+static bool recordTypeHasVTable(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return false;
+    const char* name = getTypeNameFromAST(recordType);
+    if (!name) return false;
+    size_t len = strlen(name);
+    for (int b = 0; b < HASHTABLE_SIZE; b++) {
+        Symbol* sym = procedure_table->buckets[b];
+        while (sym) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (base && base->name &&
+                strncmp(base->name, name, len) == 0 &&
+                base->name[len] == '_') {
+                return true;
+            }
+            sym = sym->next;
+        }
+    }
+    return false;
 }
 
 // Compare two type AST nodes structurally.
@@ -995,17 +1202,29 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Recursively compile the L-Value of the base (e.g., myRec or p^)
-            compileLValue(node->left, chunk, getLine(node->left));
-
-            // Now, get the address of the specific field.
-            int fieldNameIndex = addStringConstant(chunk, node->token->value);
-            if (fieldNameIndex <= 0xFF) {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+            // Base expression might be a record value or a pointer to a record.
+            if (node->left && node->left->var_type == TYPE_POINTER) {
+                compileRValue(node->left, chunk, getLine(node->left));
             } else {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
-                emitShort(chunk, (uint16_t)fieldNameIndex, line);
+                compileLValue(node->left, chunk, getLine(node->left));
+            }
+
+            AST* recType = getRecordTypeFromExpr(node->left);
+            int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
+            if (recordTypeHasVTable(recType)) fieldOffset++;
+            if (fieldOffset < 0) {
+                fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
+                        node->token ? node->token->value : "<null>");
+                compiler_had_error = true;
+                break;
+            }
+
+            if (fieldOffset <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET16, line);
+                emitShort(chunk, (uint16_t)fieldOffset, line);
             }
             break;
         }
@@ -1061,30 +1280,43 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_NEW: {
-            // new ClassName(args): allocate object pointer via builtin newobj("ClassName")
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            int nameIdx = addStringConstant(chunk, className);
-            emitConstant(chunk, nameIdx, line);
-            // call builtin newobj(string) -> pointer
-            int bi = addStringConstant(chunk, "newobj");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)bi, line);
-            writeBytecodeChunk(chunk, (uint8_t)1, line);
+            AST* classType = lookupType(className);
 
-            // If constructor exists (a routine named exactly the class) and there are args,
-            // call it with 'this' (the pointer) plus args.
-            if (node->child_count > 0) {
-                // Duplicate pointer for constructor call (one copy remains as expression result)
+            bool hasVTable = recordTypeHasVTable(classType);
+            int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+
+            if (fieldCount <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT16, line);
+                emitShort(chunk, (uint16_t)fieldCount, line);
+            }
+
+            if (hasVTable) {
+                // Initialise hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, OP_DUP, line);
-                // Push args
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                char vtName[512];
+                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                int vtNameIdx = addStringConstant(chunk, vtName);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            }
+
+            if (node->child_count > 0) {
+                writeBytecodeChunk(chunk, OP_DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
                 int ctorNameIdx = addStringConstant(chunk, className);
                 writeBytecodeChunk(chunk, OP_CALL, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
-                // We don't know address here; OP_CALL expects address next. Use 0xFFFF placeholder.
                 emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
@@ -1106,6 +1338,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    gCurrentProgramRoot = rootNode;
     // Do NOT re-initialize the chunk here, it's already populated with unit code.
     // initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;
@@ -1161,7 +1394,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     }
                 }
             }
-            
+
+            if (node->parent && node->parent->type == AST_PROGRAM) {
+                emitVTables(chunk);
+            }
+
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
                  for (int i = 0; i < statements->child_count; i++) {
@@ -2326,6 +2563,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
+            bool isVirtualMethod = (node->child_count > 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+
 #ifdef FRONTEND_REA
             // Fallback: receiver-aware method call mangle (Rea-only)
             if (!proc_symbol && node->child_count > 0 && node->children[0]) {
@@ -2528,6 +2767,37 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
+            if (isVirtualMethod) {
+                AST* recv = node->children[0];
+                compileRValue(recv, chunk, getLine(recv));
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                for (int i = 1; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    bool is_var_param = false;
+                    if (proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
+                        AST* param_node = proc_symbol->type_def->children[i];
+                        if (param_node && param_node->by_ref) is_var_param = true;
+                    }
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileRValue(arg_node, chunk, getLine(arg_node));
+                    }
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                }
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                emitConstant(chunk, addIntConstant(chunk, proc_symbol->type_def->i_val), line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+                writeBytecodeChunk(chunk, (uint8_t)1, line);
+                writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                writeBytecodeChunk(chunk, OP_PROC_CALL_INDIRECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                break;
+            }
+
             // (Argument compilation logic remains the same...)
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
@@ -2708,18 +2978,35 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
     switch (node->type) {
         case AST_NEW: {
-            // new ClassName(args): allocate object pointer via builtin newobj("ClassName")
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            int nameIdx = addStringConstant(chunk, className);
-            emitConstant(chunk, nameIdx, line);
-            // call builtin newobj(string) -> pointer
-            int bi = addStringConstant(chunk, "newobj");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)bi, line);
-            writeBytecodeChunk(chunk, (uint8_t)1, line);
+            AST* classType = lookupType(className);
 
-            // If constructor exists and there are args, call it with 'this' + args.
+            bool hasVTable = recordTypeHasVTable(classType);
+            int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+
+            if (fieldCount <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT16, line);
+                emitShort(chunk, (uint16_t)fieldCount, line);
+            }
+
+            if (hasVTable) {
+                // Store class vtable pointer into hidden __vtable field (offset 0)
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                char vtName[512];
+                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                int vtNameIdx = addStringConstant(chunk, vtName);
+                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+            }
+
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, OP_DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
@@ -3240,14 +3527,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             toLowerString(func_name_lower);
 
             func_symbol_lookup = lookupProcedure(func_name_lower);
-            
+
             if (!func_symbol_lookup && current_compilation_unit_name) {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, func_name_lower);
                 toLowerString(qualified_name_lower);
                 func_symbol_lookup = lookupProcedure(qualified_name_lower);
             }
-            
+
             Symbol* func_symbol = func_symbol_lookup;
 
             // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
@@ -3255,10 +3542,46 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 func_symbol = func_symbol->real_symbol;
             }
 
+            bool isVirtualMethod = isCallQualified && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
                 compileInlineRoutine(func_symbol, node, chunk, line, true);
                 break;
+            }
+
+            if (isVirtualMethod) {
+                if (node->child_count > 0) {
+                    // Compile receiver and keep duplicate on top
+                    AST* recv = node->children[0];
+                    compileRValue(recv, chunk, getLine(recv));
+                    writeBytecodeChunk(chunk, OP_DUP, line);
+                    for (int i = 1; i < node->child_count; i++) {
+                        AST* arg_node = node->children[i];
+                        bool is_var_param = false;
+                        if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
+                            AST* param_node = func_symbol->type_def->children[i];
+                            if (param_node && param_node->by_ref) is_var_param = true;
+                        }
+                        if (is_var_param) {
+                            compileLValue(arg_node, chunk, getLine(arg_node));
+                        } else {
+                            compileRValue(arg_node, chunk, getLine(arg_node));
+                        }
+                        writeBytecodeChunk(chunk, OP_SWAP, line);
+                    }
+                    writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                    writeBytecodeChunk(chunk, (uint8_t)0, line);
+                    writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                    emitConstant(chunk, addIntConstant(chunk, func_symbol->type_def->i_val), line);
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                    writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+                    writeBytecodeChunk(chunk, (uint8_t)1, line);
+                    writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                    writeBytecodeChunk(chunk, OP_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    break;
+                }
             }
 
             if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {

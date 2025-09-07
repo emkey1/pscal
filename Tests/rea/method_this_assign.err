@@ -2,18 +2,20 @@
 == Disassembly: Tests/rea/method_this_assign.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    3 OP_JUMP            11 (to 0014)
+0000    0 OP_CONSTANT         0 'Value type ARRAY'
+0002    | OP_DEFINE_GLOBAL NameIdx:1   'point_vtable' Type:UINT64 
 
---- Function point_setx (at 0003) ---
-0003    4 OP_GET_LOCAL        1 (slot)
-0005    | OP_GET_LOCAL_ADDRESS    0 (slot)
-0007    | OP_GET_FIELD_ADDRESS    0 'x'
-0009    | OP_SWAP
-0010    | OP_SET_INDIRECT
-0011    3 OP_GET_LOCAL        2 (slot)
-0013    | OP_RETURN
-0014    0 OP_HALT
+--- Function point_setx (at 0007) ---
+0007    4 OP_GET_LOCAL        1 (slot)
+0009    | OP_GET_LOCAL_ADDRESS    0 (slot)
+0011    | OP_GET_FIELD_OFFSET    1 (index)
+0013    | OP_SWAP
+0014    | OP_SET_INDIRECT
+0015    3 OP_GET_LOCAL        2 (slot)
+0017    | OP_RETURN
+0018    0 OP_HALT
 == End Disassembly: Tests/rea/method_this_assign.rea ==
 
-Constants (1):\n  0000: STR   "x"
+Constants (2):\n  0000: Value type ARRAY
+  0001: STR   "point_vtable"
 

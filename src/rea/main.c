@@ -11,6 +11,7 @@
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h"
 #include "rea/parser.h"
+#include "rea/semantic.h"
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 
@@ -173,6 +174,12 @@ int main(int argc, char **argv) {
 
     AST *program = parseRea(src);
     if (!program) {
+        free(src);
+        return vmExitWithCleanup(EXIT_FAILURE);
+    }
+    reaPerformSemanticAnalysis(program);
+    if (pascal_semantic_error_count > 0 && !dump_ast_json) {
+        freeAST(program);
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
