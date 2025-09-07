@@ -770,7 +770,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 node->var_type = (node->token && node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER;
                 break;
             case AST_STRING:
-                if (node->token && node->token->value && strlen(node->token->value) == 1) {
+                if (node->token && node->token->value && node->i_val == 1) {
                     node->var_type = TYPE_CHAR;
                     node->type_def = lookupType("char");
                 } else {

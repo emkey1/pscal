@@ -477,6 +477,29 @@ Value makeString(const char *val) {
     return v;
 }
 
+Value makeStringLen(const char *val, size_t len) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_STRING;
+    v.max_length = (int)len;
+    if (val && len > 0) {
+        v.s_val = (char*)malloc(len + 1);
+        if (!v.s_val) {
+            fprintf(stderr, "FATAL: Memory allocation failed in makeStringLen\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        memcpy(v.s_val, val, len);
+        v.s_val[len] = '\0';
+    } else {
+        v.s_val = strdup("");
+        if (!v.s_val) {
+            fprintf(stderr, "FATAL: Memory allocation failed in makeStringLen (empty)\n");
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+    return v;
+}
+
 Value makeChar(int c) {
     Value v;
     memset(&v, 0, sizeof(Value));

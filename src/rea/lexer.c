@@ -194,11 +194,34 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             while (isAlpha(peek(lexer))) advance(lexer);
             return makeToken(lexer, REA_TOKEN_IMPORT, start);
         case '"':
-            while (peek(lexer) != '"' && peek(lexer) != '\0') {
-                if (peek(lexer) == '\n') lexer->line++;
-                advance(lexer);
+            while (peek(lexer) != '\0') {
+                char ch = peek(lexer);
+                if (ch == '\n') lexer->line++;
+                if (ch == '\\') {
+                    advance(lexer);
+                    if (peek(lexer) != '\0') advance(lexer);
+                } else if (ch == '"') {
+                    break;
+                } else {
+                    advance(lexer);
+                }
             }
             if (peek(lexer) == '"') advance(lexer);
+            return makeToken(lexer, REA_TOKEN_STRING, start);
+        case '\'':
+            while (peek(lexer) != '\0') {
+                char ch = peek(lexer);
+                if (ch == '\n') lexer->line++;
+                if (ch == '\\') {
+                    advance(lexer);
+                    if (peek(lexer) != '\0') advance(lexer);
+                } else if (ch == '\'') {
+                    break;
+                } else {
+                    advance(lexer);
+                }
+            }
+            if (peek(lexer) == '\'') advance(lexer);
             return makeToken(lexer, REA_TOKEN_STRING, start);
         default:
             break;

@@ -199,6 +199,7 @@ Value makeNil(void);
 // Used by the 'new' builtin.
 Value makePointer(void* address, AST* base_type_node); // <<< ADD THIS PROTOTYPE >>>
 Value makeString(const char *val);
+Value makeStringLen(const char *val, size_t len);
 Value makeChar(int c);
 Value makeBoolean(int b);
 Value makeFile(FILE *f);
