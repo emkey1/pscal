@@ -16,6 +16,7 @@
 #include "compiler/bytecode.h"
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
+#define NO_VTABLE_ENTRY -1
 
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
@@ -126,11 +127,11 @@ static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt
             if (vt->capacity < parent->method_count) {
                 int newcap = parent->method_count;
                 vt->addrs = realloc(vt->addrs, sizeof(int) * newcap);
-                for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = 0;
+                for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = NO_VTABLE_ENTRY;
                 vt->capacity = newcap;
             }
             for (int j = 0; j < parent->method_count; j++) {
-                if (vt->addrs[j] == 0) vt->addrs[j] = parent->addrs[j];
+                if (vt->addrs[j] == NO_VTABLE_ENTRY) vt->addrs[j] = parent->addrs[j];
             }
             if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
         }
@@ -170,7 +171,7 @@ static void emitVTables(BytecodeChunk* chunk) {
                         if (mindex >= tables[idx].capacity) {
                             int newcap = mindex + 1;
                             tables[idx].addrs = realloc(tables[idx].addrs, sizeof(int) * newcap);
-                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = 0;
+                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = NO_VTABLE_ENTRY;
                             tables[idx].capacity = newcap;
                         }
                         tables[idx].addrs[mindex] = base->bytecode_address;
@@ -193,7 +194,8 @@ static void emitVTables(BytecodeChunk* chunk) {
         int ub = vt->method_count - 1;
         Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
         for (int j = 0; j < vt->method_count; j++) {
-            arr.array_val[j] = makeInt(vt->addrs[j]);
+            int addr = vt->addrs[j];
+            arr.array_val[j] = makeInt(addr == NO_VTABLE_ENTRY ? 0 : addr);
         }
         int cidx = addConstantToChunk(chunk, &arr);
         freeValue(&arr);
