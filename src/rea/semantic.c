@@ -356,13 +356,23 @@ static void validateNode(AST *node) {
         const char *name = node->token ? node->token->value : NULL;
         if (cls && name) {
             const char *method = name;
+            char clsbuf[MAX_SYMBOL_LENGTH];
+            const char *lookup_cls = cls;
             const char *us = strchr(name, '_');
-            if (us && strncasecmp(name, cls, (size_t)(us - name)) == 0) {
-                method = us + 1;
+            if (us) {
+                size_t prefix_len = (size_t)(us - name);
+                if (strncasecmp(name, cls, prefix_len) == 0 && cls[prefix_len] == '\0') {
+                    method = us + 1;
+                } else if (prefix_len < MAX_SYMBOL_LENGTH) {
+                    memcpy(clsbuf, name, prefix_len);
+                    clsbuf[prefix_len] = '\0';
+                    lookup_cls = clsbuf;
+                    method = us + 1;
+                }
             }
-            ClassInfo *ci = lookupClass(cls);
+            ClassInfo *ci = lookupClass(lookup_cls);
             if (ci && !lookupMethod(ci, method)) {
-                fprintf(stderr, "Unknown method '%s' for class '%s'\n", method, cls);
+                fprintf(stderr, "Unknown method '%s' for class '%s'\n", method, lookup_cls);
                 pascal_semantic_error_count++;
             }
         }
