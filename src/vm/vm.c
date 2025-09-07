@@ -2221,6 +2221,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+
                 FieldValue* current = record_struct_ptr->record_val;
                 for (uint16_t i = 0; i < field_index && current; i++) {
                     current = current->next;
@@ -2264,6 +2265,7 @@ comparison_error_label:
                 }
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range.");
+
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value popped_base_val = pop(vm);
