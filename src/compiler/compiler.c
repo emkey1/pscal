@@ -21,6 +21,10 @@
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
 
+// Forward declarations for helpers used before definition
+static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
+static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
+
 typedef struct {
     char* name;
     int depth; // Scope depth
@@ -299,6 +303,56 @@ static AST* resolveTypeAlias(AST* type_node) {
         type_node = looked;
     }
     return type_node;
+}
+
+// --- Object layout helpers -------------------------------------------------
+
+// Recursively count fields in a record, including inherited ones.
+static int getRecordFieldCount(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
+    int count = recordType->child_count; // local fields
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        count += getRecordFieldCount(parent);
+    }
+    return count;
+}
+
+// Retrieve zero-based offset of a field within a record hierarchy.
+static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE || !fieldName) return -1;
+
+    int parentCount = 0;
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        int parentOffset = getRecordFieldOffset(parent, fieldName);
+        if (parentOffset != -1) return parentOffset;
+        parentCount = getRecordFieldCount(parent);
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        AST* var = (decl && decl->child_count > 0) ? decl->children[0] : NULL;
+        if (var && var->token && strcmp(var->token->value, fieldName) == 0) {
+            return parentCount + i;
+        }
+    }
+    return -1;
+}
+
+// Determine the record type for an expression used as an object base.
+static AST* getRecordTypeFromExpr(AST* expr) {
+    if (!expr) return NULL;
+    if (expr->type == AST_DEREFERENCE) {
+        AST* ptr_type = resolveTypeAlias(expr->left->type_def);
+        if (ptr_type && ptr_type->type == AST_POINTER_TYPE) {
+            return resolveTypeAlias(ptr_type->right);
+        }
+        return NULL;
+    }
+    return resolveTypeAlias(expr->type_def);
 }
 
 // Compare two type AST nodes structurally.
@@ -1095,17 +1149,24 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Recursively compile the L-Value of the base (e.g., myRec or p^)
+            // Recursively compile the base (e.g., myRec or p^)
             compileLValue(node->left, chunk, getLine(node->left));
 
-            // Now, get the address of the specific field.
-            int fieldNameIndex = addStringConstant(chunk, node->token->value);
-            if (fieldNameIndex <= 0xFF) {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+            AST* recType = getRecordTypeFromExpr(node->left);
+            int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
+            if (fieldOffset < 0) {
+                fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
+                        node->token ? node->token->value : "<null>");
+                compiler_had_error = true;
+                break;
+            }
+
+            if (fieldOffset <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
             } else {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
-                emitShort(chunk, (uint16_t)fieldNameIndex, line);
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET16, line);
+                emitShort(chunk, (uint16_t)fieldOffset, line);
             }
             break;
         }
@@ -1161,30 +1222,38 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_NEW: {
-            // new ClassName(args): allocate object pointer via builtin newobj("ClassName")
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            int nameIdx = addStringConstant(chunk, className);
-            emitConstant(chunk, nameIdx, line);
-            // call builtin newobj(string) -> pointer
-            int bi = addStringConstant(chunk, "newobj");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)bi, line);
-            writeBytecodeChunk(chunk, (uint8_t)1, line);
+            AST* classType = lookupType(className);
+            int fieldCount = getRecordFieldCount(classType);
+            if (fieldCount <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT16, line);
+                emitShort(chunk, (uint16_t)fieldCount, line);
+            }
 
-            // If constructor exists (a routine named exactly the class) and there are args,
-            // call it with 'this' (the pointer) plus args.
+            // Initialise hidden __vtable field (offset 0)
+            writeBytecodeChunk(chunk, OP_DUP, line);
+            writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+            writeBytecodeChunk(chunk, (uint8_t)0, line);
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            char vtName[512];
+            snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+            int vtNameIdx = addStringConstant(chunk, vtName);
+            emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+
             if (node->child_count > 0) {
-                // Duplicate pointer for constructor call (one copy remains as expression result)
                 writeBytecodeChunk(chunk, OP_DUP, line);
-                // Push args
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
                 int ctorNameIdx = addStringConstant(chunk, className);
                 writeBytecodeChunk(chunk, OP_CALL, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
-                // We don't know address here; OP_CALL expects address next. Use 0xFFFF placeholder.
                 emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
@@ -2652,14 +2721,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                     writeBytecodeChunk(chunk, OP_SWAP, line);
                 }
-                int fieldIdx = addStringConstant(chunk, "__vtable");
-                if (fieldIdx <= 0xFF) {
-                    writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-                    writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
-                } else {
-                    writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
-                    emitShort(chunk, (uint16_t)fieldIdx, line);
-                }
+                writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
                 writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
                 emitConstant(chunk, addIntConstant(chunk, proc_symbol->type_def->i_val), line);
                 writeBytecodeChunk(chunk, OP_SWAP, line);
@@ -2851,27 +2914,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
     switch (node->type) {
         case AST_NEW: {
-            // new ClassName(args): allocate object pointer via builtin newobj("ClassName")
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            int nameIdx = addStringConstant(chunk, className);
-            emitConstant(chunk, nameIdx, line);
-            // call builtin newobj(string) -> pointer
-            int bi = addStringConstant(chunk, "newobj");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)bi, line);
-            writeBytecodeChunk(chunk, (uint8_t)1, line);
-
-            // Store class vtable pointer into hidden __vtable field
-            int fieldIdx = addStringConstant(chunk, "__vtable");
-            writeBytecodeChunk(chunk, OP_DUP, line);
-            if (fieldIdx <= 0xFF) {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
+            AST* classType = lookupType(className);
+            int fieldCount = getRecordFieldCount(classType);
+            if (fieldCount <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
             } else {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
-                emitShort(chunk, (uint16_t)fieldIdx, line);
+                writeBytecodeChunk(chunk, OP_ALLOC_OBJECT16, line);
+                emitShort(chunk, (uint16_t)fieldCount, line);
             }
+
+            // Store class vtable pointer into hidden __vtable field (offset 0)
+            writeBytecodeChunk(chunk, OP_DUP, line);
+            writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+            writeBytecodeChunk(chunk, (uint8_t)0, line);
             writeBytecodeChunk(chunk, OP_SWAP, line);
             char vtName[512];
             snprintf(vtName, sizeof(vtName), "%s_vtable", className);
@@ -2880,7 +2938,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             writeBytecodeChunk(chunk, OP_SWAP, line);
             writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
 
-            // If constructor exists and there are args, call it with 'this' + args.
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, OP_DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
@@ -3444,14 +3501,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         }
                         writeBytecodeChunk(chunk, OP_SWAP, line);
                     }
-                    int fieldIdx = addStringConstant(chunk, "__vtable");
-                    if (fieldIdx <= 0xFF) {
-                        writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-                        writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
-                    } else {
-                        writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
-                        emitShort(chunk, (uint16_t)fieldIdx, line);
-                    }
+                    writeBytecodeChunk(chunk, OP_GET_FIELD_OFFSET, line);
+                    writeBytecodeChunk(chunk, (uint8_t)0, line);
                     writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
                     emitConstant(chunk, addIntConstant(chunk, func_symbol->type_def->i_val), line);
                     writeBytecodeChunk(chunk, OP_SWAP, line);

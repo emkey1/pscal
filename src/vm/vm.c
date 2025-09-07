@@ -2153,6 +2153,112 @@ comparison_error_label:
                 freeValue(&b_val);
                 break;
             }
+            case OP_ALLOC_OBJECT: {
+                uint8_t field_count = READ_BYTE();
+                FieldValue* fields = calloc(field_count, sizeof(FieldValue));
+                if (!fields) {
+                    runtimeError(vm, "VM Error: Out of memory allocating object.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                for (uint16_t i = 0; i < field_count; i++) {
+                    fields[i].name = NULL;
+                    fields[i].value = makeNil();
+                    fields[i].next = (i + 1 < field_count) ? &fields[i + 1] : NULL;
+                }
+                Value* obj = malloc(sizeof(Value));
+                if (!obj) {
+                    free(fields);
+                    runtimeError(vm, "VM Error: Out of memory allocating object value.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                *obj = makeRecord(fields);
+                push(vm, makePointer(obj, NULL));
+                break;
+            }
+            case OP_ALLOC_OBJECT16: {
+                uint16_t field_count = READ_SHORT(vm);
+                FieldValue* fields = calloc(field_count, sizeof(FieldValue));
+                if (!fields) {
+                    runtimeError(vm, "VM Error: Out of memory allocating object.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                for (uint16_t i = 0; i < field_count; i++) {
+                    fields[i].name = NULL;
+                    fields[i].value = makeNil();
+                    fields[i].next = (i + 1 < field_count) ? &fields[i + 1] : NULL;
+                }
+                Value* obj = malloc(sizeof(Value));
+                if (!obj) {
+                    free(fields);
+                    runtimeError(vm, "VM Error: Out of memory allocating object value.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                *obj = makeRecord(fields);
+                push(vm, makePointer(obj, NULL));
+                break;
+            }
+            case OP_GET_FIELD_OFFSET: {
+                uint8_t field_index = READ_BYTE();
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FieldValue* fields = record_struct_ptr->record_val;
+                FieldValue* target = &fields[field_index];
+                Value popped_base_val = pop(vm);
+                freeValue(&popped_base_val);
+                push(vm, makePointer(&target->value, NULL));
+                break;
+            }
+            case OP_GET_FIELD_OFFSET16: {
+                uint16_t field_index = READ_SHORT(vm);
+                Value* base_val_ptr = vm->stackTop - 1;
+
+                Value* record_struct_ptr = NULL;
+
+                if (base_val_ptr->type == TYPE_POINTER) {
+                    if (base_val_ptr->ptr_val == NULL) {
+                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    record_struct_ptr = base_val_ptr->ptr_val;
+                } else if (base_val_ptr->type == TYPE_RECORD) {
+                    record_struct_ptr = base_val_ptr;
+                } else {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FieldValue* fields = record_struct_ptr->record_val;
+                FieldValue* target = &fields[field_index];
+                Value popped_base_val = pop(vm);
+                freeValue(&popped_base_val);
+                push(vm, makePointer(&target->value, NULL));
+                break;
+            }
             case OP_GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
