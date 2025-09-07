@@ -30,9 +30,40 @@
 #define STRING_CHAR_PTR_SENTINEL   ((AST*)0xDEADBEEF)
 #define STRING_LENGTH_SENTINEL     ((AST*)0xFEEDBEEF)
 
+// Object header used for dynamic dispatch: every heap object begins with a
+// pointer to its defining class symbol and that class's V-table.
+typedef struct {
+    Symbol* class_symbol;   // Class descriptor for the instance
+    uint16_t* vtable;       // Array of bytecode addresses for virtual methods
+} ObjectHeader;
+
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
+}
+
+// --- Class method registration helpers ---
+void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol) {
+    if (!vm || !vm->procedureTable || !className || !methodSymbol) return;
+    char key[256];
+    snprintf(key, sizeof(key), "%s::%u", className, methodIndex);
+    Symbol* alias = (Symbol*)malloc(sizeof(Symbol));
+    if (!alias) return;
+    *alias = *methodSymbol;
+    alias->name = strdup(key);
+    alias->is_alias = true;
+    alias->real_symbol = methodSymbol;
+    alias->next = NULL;
+    hashTableInsert(vm->procedureTable, alias);
+}
+
+Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex) {
+    if (!vm || !vm->procedureTable || !className) return NULL;
+    char key[256];
+    snprintf(key, sizeof(key), "%s::%u", className, methodIndex);
+    Symbol* sym = hashTableLookup(vm->procedureTable, key);
+    if (sym && sym->is_alias && sym->real_symbol) return sym->real_symbol;
+    return sym;
 }
 
 // --- Threading Helpers ---
@@ -65,6 +96,7 @@ static void* threadStart(void* arg) {
     frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
     frame->upvalues = NULL;
     frame->discard_result_on_return = false;
+    frame->vtable = NULL;
 
     if (proc_symbol && proc_symbol->upvalue_count > 0) {
         frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
@@ -1314,6 +1346,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         baseFrame->locals_count = 0;
         baseFrame->upvalue_count = 0;
         baseFrame->upvalues = NULL;
+        baseFrame->vtable = NULL;
     }
 
     #ifdef DEBUG
@@ -3244,6 +3277,8 @@ comparison_error_label:
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
                 frame->discard_result_on_return = false;
+                frame->vtable = NULL;
+                frame->vtable = NULL;
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
@@ -3369,6 +3404,98 @@ comparison_error_label:
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
+            case OP_CALL_METHOD: {
+                uint8_t method_index = READ_BYTE();
+                uint8_t declared_arity = READ_BYTE();
+                if (vm->stackTop - vm->stack < declared_arity + 1) {
+                    runtimeError(vm, "VM Error: Stack underflow for method call arguments. Expected %d, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value receiverVal = vm->stackTop[-declared_arity - 1];
+                if (receiverVal.type != TYPE_POINTER || receiverVal.ptr_val == NULL) {
+                    runtimeError(vm, "VM Error: Method call receiver must be an object pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                ObjectHeader* obj = (ObjectHeader*)receiverVal.ptr_val;
+                if (!obj->vtable) {
+                    runtimeError(vm, "VM Error: Object missing V-table.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                uint16_t target_address = obj->vtable[method_index];
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity - 1;
+                frame->vtable = obj->vtable;
+
+                Symbol* method_symbol = NULL;
+                if (obj->class_symbol) {
+                    method_symbol = vmFindClassMethod(vm, obj->class_symbol->name, method_index);
+                }
+                if (!method_symbol) {
+                    method_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                }
+                if (!method_symbol) {
+                    runtimeError(vm, "VM Error: Method not found for index %d.", method_index);
+                    vm->frameCount--;
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (method_symbol->type_def && method_symbol->type_def->child_count >= declared_arity + 1) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = method_symbol->type_def->children[i + 1];
+                        Value* arg_val = frame->slots + 1 + i;
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
+                frame->function_symbol = method_symbol;
+                frame->locals_count = method_symbol->locals_count;
+                frame->upvalue_count = method_symbol->upvalue_count;
+                frame->upvalues = NULL;
+                frame->discard_result_on_return = false;
+
+                if (method_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * method_symbol->upvalue_count);
+                    CallFrame* parent_frame = NULL;
+                    if (method_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == method_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
+                        }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", method_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    for (int i = 0; i < method_symbol->upvalue_count; i++) {
+                        if (method_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = parent_frame->slots + method_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = parent_frame->upvalues[method_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < method_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                vm->ip = vm->chunk->code + target_address;
+                break;
+            }
             case OP_PROC_CALL_INDIRECT: {
                 uint8_t declared_arity = READ_BYTE();
                 // Reuse OP_CALL_INDIRECT machinery by rewinding ip to interpret the common path,
@@ -3422,6 +3549,7 @@ comparison_error_label:
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
                 frame->discard_result_on_return = true;
+                frame->vtable = NULL;
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);

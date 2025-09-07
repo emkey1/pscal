@@ -57,6 +57,7 @@ typedef struct {
     uint8_t upvalue_count;
     Value** upvalues;
     bool discard_result_on_return; // If true, drop any function result on return
+    uint16_t* vtable;            // Reference to class V-table when executing a method
 } CallFrame;
 
 // Thread structure representing a lightweight VM thread
@@ -116,6 +117,10 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 // Takes a BytecodeChunk that was successfully compiled.
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
+
+// Register and lookup class methods in the VM's procedure table
+void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol);
+Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex);
 
 void runtimeError(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);
