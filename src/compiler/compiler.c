@@ -98,6 +98,78 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     return index;
 }
 
+typedef struct {
+    char* class_name;
+    int method_count;
+    int capacity;
+    int* addrs;
+} VTableInfo;
+
+static void emitVTables(BytecodeChunk* chunk) {
+    VTableInfo* tables = NULL;
+    int table_count = 0;
+    for (int b = 0; b < HASHTABLE_SIZE; b++) {
+        Symbol* sym = procedure_table->buckets[b];
+        while (sym) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (base && base->type_def && base->type_def->is_virtual && base->name) {
+                const char* us = strchr(base->name, '_');
+                if (us) {
+                    size_t cls_len = (size_t)(us - base->name);
+                    char cls[256];
+                    if (cls_len < sizeof(cls)) {
+                        memcpy(cls, base->name, cls_len);
+                        cls[cls_len] = '\0';
+                        int idx = -1;
+                        for (int i = 0; i < table_count; i++) {
+                            if (strcmp(tables[i].class_name, cls) == 0) { idx = i; break; }
+                        }
+                        if (idx == -1) {
+                            tables = realloc(tables, sizeof(VTableInfo) * (table_count + 1));
+                            idx = table_count++;
+                            tables[idx].class_name = strdup(cls);
+                            tables[idx].method_count = 0;
+                            tables[idx].capacity = 0;
+                            tables[idx].addrs = NULL;
+                        }
+                        int mindex = base->type_def->i_val;
+                        if (mindex >= tables[idx].capacity) {
+                            int newcap = mindex + 1;
+                            tables[idx].addrs = realloc(tables[idx].addrs, sizeof(int) * newcap);
+                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = 0;
+                            tables[idx].capacity = newcap;
+                        }
+                        tables[idx].addrs[mindex] = base->bytecode_address;
+                        if (mindex + 1 > tables[idx].method_count) tables[idx].method_count = mindex + 1;
+                    }
+                }
+            }
+            sym = sym->next;
+        }
+    }
+
+    for (int i = 0; i < table_count; i++) {
+        VTableInfo* vt = &tables[i];
+        if (vt->method_count == 0) continue;
+        int lb = 0;
+        int ub = vt->method_count - 1;
+        Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
+        for (int j = 0; j < vt->method_count; j++) {
+            arr.array_val[j] = makeInt(vt->addrs[j]);
+        }
+        int cidx = addConstantToChunk(chunk, &arr);
+        freeValue(&arr);
+        emitConstant(chunk, cidx, 0);
+        char gname[512];
+        snprintf(gname, sizeof(gname), "%s_vtable", vt->class_name);
+        int nameIdx = addStringConstant(chunk, gname);
+        emitDefineGlobal(chunk, nameIdx, 0);
+        free(vt->class_name);
+        free(vt->addrs);
+    }
+    free(tables);
+}
+
 // Return an ordinal ranking for integer-like types so we can detect
 // potential narrowing conversions. Larger ranks represent wider types.
 static int intTypeRank(VarType t) {
@@ -1149,7 +1221,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     }
                 }
             }
-            
+
+            if (node->parent && node->parent->type == AST_PROGRAM) {
+                emitVTables(chunk);
+            }
+
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
                  for (int i = 0; i < statements->child_count; i++) {
@@ -2314,6 +2390,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
+            bool isVirtualMethod = (node->child_count > 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+
 #ifdef FRONTEND_REA
             // Fallback: receiver-aware method call mangle (Rea-only)
             if (!proc_symbol && node->child_count > 0 && node->children[0]) {
@@ -2516,6 +2594,43 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
+            if (isVirtualMethod) {
+                AST* recv = node->children[0];
+                compileRValue(recv, chunk, getLine(recv));
+                writeBytecodeChunk(chunk, OP_DUP, line);
+                for (int i = 1; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    bool is_var_param = false;
+                    if (proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
+                        AST* param_node = proc_symbol->type_def->children[i];
+                        if (param_node && param_node->by_ref) is_var_param = true;
+                    }
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileRValue(arg_node, chunk, getLine(arg_node));
+                    }
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                }
+                int fieldIdx = addStringConstant(chunk, "__vtable");
+                if (fieldIdx <= 0xFF) {
+                    writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
+                    writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
+                } else {
+                    writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
+                    emitShort(chunk, (uint16_t)fieldIdx, line);
+                }
+                writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                emitConstant(chunk, addIntConstant(chunk, proc_symbol->type_def->i_val), line);
+                writeBytecodeChunk(chunk, OP_SWAP, line);
+                writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+                writeBytecodeChunk(chunk, (uint8_t)1, line);
+                writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                writeBytecodeChunk(chunk, OP_PROC_CALL_INDIRECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                break;
+            }
+
             // (Argument compilation logic remains the same...)
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
@@ -2706,6 +2821,24 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
             emitShort(chunk, (uint16_t)bi, line);
             writeBytecodeChunk(chunk, (uint8_t)1, line);
+
+            // Store class vtable pointer into hidden __vtable field
+            int fieldIdx = addStringConstant(chunk, "__vtable");
+            writeBytecodeChunk(chunk, OP_DUP, line);
+            if (fieldIdx <= 0xFF) {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
+            } else {
+                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
+                emitShort(chunk, (uint16_t)fieldIdx, line);
+            }
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            char vtName[512];
+            snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+            int vtNameIdx = addStringConstant(chunk, vtName);
+            emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16, vtNameIdx, line);
+            writeBytecodeChunk(chunk, OP_SWAP, line);
+            writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
 
             // If constructor exists and there are args, call it with 'this' + args.
             if (node->child_count > 0) {
@@ -3228,14 +3361,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             toLowerString(func_name_lower);
 
             func_symbol_lookup = lookupProcedure(func_name_lower);
-            
+
             if (!func_symbol_lookup && current_compilation_unit_name) {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, func_name_lower);
                 toLowerString(qualified_name_lower);
                 func_symbol_lookup = lookupProcedure(qualified_name_lower);
             }
-            
+
             Symbol* func_symbol = func_symbol_lookup;
 
             // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
@@ -3243,10 +3376,52 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 func_symbol = func_symbol->real_symbol;
             }
 
+            bool isVirtualMethod = isCallQualified && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
                 compileInlineRoutine(func_symbol, node, chunk, line, true);
                 break;
+            }
+
+            if (isVirtualMethod) {
+                if (node->child_count > 0) {
+                    // Compile receiver and keep duplicate on top
+                    AST* recv = node->children[0];
+                    compileRValue(recv, chunk, getLine(recv));
+                    writeBytecodeChunk(chunk, OP_DUP, line);
+                    for (int i = 1; i < node->child_count; i++) {
+                        AST* arg_node = node->children[i];
+                        bool is_var_param = false;
+                        if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
+                            AST* param_node = func_symbol->type_def->children[i];
+                            if (param_node && param_node->by_ref) is_var_param = true;
+                        }
+                        if (is_var_param) {
+                            compileLValue(arg_node, chunk, getLine(arg_node));
+                        } else {
+                            compileRValue(arg_node, chunk, getLine(arg_node));
+                        }
+                        writeBytecodeChunk(chunk, OP_SWAP, line);
+                    }
+                    int fieldIdx = addStringConstant(chunk, "__vtable");
+                    if (fieldIdx <= 0xFF) {
+                        writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
+                        writeBytecodeChunk(chunk, (uint8_t)fieldIdx, line);
+                    } else {
+                        writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
+                        emitShort(chunk, (uint16_t)fieldIdx, line);
+                    }
+                    writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                    emitConstant(chunk, addIntConstant(chunk, func_symbol->type_def->i_val), line);
+                    writeBytecodeChunk(chunk, OP_SWAP, line);
+                    writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+                    writeBytecodeChunk(chunk, (uint8_t)1, line);
+                    writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                    writeBytecodeChunk(chunk, OP_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    break;
+                }
             }
 
             if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {

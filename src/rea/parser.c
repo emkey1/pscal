@@ -19,6 +19,7 @@ typedef struct {
     bool hadError;
     const char* currentClassName; // non-owning pointer to current class name while parsing class body
     const char* currentParentClassName; // non-owning pointer to current parent class name while in class body
+    int currentMethodIndex; // index of next method in current class for vtable
 } ReaParser;
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
@@ -38,7 +39,7 @@ static AST *parseReturn(ReaParser *p);
 static AST *parseBreak(ReaParser *p);
 static AST *parseIf(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
-static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype);
+static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex);
 static AST *parseWhile(ReaParser *p);
 static AST *parseDoWhile(ReaParser *p);
 static AST *parseFor(ReaParser *p);
@@ -700,7 +701,7 @@ static AST *parseVarDecl(ReaParser *p) {
                 Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
                 free(lex);
                 reaAdvance(p); // consume constructor name
-                return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID);
+                return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID, -1);
             }
         }
     }
@@ -721,7 +722,8 @@ static AST *parseVarDecl(ReaParser *p) {
         free(lex);
         reaAdvance(p); // consume identifier
         if (p->current.type == REA_TOKEN_LEFT_PAREN) {
-            return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID);
+            int idx = p->currentClassName ? p->currentMethodIndex++ : -1;
+            return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID, idx);
         } else {
             fprintf(stderr, "L%d: Variable cannot have type void.\n", p->current.line);
             p->hadError = true;
@@ -762,7 +764,8 @@ static AST *parseVarDecl(ReaParser *p) {
     reaAdvance(p); // consume identifier
 
     if (p->current.type == REA_TOKEN_LEFT_PAREN) {
-        return parseFunctionDecl(p, nameTok, typeNode, vtype);
+        int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
+        return parseFunctionDecl(p, nameTok, typeNode, vtype, idx2);
     }
 
     AST *var = newASTNode(AST_VARIABLE, nameTok);
@@ -786,7 +789,7 @@ static AST *parseVarDecl(ReaParser *p) {
     return decl;
 }
 
-static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype) {
+static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex) {
     VarType prevType = p->currentFunctionType;
     p->currentFunctionType = vtype;
 
@@ -879,6 +882,10 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
 
     AST *func = (vtype == TYPE_VOID) ? newASTNode(AST_PROCEDURE_DECL, nameTok)
                                      : newASTNode(AST_FUNCTION_DECL, nameTok);
+    if (methodIndex >= 0) {
+        func->is_virtual = true;
+        func->i_val = methodIndex;
+    }
     if (params->child_count > 0) {
         func->children = params->children;
         func->child_count = params->child_count;
@@ -1328,11 +1335,21 @@ static AST *parseStatement(ReaParser *p) {
         // Parse class body
         AST *recordAst = newASTNode(AST_RECORD_TYPE, NULL);
         if (parentRef) setExtra(recordAst, parentRef);
+        // Inject hidden vtable pointer field as first record member
+        Token *vtTok = newToken(TOKEN_IDENTIFIER, "__vtable", classNameTok->line, 0);
+        AST *vtVar = newASTNode(AST_VARIABLE, vtTok);
+        setTypeAST(vtVar, TYPE_POINTER);
+        AST *vtDecl = newASTNode(AST_VAR_DECL, NULL);
+        addChild(vtDecl, vtVar);
+        setTypeAST(vtDecl, TYPE_POINTER);
+        addChild(recordAst, vtDecl);
         AST *methods = newASTNode(AST_COMPOUND, NULL);
         const char* prevClass = p->currentClassName;
         const char* prevParent = p->currentParentClassName;
+        int prevIndex = p->currentMethodIndex;
         p->currentClassName = classNameTok->value;
         p->currentParentClassName = parentRef && parentRef->token ? parentRef->token->value : NULL;
+        p->currentMethodIndex = 0;
         if (p->current.type == REA_TOKEN_LEFT_BRACE) {
             reaAdvance(p); // consume '{'
             while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
@@ -1371,6 +1388,7 @@ static AST *parseStatement(ReaParser *p) {
         }
         p->currentClassName = prevClass;
         p->currentParentClassName = prevParent;
+        p->currentMethodIndex = prevIndex;
 
         // Build TYPE_DECL(Name = <recordAst>) and register type
         AST *typeDecl = newASTNode(AST_TYPE_DECL, classNameTok);
@@ -1469,6 +1487,7 @@ AST *parseRea(const char *source) {
     p.hadError = false;
     p.currentClassName = NULL;
     p.currentParentClassName = NULL;
+    p.currentMethodIndex = 0;
     reaAdvance(&p);
 
     AST *program = newASTNode(AST_PROGRAM, NULL);
