@@ -3,15 +3,13 @@
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
-0005    3 OP_CONSTANT         1 'Point'
-0007    | OP_CALL_BUILTIN      2 'newobj' (1 args)
-0011    | OP_GET_GLOBAL_ADDRESS    0 'p'
-0013    | OP_SWAP
-0014    | OP_SET_INDIRECT
-0015    0 OP_HALT
+0005    3 OP_ALLOC_OBJECT     2 (fields)
+0007    | OP_GET_GLOBAL_ADDRESS    0 'p'
+0009    | OP_SWAP
+0010    | OP_SET_INDIRECT
+0011    0 OP_HALT
 == End Disassembly: Tests/rea/new_assign_ptr.rea ==
 
-Constants (3):\n  0000: STR   "p"
+Constants (2):\n  0000: STR   "p"
   0001: STR   "Point"
-  0002: STR   "newobj"
 

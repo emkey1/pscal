@@ -3,13 +3,11 @@
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    3 OP_DEFINE_GLOBAL NameIdx:0   'p' Type:POINTER ('Point')
-0005    | OP_CONSTANT         1 'Point'
-0007    | OP_CALL_BUILTIN      2 'newobj' (1 args)
-0011    | OP_SET_GLOBAL       0 'p'
-0013    0 OP_HALT
+0005    | OP_ALLOC_OBJECT     3 (fields)
+0007    | OP_SET_GLOBAL       0 'p'
+0009    0 OP_HALT
 == End Disassembly: Tests/rea/new_alloc.rea ==
 
-Constants (3):\n  0000: STR   "p"
+Constants (2):\n  0000: STR   "p"
   0001: STR   "Point"
-  0002: STR   "newobj"
 
