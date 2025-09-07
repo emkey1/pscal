@@ -1225,7 +1225,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
             AST* classType = lookupType(className);
-            int fieldCount = getRecordFieldCount(classType);
+            int fieldCount = getRecordFieldCount(classType) + 1;
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
                 writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
@@ -2917,7 +2917,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
             AST* classType = lookupType(className);
-            int fieldCount = getRecordFieldCount(classType);
+            int fieldCount = getRecordFieldCount(classType) + 1;
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, OP_ALLOC_OBJECT, line);
                 writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
