@@ -174,6 +174,8 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
             return makeToken(lexer, REA_TOKEN_SLASH, start);
+        case '%':
+            return makeToken(lexer, REA_TOKEN_PERCENT, start);
         case '!':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_BANG_EQUAL : REA_TOKEN_BANG, start);
         case '&':

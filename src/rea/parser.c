@@ -449,6 +449,7 @@ static TokenType mapOp(ReaTokenType t) {
         case REA_TOKEN_MINUS: return TOKEN_MINUS;
         case REA_TOKEN_STAR: return TOKEN_MUL;
         case REA_TOKEN_SLASH: return TOKEN_SLASH;
+        case REA_TOKEN_PERCENT: return TOKEN_MOD;
         case REA_TOKEN_EQUAL_EQUAL: return TOKEN_EQUAL;
         case REA_TOKEN_BANG_EQUAL: return TOKEN_NOT_EQUAL;
         case REA_TOKEN_GREATER: return TOKEN_GREATER;
@@ -465,6 +466,7 @@ static const char *opLexeme(TokenType t) {
         case TOKEN_MINUS: return "-";
         case TOKEN_MUL: return "*";
         case TOKEN_SLASH: return "/";
+        case TOKEN_MOD: return "%";
         case TOKEN_EQUAL: return "==";
         case TOKEN_NOT_EQUAL: return "!=";
         case TOKEN_GREATER: return ">";
@@ -478,7 +480,9 @@ static const char *opLexeme(TokenType t) {
 static AST *parseTerm(ReaParser *p) {
     AST *node = parseFactor(p);
     if (!node) return NULL;
-    while (p->current.type == REA_TOKEN_STAR || p->current.type == REA_TOKEN_SLASH) {
+    while (p->current.type == REA_TOKEN_STAR ||
+           p->current.type == REA_TOKEN_SLASH ||
+           p->current.type == REA_TOKEN_PERCENT) {
         ReaToken op = p->current;
         reaAdvance(p);
         AST *right = parseFactor(p);
