@@ -1607,7 +1607,7 @@ static size_t headerAccumJob(char *buffer, size_t size, size_t nitems, void *use
     return real_size;
 }
 
-#ifdef CURLOPT_XFERINFOFUNCTION
+#if LIBCURL_VERSION_NUM >= 0x072000
 static int xferInfoCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
     (void)ultotal; (void)ulnow;
     HttpAsyncJob* j = (HttpAsyncJob*)clientp;
@@ -1748,7 +1748,7 @@ static void* httpAsyncThread(void* arg) {
         if (job->proxy_type) curl_easy_setopt(eh, CURLOPT_PROXYTYPE, job->proxy_type);
     }
     // Progress + cancel
-#ifdef CURLOPT_XFERINFOFUNCTION
+#if LIBCURL_VERSION_NUM >= 0x072000
     curl_easy_setopt(eh, CURLOPT_XFERINFOFUNCTION, xferInfoCallback);
     curl_easy_setopt(eh, CURLOPT_XFERINFODATA, job);
     curl_easy_setopt(eh, CURLOPT_NOPROGRESS, 0L);
@@ -2059,7 +2059,9 @@ Value vmBuiltinHttpRequestAsyncToFile(VM* vm, int arg_count, Value* args) {
     if (args[4].type != TYPE_STRING || !args[4].s_val) {
         runtimeError(vm, "httpRequestAsyncToFile: out must be a filename string.");
         // free partial
-        if (job->method) free(job->method); if (job->url) free(job->url); if (job->body) free(job->body);
+        if (job->method) free(job->method);
+        if (job->url) free(job->url);
+        if (job->body) free(job->body);
         job->active = 0;
         pthread_mutex_unlock(&g_http_async_mutex);
         return makeInt(-1);
