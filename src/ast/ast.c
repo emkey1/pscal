@@ -120,27 +120,27 @@ void debugAST(AST *node, int indent) {
 #endif // DEBUG
 
 void addChild(AST *parent, AST *child) {
-    if (!parent || !child) {
-        #ifdef DEBUG
-        fprintf(stderr, "[addChild Warning] Attempted to add %s to %s parent.\n",
-                child ? "child" : "NULL child", parent ? "valid" : "NULL");
-        #endif
+    if (!parent) {
         return;
     }
+
     if (parent->child_capacity == 0) {
         parent->child_capacity = 4;
         parent->children = malloc(sizeof(AST*) * parent->child_capacity);
         if (!parent->children) { fprintf(stderr, "Memory allocation error in addChild\n"); EXIT_FAILURE_HANDLER(); }
-        for(int i=0; i < parent->child_capacity; ++i) parent->children[i] = NULL;
+        for (int i = 0; i < parent->child_capacity; ++i) parent->children[i] = NULL;
     } else if (parent->child_count >= parent->child_capacity) {
         int old_capacity = parent->child_capacity;
         parent->child_capacity *= 2;
         parent->children = realloc(parent->children, sizeof(AST*) * parent->child_capacity);
         if (!parent->children) { fprintf(stderr, "Memory allocation error in addChild (realloc)\n"); EXIT_FAILURE_HANDLER(); }
-        for(int i=old_capacity; i < parent->child_capacity; ++i) parent->children[i] = NULL;
+        for (int i = old_capacity; i < parent->child_capacity; ++i) parent->children[i] = NULL;
     }
+
     parent->children[parent->child_count++] = child;
-    child->parent = parent;
+    if (child) {
+        child->parent = parent;
+    }
 }
 
 void setLeft(AST *parent, AST *child) {
