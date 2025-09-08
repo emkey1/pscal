@@ -8,14 +8,18 @@ class Point {
   int y;
 }
 
-// Allocate and initialize
+// Allocate and declare variables
 Point p = new Point();
+int sum;
+bool big;
+
+// Initialize fields
 p.x = 10;
 p.y = 20;
 
 // Arithmetic + comparison + logical operators
-int sum = p.x + p.y;
-bool big = (sum >= 30) && (p.x > 0) || (p.y == 0);
+sum = p.x + p.y;
+big = (sum >= 30) && (p.x > 0) || (p.y == 0);
 
 if (big) {
   writeln("sum=", sum);
@@ -43,7 +47,8 @@ do {
 // Switch with multi-label case
 int v = 2;
 switch (v) {
-  case 1, 2:
+  case 1:
+  case 2:
     writeln("one or two");
     break;
   default:
