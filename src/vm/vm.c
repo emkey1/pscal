@@ -3237,6 +3237,21 @@ comparison_error_label:
                 *target_slot = ptr;
                 break;
             }
+            case INIT_LOCAL_STRING: {
+                uint8_t slot = READ_BYTE();
+                uint8_t length = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                target_slot->type = TYPE_STRING;
+                target_slot->max_length = length;
+                target_slot->s_val = (char*)calloc(length + 1, 1);
+                if (!target_slot->s_val) {
+                    runtimeError(vm, "VM Error: Malloc failed for fixed-length string initialization.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
             case JUMP_IF_FALSE: {
                 uint16_t offset_val = READ_SHORT(vm);
                 Value condition_value = pop(vm);
