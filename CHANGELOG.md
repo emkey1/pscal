@@ -7,6 +7,7 @@ Enhancements
 - Pascal: Added indirect procedure-pointer calls in both expression and statement contexts.
 - Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1-arg form.
 - VM: Implemented indirect call opcodes and end-to-end support for passing an initial pointer argument to new threads.
+- Tools: Added standalone bytecode decompiler `pscald` matching `--dump-bytecode-only` output.
 
 Stability and correctness
 - Pointer metadata propagation: Pointer locals/globals now carry base-type metadata end-to-end so `new(p)` and `p^` dereferences work reliably.
