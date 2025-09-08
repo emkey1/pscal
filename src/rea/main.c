@@ -313,7 +313,8 @@ int main(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, dep_array, dep_count, &chunk);
+    if (dep_array) free(dep_array);
     if (used_cache) {
 #if defined(__APPLE__)
 #define PSCAL_STAT_SEC(st) ((st).st_mtimespec.tv_sec)
