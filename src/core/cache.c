@@ -37,7 +37,10 @@ static char* buildCachePath(const char* source_path) {
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
     mkdir(dir, 0777); // ensure directory exists
 
-    unsigned long h = hashPath(source_path);
+    char* abs_path = realpath(source_path, NULL);
+    const char* hash_src = abs_path ? abs_path : source_path;
+    unsigned long h = hashPath(hash_src);
+    if (abs_path) free(abs_path);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }

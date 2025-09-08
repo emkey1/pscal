@@ -55,7 +55,10 @@ static char* buildCachePathLocal(const char* source_path) {
     if (!dir) return NULL;
     snprintf(dir, dir_len, "%s/%s", home, ".pscal_cache");
     mkdir(dir, 0777);
-    unsigned long h = hashPathLocal(source_path);
+    char* abs_path = realpath(source_path, NULL);
+    const char* hash_src = abs_path ? abs_path : source_path;
+    unsigned long h = hashPathLocal(hash_src);
+    if (abs_path) free(abs_path);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
