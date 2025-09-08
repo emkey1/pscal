@@ -192,29 +192,48 @@ int main(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    // Handle #import directives by loading and linking Pascal units before compiling the main program
-    walkUsesClauses(program, &chunk);
-
-    // Annotate types for the entire program prior to compilation so that
-    // qualified method calls can be resolved to their class-mangled routines.
-    annotateTypes(program, NULL, program);
-    bool compilation_ok = compileASTToBytecode(program, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, &chunk);
 
     InterpretResult result = INTERPRET_COMPILE_ERROR;
-    if (compilation_ok) {
-        finalizeBytecode(&chunk);
+    bool compilation_ok = true;
+    if (!used_cache) {
+        // Handle #import directives by loading and linking Pascal units before compiling the main program
+        walkUsesClauses(program, &chunk);
 
+        // Annotate types for the entire program prior to compilation so that
+        // qualified method calls can be resolved to their class-mangled routines.
+        annotateTypes(program, NULL, program);
+        compilation_ok = compileASTToBytecode(program, &chunk);
+        if (compilation_ok) {
+            finalizeBytecode(&chunk);
+            saveBytecodeToCache(path, &chunk);
+            fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+            if (dump_bytecode_flag) {
+                fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
+                disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+                if (!dump_bytecode_only_flag) {
+                    fprintf(stderr, "\n--- executing Program with VM ---\n");
+                }
+            }
+        } else {
+            fprintf(stderr, "Compilation failed with errors.\n");
+        }
+    } else {
+        fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n",
+                chunk.count, chunk.constants_count);
+        if (dump_bytecode_flag) {
+            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            if (!dump_bytecode_only_flag) {
+                fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
+            }
+        }
+    }
+
+    if (compilation_ok) {
         if (argc > argi) {
             gParamCount = argc - argi;
             gParamValues = &argv[argi];
-        }
-
-        if (dump_bytecode_flag) {
-            fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
-            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-            if (!dump_bytecode_only_flag) {
-                fprintf(stderr, "\n--- executing Program with VM ---\n");
-            }
         }
 
         if (dump_bytecode_only_flag) {

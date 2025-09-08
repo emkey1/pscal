@@ -160,12 +160,29 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    BytecodeChunk chunk; clikeCompile(prog, &chunk);
-    if (dump_bytecode_flag) {
-        fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
-        disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-        if (!dump_bytecode_only_flag) {
-            fprintf(stderr, "\n--- executing Program with VM ---\n");
+    BytecodeChunk chunk;
+    initBytecodeChunk(&chunk);
+    bool used_cache = loadBytecodeFromCache(path, &chunk);
+    if (!used_cache) {
+        clikeCompile(prog, &chunk);
+        saveBytecodeToCache(path, &chunk);
+        fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+                chunk.count, chunk.constants_count);
+        if (dump_bytecode_flag) {
+            fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
+            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            if (!dump_bytecode_only_flag) {
+                fprintf(stderr, "\n--- executing Program with VM ---\n");
+            }
+        }
+    } else {
+        fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n",
+                chunk.count, chunk.constants_count);
+        if (dump_bytecode_flag) {
+            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            if (!dump_bytecode_only_flag) {
+                fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
+            }
         }
     }
 
