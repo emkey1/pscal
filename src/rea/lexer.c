@@ -158,6 +158,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_LEFT_BRACE, start);
         case '}':
             return makeToken(lexer, REA_TOKEN_RIGHT_BRACE, start);
+        case '[':
+            return makeToken(lexer, REA_TOKEN_LEFT_BRACKET, start);
+        case ']':
+            return makeToken(lexer, REA_TOKEN_RIGHT_BRACKET, start);
         case ',':
             return makeToken(lexer, REA_TOKEN_COMMA, start);
         case '.':

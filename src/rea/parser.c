@@ -24,7 +24,92 @@ typedef struct {
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
 
-static AST *parseExpression(ReaParser *p);
+
+/* --------------------------------------------------------------------- */
+/*  Helpers for array handling                                           */
+/* --------------------------------------------------------------------- */
+
+// Forward declarations from the compiler and core utilities.  These are
+// needed so the parser can evaluate constant expressions for array bounds
+// without pulling in heavy headers.
+Value evaluateCompileTimeValue(AST *node); // from compiler/compiler.c
+void freeValue(Value *v);                  // from core/utils.c
+static AST *parseExpression(ReaParser *p); // forward for array helpers
+
+// Parse a sequence of bracketed index expressions after an expression and
+// build an AST_ARRAY_ACCESS node.  For multi-dimensional access like
+// `a[1][2]` this gathers both indices into a single AST node.
+static AST *parseArrayAccess(ReaParser *p, AST *base) {
+    AST *access = newASTNode(AST_ARRAY_ACCESS, NULL);
+    setLeft(access, base);
+    setTypeAST(access, TYPE_UNKNOWN);
+    while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        reaAdvance(p); // consume '['
+        AST *indexExpr = NULL;
+        if (p->current.type != REA_TOKEN_RIGHT_BRACKET) {
+            indexExpr = parseExpression(p);
+        }
+        if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
+            reaAdvance(p);
+        }
+        addChild(access, indexExpr);
+    }
+    return access;
+}
+
+// Parse array type suffixes after a variable name in a declaration, e.g.
+// `int a[10];`  Returns a new AST_ARRAY_TYPE node wrapping the provided
+// base type.  The resulting node's children are AST_SUBRANGE bounds with
+// 0-based indexing, and *vtype_out is set to TYPE_ARRAY.
+static AST *parseArrayType(ReaParser *p, AST *baseType, VarType *vtype_out) {
+    AST *arrType = newASTNode(AST_ARRAY_TYPE, NULL);
+    setTypeAST(arrType, TYPE_ARRAY);
+    setRight(arrType, baseType);
+    while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        int line = p->current.line;
+        reaAdvance(p); // consume '['
+        AST *dimExpr = NULL;
+        if (p->current.type != REA_TOKEN_RIGHT_BRACKET) {
+            dimExpr = parseExpression(p);
+        }
+        if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
+            reaAdvance(p);
+        }
+        // Evaluate dimension to a constant upper bound
+        int high = -1;
+        if (dimExpr) {
+            Value v = evaluateCompileTimeValue(dimExpr);
+            if (v.type == TYPE_INT64 || v.type == TYPE_INT32 || v.type == TYPE_INT16 || v.type == TYPE_INT8 || v.type == TYPE_UINT64 || v.type == TYPE_UINT32 || v.type == TYPE_UINT16 || v.type == TYPE_UINT8 || v.type == TYPE_WORD || v.type == TYPE_BYTE || v.type == TYPE_INTEGER) {
+                high = (int)v.i_val - 1;
+            } else {
+                fprintf(stderr, "L%d: Array size must be a constant integer.\n", line);
+            }
+            freeValue(&v);
+            freeAST(dimExpr);
+        } else {
+            fprintf(stderr, "L%d: Missing array size.\n", line);
+        }
+
+        Token *lowTok = newToken(TOKEN_INTEGER_CONST, "0", line, 0);
+        AST *lowNode = newASTNode(AST_NUMBER, lowTok);
+        setTypeAST(lowNode, TYPE_INT64);
+        lowNode->i_val = 0;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", high);
+        Token *highTok = newToken(TOKEN_INTEGER_CONST, buf, line, 0);
+        AST *highNode = newASTNode(AST_NUMBER, highTok);
+        setTypeAST(highNode, TYPE_INT64);
+        highNode->i_val = high;
+        AST *range = newASTNode(AST_SUBRANGE, NULL);
+        setLeft(range, lowNode);
+        setRight(range, highNode);
+        setTypeAST(range, TYPE_INT64);
+        addChild(arrType, range);
+    }
+    if (vtype_out) *vtype_out = TYPE_ARRAY;
+    return arrType;
+}
+
 static AST *parseAssignment(ReaParser *p);
 static AST *parseEquality(ReaParser *p);
 static AST *parseComparison(ReaParser *p);
@@ -373,9 +458,13 @@ static AST *parseFactor(ReaParser *p) {
             }
             if (call_args) freeAST(call_args);
             setTypeAST(call, TYPE_UNKNOWN);
-            // Support member access chaining after call
+            // Support member access chaining after call (dots or brackets)
             AST *node = call;
-            while (p->current.type == REA_TOKEN_DOT) {
+            while (p->current.type == REA_TOKEN_DOT || p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                    node = parseArrayAccess(p, node);
+                    continue;
+                }
                 reaAdvance(p);
                 if (p->current.type != REA_TOKEN_IDENTIFIER) break;
                 // Capture method/field name
@@ -441,7 +530,11 @@ static AST *parseFactor(ReaParser *p) {
         } else {
             AST *node = newASTNode(AST_VARIABLE, tok);
             setTypeAST(node, TYPE_UNKNOWN);
-            while (p->current.type == REA_TOKEN_DOT) {
+            while (p->current.type == REA_TOKEN_DOT || p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                    node = parseArrayAccess(p, node);
+                    continue;
+                }
                 reaAdvance(p);
                 if (p->current.type != REA_TOKEN_IDENTIFIER) break;
                 char *f = (char*)malloc(p->current.length + 1);
@@ -652,7 +745,7 @@ static AST *parseAssignment(ReaParser *p) {
     // Highest precedence: handle assignment right-associatively
     AST *left = parseLogicalOr(p);
     if (!left) return NULL;
-    if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS) && p->current.type == REA_TOKEN_EQUAL) {
+    if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS || left->type == AST_ARRAY_ACCESS) && p->current.type == REA_TOKEN_EQUAL) {
         ReaToken op = p->current;
         reaAdvance(p);
         AST *value = parseAssignment(p);
@@ -836,6 +929,10 @@ static AST *parseVarDecl(ReaParser *p) {
     free(lex);
 
     reaAdvance(p); // consume identifier
+
+    if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        typeNode = parseArrayType(p, typeNode, &vtype);
+    }
 
     if (p->current.type == REA_TOKEN_LEFT_PAREN) {
         int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
