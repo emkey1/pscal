@@ -42,7 +42,7 @@ static void initSymbolSystem(void) {
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
-        fprintf(stderr, "Usage: disassembler <bytecode_file>\n");
+        fprintf(stderr, "Usage: pscald <bytecode_file>\n");
         return EXIT_FAILURE;
     }
 

@@ -25,9 +25,9 @@ add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
-# Optionally build the debug "dascal" binary
+# Optionally build additional binaries
 option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
-option(BUILD_DISASSEMBLER "Build the standalone disassembler" OFF)
+option(BUILD_PSCALD "Build the standalone bytecode decompiler" OFF)
 
 # Optionally enable SDL-based features
 option(SDL "Enable SDL-based graphics and audio" OFF)
@@ -276,13 +276,13 @@ set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
 add_pscal_executable(pscalvm)
 set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
 
-if(BUILD_DISASSEMBLER)
+if(BUILD_PSCALD)
     set(DISASSEMBLER_SOURCES ${PSCAL_VM_SOURCES})
     list(REMOVE_ITEM DISASSEMBLER_SOURCES src/vm/vm_main.c)
     list(APPEND DISASSEMBLER_SOURCES src/disassembler/main.c)
     set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
     set(PSCAL_SOURCES ${DISASSEMBLER_SOURCES})
-    add_pscal_executable(disassembler)
+    add_pscal_executable(pscald)
     set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
 endif()
 
@@ -469,8 +469,8 @@ if(BUILD_DASCAL)
     install(TARGETS dascal
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
-if(BUILD_DISASSEMBLER)
-    install(TARGETS disassembler
+if(BUILD_PSCALD)
+    install(TARGETS pscald
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
