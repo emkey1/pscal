@@ -11,7 +11,7 @@ TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 # avoid "unbound variable" errors under `set -u` by explicitly declaring an
 # empty array. Otherwise, split the space-separated environment variable into
 # an array.
-SKIP_TESTS=()
+SKIP_TESTS=(foo)
 if [[ -n "${REA_SKIP_TESTS:-}" ]]; then
   IFS=' ' read -r -a SKIP_TESTS <<< "$REA_SKIP_TESTS"
 fi
