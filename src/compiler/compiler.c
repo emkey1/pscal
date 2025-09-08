@@ -1667,6 +1667,26 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                         writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                    } else if (node->var_type == TYPE_STRING) {
+                        int len = 0;
+                        if (actual_type_def_node->right) {
+                            Value len_val = evaluateCompileTimeValue(actual_type_def_node->right);
+                            if (len_val.type == TYPE_INTEGER) {
+                                len = (int)len_val.i_val;
+                                if (len < 0 || len > 255) {
+                                    fprintf(stderr, "L%d: Compiler error: Fixed string length out of range (0-255).\n", getLine(varNameNode));
+                                    compiler_had_error = true;
+                                    len = 0;
+                                }
+                            } else {
+                                fprintf(stderr, "L%d: Compiler error: String length did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                compiler_had_error = true;
+                            }
+                            freeValue(&len_val);
+                        }
+                        writeBytecodeChunk(chunk, INIT_LOCAL_STRING, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)len, getLine(varNameNode));
                     } else if (node->var_type == TYPE_FILE) {
                         writeBytecodeChunk(chunk, INIT_LOCAL_FILE, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
