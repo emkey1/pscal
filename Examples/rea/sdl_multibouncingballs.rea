@@ -1,0 +1,177 @@
+// SDL Multi Bouncing Balls demo ported to Rea using classes.
+// Requires building Pscal with SDL support.
+
+class Ball {
+  float x;
+  float y;
+  float dx;
+  float dy;
+  float mass;
+  int radius;
+  int r;
+  int g;
+  int b;
+  bool active;
+
+  void init(int w, int h, float minSpeed, float maxSpeed) {
+    radius = 8 + random(13);
+    x = radius + random(w - 2 * radius);
+    y = radius + random(h - 2 * radius);
+    int speedRange = trunc(maxSpeed - minSpeed + 1);
+    float speed = minSpeed + random(speedRange);
+    float angle = random(360) * (3.14159265 / 180.0);
+    dx = cos(angle) * speed / 60.0;
+    dy = sin(angle) * speed / 60.0;
+    if ((abs(dx) < 0.1) && (abs(dy) < 0.1)) {
+      dx = (minSpeed / 60.0) * 0.707;
+      dy = (minSpeed / 60.0) * 0.707;
+    }
+    r = random(206) + 50;
+    g = random(206) + 50;
+    b = random(206) + 50;
+    mass = radius * radius;
+    active = true;
+  }
+
+  void move(int maxX, int maxY) {
+    x = x + dx;
+    y = y + dy;
+    if ((x - radius) < 0) {
+      x = radius;
+      dx = -dx;
+    } else if ((x + radius) > maxX) {
+      x = maxX - radius;
+      dx = -dx;
+    }
+    if ((y - radius) < 0) {
+      y = radius;
+      dy = -dy;
+    } else if ((y + radius) > maxY) {
+      y = maxY - radius;
+      dy = -dy;
+    }
+  }
+
+  void draw() {
+    setrgbcolor(r, g, b);
+    fillcircle(trunc(x), trunc(y), radius);
+  }
+}
+
+class BallsApp {
+  const int WindowWidth = 1280;
+  const int WindowHeight = 1024;
+  const int TargetFPS = 60;
+  const int FrameDelay = trunc(1000 / TargetFPS);
+  const int NumBalls = 90;
+  const float MaxInitialSpeed = 250.0;
+  const float MinInitialSpeed = 80.0;
+
+  Ball balls[NumBalls + 1];
+  int maxX;
+  int maxY;
+  bool quit;
+
+  void init() {
+    initgraph(WindowWidth, WindowHeight, "Multi Bouncing Balls in Rea");
+    randomize();
+    maxX = getmaxx();
+    maxY = getmaxy();
+    int i = 1;
+    while (i <= NumBalls) {
+      balls[i] = new Ball();
+      balls[i].init(WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+      i = i + 1;
+    }
+    quit = false;
+  }
+
+  void handleCollisions() {
+    int i = 1;
+    while (i <= NumBalls) {
+      if (balls[i].active) {
+        int j = i + 1;
+        while (j <= NumBalls) {
+          if (balls[j].active) {
+            float distSq = (balls[i].x - balls[j].x) * (balls[i].x - balls[j].x) +
+                           (balls[i].y - balls[j].y) * (balls[i].y - balls[j].y);
+            float sumR = balls[i].radius + balls[j].radius;
+            float sumR2 = sumR * sumR;
+            if (distSq <= sumR2) {
+              float dist = sqrt(distSq);
+              if (dist == 0.0) dist = 0.001;
+              float nx = (balls[j].x - balls[i].x) / dist;
+              float ny = (balls[j].y - balls[i].y) / dist;
+              float tx = -ny;
+              float ty = nx;
+              float v1x = balls[i].dx;
+              float v1y = balls[i].dy;
+              float v2x = balls[j].dx;
+              float v2y = balls[j].dy;
+              float v1n = v1x * nx + v1y * ny;
+              float v1t = v1x * tx + v1y * ty;
+              float v2n = v2x * nx + v2y * ny;
+              float v2t = v2x * tx + v2y * ty;
+              float m1 = balls[i].mass;
+              float m2 = balls[j].mass;
+              float new_v1n = (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
+              float new_v2n = (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
+              balls[i].dx = new_v1n * nx + v1t * tx;
+              balls[i].dy = new_v1n * ny + v1t * ty;
+              balls[j].dx = new_v2n * nx + v2t * tx;
+              balls[j].dy = new_v2n * ny + v2t * ty;
+              float overlap = sumR - dist;
+              if (overlap > 0.0) {
+                balls[i].x = balls[i].x - (overlap / 2.0) * nx;
+                balls[i].y = balls[i].y - (overlap / 2.0) * ny;
+                balls[j].x = balls[j].x + (overlap / 2.0) * nx;
+                balls[j].y = balls[j].y + (overlap / 2.0) * ny;
+              }
+            }
+          }
+          j = j + 1;
+        }
+      }
+      i = i + 1;
+    }
+  }
+
+  void update() {
+    int i = 1;
+    while (i <= NumBalls) {
+      if (balls[i].active) balls[i].move(maxX, maxY);
+      i = i + 1;
+    }
+    handleCollisions();
+  }
+
+  void draw() {
+    cleardevice();
+    int i = 1;
+    while (i <= NumBalls) {
+      if (balls[i].active) balls[i].draw();
+      i = i + 1;
+    }
+    updatescreen();
+  }
+
+  void run() {
+    init();
+    writeln("Multi Bouncing Balls... Press Q to quit.");
+    while (!quit) {
+      if (keypressed()) {
+        char c = readkey();
+        if (toupper(c) == 'Q') quit = true;
+      }
+      update();
+      draw();
+      graphloop(FrameDelay);
+    }
+    closegraph();
+    writeln("Demo finished.");
+  }
+}
+
+BallsApp app = new BallsApp();
+app.run();
+

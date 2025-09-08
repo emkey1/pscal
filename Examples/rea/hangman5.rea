@@ -1,0 +1,94 @@
+// Hangman game ported to Rea front end using OOP.
+
+class WordList {
+  str words[64];
+  int count;
+  void add(str w) {
+    words[count] = w;
+    count = count + 1;
+  }
+  str randomWord() {
+    return words[random(count)];
+  }
+}
+
+bool contains(str s, char c) {
+  int i = 0;
+  while (i < strlen(s)) {
+    if (s[i] == c) return true;
+    i = i + 1;
+  }
+  return false;
+}
+
+class HangmanGame {
+  WordList list;
+  str chosen;
+  str display;
+  str guessed;
+  int wrong;
+  const int maxWrong = 8;
+
+  void init() {
+    list = new WordList();
+    list.add("APPLE");
+    list.add("BANANA");
+    list.add("ORANGE");
+    list.add("GRAPES");
+    list.add("PEACH");
+    randomize();
+    chosen = list.randomWord();
+    display = "";
+    int i = 0;
+    while (i < strlen(chosen)) {
+      display = display + "_";
+      i = i + 1;
+    }
+    guessed = "";
+    wrong = 0;
+  }
+
+  void show() {
+    writeln("Word: ", display);
+    writeln("Guessed: ", guessed);
+    writeln("Wrong: ", wrong, " / ", maxWrong);
+  }
+
+  bool applyGuess(char c) {
+    bool hit = false;
+    int i = 0;
+    while (i < strlen(chosen)) {
+      if (chosen[i] == c) {
+        display[i] = c;
+        hit = true;
+      }
+      i = i + 1;
+    }
+    if (!hit) wrong = wrong + 1;
+    guessed = guessed + c;
+    return display == chosen;
+  }
+
+  void play() {
+    init();
+    writeln("Hangman Game - Rea version\n");
+    while (wrong < maxWrong) {
+      show();
+      write("Guess a letter: ");
+      str line;
+      readln(line);
+      if (strlen(line) == 0) continue;
+      char g = toupper(line[0]);
+      if (contains(guessed, g)) continue;
+      if (applyGuess(g)) {
+        writeln("You win! The word was ", chosen);
+        return;
+      }
+    }
+    writeln("You lose! The word was ", chosen);
+  }
+}
+
+HangmanGame game = new HangmanGame();
+game.play();
+
