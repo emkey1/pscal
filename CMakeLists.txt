@@ -26,8 +26,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
 # Optionally build additional binaries
-option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
-option(BUILD_PSCALD "Build the standalone bytecode decompiler" OFF)
+option(BUILD_DASCAL "Build the dascal debugging binary" ON)
+option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
 option(SDL "Enable SDL-based graphics and audio" OFF)
