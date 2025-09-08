@@ -64,6 +64,31 @@ static char* buildCachePathLocal(const char* source_path) {
     return full;
 }
 
+static char* resolveImportPath(const char* orig_path) {
+    FILE *f = fopen(orig_path, "rb");
+    if (f) { fclose(f); return strdup(orig_path); }
+    const char *lib_dir = getenv("CLIKE_LIB_DIR");
+    if (lib_dir && *lib_dir) {
+        size_t len = strlen(lib_dir) + 1 + strlen(orig_path) + 1;
+        char *path = (char*)malloc(len);
+        if (path) {
+            snprintf(path, len, "%s/%s", lib_dir, orig_path);
+            f = fopen(path, "rb");
+            if (f) { fclose(f); return path; }
+            free(path);
+        }
+    }
+    const char *default_dir = "/usr/local/pscal/clike/lib";
+    size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
+    char *path = (char*)malloc(len);
+    if (!path) return NULL;
+    snprintf(path, len, "%s/%s", default_dir, orig_path);
+    f = fopen(path, "rb");
+    if (f) { fclose(f); return path; }
+    free(path);
+    return NULL;
+}
+
 int main(int argc, char **argv) {
     // Keep terminal untouched for clike: no raw mode or color push
     int dump_ast_json_flag = 0;
@@ -189,6 +214,16 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
+    char **dep_paths = NULL;
+    if (clike_import_count > 0) {
+        dep_paths = (char**)malloc(sizeof(char*) * clike_import_count);
+        if (dep_paths) {
+            for (int i = 0; i < clike_import_count; ++i) {
+                dep_paths[i] = resolveImportPath(clike_imports[i]);
+                if (!dep_paths[i]) dep_paths[i] = strdup(clike_imports[i]);
+            }
+        }
+    }
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     bool used_cache = loadBytecodeFromCache(path, &chunk);

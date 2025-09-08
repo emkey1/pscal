@@ -275,7 +275,10 @@ static bool readValue(FILE* f, Value* out) {
     return true;
 }
 
-bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
+bool loadBytecodeFromCache(const char* source_path,
+                           const char** dependencies,
+                           int dep_count,
+                           BytecodeChunk* chunk) {
     char* cache_path = buildCachePath(source_path);
     if (!cache_path) return false;
     if (chunk && chunk->count > 0) {
@@ -289,6 +292,12 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
     if (!isCacheFresh(cache_path, source_path)) {
         free(cache_path);
         return false;
+    }
+    for (int i = 0; dependencies && i < dep_count; ++i) {
+        if (!isCacheFresh(cache_path, dependencies[i])) {
+            free(cache_path);
+            return false;
+        }
     }
 
     FILE* f = fopen(cache_path, "rb");
