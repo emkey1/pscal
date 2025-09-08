@@ -41,6 +41,7 @@ EXIT_CODE=0
 
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)
+
   if should_skip "$test_name"; then
     echo "---- $test_name (skipped) ----"
     continue

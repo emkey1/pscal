@@ -38,6 +38,8 @@ static AST *parseVarDecl(ReaParser *p);
 static AST *parseReturn(ReaParser *p);
 static AST *parseBreak(ReaParser *p);
 static AST *parseIf(ReaParser *p);
+static AST *parseWhile(ReaParser *p);
+static AST *parseBreak(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex);
 static AST *parseWhile(ReaParser *p);
@@ -1485,6 +1487,12 @@ static AST *parseStatement(ReaParser *p) {
         }
         freeAST(methods);
         return bundle;
+    }
+    if (p->current.type == REA_TOKEN_WHILE) {
+        return parseWhile(p);
+    }
+    if (p->current.type == REA_TOKEN_BREAK) {
+        return parseBreak(p);
     }
     if (p->current.type == REA_TOKEN_LEFT_BRACE) {
         return parseBlock(p);
