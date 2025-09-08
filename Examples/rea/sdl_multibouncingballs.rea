@@ -80,7 +80,7 @@ class BallsApp {
     int i = 1;
     while (i <= NumBalls) {
       balls[i] = new Ball();
-      balls[i].init(WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+      Ball_init(balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
       i = i + 1;
     }
     quit = false;
@@ -139,32 +139,32 @@ class BallsApp {
   void update() {
     int i = 1;
     while (i <= NumBalls) {
-      if (balls[i].active) balls[i].move(maxX, maxY);
+        if (balls[i].active) Ball_move(balls[i], maxX, maxY);
       i = i + 1;
     }
-    handleCollisions();
+    this.handleCollisions();
   }
 
   void draw() {
     cleardevice();
     int i = 1;
     while (i <= NumBalls) {
-      if (balls[i].active) balls[i].draw();
+      if (balls[i].active) Ball_draw(balls[i]);
       i = i + 1;
     }
     updatescreen();
   }
 
   void run() {
-    init();
+    this.init();
     writeln("Multi Bouncing Balls... Press Q to quit.");
     while (!quit) {
       if (keypressed()) {
         char c = readkey();
         if (toupper(c) == 'Q') quit = true;
       }
-      update();
-      draw();
+      this.update();
+      this.draw();
       graphloop(FrameDelay);
     }
     closegraph();
@@ -173,5 +173,5 @@ class BallsApp {
 }
 
 BallsApp app = new BallsApp();
-app.run();
+BallsApp_run(app);
 
