@@ -15,7 +15,7 @@
 // addConstantToChunk, emitShort, patchShort from your provided file.
 
 void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
-    chunk->version = PSCAL_VM_VERSION;
+    chunk->version = pscal_vm_version();
     chunk->count = 0;
     chunk->capacity = 0;
     chunk->code = NULL;

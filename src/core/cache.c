@@ -16,7 +16,6 @@
 
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION PSCAL_VM_VERSION /* doubles as VM bytecode version */
 
 
 static unsigned long hashPath(const char* path) {
@@ -311,18 +310,19 @@ bool loadBytecodeFromCache(const char* source_path,
                 magic == CACHE_MAGIC) {
                 const char* strict_env = getenv("PSCAL_STRICT_VM");
                 bool strict = strict_env && strict_env[0] != '\0';
-                if (ver > CACHE_VERSION) {
+                uint32_t vm_ver = pscal_vm_version();
+                if (ver > vm_ver) {
                     if (strict) {
                         fprintf(stderr,
                                 "Cached bytecode requires VM version %u but current VM version is %u\\n",
-                                ver, CACHE_VERSION);
+                                ver, vm_ver);
                         fclose(f);
                         free(cache_path);
                         return false;
                     } else {
                         fprintf(stderr,
                                 "Warning: cached bytecode targets VM version %u but running version is %u\\n",
-                                ver, CACHE_VERSION);
+                                ver, vm_ver);
                     }
                 }
                 chunk->version = ver;
@@ -463,22 +463,19 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
             magic == CACHE_MAGIC) {
             const char* strict_env = getenv("PSCAL_STRICT_VM");
             bool strict = strict_env && strict_env[0] != '\0';
-            if (ver > CACHE_VERSION) {
+            uint32_t vm_ver = pscal_vm_version();
+            if (ver > vm_ver) {
                 if (strict) {
                     fprintf(stderr,
                             "Bytecode requires VM version %u but this VM only supports version %u\\n",
-                            ver, CACHE_VERSION);
+                            ver, vm_ver);
                     fclose(f);
                     return false;
                 } else {
                     fprintf(stderr,
                             "Warning: bytecode targets VM version %u but running version is %u\\n",
-                            ver, CACHE_VERSION);
+                            ver, vm_ver);
                 }
-            } else if (ver < CACHE_VERSION) {
-                fprintf(stderr,
-                        "Warning: bytecode version %u is older than VM version %u\\n",
-                        ver, CACHE_VERSION);
             }
             chunk->version = ver;
             int count = 0;

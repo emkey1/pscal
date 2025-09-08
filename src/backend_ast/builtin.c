@@ -3117,7 +3117,7 @@ Value vmBuiltinValreal(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinVMVersion(VM* vm, int arg_count, Value* args) {
     (void)vm; (void)args;
-    return arg_count == 0 ? makeInt(PSCAL_VM_VERSION) : makeInt(-1);
+    return arg_count == 0 ? makeInt(pscal_vm_version()) : makeInt(-1);
 }
 
 Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
