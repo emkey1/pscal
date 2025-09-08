@@ -1473,6 +1473,7 @@ static AST *parseStatement(ReaParser *p) {
         }
         // Return both type and methods in a compound so top-level gets both
         AST *bundle = newASTNode(AST_COMPOUND, NULL);
+        bundle->is_global_scope = true; // mark for top-level flattening
         addChild(bundle, typeDecl);
         // append methods
         if (methods && methods->child_count > 0) {
@@ -1576,7 +1577,7 @@ AST *parseRea(const char *source) {
         AST *stmt = parseStatement(&p);
         if (!stmt) break;
 
-        if (stmt->type == AST_COMPOUND) {
+        if (stmt->type == AST_COMPOUND && stmt->is_global_scope) {
             for (int i = 0; i < stmt->child_count; i++) {
                 AST *child = stmt->children[i];
                 if (!child) continue;
