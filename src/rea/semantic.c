@@ -7,6 +7,9 @@
 #include <string.h>
 #include <strings.h>
 
+// Forward declaration from core/utils.c
+Token *newToken(TokenType type, const char *value, int line, int column);
+
 /* ------------------------------------------------------------------------- */
 /*  Internal helpers                                                         */
 /* ------------------------------------------------------------------------- */
@@ -310,11 +313,20 @@ static const char *resolveExprClass(AST *expr) {
     case AST_VARIABLE: {
         if (!expr->token || !expr->token->value) return NULL;
         AST *decl = findStaticDeclarationInAST(expr->token->value, expr, gProgramRoot);
-        if (decl && decl->right && decl->right->token) {
-            return decl->right->token->value;
+        if (decl && decl->right) {
+            AST *type = decl->right;
+            /* Drill through array or type references to the base type */
+            while (type && (type->type == AST_ARRAY_TYPE || type->type == AST_TYPE_REFERENCE)) {
+                type = type->right;
+            }
+            if (type && type->token) {
+                return type->token->value;
+            }
         }
         return NULL;
     }
+    case AST_ARRAY_ACCESS:
+        return resolveExprClass(expr->left);
     case AST_FIELD_ACCESS: {
         const char *base = resolveExprClass(expr->left);
         if (!base) return NULL;
@@ -339,8 +351,25 @@ static const char *resolveExprClass(AST *expr) {
     }
 }
 
-static void validateNode(AST *node) {
+static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     if (!node) return;
+
+    ClassInfo *clsContext = currentClass;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
+        const char *fullname = node->token ? node->token->value : NULL;
+        const char *us = fullname ? strchr(fullname, '_') : NULL;
+        if (us) {
+            size_t len = (size_t)(us - fullname);
+            char buf[MAX_SYMBOL_LENGTH];
+            if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+            memcpy(buf, fullname, len);
+            buf[len] = '\0';
+            clsContext = lookupClass(buf);
+        } else {
+            clsContext = NULL;
+        }
+    }
+
     if (node->type == AST_FIELD_ACCESS) {
         const char *cls = resolveExprClass(node->left);
         if (cls) {
@@ -351,26 +380,67 @@ static void validateNode(AST *node) {
                 pascal_semantic_error_count++;
             }
         }
-    } else if (node->type == AST_PROCEDURE_CALL && node->left) {
-        const char *cls = resolveExprClass(node->left);
-        const char *name = node->token ? node->token->value : NULL;
-        if (cls && name) {
-            const char *method = name;
-            const char *us = strchr(name, '_');
-            if (us && strncasecmp(name, cls, (size_t)(us - name)) == 0) {
-                method = us + 1;
+    } else if (node->type == AST_PROCEDURE_CALL) {
+        if (node->left) {
+            const char *cls = resolveExprClass(node->left);
+            const char *name = node->token ? node->token->value : NULL;
+            if (cls && name) {
+                const char *method = name;
+                const char *us = strchr(name, '_');
+                bool already = false;
+                if (us && strncasecmp(name, cls, (size_t)(us - name)) == 0) {
+                    method = us + 1;
+                    already = true;
+                }
+                ClassInfo *ci = lookupClass(cls);
+                if (ci && lookupMethod(ci, method)) {
+                    if (!already) {
+                        size_t ln = strlen(cls) + 1 + strlen(name) + 1;
+                        char *m = (char*)malloc(ln);
+                        if (m) {
+                            snprintf(m, ln, "%s_%s", cls, name);
+                            free(node->token->value);
+                            node->token->value = m;
+                            node->token->length = strlen(m);
+                        }
+                    }
+                } else if (ci && !lookupMethod(ci, method)) {
+                    fprintf(stderr, "Unknown method '%s' for class '%s'\n", method, cls);
+                    pascal_semantic_error_count++;
+                }
             }
-            ClassInfo *ci = lookupClass(cls);
-            if (ci && !lookupMethod(ci, method)) {
-                fprintf(stderr, "Unknown method '%s' for class '%s'\n", method, cls);
-                pascal_semantic_error_count++;
+        } else if (currentClass && node->token) {
+            Symbol *sym = lookupMethod(currentClass, node->token->value);
+            if (sym && sym->type_def && sym->type_def->token && sym->type_def->token->value) {
+                const char *fullname = sym->type_def->token->value;
+                size_t ln = strlen(fullname) + 1;
+                char *m = (char*)malloc(ln);
+                if (m) {
+                    memcpy(m, fullname, ln);
+                    free(node->token->value);
+                    node->token->value = m;
+                    node->token->length = ln - 1;
+                }
+
+                Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", node->token ? node->token->line : 0, 0);
+                AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+                thisVar->var_type = TYPE_POINTER;
+                addChild(node, NULL);
+                for (int i = node->child_count - 1; i > 0; i--) {
+                    node->children[i] = node->children[i - 1];
+                    if (node->children[i]) node->children[i]->parent = node;
+                }
+                node->children[0] = thisVar;
+                thisVar->parent = node;
+                setLeft(node, thisVar);
             }
         }
     }
-    if (node->left) validateNode(node->left);
-    if (node->right) validateNode(node->right);
-    if (node->extra) validateNode(node->extra);
-    for (int i = 0; i < node->child_count; i++) validateNode(node->children[i]);
+
+    if (node->left) validateNodeInternal(node->left, clsContext);
+    if (node->right) validateNodeInternal(node->right, clsContext);
+    if (node->extra) validateNodeInternal(node->extra, clsContext);
+    for (int i = 0; i < node->child_count; i++) validateNodeInternal(node->children[i], clsContext);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -384,7 +454,7 @@ void reaPerformSemanticAnalysis(AST *root) {
     collectMethods(root);
     linkParents();
     checkOverrides();
-    validateNode(root);
+    validateNodeInternal(root, NULL);
     freeClassTable();
 }
 
