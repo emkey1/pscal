@@ -10,7 +10,7 @@ FNV_PRIME = 16777619
 
 def hash_path(path: str) -> int:
     h = FNV_OFFSET
-    for b in path.encode("utf-8"):
+    for b in os.fsencode(path):
         h ^= b
         h = (h * FNV_PRIME) & 0xFFFFFFFF
     return h
