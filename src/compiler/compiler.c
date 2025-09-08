@@ -434,6 +434,7 @@ static bool compareTypeNodes(AST* a, AST* b) {
     a = resolveTypeAlias(a);
     b = resolveTypeAlias(b);
     if (!a || !b) return a == b;
+    if (a == b) return true;
     if (a->var_type != b->var_type) return false;
     switch (a->var_type) {
         case TYPE_ARRAY:
