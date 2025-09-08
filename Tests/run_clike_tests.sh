@@ -78,7 +78,7 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   mv "$actual_out.clean" "$actual_out"
   perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$actual_err" > "$actual_err.clean"
   mv "$actual_err.clean" "$actual_err"
-  perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m; s/^--- Compiling Main Program AST to Bytecode ---\n//m' "$actual_err" > "$actual_err.clean"
+  perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$actual_err" > "$actual_err.clean"
   mv "$actual_err.clean" "$actual_err"
 
   # Keep only the first two lines of stderr for deterministic comparisons
