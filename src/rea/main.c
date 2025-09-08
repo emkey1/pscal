@@ -116,6 +116,38 @@ static void walkUsesClauses(AST* node, BytecodeChunk* chunk) {
     }
 }
 
+static void collectUnitListPaths(List* unit_list, List* out) {
+    if (!unit_list || !out) return;
+    for (int i = 0; i < listSize(unit_list); i++) {
+        char *used_unit_name = (char*)listGet(unit_list, i);
+        if (!used_unit_name) continue;
+
+        char lower[MAX_SYMBOL_LENGTH];
+        strncpy(lower, used_unit_name, MAX_SYMBOL_LENGTH - 1);
+        lower[MAX_SYMBOL_LENGTH - 1] = '\0';
+        for (int k = 0; lower[k]; k++) lower[k] = tolower((unsigned char)lower[k]);
+
+        char *unit_file_path = findUnitFile(lower);
+        if (unit_file_path) {
+            listAppend(out, unit_file_path);
+            free(unit_file_path);
+        }
+    }
+}
+
+static void collectUsesClauses(AST* node, List* out) {
+    if (!node) return;
+    if (node->type == AST_USES_CLAUSE && node->unit_list) {
+        collectUnitListPaths(node->unit_list, out);
+    }
+    if (node->left) collectUsesClauses(node->left, out);
+    if (node->right) collectUsesClauses(node->right, out);
+    if (node->extra) collectUsesClauses(node->extra, out);
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i]) collectUsesClauses(node->children[i], out);
+    }
+}
+
 int main(int argc, char **argv) {
     vmInitTerminalState();
 
@@ -190,9 +222,20 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
+    List *dep_files = createList();
+    collectUsesClauses(program, dep_files);
+    int dep_count = listSize(dep_files);
+    const char **dep_array = NULL;
+    if (dep_count > 0) {
+        dep_array = malloc(sizeof(char*) * dep_count);
+        for (int i = 0; i < dep_count; i++) dep_array[i] = listGet(dep_files, i);
+    }
+
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, dep_array, dep_count, &chunk);
+    free(dep_array);
+    freeList(dep_files);
 
     InterpretResult result = INTERPRET_COMPILE_ERROR;
     bool compilation_ok = true;

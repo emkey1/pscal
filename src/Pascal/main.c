@@ -111,7 +111,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             overall_success_status = true;
         } else {
             GlobalAST = optimizePascalAST(GlobalAST);
-            used_cache = loadBytecodeFromCache(programName, &chunk);
+            used_cache = loadBytecodeFromCache(programName, NULL, 0, &chunk);
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
                 if (dump_bytecode_flag) {
