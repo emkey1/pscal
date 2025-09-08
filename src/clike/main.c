@@ -207,14 +207,40 @@ int main(int argc, char **argv) {
             used_cache = false;
         } else {
             for (int i = 0; i < clike_import_count && used_cache; ++i) {
+                const char *orig_path = clike_imports[i];
+                char *allocated_path = NULL;
                 struct stat dep_stat;
-                if (stat(clike_imports[i], &dep_stat) != 0 ||
-                    PSCAL_STAT_SEC(cache_stat) <= PSCAL_STAT_SEC(dep_stat)) {
+                bool dep_ok = (stat(orig_path, &dep_stat) == 0);
+                if (!dep_ok) {
+                    const char *lib_dir = getenv("CLIKE_LIB_DIR");
+                    if (lib_dir && *lib_dir) {
+                        size_t len = strlen(lib_dir) + 1 + strlen(orig_path) + 1;
+                        allocated_path = (char *)malloc(len);
+                        if (allocated_path) {
+                            snprintf(allocated_path, len, "%s/%s", lib_dir, orig_path);
+                            dep_ok = (stat(allocated_path, &dep_stat) == 0);
+                            if (!dep_ok) { free(allocated_path); allocated_path = NULL; }
+                        }
+                    }
+                }
+                if (!dep_ok) {
+                    const char *default_dir = "/usr/local/pscal/clike/lib";
+                    size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
+                    allocated_path = (char *)malloc(len);
+                    if (allocated_path) {
+                        snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);
+                        dep_ok = (stat(allocated_path, &dep_stat) == 0);
+                        if (!dep_ok) { free(allocated_path); allocated_path = NULL; }
+                    }
+                }
+                if (!dep_ok || PSCAL_STAT_SEC(cache_stat) <= PSCAL_STAT_SEC(dep_stat)) {
                     freeBytecodeChunk(&chunk);
                     initBytecodeChunk(&chunk);
                     used_cache = false;
+                    if (allocated_path) free(allocated_path);
                     break;
                 }
+                if (allocated_path) free(allocated_path);
             }
             free(cache_path);
         }
