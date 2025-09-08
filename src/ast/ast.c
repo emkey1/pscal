@@ -449,12 +449,6 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                     AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
                     if (declNode) {
                         if (declNode->type == AST_ENUM_TYPE) {
-                            /*
-                             * Enumeration literals (e.g., cRed) are inserted into the
-                             * global symbol table with their enum type definition as
-                             * the declaration node. Recognise this and propagate the
-                             * enum type to the identifier.
-                             */
                             node->var_type = TYPE_ENUM;
                             node->type_def = declNode;
                         } else if (declNode->type == AST_VAR_DECL) {
@@ -473,21 +467,58 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                             node->var_type = TYPE_VOID;
                         }
                     } else {
-                        AST* typeDef = lookupType(varName);
-                        if (typeDef) {
-                            node->var_type = typeDef->var_type;
-                            node->type_def = typeDef;
-                            #ifdef DEBUG
-                            fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
-                            #endif
-                        } else {
-                            #ifdef DEBUG
-                            if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
-                                fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
-                            }
-                            #endif
-                            node->var_type = TYPE_VOID;
+                        // Attempt to resolve as a field of the enclosing class
+                        AST* scope = childScopeNode;
+                        while (scope && scope->type != AST_FUNCTION_DECL && scope->type != AST_PROCEDURE_DECL) {
+                            scope = scope->parent;
                         }
+                        const char* clsName = NULL;
+                        if (scope && scope->token && scope->token->value) {
+                            const char* fn = scope->token->value;
+                            const char* us = strchr(fn, '_');
+                            if (us) {
+                                size_t len = (size_t)(us - fn);
+                                char tmp[MAX_SYMBOL_LENGTH];
+                                if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
+                                memcpy(tmp, fn, len);
+                                tmp[len] = '\0';
+                                clsName = tmp;
+                                AST* ctype = lookupType(tmp);
+                                ctype = resolveTypeAlias(ctype);
+                                if (ctype && ctype->type == AST_RECORD_TYPE) {
+                                    for (int i = 0; i < ctype->child_count; i++) {
+                                        AST* f = ctype->children[i];
+                                        if (!f || f->type != AST_VAR_DECL) continue;
+                                        for (int j = 0; j < f->child_count; j++) {
+                                            AST* v = f->children[j];
+                                            if (v && v->token && strcmp(v->token->value, varName) == 0) {
+                                                node->var_type = f->var_type;
+                                                node->type_def = f->right;
+                                                goto resolved_field;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        {
+                            AST* typeDef = lookupType(varName);
+                            if (typeDef) {
+                                node->var_type = typeDef->var_type;
+                                node->type_def = typeDef;
+                                #ifdef DEBUG
+                                fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
+                                #endif
+                            } else {
+                                #ifdef DEBUG
+                                if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
+                                    fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
+                                }
+                                #endif
+                                node->var_type = TYPE_VOID;
+                            }
+                        }
+resolved_field: ;
                     }
                 }
                 if (strcasecmp(varName, "result") == 0 && childScopeNode && childScopeNode->type == AST_FUNCTION_DECL) {
@@ -741,26 +772,16 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 node->var_type = TYPE_VOID;
                 node->type_def = NULL;
                 if (node->left) {
-                    // Start from the type definition of the array expression on the left
-                    AST *arrayType = node->left->type_def;
-
-                    // Resolve any type references (aliases) to get to the actual type node
-                    while (arrayType && arrayType->type == AST_TYPE_REFERENCE) {
-                        arrayType = arrayType->right;
-                    }
-
-                    // If we're indexing into an array, pull out its element type
+                    AST *arrayType = resolveTypeAlias(node->left->type_def);
                     if (arrayType && arrayType->type == AST_ARRAY_TYPE) {
-                        AST *elemType = arrayType->right;
-
-                        // Again resolve any aliases on the element type
-                        while (elemType && elemType->type == AST_TYPE_REFERENCE) {
-                            elemType = elemType->right;
-                        }
-
+                        AST *elemType = resolveTypeAlias(arrayType->right);
                         if (elemType) {
-                            node->var_type = elemType->var_type;
                             node->type_def = elemType;
+                            if (elemType->type == AST_RECORD_TYPE) {
+                                node->var_type = TYPE_POINTER;
+                            } else {
+                                node->var_type = elemType->var_type;
+                            }
                         }
                     } else if (node->left->var_type == TYPE_STRING) {
                         // Special case: indexing into a string yields a char
