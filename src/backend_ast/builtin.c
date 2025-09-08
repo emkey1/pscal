@@ -651,17 +651,30 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 }
             }
             // Parse length modifiers and record small-width flags; we normalize by truncating manually
-            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
-            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
-            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
-            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
+            bool mod_h = false, mod_hh = false;
+            if (fmt[j] == 'h') {
+                mod_h = true;
+                j++;
+                if (fmt[j] == 'h') {
+                    mod_hh = true;
+                    mod_h = false;
+                    j++;
+                }
+            } else if (fmt[j] == 'l') {
+                // We currently ignore 'l' and 'll' modifiers but need to consume them
+                j++;
+                if (fmt[j] == 'l') {
+                    j++;
+                }
+            } else {
+                const char* length_mods = "Ljzt";
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+            }
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
                 return makeInt(0);
             }
-            // Suppress unused warnings for length modifiers we don't currently use explicitly
-            (void)mod_l; (void)mod_ll;
             char fmtbuf[32];
             char buf[256];
             if (width > 0 && precision >= 0) {
@@ -786,13 +799,27 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 j++; precision = 0;
                 while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
             }
-            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
-            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
-            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
-            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
-            char spec = fmt[j]; if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
-            // Suppress unused warnings for length modifiers we don't currently use explicitly
-            (void)mod_l; (void)mod_ll;
+            bool mod_h = false, mod_hh = false;
+            if (fmt[j] == 'h') {
+                mod_h = true;
+                j++;
+                if (fmt[j] == 'h') {
+                    mod_hh = true;
+                    mod_h = false;
+                    j++;
+                }
+            } else if (fmt[j] == 'l') {
+                // Ignore 'l' and 'll' modifiers but consume them
+                j++;
+                if (fmt[j] == 'l') {
+                    j++;
+                }
+            } else {
+                const char* length_mods = "Ljzt";
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+            }
+            char spec = fmt[j];
+            if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
             char fmtbuf[32]; char buf[256];
             if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
             else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
