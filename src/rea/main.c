@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <ctype.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -31,6 +35,82 @@ static const char *REA_USAGE =
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
 "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
+
+static unsigned long hashPathLocal(const char* path) {
+    uint32_t hash = 2166136261u;
+    for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
+        hash ^= *p;
+        hash *= 16777619u;
+    }
+    return (unsigned long)hash;
+}
+
+static char* buildCachePathLocal(const char* source_path) {
+    const char* home = getenv("HOME");
+    if (!home) return NULL;
+    size_t dir_len = strlen(home) + 1 + strlen(".pscal_cache") + 1;
+    char* dir = (char*)malloc(dir_len);
+    if (!dir) return NULL;
+    snprintf(dir, dir_len, "%s/%s", home, ".pscal_cache");
+    mkdir(dir, 0777);
+    unsigned long h = hashPathLocal(source_path);
+    size_t path_len = dir_len + 32;
+    char* full = (char*)malloc(path_len);
+    if (!full) { free(dir); return NULL; }
+    snprintf(full, path_len, "%s/%lu.bc", dir, h);
+    free(dir);
+    return full;
+}
+
+static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
+    if (!unit_list) return true;
+#if defined(__APPLE__)
+#define PSCAL_STAT_SEC(st)  ((st).st_mtimespec.tv_sec)
+#else
+#define PSCAL_STAT_SEC(st)  ((st).st_mtim.tv_sec)
+#endif
+    for (int i = 0; i < listSize(unit_list); i++) {
+        char *used_unit_name = (char*)listGet(unit_list, i);
+        if (!used_unit_name) continue;
+
+        char lower_used_unit_name[MAX_SYMBOL_LENGTH];
+        strncpy(lower_used_unit_name, used_unit_name, MAX_SYMBOL_LENGTH - 1);
+        lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
+        for (int k = 0; lower_used_unit_name[k]; k++) {
+            lower_used_unit_name[k] = tolower((unsigned char)lower_used_unit_name[k]);
+        }
+
+        char *unit_file_path = findUnitFile(lower_used_unit_name);
+        if (!unit_file_path) continue;
+
+        struct stat unit_stat;
+        if (stat(unit_file_path, &unit_stat) != 0) {
+            free(unit_file_path);
+            return false;
+        }
+        if (cache_mtime <= PSCAL_STAT_SEC(unit_stat)) {
+            free(unit_file_path);
+            return false;
+        }
+        free(unit_file_path);
+    }
+#undef PSCAL_STAT_SEC
+    return true;
+}
+
+static bool importsAreFresh(AST* node, time_t cache_mtime) {
+    if (!node) return true;
+    if (node->type == AST_USES_CLAUSE && node->unit_list) {
+        if (!isUnitListFresh(node->unit_list, cache_mtime)) return false;
+    }
+    if (node->left && !importsAreFresh(node->left, cache_mtime)) return false;
+    if (node->right && !importsAreFresh(node->right, cache_mtime)) return false;
+    if (node->extra && !importsAreFresh(node->extra, cache_mtime)) return false;
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i] && !importsAreFresh(node->children[i], cache_mtime)) return false;
+    }
+    return true;
+}
 
 static void processUnitList(List* unit_list, BytecodeChunk* chunk) {
     if (!unit_list) return;
@@ -193,6 +273,25 @@ int main(int argc, char **argv) {
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     bool used_cache = loadBytecodeFromCache(path, &chunk);
+    if (used_cache) {
+#if defined(__APPLE__)
+#define PSCAL_STAT_SEC(st) ((st).st_mtimespec.tv_sec)
+#else
+#define PSCAL_STAT_SEC(st) ((st).st_mtim.tv_sec)
+#endif
+        char* cache_path = buildCachePathLocal(path);
+        struct stat cache_stat;
+        if (!cache_path || stat(cache_path, &cache_stat) != 0 ||
+            !importsAreFresh(program, PSCAL_STAT_SEC(cache_stat))) {
+            if (cache_path) free(cache_path);
+            freeBytecodeChunk(&chunk);
+            initBytecodeChunk(&chunk);
+            used_cache = false;
+        } else {
+            free(cache_path);
+        }
+#undef PSCAL_STAT_SEC
+    }
 
     InterpretResult result = INTERPRET_COMPILE_ERROR;
     bool compilation_ok = true;

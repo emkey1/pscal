@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdint.h>
 #include "clike/parser.h"
 #include "clike/codegen.h"
 #include "clike/builtins.h"
@@ -33,7 +36,33 @@ static const char *CLIKE_USAGE =
     "   Options:\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
-    "     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n";
+"     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n";
+
+static unsigned long hashPathLocal(const char* path) {
+    uint32_t hash = 2166136261u;
+    for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
+        hash ^= *p;
+        hash *= 16777619u;
+    }
+    return (unsigned long)hash;
+}
+
+static char* buildCachePathLocal(const char* source_path) {
+    const char* home = getenv("HOME");
+    if (!home) return NULL;
+    size_t dir_len = strlen(home) + 1 + strlen(".pscal_cache") + 1;
+    char* dir = (char*)malloc(dir_len);
+    if (!dir) return NULL;
+    snprintf(dir, dir_len, "%s/%s", home, ".pscal_cache");
+    mkdir(dir, 0777);
+    unsigned long h = hashPathLocal(source_path);
+    size_t path_len = dir_len + 32;
+    char* full = (char*)malloc(path_len);
+    if (!full) { free(dir); return NULL; }
+    snprintf(full, path_len, "%s/%lu.bc", dir, h);
+    free(dir);
+    return full;
+}
 
 int main(int argc, char **argv) {
     // Keep terminal untouched for clike: no raw mode or color push
@@ -163,6 +192,34 @@ int main(int argc, char **argv) {
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     bool used_cache = loadBytecodeFromCache(path, &chunk);
+    if (used_cache) {
+#if defined(__APPLE__)
+#define PSCAL_STAT_SEC(st) ((st).st_mtimespec.tv_sec)
+#else
+#define PSCAL_STAT_SEC(st) ((st).st_mtim.tv_sec)
+#endif
+        char* cache_path = buildCachePathLocal(path);
+        struct stat cache_stat;
+        if (!cache_path || stat(cache_path, &cache_stat) != 0) {
+            if (cache_path) free(cache_path);
+            freeBytecodeChunk(&chunk);
+            initBytecodeChunk(&chunk);
+            used_cache = false;
+        } else {
+            for (int i = 0; i < clike_import_count && used_cache; ++i) {
+                struct stat dep_stat;
+                if (stat(clike_imports[i], &dep_stat) != 0 ||
+                    PSCAL_STAT_SEC(cache_stat) <= PSCAL_STAT_SEC(dep_stat)) {
+                    freeBytecodeChunk(&chunk);
+                    initBytecodeChunk(&chunk);
+                    used_cache = false;
+                    break;
+                }
+            }
+            free(cache_path);
+        }
+#undef PSCAL_STAT_SEC
+    }
     if (!used_cache) {
         clikeCompile(prog, &chunk);
         saveBytecodeToCache(path, &chunk);
