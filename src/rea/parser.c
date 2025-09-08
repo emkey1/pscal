@@ -261,9 +261,7 @@ static AST *parseFactor(ReaParser *p) {
         TokenType ttype = TOKEN_INTEGER_CONST;
         VarType vtype = TYPE_INT64;
 
-        bool is_hex = false;
         if (len > 2 && start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
-            is_hex = true;
             start += 2;
             len -= 2;
             ttype = TOKEN_HEX_CONST;
@@ -1475,6 +1473,7 @@ static AST *parseStatement(ReaParser *p) {
         }
         // Return both type and methods in a compound so top-level gets both
         AST *bundle = newASTNode(AST_COMPOUND, NULL);
+        bundle->is_global_scope = true; // mark for top-level flattening
         addChild(bundle, typeDecl);
         // append methods
         if (methods && methods->child_count > 0) {
@@ -1577,8 +1576,22 @@ AST *parseRea(const char *source) {
     while (p.current.type != REA_TOKEN_EOF && !p.hadError) {
         AST *stmt = parseStatement(&p);
         if (!stmt) break;
-        if (stmt->type == AST_VAR_DECL || stmt->type == AST_FUNCTION_DECL || stmt->type == AST_PROCEDURE_DECL ||
-            stmt->type == AST_TYPE_DECL || stmt->type == AST_CONST_DECL) {
+
+        if (stmt->type == AST_COMPOUND && stmt->is_global_scope) {
+            for (int i = 0; i < stmt->child_count; i++) {
+                AST *child = stmt->children[i];
+                if (!child) continue;
+                if (child->type == AST_VAR_DECL || child->type == AST_FUNCTION_DECL || child->type == AST_PROCEDURE_DECL ||
+                    child->type == AST_TYPE_DECL || child->type == AST_CONST_DECL) {
+                    addChild(decls, child);
+                } else {
+                    addChild(stmts, child);
+                }
+                stmt->children[i] = NULL;
+            }
+            freeAST(stmt);
+        } else if (stmt->type == AST_VAR_DECL || stmt->type == AST_FUNCTION_DECL || stmt->type == AST_PROCEDURE_DECL ||
+                   stmt->type == AST_TYPE_DECL || stmt->type == AST_CONST_DECL) {
             addChild(decls, stmt);
         } else {
             addChild(stmts, stmt);
