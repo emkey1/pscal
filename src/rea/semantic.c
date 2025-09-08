@@ -307,17 +307,24 @@ static Symbol *lookupMethod(ClassInfo *ci, const char *name) {
     return NULL;
 }
 
-static const char *resolveExprClass(AST *expr) {
+static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
     if (!expr) return NULL;
     switch (expr->type) {
     case AST_VARIABLE: {
         if (!expr->token || !expr->token->value) return NULL;
         AST *decl = findStaticDeclarationInAST(expr->token->value, expr, gProgramRoot);
+        if (!decl && currentClass) {
+            Symbol *fs = lookupField(currentClass, expr->token->value);
+            if (fs && fs->type_def) decl = fs->type_def;
+        }
         if (decl && decl->right) {
             AST *type = decl->right;
-            /* Drill through array or type references to the base type */
-            while (type && (type->type == AST_ARRAY_TYPE || type->type == AST_TYPE_REFERENCE)) {
+            /* Drill through array wrappers */
+            while (type && type->type == AST_ARRAY_TYPE) {
                 type = type->right;
+            }
+            if (type && type->type == AST_TYPE_REFERENCE && type->token) {
+                return type->token->value;
             }
             if (type && type->token) {
                 return type->token->value;
@@ -326,9 +333,9 @@ static const char *resolveExprClass(AST *expr) {
         return NULL;
     }
     case AST_ARRAY_ACCESS:
-        return resolveExprClass(expr->left);
+        return resolveExprClass(expr->left, currentClass);
     case AST_FIELD_ACCESS: {
-        const char *base = resolveExprClass(expr->left);
+        const char *base = resolveExprClass(expr->left, currentClass);
         if (!base) return NULL;
         ClassInfo *ci = lookupClass(base);
         if (!ci) return NULL;
@@ -371,7 +378,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_FIELD_ACCESS) {
-        const char *cls = resolveExprClass(node->left);
+        const char *cls = resolveExprClass(node->left, clsContext);
         if (cls) {
             ClassInfo *ci = lookupClass(cls);
             const char *fname = node->right && node->right->token ? node->right->token->value : NULL;
@@ -382,7 +389,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
         if (node->left) {
-            const char *cls = resolveExprClass(node->left);
+            const char *cls = resolveExprClass(node->left, clsContext);
             const char *name = node->token ? node->token->value : NULL;
             if (cls && name) {
                 const char *method = name;

@@ -179,6 +179,8 @@ void setExtra(AST *parent, AST *child) {
 
 void freeAST(AST *node) {
     if (!node) return;
+    if (node->freed) return;
+    node->freed = true;
 
     if (isNodeInTypeTable(node)) {
         return;
