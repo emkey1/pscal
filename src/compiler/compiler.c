@@ -379,6 +379,29 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
 // Determine the record type for an expression used as an object base.
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
+    if (expr->type == AST_ARRAY_ACCESS) {
+        AST* baseType = getRecordTypeFromExpr(expr->left);
+        if (!baseType) return NULL;
+        baseType = resolveTypeAlias(baseType);
+        if (baseType && baseType->type == AST_ARRAY_TYPE) {
+            AST* elem = resolveTypeAlias(baseType->right);
+            if (elem && elem->type == AST_POINTER_TYPE) {
+                return resolveTypeAlias(elem->right);
+            }
+            return elem;
+        }
+        if (baseType && baseType->type == AST_POINTER_TYPE) {
+            AST* arr = resolveTypeAlias(baseType->right);
+            if (arr && arr->type == AST_ARRAY_TYPE) {
+                AST* elem = resolveTypeAlias(arr->right);
+                if (elem && elem->type == AST_POINTER_TYPE) {
+                    return resolveTypeAlias(elem->right);
+                }
+                return elem;
+            }
+        }
+        return NULL;
+    }
     if (expr->type == AST_DEREFERENCE) {
         AST* ptr_type = resolveTypeAlias(expr->left->type_def);
         if (ptr_type && ptr_type->type == AST_POINTER_TYPE) {
@@ -391,6 +414,32 @@ static AST* getRecordTypeFromExpr(AST* expr) {
         AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
         if (decl && decl->right) {
             t = resolveTypeAlias(decl->right);
+        } else if (current_function_compiler && current_function_compiler->function_symbol &&
+                   current_function_compiler->function_symbol->name) {
+            const char* fname = current_function_compiler->function_symbol->name;
+            const char* us = strchr(fname, '_');
+            if (us) {
+                size_t len = (size_t)(us - fname);
+                char cls[MAX_SYMBOL_LENGTH];
+                if (len >= sizeof(cls)) len = sizeof(cls) - 1;
+                memcpy(cls, fname, len);
+                cls[len] = '\0';
+                AST* classType = lookupType(cls);
+                classType = resolveTypeAlias(classType);
+                if (classType && classType->type == AST_RECORD_TYPE) {
+                    for (int i = 0; i < classType->child_count && !t; i++) {
+                        AST* f = classType->children[i];
+                        if (!f || f->type != AST_VAR_DECL) continue;
+                        for (int j = 0; j < f->child_count; j++) {
+                            AST* v = f->children[j];
+                            if (v && v->token && strcmp(v->token->value, expr->token->value) == 0) {
+                                if (f->right) t = resolveTypeAlias(f->right);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     if (t && t->type == AST_POINTER_TYPE) {
