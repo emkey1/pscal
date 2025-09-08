@@ -4,7 +4,10 @@
 #include <stdbool.h>
 #include "compiler/bytecode.h"
 
-bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk);
+bool loadBytecodeFromCache(const char* source_path,
+                           const char** dependencies,
+                           int dep_count,
+                           BytecodeChunk* chunk);
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk);
 bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk);
 
