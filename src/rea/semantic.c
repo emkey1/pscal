@@ -412,37 +412,27 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         } else if (currentClass && node->token) {
             Symbol *sym = lookupMethod(currentClass, node->token->value);
             if (sym && sym->type_def && sym->type_def->token && sym->type_def->token->value) {
-                const char *name = node->token->value;
                 const char *fullname = sym->type_def->token->value;
-                const char *us = strchr(fullname, '_');
-                if (us) {
-                    char owner[MAX_SYMBOL_LENGTH];
-                    size_t len = (size_t)(us - fullname);
-                    if (len >= sizeof(owner)) len = sizeof(owner) - 1;
-                    memcpy(owner, fullname, len);
-                    owner[len] = '\0';
-
-                    size_t ln = strlen(owner) + 1 + strlen(name) + 1;
-                    char *m = (char*)malloc(ln);
-                    if (m) {
-                        snprintf(m, ln, "%s_%s", owner, name);
-                        free(node->token->value);
-                        node->token->value = m;
-                        node->token->length = strlen(m);
-                    }
-
-                    Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", node->token ? node->token->line : 0, 0);
-                    AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-                    thisVar->var_type = TYPE_POINTER;
-                    addChild(node, NULL);
-                    for (int i = node->child_count - 1; i > 0; i--) {
-                        node->children[i] = node->children[i - 1];
-                        if (node->children[i]) node->children[i]->parent = node;
-                    }
-                    node->children[0] = thisVar;
-                    thisVar->parent = node;
-                    setLeft(node, thisVar);
+                size_t ln = strlen(fullname) + 1;
+                char *m = (char*)malloc(ln);
+                if (m) {
+                    memcpy(m, fullname, ln);
+                    free(node->token->value);
+                    node->token->value = m;
+                    node->token->length = ln - 1;
                 }
+
+                Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", node->token ? node->token->line : 0, 0);
+                AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+                thisVar->var_type = TYPE_POINTER;
+                addChild(node, NULL);
+                for (int i = node->child_count - 1; i > 0; i--) {
+                    node->children[i] = node->children[i - 1];
+                    if (node->children[i]) node->children[i]->parent = node;
+                }
+                node->children[0] = thisVar;
+                thisVar->parent = node;
+                setLeft(node, thisVar);
             }
         }
     }
