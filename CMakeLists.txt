@@ -26,11 +26,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
 # Optionally build additional binaries
-option(BUILD_DASCAL "Build the dascal debugging binary" ON)
+option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
-option(SDL "Enable SDL-based graphics and audio" OFF)
+option(SDL "Enable SDL-based graphics and audio" ON)
 if(SDL)
     add_compile_definitions(SDL)
 endif()
@@ -39,6 +39,7 @@ endif()
 option(ENABLE_EXT_BUILTIN_MATH "Enable extended math builtins" ON)
 option(ENABLE_EXT_BUILTIN_STRINGS "Enable extended string builtins" ON)
 option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
+option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
 
 if(ENABLE_EXT_BUILTIN_MATH)
     add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
@@ -48,6 +49,9 @@ if(ENABLE_EXT_BUILTIN_STRINGS)
 endif()
 if(ENABLE_EXT_BUILTIN_SYSTEM)
     add_compile_definitions(ENABLE_EXT_BUILTIN_SYSTEM)
+endif()
+if(ENABLE_EXT_BUILTIN_USER)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_USER)
 endif()
 
 # ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
