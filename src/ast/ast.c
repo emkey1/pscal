@@ -61,6 +61,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->symbol_table = NULL; // Initialize symbol_table
     node->unit_list = NULL; // Initialize unit_list
     node->type_def = NULL; // Initialize type definition link
+    node->freed = false; // Guard flag must start false
 
     return node;
 }
@@ -967,7 +968,9 @@ AST *copyAST(AST *node) {
     if (!node) return NULL;
     AST *newNode = newASTNode(node->type, node->token);
     if (!newNode) return NULL;
-    
+    // Ensure fresh node isn't marked as freed
+    newNode->freed = false;
+
     // Copy all scalar fields
     newNode->var_type = node->var_type;
     newNode->by_ref = node->by_ref;
