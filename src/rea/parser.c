@@ -43,7 +43,12 @@ static AST *parseExpression(ReaParser *p); // forward for array helpers
 static AST *parseArrayAccess(ReaParser *p, AST *base) {
     AST *access = newASTNode(AST_ARRAY_ACCESS, NULL);
     setLeft(access, base);
-    setTypeAST(access, TYPE_VOID);
+    /*
+     * Array accesses cannot be typed without semantic information.
+     * Mark the access node's type as unknown so later stages can
+     * refine it based on the array's declared element type.
+     */
+    setTypeAST(access, TYPE_UNKNOWN);
     while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
         reaAdvance(p); // consume '['
         AST *indexExpr = NULL;
