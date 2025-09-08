@@ -43,6 +43,11 @@ static AST *parseExpression(ReaParser *p); // forward for array helpers
 static AST *parseArrayAccess(ReaParser *p, AST *base) {
     AST *access = newASTNode(AST_ARRAY_ACCESS, NULL);
     setLeft(access, base);
+    /*
+     * Array accesses cannot be typed without semantic information.
+     * Mark the access node's type as unknown so later stages can
+     * refine it based on the array's declared element type.
+     */
     setTypeAST(access, TYPE_UNKNOWN);
     while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
         reaAdvance(p); // consume '['
@@ -912,8 +917,12 @@ static AST *parseVarDecl(ReaParser *p) {
         lex[p->current.length] = '\0';
         Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
-        typeNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
-        setTypeAST(typeNode, TYPE_RECORD);
+        AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+        setTypeAST(refNode, TYPE_RECORD);
+        AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+        setTypeAST(ptrNode, TYPE_POINTER);
+        setRight(ptrNode, refNode);
+        typeNode = ptrNode;
         vtype = TYPE_POINTER; // store pointers to class instances by default
         reaAdvance(p); // consume type identifier
     } else {
@@ -983,25 +992,47 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     // Inject implicit 'this' parameter as first parameter when inside a class
     if (p->currentClassName) {
         Token *ptypeTok = newToken(TOKEN_IDENTIFIER, p->currentClassName, p->current.line, 0);
-        AST *ptypeNode = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
-        setTypeAST(ptypeNode, TYPE_RECORD);
+        AST *refNode = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
+        setTypeAST(refNode, TYPE_RECORD);
+        AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+        setTypeAST(ptrNode, TYPE_POINTER);
+        setRight(ptrNode, refNode);
         Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", p->current.line, 0);
         AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
         setTypeAST(thisVar, TYPE_POINTER);
         AST *thisDecl = newASTNode(AST_VAR_DECL, NULL);
         addChild(thisDecl, thisVar);
-        setRight(thisDecl, ptypeNode);
+        setRight(thisDecl, ptrNode);
         setTypeAST(thisDecl, TYPE_POINTER);
         addChild(params, thisDecl);
     }
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
-        ReaTokenType paramTypeTok = p->current.type;
-        VarType pvtype = mapType(paramTypeTok);
-        const char *ptname = typeName(paramTypeTok);
-        Token *ptypeTok = newToken(TOKEN_IDENTIFIER, ptname, p->current.line, 0);
-        AST *ptypeNode = newASTNode(AST_TYPE_IDENTIFIER, ptypeTok);
-        setTypeAST(ptypeNode, pvtype);
-        reaAdvance(p); // consume param type
+        AST *ptypeNode = NULL;
+        VarType pvtype = TYPE_VOID;
+        if (p->current.type == REA_TOKEN_IDENTIFIER) {
+            char *lex = (char *)malloc(p->current.length + 1);
+            if (!lex) break;
+            memcpy(lex, p->current.start, p->current.length);
+            lex[p->current.length] = '\0';
+            Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+            free(lex);
+            AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+            setTypeAST(refNode, TYPE_RECORD);
+            AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+            setTypeAST(ptrNode, TYPE_POINTER);
+            setRight(ptrNode, refNode);
+            ptypeNode = ptrNode;
+            pvtype = TYPE_POINTER;
+            reaAdvance(p); // consume type identifier
+        } else {
+            ReaTokenType paramTypeTok = p->current.type;
+            pvtype = mapType(paramTypeTok);
+            const char *ptname = typeName(paramTypeTok);
+            Token *ptypeTok = newToken(TOKEN_IDENTIFIER, ptname, p->current.line, 0);
+            ptypeNode = newASTNode(AST_TYPE_IDENTIFIER, ptypeTok);
+            setTypeAST(ptypeNode, pvtype);
+            reaAdvance(p); // consume param type
+        }
 
         if (p->current.type != REA_TOKEN_IDENTIFIER) break;
         char *lex = (char *)malloc(p->current.length + 1);
