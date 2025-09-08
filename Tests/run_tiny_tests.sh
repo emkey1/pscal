@@ -67,7 +67,9 @@ for src in "$SCRIPT_DIR"/tiny/*.tiny; do
   fi
 
   if [ -n "$DCOMP_BIN" ] && [ -f "$disasm_file" ]; then
-    "$DCOMP_BIN" "tiny/$test_name.pbc" 2> "$actual_disasm"
+    "$DCOMP_BIN" "$bytecode_file" 2> "$actual_disasm"
+    # Normalize absolute path in header to expected relative path
+    sed -i "s|$bytecode_file|tiny/$test_name.pbc|" "$actual_disasm"
     if ! diff -u "$disasm_file" "$actual_disasm"; then
       echo "Disassembly mismatch: $test_name" >&2
       EXIT_CODE=1
