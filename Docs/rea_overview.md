@@ -34,3 +34,11 @@ writeln("c=", c.n);
 Example program demonstrating field assignment and method calls【F:Examples/rea/method_demo.rea†L3-L19】.
 
 For additional examples and the full specification, see `rea_language_reference.md` and the sample programs under `Examples/rea`.
+
+### The Name
+
+Rea was my best friend, wife and near constant companion for twenty five plus years.  She passed in 
+January of 2021 from complications related to Creutzfeldt-Jakob Disease (CJD), and increadily rare 
+degenerative brain disease that strikes about four hundred people a year in the US.
+
+If you find this code useful, please consider a donation to the CJD foundation in her name (Rea Simpson)
