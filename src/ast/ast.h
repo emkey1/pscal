@@ -25,6 +25,7 @@ typedef struct AST {
     bool is_inline;          // Flag for inline directive on procedures/functions
     bool is_virtual;         // Flag for class methods participating in V-table
     struct AST *type_def;    // For TYPE_REFERENCE etc.
+    bool freed;              // Internal flag to guard against double free
 } AST;
 
 AST *newASTNode(ASTNodeType type, Token *token);
