@@ -35,6 +35,22 @@ static void resetStack(VM* vm) {
     vm->stackTop = vm->stack;
 }
 
+// Resolve a value to its underlying record by chasing pointer chains.
+// Returns NULL if a nil pointer is encountered.  If the original value is
+// neither a pointer nor a record, *invalid_type is set to true.
+static Value* resolveRecord(Value* base, bool* invalid_type) {
+    if (invalid_type) *invalid_type = false;
+    if (base->type != TYPE_POINTER && base->type != TYPE_RECORD) {
+        if (invalid_type) *invalid_type = true;
+        return NULL;
+    }
+    Value* current = base;
+    while (current && current->type == TYPE_POINTER) {
+        current = current->ptr_val;
+    }
+    return current;
+}
+
 // --- Class method registration helpers ---
 void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol) {
     if (!vm || !vm->procedureTable || !className || !methodSymbol) return;
@@ -2200,22 +2216,16 @@ comparison_error_label:
             case GET_FIELD_OFFSET: {
                 uint8_t field_index = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
-
-                Value* record_struct_ptr = NULL;
-
-                if (base_val_ptr->type == TYPE_POINTER) {
-                    if (base_val_ptr->ptr_val == NULL) {
-                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    record_struct_ptr = base_val_ptr->ptr_val;
-                } else if (base_val_ptr->type == TYPE_RECORD) {
-                    record_struct_ptr = base_val_ptr;
-                } else {
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
                     runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 if (record_struct_ptr->type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -2238,22 +2248,16 @@ comparison_error_label:
             case GET_FIELD_OFFSET16: {
                 uint16_t field_index = READ_SHORT(vm);
                 Value* base_val_ptr = vm->stackTop - 1;
-
-                Value* record_struct_ptr = NULL;
-
-                if (base_val_ptr->type == TYPE_POINTER) {
-                    if (base_val_ptr->ptr_val == NULL) {
-                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    record_struct_ptr = base_val_ptr->ptr_val;
-                } else if (base_val_ptr->type == TYPE_RECORD) {
-                    record_struct_ptr = base_val_ptr;
-                } else {
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
                     runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 if (record_struct_ptr->type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -2276,22 +2280,16 @@ comparison_error_label:
             case GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
-
-                Value* record_struct_ptr = NULL;
-
-                if (base_val_ptr->type == TYPE_POINTER) {
-                    if (base_val_ptr->ptr_val == NULL) {
-                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    record_struct_ptr = base_val_ptr->ptr_val;
-                } else if (base_val_ptr->type == TYPE_RECORD) {
-                    record_struct_ptr = base_val_ptr;
-                } else {
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
                     runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 if (record_struct_ptr->type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
                     return INTERPRET_RUNTIME_ERROR;
@@ -2315,22 +2313,16 @@ comparison_error_label:
             case GET_FIELD_ADDRESS16: {
                 uint16_t field_name_idx = READ_SHORT(vm);
                 Value* base_val_ptr = vm->stackTop - 1;
-
-                Value* record_struct_ptr = NULL;
-
-                if (base_val_ptr->type == TYPE_POINTER) {
-                    if (base_val_ptr->ptr_val == NULL) {
-                        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
-                    record_struct_ptr = base_val_ptr->ptr_val;
-                } else if (base_val_ptr->type == TYPE_RECORD) {
-                    record_struct_ptr = base_val_ptr;
-                } else {
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
                     runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 if (record_struct_ptr->type != TYPE_RECORD) {
                     runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
                     return INTERPRET_RUNTIME_ERROR;
