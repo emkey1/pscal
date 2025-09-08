@@ -298,7 +298,7 @@ set(CLIKE_SOURCES
     src/clike/opt.c
     src/clike/preproc.c
     src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
