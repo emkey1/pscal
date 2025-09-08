@@ -156,6 +156,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case GET_CHAR_ADDRESS:
         case INIT_LOCAL_FILE:
             return 2; // 1-byte opcode + 1-byte operand
+        case INIT_LOCAL_STRING:
+            return 3; // opcode + slot + length
         case INIT_LOCAL_POINTER:
             return 4; // opcode + slot byte + 2-byte type name index
         case INIT_LOCAL_ARRAY: {
@@ -572,6 +574,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             uint8_t slot = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (slot)\n", "INIT_LOCAL_FILE", slot);
             return offset + 2;
+        }
+        case INIT_LOCAL_STRING: {
+            uint8_t slot = chunk->code[offset + 1];
+            uint8_t length = chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (slot) %4d (len)\n", "INIT_LOCAL_STRING", slot, length);
+            return offset + 3;
         }
         case INIT_LOCAL_POINTER: {
             uint8_t slot = chunk->code[offset + 1];
