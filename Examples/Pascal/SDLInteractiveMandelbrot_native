@@ -115,17 +115,19 @@ BEGIN
         Iteration := Iteration + 1;
       END;
       IF Iteration = MandelMaxIterations THEN BEGIN
-        R_calc := 0; G_calc := 0; B_calc := 0;
+        R_calc := Byte(0);
+        G_calc := Byte(0);
+        B_calc := Byte(0);
       END ELSE BEGIN
-        R_calc := ((Iteration * 12) MOD 256 + 256) MOD 256;
-        G_calc := ((Iteration * 8 + 80) MOD 256 + 256) MOD 256;
-        B_calc := ((Iteration * 5 + 160) MOD 256 + 256) MOD 256;
+        R_calc := Byte(((Iteration * 12) MOD 256 + 256) MOD 256);
+        G_calc := Byte(((Iteration * 8 + 80) MOD 256 + 256) MOD 256);
+        B_calc := Byte(((Iteration * 5 + 160) MOD 256 + 256) MOD 256);
       END;
       BufferBaseIdx := (LocalPy * ViewPixelWidth + LocalPx) * MandelBytesPerPixel;
       PixelData[BufferBaseIdx + 0] := R_calc;
       PixelData[BufferBaseIdx + 1] := G_calc;
       PixelData[BufferBaseIdx + 2] := B_calc;
-      PixelData[BufferBaseIdx + 3] := 255;
+      PixelData[BufferBaseIdx + 3] := Byte(255);
     END; // Px
     lock(RowMutex);
     RowDone[LocalPy] := 1;
@@ -161,7 +163,7 @@ BEGIN
   FOR i := 0 TO ViewPixelHeight - 1 DO RowDone[i] := 0;
   rowBytes := ViewPixelWidth * MandelBytesPerPixel;
   FOR k := 0 TO (ViewPixelWidth * ViewPixelHeight * MandelBytesPerPixel) - 1 DO
-    DisplayPixelData[k] := 0;
+    DisplayPixelData[k] := Byte(0);
 
   rowsPerThread := ViewPixelHeight DIV ThreadCount;
   extra := ViewPixelHeight MOD ThreadCount;
