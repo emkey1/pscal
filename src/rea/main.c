@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <ctype.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -31,6 +35,82 @@ static const char *REA_USAGE =
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
 "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
+
+static unsigned long hashPathLocal(const char* path) {
+    uint32_t hash = 2166136261u;
+    for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
+        hash ^= *p;
+        hash *= 16777619u;
+    }
+    return (unsigned long)hash;
+}
+
+static char* buildCachePathLocal(const char* source_path) {
+    const char* home = getenv("HOME");
+    if (!home) return NULL;
+    size_t dir_len = strlen(home) + 1 + strlen(".pscal_cache") + 1;
+    char* dir = (char*)malloc(dir_len);
+    if (!dir) return NULL;
+    snprintf(dir, dir_len, "%s/%s", home, ".pscal_cache");
+    mkdir(dir, 0777);
+    unsigned long h = hashPathLocal(source_path);
+    size_t path_len = dir_len + 32;
+    char* full = (char*)malloc(path_len);
+    if (!full) { free(dir); return NULL; }
+    snprintf(full, path_len, "%s/%lu.bc", dir, h);
+    free(dir);
+    return full;
+}
+
+static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
+    if (!unit_list) return true;
+#if defined(__APPLE__)
+#define PSCAL_STAT_SEC(st)  ((st).st_mtimespec.tv_sec)
+#else
+#define PSCAL_STAT_SEC(st)  ((st).st_mtim.tv_sec)
+#endif
+    for (int i = 0; i < listSize(unit_list); i++) {
+        char *used_unit_name = (char*)listGet(unit_list, i);
+        if (!used_unit_name) continue;
+
+        char lower_used_unit_name[MAX_SYMBOL_LENGTH];
+        strncpy(lower_used_unit_name, used_unit_name, MAX_SYMBOL_LENGTH - 1);
+        lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
+        for (int k = 0; lower_used_unit_name[k]; k++) {
+            lower_used_unit_name[k] = tolower((unsigned char)lower_used_unit_name[k]);
+        }
+
+        char *unit_file_path = findUnitFile(lower_used_unit_name);
+        if (!unit_file_path) continue;
+
+        struct stat unit_stat;
+        if (stat(unit_file_path, &unit_stat) != 0) {
+            free(unit_file_path);
+            return false;
+        }
+        if (cache_mtime <= PSCAL_STAT_SEC(unit_stat)) {
+            free(unit_file_path);
+            return false;
+        }
+        free(unit_file_path);
+    }
+#undef PSCAL_STAT_SEC
+    return true;
+}
+
+static bool importsAreFresh(AST* node, time_t cache_mtime) {
+    if (!node) return true;
+    if (node->type == AST_USES_CLAUSE && node->unit_list) {
+        if (!isUnitListFresh(node->unit_list, cache_mtime)) return false;
+    }
+    if (node->left && !importsAreFresh(node->left, cache_mtime)) return false;
+    if (node->right && !importsAreFresh(node->right, cache_mtime)) return false;
+    if (node->extra && !importsAreFresh(node->extra, cache_mtime)) return false;
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i] && !importsAreFresh(node->children[i], cache_mtime)) return false;
+    }
+    return true;
+}
 
 static void processUnitList(List* unit_list, BytecodeChunk* chunk) {
     if (!unit_list) return;
@@ -116,6 +196,38 @@ static void walkUsesClauses(AST* node, BytecodeChunk* chunk) {
     }
 }
 
+static void collectUnitListPaths(List* unit_list, List* out) {
+    if (!unit_list || !out) return;
+    for (int i = 0; i < listSize(unit_list); i++) {
+        char *used_unit_name = (char*)listGet(unit_list, i);
+        if (!used_unit_name) continue;
+
+        char lower[MAX_SYMBOL_LENGTH];
+        strncpy(lower, used_unit_name, MAX_SYMBOL_LENGTH - 1);
+        lower[MAX_SYMBOL_LENGTH - 1] = '\0';
+        for (int k = 0; lower[k]; k++) lower[k] = tolower((unsigned char)lower[k]);
+
+        char *unit_file_path = findUnitFile(lower);
+        if (unit_file_path) {
+            listAppend(out, unit_file_path);
+            free(unit_file_path);
+        }
+    }
+}
+
+static void collectUsesClauses(AST* node, List* out) {
+    if (!node) return;
+    if (node->type == AST_USES_CLAUSE && node->unit_list) {
+        collectUnitListPaths(node->unit_list, out);
+    }
+    if (node->left) collectUsesClauses(node->left, out);
+    if (node->right) collectUsesClauses(node->right, out);
+    if (node->extra) collectUsesClauses(node->extra, out);
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i]) collectUsesClauses(node->children[i], out);
+    }
+}
+
 int main(int argc, char **argv) {
     vmInitTerminalState();
 
@@ -190,31 +302,78 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
+    List *dep_files = createList();
+    collectUsesClauses(program, dep_files);
+    int dep_count = listSize(dep_files);
+    const char **dep_array = NULL;
+    if (dep_count > 0) {
+        dep_array = malloc(sizeof(char*) * dep_count);
+        for (int i = 0; i < dep_count; i++) dep_array[i] = listGet(dep_files, i);
+    }
+
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    // Handle #import directives by loading and linking Pascal units before compiling the main program
-    walkUsesClauses(program, &chunk);
-
-    // Annotate types for the entire program prior to compilation so that
-    // qualified method calls can be resolved to their class-mangled routines.
-    annotateTypes(program, NULL, program);
-    bool compilation_ok = compileASTToBytecode(program, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, &chunk);
+    if (used_cache) {
+#if defined(__APPLE__)
+#define PSCAL_STAT_SEC(st) ((st).st_mtimespec.tv_sec)
+#else
+#define PSCAL_STAT_SEC(st) ((st).st_mtim.tv_sec)
+#endif
+        char* cache_path = buildCachePathLocal(path);
+        struct stat cache_stat;
+        if (!cache_path || stat(cache_path, &cache_stat) != 0 ||
+            !importsAreFresh(program, PSCAL_STAT_SEC(cache_stat))) {
+            if (cache_path) free(cache_path);
+            freeBytecodeChunk(&chunk);
+            initBytecodeChunk(&chunk);
+            used_cache = false;
+        } else {
+            free(cache_path);
+        }
+#undef PSCAL_STAT_SEC
+    }
 
     InterpretResult result = INTERPRET_COMPILE_ERROR;
-    if (compilation_ok) {
-        finalizeBytecode(&chunk);
+    bool compilation_ok = true;
+    if (!used_cache) {
+        // Handle #import directives by loading and linking Pascal units before compiling the main program
+        walkUsesClauses(program, &chunk);
 
+        // Annotate types for the entire program prior to compilation so that
+        // qualified method calls can be resolved to their class-mangled routines.
+        annotateTypes(program, NULL, program);
+        compilation_ok = compileASTToBytecode(program, &chunk);
+        if (compilation_ok) {
+            finalizeBytecode(&chunk);
+            saveBytecodeToCache(path, &chunk);
+            fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+            if (dump_bytecode_flag) {
+                fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
+                disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+                if (!dump_bytecode_only_flag) {
+                    fprintf(stderr, "\n--- executing Program with VM ---\n");
+                }
+            }
+        } else {
+            fprintf(stderr, "Compilation failed with errors.\n");
+        }
+    } else {
+        fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n",
+                chunk.count, chunk.constants_count);
+        if (dump_bytecode_flag) {
+            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            if (!dump_bytecode_only_flag) {
+                fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
+            }
+        }
+    }
+
+    if (compilation_ok) {
         if (argc > argi) {
             gParamCount = argc - argi;
             gParamValues = &argv[argi];
-        }
-
-        if (dump_bytecode_flag) {
-            fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
-            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-            if (!dump_bytecode_only_flag) {
-                fprintf(stderr, "\n--- executing Program with VM ---\n");
-            }
         }
 
         if (dump_bytecode_only_flag) {

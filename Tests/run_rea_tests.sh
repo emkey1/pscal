@@ -31,6 +31,11 @@ if [ ! -x "$REA_BIN" ]; then
   exit 1
 fi
 
+# Use an isolated HOME to avoid interference from existing caches.
+TEST_HOME=$(mktemp -d)
+export HOME="$TEST_HOME"
+trap 'rm -rf "$TEST_HOME"' EXIT
+
 cd "$ROOT_DIR"
 EXIT_CODE=0
 
@@ -69,6 +74,8 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   mv "$actual_out.clean" "$actual_out"
   perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$actual_err" > "$actual_err.clean"
   mv "$actual_err.clean" "$actual_err"
+  perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m; s/^--- Compiling Main Program AST to Bytecode ---\n//m' "$actual_err" > "$actual_err.clean"
+  mv "$actual_err.clean" "$actual_err"
 
   if [ -f "$out_file" ]; then
     if ! diff -u "$out_file" "$actual_out"; then
@@ -101,5 +108,34 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   echo
   echo
  done
+
+# Basic cache reuse test for the Rea front end
+echo "---- CacheReuseTest ----"
+tmp_home=$(mktemp -d)
+src_dir=$(mktemp -d)
+cat > "$src_dir/CacheTest.rea" <<'EOF'
+writeln("first");
+EOF
+sleep 1
+set +e
+(cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
+status1=$?
+set -e
+if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
+  sleep 2
+  set +e
+  (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
+  status2=$?
+  set -e
+  if [ $status2 -ne 0 ] || ! grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
+    echo "Cache reuse test failed: expected cached bytecode" >&2
+    EXIT_CODE=1
+  fi
+else
+  echo "Cache reuse test failed to run" >&2
+  EXIT_CODE=1
+fi
+rm -rf "$tmp_home" "$src_dir"
+echo
 
 exit $EXIT_CODE
