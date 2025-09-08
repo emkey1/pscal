@@ -226,7 +226,11 @@ int main(int argc, char **argv) {
     }
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, (const char**)dep_paths, clike_import_count, &chunk);
+    if (dep_paths) {
+        for (int i = 0; i < clike_import_count; ++i) free(dep_paths[i]);
+        free(dep_paths);
+    }
     if (used_cache) {
 #if defined(__APPLE__)
 #define PSCAL_STAT_SEC(st) ((st).st_mtimespec.tv_sec)
