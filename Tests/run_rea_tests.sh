@@ -7,7 +7,14 @@ REA_BIN="$ROOT_DIR/build/bin/rea"
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
-IFS=' ' read -r -a SKIP_TESTS <<< "${REA_SKIP_TESTS:-}"
+# Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
+# avoid "unbound variable" errors under `set -u` by explicitly declaring an
+# empty array. Otherwise, split the space-separated environment variable into
+# an array.
+SKIP_TESTS=()
+if [[ -n "${REA_SKIP_TESTS:-}" ]]; then
+  IFS=' ' read -r -a SKIP_TESTS <<< "$REA_SKIP_TESTS"
+fi
 
 should_skip() {
   local t="$1"
