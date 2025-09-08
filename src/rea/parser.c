@@ -34,6 +34,7 @@ static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
 // without pulling in heavy headers.
 Value evaluateCompileTimeValue(AST *node); // from compiler/compiler.c
 void freeValue(Value *v);                  // from core/utils.c
+void addCompilerConstant(const char* name, const Value* value, int line); // from compiler/compiler.h
 static AST *parseExpression(ReaParser *p); // forward for array helpers
 
 // Parse a sequence of bracketed index expressions after an expression and
@@ -1412,6 +1413,17 @@ static AST *parseSwitch(ReaParser *p) {
 
 static AST *parseConstDecl(ReaParser *p) {
     reaAdvance(p); // consume 'const'
+    AST *typeNode = NULL;
+    VarType vtype = TYPE_UNKNOWN;
+    if (p->current.type != REA_TOKEN_IDENTIFIER) {
+        ReaTokenType typeTok = p->current.type;
+        vtype = mapType(typeTok);
+        const char *tname = typeName(typeTok);
+        Token *ttok = newToken(TOKEN_IDENTIFIER, tname, p->current.line, 0);
+        typeNode = newASTNode(AST_TYPE_IDENTIFIER, ttok);
+        setTypeAST(typeNode, vtype);
+        reaAdvance(p); // consume type keyword
+    }
     if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
     char *lex = (char *)malloc(p->current.length + 1);
     if (!lex) return NULL;
@@ -1419,14 +1431,23 @@ static AST *parseConstDecl(ReaParser *p) {
     lex[p->current.length] = '\0';
     Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
     free(lex);
-    reaAdvance(p);
+    reaAdvance(p); // consume name
     if (p->current.type != REA_TOKEN_EQUAL) return NULL;
     reaAdvance(p);
     AST *value = parseExpression(p);
     if (p->current.type == REA_TOKEN_SEMICOLON) reaAdvance(p);
     AST *node = newASTNode(AST_CONST_DECL, nameTok);
     setLeft(node, value);
+    if (typeNode) setRight(node, typeNode);
     if (value) setTypeAST(node, value->var_type);
+    if (value) {
+        Value v = evaluateCompileTimeValue(value);
+        if (v.type != TYPE_VOID && v.type != TYPE_UNKNOWN) {
+            addCompilerConstant(nameTok->value, &v, nameTok->line);
+            if (!typeNode) setTypeAST(node, v.type);
+        }
+        freeValue(&v);
+    }
     return node;
 }
 
@@ -1525,18 +1546,22 @@ static AST *parseStatement(ReaParser *p) {
         if (p->current.type == REA_TOKEN_LEFT_BRACE) {
             reaAdvance(p); // consume '{'
             while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
-                // Field or method: both start with a type keyword
-                if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
-                    p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
-                    p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
-                    p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
-                    p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
-                    p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-                    p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
-                    p->current.type == REA_TOKEN_VOID ||
-                    p->current.type == REA_TOKEN_IDENTIFIER) {
-                    // Consume type and identifier into a fake varDecl to reuse existing parser
-                    // Consume type and identifier into a fake varDecl to reuse existing parser
+                if (p->current.type == REA_TOKEN_CONST) {
+                    AST *c = parseConstDecl(p);
+                    if (c) {
+                        addChild(recordAst, c);
+                    } else {
+                        reaAdvance(p);
+                    }
+                } else if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
+                           p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
+                           p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
+                           p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
+                           p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
+                           p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
+                           p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
+                           p->current.type == REA_TOKEN_VOID ||
+                           p->current.type == REA_TOKEN_IDENTIFIER) {
                     AST *decl = parseVarDecl(p);
                     if (decl) {
                         if (decl->type == AST_FUNCTION_DECL) {
@@ -1547,11 +1572,9 @@ static AST *parseStatement(ReaParser *p) {
                             addChild(recordAst, decl);
                         }
                     } else {
-                        // Recovery: advance one token to avoid infinite loop
                         reaAdvance(p);
                     }
                 } else {
-                    // Skip unsupported constructs for now
                     reaAdvance(p);
                 }
                 // optional semicolons are consumed by parseVarDecl; any extras will be skipped
