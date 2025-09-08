@@ -120,16 +120,28 @@ static void collectClasses(AST *node) {
         }
         ci->fields = createHashTable();
         ci->methods = createHashTable();
-        /* Gather fields */
+        /* Gather fields and constants */
         for (int i = 0; i < node->left->child_count; i++) {
             AST *field = node->left->children[i];
-            if (!field || field->type != AST_VAR_DECL) continue;
-            AST *var = field->child_count > 0 ? field->children[0] : NULL;
-            if (!var || !var->token || !var->token->value) continue;
-            char *lname = lowerDup(var->token->value);
+            if (!field) continue;
+            const char *fname = NULL;
+            AST *ftype = NULL;
+            if (field->type == AST_VAR_DECL) {
+                AST *var = field->child_count > 0 ? field->children[0] : NULL;
+                if (!var || !var->token || !var->token->value) continue;
+                fname = var->token->value;
+                ftype = field->right;
+            } else if (field->type == AST_CONST_DECL) {
+                if (!field->token || !field->token->value) continue;
+                fname = field->token->value;
+                ftype = field->right ? field->right : (field->left ? field->left : NULL);
+            } else {
+                continue;
+            }
+            char *lname = lowerDup(fname);
             if (!lname) continue;
             if (hashTableLookup(ci->fields, lname)) {
-                fprintf(stderr, "Duplicate field '%s' in class '%s'\n", var->token->value, ci->name);
+                fprintf(stderr, "Duplicate field '%s' in class '%s'\n", fname, ci->name);
                 pascal_semantic_error_count++;
                 free(lname);
                 continue;
@@ -137,7 +149,7 @@ static void collectClasses(AST *node) {
             Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
             if (!sym) { free(lname); continue; }
             sym->name = lname;
-            sym->type_def = field->right ? copyAST(field->right) : NULL;
+            sym->type_def = ftype ? copyAST(ftype) : NULL;
             hashTableInsert(ci->fields, sym);
         }
         insertClassInfo(ci);
@@ -319,8 +331,8 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
         }
         if (decl && decl->right) {
             AST *type = decl->right;
-            /* Drill through array wrappers */
-            while (type && type->type == AST_ARRAY_TYPE) {
+            /* Drill through array and pointer wrappers */
+            while (type && (type->type == AST_ARRAY_TYPE || type->type == AST_POINTER_TYPE)) {
                 type = type->right;
             }
             if (type && type->type == AST_TYPE_REFERENCE && type->token) {
@@ -374,6 +386,15 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             clsContext = lookupClass(buf);
         } else {
             clsContext = NULL;
+        }
+    }
+
+    if (node->type == AST_VARIABLE && clsContext) {
+        const char *vname = node->token ? node->token->value : NULL;
+        Symbol *fs = lookupField(clsContext, vname);
+        if (fs && fs->type_def) {
+            node->var_type = fs->type_def->var_type;
+            node->type_def = copyAST(fs->type_def);
         }
     }
 
