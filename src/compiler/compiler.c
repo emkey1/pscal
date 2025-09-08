@@ -3700,9 +3700,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
                 if (isCallQualified) {
-                    snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
+                    snprintf(original_display_name, sizeof(original_display_name), "%.*s.%.*s", MAX_SYMBOL_LENGTH - 1, node->left->token->value, MAX_SYMBOL_LENGTH - 1, functionName);
                 } else {
-                    strncpy(original_display_name, functionName, sizeof(original_display_name)-1); original_display_name[sizeof(original_display_name)-1] = '\0';
+                    strncpy(original_display_name, functionName, sizeof(original_display_name)-1);
+                    original_display_name[sizeof(original_display_name)-1] = '\0';
                 }
                 
                 if (func_symbol) {
