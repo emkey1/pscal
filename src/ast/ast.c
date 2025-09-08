@@ -777,7 +777,7 @@ resolved_field: ;
                         AST *elemType = resolveTypeAlias(arrayType->right);
                         if (elemType) {
                             node->type_def = elemType;
-                            if (elemType->type == AST_RECORD_TYPE) {
+                            if (elemType->type == AST_POINTER_TYPE) {
                                 node->var_type = TYPE_POINTER;
                             } else {
                                 node->var_type = elemType->var_type;
