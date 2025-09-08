@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 TINY_BIN="$ROOT_DIR/tools/tiny"
 VM_BIN="$ROOT_DIR/build/bin/pscalvm"
+DCOMP_BIN="$ROOT_DIR/build/bin/pscald"
 
 if [ ! -x "$TINY_BIN" ]; then
   echo "tiny script not found at $TINY_BIN" >&2
@@ -15,6 +16,10 @@ if [ ! -x "$VM_BIN" ]; then
   echo "pscalvm binary not found at $VM_BIN" >&2
   exit 1
 fi
+if [ ! -x "$DCOMP_BIN" ]; then
+  echo "pscald binary not found at $DCOMP_BIN; skipping disassembly checks." >&2
+  DCOMP_BIN=""
+fi
 
 EXIT_CODE=0
 
@@ -22,14 +27,16 @@ for src in "$SCRIPT_DIR"/tiny/*.tiny; do
   test_name=$(basename "$src" .tiny)
   in_file="$SCRIPT_DIR/tiny/$test_name.in"
   out_file="$SCRIPT_DIR/tiny/$test_name.out"
-  bytecode_file=$(mktemp "$SCRIPT_DIR/$test_name.XXXXXX.pbc")
+  disasm_file="$SCRIPT_DIR/tiny/$test_name.disasm"
+  bytecode_file="$SCRIPT_DIR/tiny/$test_name.pbc"
   actual_out=$(mktemp)
+  actual_disasm=$(mktemp)
   echo "---- $test_name ----"
 
   if ! "$TINY_BIN" "$src" "$bytecode_file"; then
     echo "Compilation failed: $test_name" >&2
     EXIT_CODE=1
-    rm -f "$bytecode_file" "$actual_out"
+    rm -f "$bytecode_file" "$actual_out" "$actual_disasm"
     continue
   fi
 
@@ -59,7 +66,19 @@ for src in "$SCRIPT_DIR"/tiny/*.tiny; do
     EXIT_CODE=1
   fi
 
-  rm -f "$bytecode_file" "$actual_out"
+  if [ -n "$DCOMP_BIN" ] && [ -f "$disasm_file" ]; then
+    "$DCOMP_BIN" "$bytecode_file" 2> "$actual_disasm"
+    # Normalize absolute path in header to expected relative path
+    # Use portable sed -i invocation that works on both GNU and BSD sed.
+    sed -i.bak "s|$bytecode_file|tiny/$test_name.pbc|" "$actual_disasm"
+    rm -f "$actual_disasm.bak"
+    if ! diff -u "$disasm_file" "$actual_disasm"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
+  fi
+
+  rm -f "$bytecode_file" "$actual_out" "$actual_disasm"
   echo
   echo
 

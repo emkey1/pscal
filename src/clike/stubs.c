@@ -34,13 +34,7 @@ void insertType(const char* name, AST* typeDef) { (void)name; (void)typeDef; }
 AST* newASTNode(ASTNodeType type, Token* token) {
     AST* node = (AST*)calloc(1, sizeof(AST));
     node->type = type;
-    if (token) {
-        node->token = (Token*)malloc(sizeof(Token));
-        node->token->type = token->type;
-        node->token->line = token->line;
-        node->token->column = token->column;
-        node->token->value = token->value ? strdup(token->value) : NULL;
-    }
+    if (token) node->token = copyToken(token);
     return node;
 }
 

@@ -1,4 +1,5 @@
 class Point { int x; int y; }
+Point p;
 // LHS field assignment
 p.x = 1;
 

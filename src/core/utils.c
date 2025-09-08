@@ -190,6 +190,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_SET:            return "SET";
         case AST_ARRAY_LITERAL:  return "ARRAY_LITERAL";
         case AST_BREAK:          return "BREAK";
+        case AST_CONTINUE:       return "CONTINUE";
         case AST_THREAD_SPAWN:   return "THREAD_SPAWN";
         case AST_THREAD_JOIN:    return "THREAD_JOIN";
         case AST_POINTER_TYPE:   return "POINTER_TYPE";
@@ -470,6 +471,29 @@ Value makeString(const char *val) {
         v.s_val = strdup("");
         if (!v.s_val) {
             fprintf(stderr, "FATAL: Memory allocation failed in makeString (strdup empty)\n");
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+    return v;
+}
+
+Value makeStringLen(const char *val, size_t len) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_STRING;
+    v.max_length = (int)len;
+    if (val && len > 0) {
+        v.s_val = (char*)malloc(len + 1);
+        if (!v.s_val) {
+            fprintf(stderr, "FATAL: Memory allocation failed in makeStringLen\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        memcpy(v.s_val, val, len);
+        v.s_val[len] = '\0';
+    } else {
+        v.s_val = strdup("");
+        if (!v.s_val) {
+            fprintf(stderr, "FATAL: Memory allocation failed in makeStringLen (empty)\n");
             EXIT_FAILURE_HANDLER();
         }
     }
@@ -914,11 +938,17 @@ Token *newToken(TokenType type, const char *value, int line, int column) { // Ad
         EXIT_FAILURE_HANDLER();
     }
     token->type = type;
-    token->value = value ? strdup(value) : NULL;
-    if (value && !token->value) {
-        fprintf(stderr, "Memory allocation error (strdup value) in newToken\n");
-        free(token);
-        EXIT_FAILURE_HANDLER();
+    token->length = value ? strlen(value) : 0;
+    if (value) {
+        token->value = (char*)malloc(token->length + 1);
+        if (!token->value) {
+            fprintf(stderr, "Memory allocation error (token value) in newToken\n");
+            free(token);
+            EXIT_FAILURE_HANDLER();
+        }
+        memcpy(token->value, value, token->length + 1); // include terminator
+    } else {
+        token->value = NULL;
     }
     token->line = line;     // <<< SET LINE
     token->column = column; // <<< SET COLUMN
@@ -930,16 +960,23 @@ Token *copyToken(const Token *orig_token) { // Renamed parameter to avoid confli
     if (!orig_token) return NULL;
     Token *new_token = malloc(sizeof(Token));
     if (!new_token) { fprintf(stderr, "Memory allocation error in copyToken (Token struct)\n"); EXIT_FAILURE_HANDLER(); }
-    
+
     new_token->type = orig_token->type;
-    new_token->value = orig_token->value ? strdup(orig_token->value) : NULL;
-    if (orig_token->value && !new_token->value) {
-         fprintf(stderr, "Memory allocation error (strdup value) in copyToken\n");
-         free(new_token);
-         EXIT_FAILURE_HANDLER();
+    new_token->length = orig_token->length;
+    if (orig_token->value) {
+        new_token->value = (char*)malloc(orig_token->length + 1);
+        if (!new_token->value) {
+            fprintf(stderr, "Memory allocation error (token value) in copyToken\n");
+            free(new_token);
+            EXIT_FAILURE_HANDLER();
+        }
+        memcpy(new_token->value, orig_token->value, orig_token->length);
+        new_token->value[orig_token->length] = '\0';
+    } else {
+        new_token->value = NULL;
     }
     new_token->line = orig_token->line;
-    new_token->column = orig_token->column; 
+    new_token->column = orig_token->column;
     return new_token;
 }
 

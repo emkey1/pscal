@@ -85,6 +85,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
     switch (length) {
         case 2:
             if (strncmp(start, "if", 2) == 0) return REA_TOKEN_IF;
+            if (strncmp(start, "do", 2) == 0) return REA_TOKEN_DO;
             break;
         case 3:
             if (strncmp(start, "for", 3) == 0) return REA_TOKEN_FOR;
@@ -98,6 +99,11 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "true", 4) == 0) return REA_TOKEN_TRUE;
             if (strncmp(start, "void", 4) == 0) return REA_TOKEN_VOID;
             if (strncmp(start, "bool", 4) == 0) return REA_TOKEN_BOOL;
+            if (strncmp(start, "case", 4) == 0) return REA_TOKEN_CASE;
+            if (strncmp(start, "char", 4) == 0) return REA_TOKEN_CHAR;
+            if (strncmp(start, "byte", 4) == 0) return REA_TOKEN_BYTE;
+            if (strncmp(start, "text", 4) == 0) return REA_TOKEN_TEXT;
+            if (strncmp(start, "int8", 4) == 0) return REA_TOKEN_INT8;
             break;
         case 5:
             if (strncmp(start, "class", 5) == 0) return REA_TOKEN_CLASS;
@@ -107,6 +113,9 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "float", 5) == 0) return REA_TOKEN_FLOAT;
             if (strncmp(start, "const", 5) == 0) return REA_TOKEN_CONST;
             if (strncmp(start, "false", 5) == 0) return REA_TOKEN_FALSE;
+            if (strncmp(start, "int16", 5) == 0) return REA_TOKEN_INT16;
+            if (strncmp(start, "int32", 5) == 0) return REA_TOKEN_INT32;
+            if (strncmp(start, "int64", 5) == 0) return REA_TOKEN_INT64;
             break;
         case 6:
             if (strncmp(start, "return", 6) == 0) return REA_TOKEN_RETURN;
@@ -116,6 +125,8 @@ static ReaTokenType keywordType(const char *start, size_t length) {
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;
             if (strncmp(start, "default", 7) == 0) return REA_TOKEN_DEFAULT;
+            if (strncmp(start, "float32", 7) == 0) return REA_TOKEN_FLOAT32;
+            if (strncmp(start, "mstream", 7) == 0) return REA_TOKEN_MSTREAM;
             break;
         case 8:
             if (strncmp(start, "continue", 8) == 0) return REA_TOKEN_CONTINUE;
@@ -163,8 +174,16 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
             return makeToken(lexer, REA_TOKEN_SLASH, start);
+        case '%':
+            return makeToken(lexer, REA_TOKEN_PERCENT, start);
         case '!':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_BANG_EQUAL : REA_TOKEN_BANG, start);
+        case '&':
+            if (match(lexer, '&')) return makeToken(lexer, REA_TOKEN_AND_AND, start);
+            break;
+        case '|':
+            if (match(lexer, '|')) return makeToken(lexer, REA_TOKEN_OR_OR, start);
+            break;
         case '=':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_EQUAL_EQUAL : REA_TOKEN_EQUAL, start);
         case '<':
@@ -175,17 +194,45 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             while (isAlpha(peek(lexer))) advance(lexer);
             return makeToken(lexer, REA_TOKEN_IMPORT, start);
         case '"':
-            while (peek(lexer) != '"' && peek(lexer) != '\0') {
-                if (peek(lexer) == '\n') lexer->line++;
-                advance(lexer);
+            while (peek(lexer) != '\0') {
+                char ch = peek(lexer);
+                if (ch == '\n') lexer->line++;
+                if (ch == '\\') {
+                    advance(lexer);
+                    if (peek(lexer) != '\0') advance(lexer);
+                } else if (ch == '"') {
+                    break;
+                } else {
+                    advance(lexer);
+                }
             }
             if (peek(lexer) == '"') advance(lexer);
+            return makeToken(lexer, REA_TOKEN_STRING, start);
+        case '\'':
+            while (peek(lexer) != '\0') {
+                char ch = peek(lexer);
+                if (ch == '\n') lexer->line++;
+                if (ch == '\\') {
+                    advance(lexer);
+                    if (peek(lexer) != '\0') advance(lexer);
+                } else if (ch == '\'') {
+                    break;
+                } else {
+                    advance(lexer);
+                }
+            }
+            if (peek(lexer) == '\'') advance(lexer);
             return makeToken(lexer, REA_TOKEN_STRING, start);
         default:
             break;
     }
 
     if (isDigit(c)) {
+        if (c == '0' && (peek(lexer) == 'x' || peek(lexer) == 'X')) {
+            advance(lexer); // consume 'x'
+            while (isxdigit(peek(lexer))) advance(lexer);
+            return makeToken(lexer, REA_TOKEN_NUMBER, start);
+        }
         while (isDigit(peek(lexer))) advance(lexer);
         if (peek(lexer) == '.' && isDigit(peekNext(lexer))) {
             advance(lexer);
@@ -196,10 +243,30 @@ ReaToken reaNextToken(ReaLexer *lexer) {
 
     if (isAlpha(c)) {
         while (isAlphaNumeric(peek(lexer))) advance(lexer);
+        // Special-case multi-word type: long double
+        size_t save_pos = lexer->pos;
         ReaTokenType type = keywordType(lexer->source + start, lexer->pos - start);
+        if (type == REA_TOKEN_IDENTIFIER) {
+            // Check for 'long' followed by 'double'
+            const char *lex = lexer->source + start;
+            size_t len = save_pos - start;
+            if (len == 4 && strncmp(lex, "long", 4) == 0) {
+                // Skip whitespace
+                while (peek(lexer) == ' ' || peek(lexer) == '\t' || peek(lexer) == '\r' || peek(lexer) == '\n') {
+                    if (peek(lexer) == '\n') lexer->line++;
+                    lexer->pos++;
+                }
+                if (strncmp(lexer->source + lexer->pos, "double", 6) == 0 &&
+                    !isAlphaNumeric(*(lexer->source + lexer->pos + 6))) {
+                    lexer->pos += 6; // consume 'double'
+                    return makeToken(lexer, REA_TOKEN_LONG_DOUBLE, start);
+                } else {
+                    lexer->pos = save_pos; // restore if not matched
+                }
+            }
+        }
         return makeToken(lexer, type, start);
     }
 
     return makeToken(lexer, REA_TOKEN_UNKNOWN, start);
 }
-

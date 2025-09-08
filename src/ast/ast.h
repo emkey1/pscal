@@ -23,6 +23,7 @@ typedef struct AST {
     int i_val;               // Used for enum ordinal value storage in AST_ENUM_VALUE
     bool is_global_scope;    // Flag for block nodes
     bool is_inline;          // Flag for inline directive on procedures/functions
+    bool is_virtual;         // Flag for class methods participating in V-table
     struct AST *type_def;    // For TYPE_REFERENCE etc.
 } AST;
 

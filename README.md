@@ -102,6 +102,7 @@ Example usage:
 ```sh
 python tools/tiny program.tiny out.pbc
 ./build/bin/pscalvm out.pbc
+./build/bin/pscald out.pbc
 ```
 
 Only integer variables and arithmetic are supported, but this is sufficient for
@@ -158,6 +159,8 @@ Options and semantics:
 - Command-line options:
   - `--dump-bytecode`: compile and disassemble bytecode (then execute).
   - `--dump-bytecode-only`: compile and disassemble bytecode, then exit (no execution).
+- Standalone tools:
+  - `pscald <bytecode_file>`: disassemble a compiled bytecode file. Output matches `--dump-bytecode-only`.
 - Operator semantics:
   - Logical `&&` and `||` use short-circuit evaluation.
   - Shift operators `<<` and `>>` are supported with standard precedence (lower than `+`/`-`, left-associative).

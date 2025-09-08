@@ -1,0 +1,69 @@
+{
+
+  "node_type": "PROGRAM",
+  "var_type_annotated": "VOID",
+  "main_block": 
+  {
+
+    "node_type": "BLOCK",
+    "var_type_annotated": "VOID",
+    "is_global_scope": false,
+    "declarations": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "INT64",
+          "left": 
+          {
+
+            "node_type": "NUMBER",
+            "token": {
+                "type": "HEX_CONST",
+                "value": "1f"
+            },
+            "var_type_annotated": "INT64",
+            "i_val": 0
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_IDENTIFIER",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "int"
+            },
+            "var_type_annotated": "INT64"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "a"
+              },
+              "var_type_annotated": "INT64"
+            }
+          ]
+        }
+      ]
+    }
+,
+    "body": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID"
+    }
+
+  }
+
+}
+

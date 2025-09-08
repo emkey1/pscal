@@ -7,7 +7,7 @@
 #include "core/types.h"
 #include "core/utils.h"    // For freeValue, varTypeToString
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
-#include "vm/vm.h"         // For HostFunctionID type (used in OP_CALL_HOST cast)
+#include "vm/vm.h"         // For HostFunctionID type (used in CALL_HOST cast)
 #include "Pascal/globals.h"
 #include "core/version.h"
 
@@ -15,7 +15,7 @@
 // addConstantToChunk, emitShort, patchShort from your provided file.
 
 void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
-    chunk->version = PSCAL_VM_VERSION;
+    chunk->version = pscal_vm_version();
     chunk->count = 0;
     chunk->capacity = 0;
     chunk->code = NULL;
@@ -139,24 +139,28 @@ static const char* findProcedureNameByAddress(HashTable* procedureTable, uint16_
 int getInstructionLength(BytecodeChunk* chunk, int offset) {
     uint8_t instruction = chunk->code[offset];
     switch (instruction) {
-        case OP_CONSTANT:
-        case OP_GET_GLOBAL:
-        case OP_SET_GLOBAL:
-        case OP_GET_LOCAL:
-        case OP_SET_LOCAL:
-        case OP_GET_GLOBAL_ADDRESS:
-        case OP_GET_LOCAL_ADDRESS:
-        case OP_GET_UPVALUE:
-        case OP_SET_UPVALUE:
-        case OP_GET_UPVALUE_ADDRESS:
-        case OP_GET_FIELD_ADDRESS:
-        case OP_GET_ELEMENT_ADDRESS:
-        case OP_GET_CHAR_ADDRESS:
-        case OP_INIT_LOCAL_FILE:
+        case CONSTANT:
+        case GET_GLOBAL:
+        case SET_GLOBAL:
+        case GET_LOCAL:
+        case SET_LOCAL:
+        case GET_GLOBAL_ADDRESS:
+        case GET_LOCAL_ADDRESS:
+        case GET_UPVALUE:
+        case SET_UPVALUE:
+        case GET_UPVALUE_ADDRESS:
+        case GET_FIELD_ADDRESS:
+        case GET_FIELD_OFFSET:
+        case ALLOC_OBJECT:
+        case GET_ELEMENT_ADDRESS:
+        case GET_CHAR_ADDRESS:
+        case INIT_LOCAL_FILE:
             return 2; // 1-byte opcode + 1-byte operand
-        case OP_INIT_LOCAL_POINTER:
+        case INIT_LOCAL_STRING:
+            return 3; // opcode + slot + length
+        case INIT_LOCAL_POINTER:
             return 4; // opcode + slot byte + 2-byte type name index
-        case OP_INIT_LOCAL_ARRAY: {
+        case INIT_LOCAL_ARRAY: {
             int current_pos = offset + 1; // after opcode
             current_pos++; // slot
             if (current_pos >= chunk->count) return 1;
@@ -165,23 +169,25 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             current_pos += 2; // elem type and elem type name index
             return current_pos - offset;
         }
-        case OP_CONSTANT16:
-        case OP_GET_FIELD_ADDRESS16:
-        case OP_GET_GLOBAL16:
-        case OP_SET_GLOBAL16:
-        case OP_GET_GLOBAL_ADDRESS16:
+        case CONSTANT16:
+        case GET_FIELD_ADDRESS16:
+        case GET_FIELD_OFFSET16:
+        case ALLOC_OBJECT16:
+        case GET_GLOBAL16:
+        case SET_GLOBAL16:
+        case GET_GLOBAL_ADDRESS16:
             return 3; // 1 byte opcode + 2-byte operand
-        case OP_JUMP:
-        case OP_JUMP_IF_FALSE:
-        case OP_FORMAT_VALUE:
+        case JUMP:
+        case JUMP_IF_FALSE:
+        case FORMAT_VALUE:
             return 3; // 1-byte opcode + 2-byte operand
-        case OP_CALL_BUILTIN:
+        case CALL_BUILTIN:
             return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
-        case OP_CALL:
+        case CALL:
             return 6; // 1-byte opcode + 2-byte name_idx + 2-byte addr + 1-byte arity
-        case OP_EXIT:
+        case EXIT:
             return 1;
-        case OP_DEFINE_GLOBAL: {
+        case DEFINE_GLOBAL: {
             // This instruction has a variable length.
             int current_pos = offset + 1; // Position after the opcode
             if (current_pos + 1 >= chunk->count) return 1; // Safeguard for incomplete instruction
@@ -205,8 +211,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             }
             return (current_pos - offset); // Return the total calculated length
         }
-        case OP_DEFINE_GLOBAL16: {
-            // Similar to OP_DEFINE_GLOBAL but with a 16-bit name index.
+        case DEFINE_GLOBAL16: {
+            // Similar to DEFINE_GLOBAL but with a 16-bit name index.
             int current_pos = offset + 1; // after opcode
             if (current_pos + 2 >= chunk->count) return 1; // ensure enough bytes for name and type
             VarType declaredType = (VarType)chunk->code[offset + 3];
@@ -273,13 +279,13 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
 
     uint8_t instruction = chunk->code[offset];
     switch (instruction) {
-        case OP_RETURN:
-            fprintf(stderr, "OP_RETURN\n");
+        case RETURN:
+            fprintf(stderr, "RETURN\n");
             return offset + 1;
 
-        case OP_CONSTANT: {
+        case CONSTANT: {
             uint8_t constant_index = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4u ", "OP_CONSTANT", (unsigned)constant_index);
+            fprintf(stderr, "%-16s %4u ", "CONSTANT", (unsigned)constant_index);
             if (constant_index >= chunk->constants_count) {
                 fprintf(stderr, "<INVALID CONST IDX %u>\n", (unsigned)constant_index);
                 return offset + 2;
@@ -308,9 +314,9 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "'\n");
             return offset + 2;
         }
-        case OP_CONSTANT16: {
+        case CONSTANT16: {
             uint16_t constant_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %4u ", "OP_CONSTANT16", (unsigned)constant_index);
+            fprintf(stderr, "%-16s %4u ", "CONSTANT16", (unsigned)constant_index);
             if (constant_index >= chunk->constants_count) {
                 fprintf(stderr, "<INVALID CONST IDX %u>\n", (unsigned)constant_index);
                 return offset + 3;
@@ -339,55 +345,55 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "'\n");
             return offset + 3;
         }
-        case OP_ADD:           fprintf(stderr, "OP_ADD\n"); return offset + 1;
-        case OP_SUBTRACT:      fprintf(stderr, "OP_SUBTRACT\n"); return offset + 1;
-        case OP_MULTIPLY:      fprintf(stderr, "OP_MULTIPLY\n"); return offset + 1;
-        case OP_DIVIDE:        fprintf(stderr, "OP_DIVIDE\n"); return offset + 1;
-        case OP_NEGATE:        fprintf(stderr, "OP_NEGATE\n"); return offset + 1;
-        case OP_NOT:           fprintf(stderr, "OP_NOT\n"); return offset + 1;
-        case OP_EQUAL:         fprintf(stderr, "OP_EQUAL\n"); return offset + 1;
-        case OP_NOT_EQUAL:     fprintf(stderr, "OP_NOT_EQUAL\n"); return offset + 1;
-        case OP_GREATER:       fprintf(stderr, "OP_GREATER\n"); return offset + 1;
-        case OP_GREATER_EQUAL: fprintf(stderr, "OP_GREATER_EQUAL\n"); return offset + 1;
-        case OP_LESS:          fprintf(stderr, "OP_LESS\n"); return offset + 1;
-        case OP_LESS_EQUAL:    fprintf(stderr, "OP_LESS_EQUAL\n"); return offset + 1;
-        case OP_INT_DIV:       fprintf(stderr, "OP_INT_DIV\n"); return offset + 1;
-        case OP_MOD:           fprintf(stderr, "OP_MOD\n"); return offset + 1;
-        case OP_AND:           fprintf(stderr, "OP_AND\n"); return offset + 1;
-        case OP_OR:            fprintf(stderr, "OP_OR\n"); return offset + 1;
-        case OP_SHL:           fprintf(stderr, "OP_SHL\n"); return offset + 1;
-        case OP_SHR:           fprintf(stderr, "OP_SHR\n"); return offset + 1;
+        case ADD:           fprintf(stderr, "ADD\n"); return offset + 1;
+        case SUBTRACT:      fprintf(stderr, "SUBTRACT\n"); return offset + 1;
+        case MULTIPLY:      fprintf(stderr, "MULTIPLY\n"); return offset + 1;
+        case DIVIDE:        fprintf(stderr, "DIVIDE\n"); return offset + 1;
+        case NEGATE:        fprintf(stderr, "NEGATE\n"); return offset + 1;
+        case NOT:           fprintf(stderr, "NOT\n"); return offset + 1;
+        case EQUAL:         fprintf(stderr, "EQUAL\n"); return offset + 1;
+        case NOT_EQUAL:     fprintf(stderr, "NOT_EQUAL\n"); return offset + 1;
+        case GREATER:       fprintf(stderr, "GREATER\n"); return offset + 1;
+        case GREATER_EQUAL: fprintf(stderr, "GREATER_EQUAL\n"); return offset + 1;
+        case LESS:          fprintf(stderr, "LESS\n"); return offset + 1;
+        case LESS_EQUAL:    fprintf(stderr, "LESS_EQUAL\n"); return offset + 1;
+        case INT_DIV:       fprintf(stderr, "INT_DIV\n"); return offset + 1;
+        case MOD:           fprintf(stderr, "MOD\n"); return offset + 1;
+        case AND:           fprintf(stderr, "AND\n"); return offset + 1;
+        case OR:            fprintf(stderr, "OR\n"); return offset + 1;
+        case SHL:           fprintf(stderr, "SHL\n"); return offset + 1;
+        case SHR:           fprintf(stderr, "SHR\n"); return offset + 1;
 
-        case OP_JUMP_IF_FALSE: {
+        case JUMP_IF_FALSE: {
             uint16_t jump_operand = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
             int target_addr = offset + 3 + (int16_t)jump_operand;
             const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
-            fprintf(stderr, "%-16s %4d (to %04d)", "OP_JUMP_IF_FALSE", (int16_t)jump_operand, target_addr);
+            fprintf(stderr, "%-16s %4d (to %04d)", "JUMP_IF_FALSE", (int16_t)jump_operand, target_addr);
             if (targetName) {
                 fprintf(stderr, " -> %s", targetName);
             }
             fprintf(stderr, "\n");
             return offset + 3;
         }
-        case OP_JUMP: {
+        case JUMP: {
             uint16_t jump_operand_uint = (uint16_t)(chunk->code[offset + 1] << 8) | chunk->code[offset + 2];
             int16_t jump_operand_sint = (int16_t)jump_operand_uint;
             int target_addr = offset + 3 + jump_operand_sint;
             const char* targetName = findProcedureNameByAddress(procedureTable, target_addr);
-            fprintf(stderr, "%-16s %4d (to %04d)", "OP_JUMP", jump_operand_sint, target_addr);
+            fprintf(stderr, "%-16s %4d (to %04d)", "JUMP", jump_operand_sint, target_addr);
             if (targetName) {
                 fprintf(stderr, " -> %s", targetName);
             }
             fprintf(stderr, "\n");
             return offset + 3;
         }
-        case OP_SWAP: fprintf(stderr, "OP_SWAP\n"); return offset + 1;
-        case OP_DUP:  fprintf(stderr, "OP_DUP\n"); return offset + 1;
+        case SWAP: fprintf(stderr, "SWAP\n"); return offset + 1;
+        case DUP:  fprintf(stderr, "DUP\n"); return offset + 1;
 
-        case OP_DEFINE_GLOBAL: {
+        case DEFINE_GLOBAL: {
             uint8_t name_idx = chunk->code[offset + 1];
             VarType declaredType = (VarType)chunk->code[offset + 2];
-            fprintf(stderr, "%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL", name_idx);
+            fprintf(stderr, "%-16s NameIdx:%-3d ", "DEFINE_GLOBAL", name_idx);
             if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
                 fprintf(stderr, "'%s' ", chunk->constants[name_idx].s_val);
             } else {
@@ -443,11 +449,11 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "\n");
             return current_offset;
         }
-        case OP_DEFINE_GLOBAL16: {
+        case DEFINE_GLOBAL16: {
             // Variable or constant definition using a 16-bit name index.
             uint16_t name_idx = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
             VarType declaredType = (VarType)chunk->code[offset + 3];
-            fprintf(stderr, "%-16s NameIdx:%-3d ", "OP_DEFINE_GLOBAL16", name_idx);
+            fprintf(stderr, "%-16s NameIdx:%-3d ", "DEFINE_GLOBAL16", name_idx);
             if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING) {
                 fprintf(stderr, "'%s' ", chunk->constants[name_idx].s_val);
             } else {
@@ -503,76 +509,82 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "\n");
             return current_offset;
         }
-        case OP_GET_GLOBAL: {
+        case GET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d '%s'\n", "OP_GET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
+            fprintf(stderr, "%-16s %4d '%s'\n", "GET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 2;
         }
-        case OP_SET_GLOBAL: {
+        case SET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d '%s'\n", "OP_SET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
+            fprintf(stderr, "%-16s %4d '%s'\n", "SET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 2;
         }
-        case OP_GET_GLOBAL_ADDRESS: {
+        case GET_GLOBAL_ADDRESS: {
             uint8_t name_index = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));
+            fprintf(stderr, "%-16s %4d '%s'\n", "GET_GLOBAL_ADDRESS", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 2;
         }
-        case OP_GET_GLOBAL16: {
+        case GET_GLOBAL16: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %4d '%s'\n", "OP_GET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
+            fprintf(stderr, "%-16s %4d '%s'\n", "GET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 3;
         }
-        case OP_SET_GLOBAL16: {
+        case SET_GLOBAL16: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %4d '%s'\n", "OP_SET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
+            fprintf(stderr, "%-16s %4d '%s'\n", "SET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 3;
         }
-        case OP_GET_GLOBAL_ADDRESS16: {
+        case GET_GLOBAL_ADDRESS16: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %4d '%s'\n", "OP_GET_GLOBAL_ADDRESS16", name_index, AS_STRING(chunk->constants[name_index]));
+            fprintf(stderr, "%-16s %4d '%s'\n", "GET_GLOBAL_ADDRESS16", name_index, AS_STRING(chunk->constants[name_index]));
             return offset + 3;
         }
-        case OP_GET_LOCAL: {
+        case GET_LOCAL: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_GET_LOCAL", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "GET_LOCAL", slot);
             return offset + 2;
         }
-        case OP_SET_LOCAL: {
+        case SET_LOCAL: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_SET_LOCAL", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "SET_LOCAL", slot);
             return offset + 2;
         }
-        case OP_GET_UPVALUE: {
+        case GET_UPVALUE: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_GET_UPVALUE", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "GET_UPVALUE", slot);
             return offset + 2;
         }
-        case OP_SET_UPVALUE: {
+        case SET_UPVALUE: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_SET_UPVALUE", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "SET_UPVALUE", slot);
             return offset + 2;
         }
-        case OP_GET_UPVALUE_ADDRESS: {
+        case GET_UPVALUE_ADDRESS: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_GET_UPVALUE_ADDRESS", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "GET_UPVALUE_ADDRESS", slot);
             return offset + 2;
         }
-        case OP_INIT_LOCAL_ARRAY: {
+        case INIT_LOCAL_ARRAY: {
             uint8_t slot = chunk->code[offset + 1];
             uint8_t dim_count = chunk->code[offset + 2];
-            fprintf(stderr, "%-16s Slot:%d Dims:%d\n", "OP_INIT_LOCAL_ARRAY", slot, dim_count);
+            fprintf(stderr, "%-16s Slot:%d Dims:%d\n", "INIT_LOCAL_ARRAY", slot, dim_count);
             return offset + 5 + dim_count * 4;
         }
-        case OP_INIT_LOCAL_FILE: {
+        case INIT_LOCAL_FILE: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_INIT_LOCAL_FILE", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "INIT_LOCAL_FILE", slot);
             return offset + 2;
         }
-        case OP_INIT_LOCAL_POINTER: {
+        case INIT_LOCAL_STRING: {
+            uint8_t slot = chunk->code[offset + 1];
+            uint8_t length = chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (slot) %4d (len)\n", "INIT_LOCAL_STRING", slot, length);
+            return offset + 3;
+        }
+        case INIT_LOCAL_POINTER: {
             uint8_t slot = chunk->code[offset + 1];
             uint16_t name_idx = (uint16_t)(chunk->code[offset + 2] << 8) | chunk->code[offset + 3];
-            fprintf(stderr, "%-16s %4d (slot) %4d", "OP_INIT_LOCAL_POINTER", slot, name_idx);
+            fprintf(stderr, "%-16s %4d (slot) %4d", "INIT_LOCAL_POINTER", slot, name_idx);
             if (name_idx < chunk->constants_count &&
                 chunk->constants[name_idx].type == TYPE_STRING) {
                 fprintf(stderr, " '%s'", chunk->constants[name_idx].s_val);
@@ -580,14 +592,14 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "\n");
             return offset + 4;
         }
-        case OP_GET_LOCAL_ADDRESS: {
+        case GET_LOCAL_ADDRESS: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "OP_GET_LOCAL_ADDRESS", slot);
+            fprintf(stderr, "%-16s %4d (slot)\n", "GET_LOCAL_ADDRESS", slot);
             return offset + 2;
         }
-        case OP_GET_FIELD_ADDRESS: {
+        case GET_FIELD_ADDRESS: {
             uint8_t const_idx = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d ", "OP_GET_FIELD_ADDRESS", const_idx);
+            fprintf(stderr, "%-16s %4d ", "GET_FIELD_ADDRESS", const_idx);
             if (const_idx < chunk->constants_count &&
                 chunk->constants[const_idx].type == TYPE_STRING) {
                 fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));
@@ -596,10 +608,10 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             return offset + 2;
         }
-        case OP_GET_FIELD_ADDRESS16: {
+        case GET_FIELD_ADDRESS16: {
             uint16_t const_idx = (uint16_t)(chunk->code[offset + 1] << 8) |
                                  chunk->code[offset + 2];
-            fprintf(stderr, "%-16s %4d ", "OP_GET_FIELD_ADDRESS16", const_idx);
+            fprintf(stderr, "%-16s %4d ", "GET_FIELD_ADDRESS16", const_idx);
             if (const_idx < chunk->constants_count &&
                 chunk->constants[const_idx].type == TYPE_STRING) {
                 fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));
@@ -608,28 +620,50 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             return offset + 3;
         }
-        case OP_GET_ELEMENT_ADDRESS: {
-            uint8_t dims = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (dims)\n", "OP_GET_ELEMENT_ADDRESS", dims);
+        case ALLOC_OBJECT: {
+            uint8_t fields = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (fields)\n", "ALLOC_OBJECT", fields);
             return offset + 2;
         }
-        case OP_GET_CHAR_ADDRESS:
-            fprintf(stderr, "OP_GET_CHAR_ADDRESS\n"); // <-- ADDED MISSING CASE
+        case ALLOC_OBJECT16: {
+            uint16_t fields = (uint16_t)(chunk->code[offset + 1] << 8) |
+                              chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (fields)\n", "ALLOC_OBJECT16", fields);
+            return offset + 3;
+        }
+        case GET_FIELD_OFFSET: {
+            uint8_t idx = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (index)\n", "GET_FIELD_OFFSET", idx);
+            return offset + 2;
+        }
+        case GET_FIELD_OFFSET16: {
+            uint16_t idx = (uint16_t)(chunk->code[offset + 1] << 8) |
+                            chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (index)\n", "GET_FIELD_OFFSET16", idx);
+            return offset + 3;
+        }
+        case GET_ELEMENT_ADDRESS: {
+            uint8_t dims = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (dims)\n", "GET_ELEMENT_ADDRESS", dims);
+            return offset + 2;
+        }
+        case GET_CHAR_ADDRESS:
+            fprintf(stderr, "GET_CHAR_ADDRESS\n"); // <-- ADDED MISSING CASE
             return offset + 1;
-        case OP_SET_INDIRECT:
-            fprintf(stderr, "OP_SET_INDIRECT\n");
+        case SET_INDIRECT:
+            fprintf(stderr, "SET_INDIRECT\n");
             return offset + 1;
-        case OP_GET_INDIRECT:
-            fprintf(stderr, "OP_GET_INDIRECT\n");
+        case GET_INDIRECT:
+            fprintf(stderr, "GET_INDIRECT\n");
             return offset + 1;
-        case OP_IN:
-            fprintf(stderr, "OP_IN\n");
+        case IN:
+            fprintf(stderr, "IN\n");
             return offset + 1;
-        case OP_GET_CHAR_FROM_STRING:
-            fprintf(stderr, "OP_GET_CHAR_FROM_STRING\n");
+        case GET_CHAR_FROM_STRING:
+            fprintf(stderr, "GET_CHAR_FROM_STRING\n");
             return offset + 1;
 
-        case OP_CALL_BUILTIN: {
+        case CALL_BUILTIN: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
                                              chunk->code[offset + 2]);
             uint8_t arg_count = chunk->code[offset + 3];
@@ -640,27 +674,27 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 name = AS_STRING(chunk->constants[name_index]);
             }
             fprintf(stderr, "%-16s %5d '%s' (%d args)\n",
-                    "OP_CALL_BUILTIN", name_index, name, arg_count);
+                    "CALL_BUILTIN", name_index, name, arg_count);
             return offset + 4;
         }
         
         // These are not currently used in your compiler but are in the enum
-        case OP_CALL_BUILTIN_PROC:
-             fprintf(stderr, "%-16s (not fully impl.)\n", "OP_CALL_BUILTIN_PROC");
+        case CALL_BUILTIN_PROC:
+             fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_BUILTIN_PROC");
              return offset + 3;
-        case OP_CALL_USER_PROC:
-             fprintf(stderr, "%-16s (not fully impl.)\n", "OP_CALL_USER_PROC");
+        case CALL_USER_PROC:
+             fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_USER_PROC");
              return offset + 3;
 
-        case OP_CALL_HOST: {
+        case CALL_HOST: {
             uint8_t host_fn_id_val = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (ID: %d)\n", "OP_CALL_HOST", host_fn_id_val, host_fn_id_val);
+            fprintf(stderr, "%-16s %4d (ID: %d)\n", "CALL_HOST", host_fn_id_val, host_fn_id_val);
             return offset + 2;
         }
-        case OP_POP:
-            fprintf(stderr, "OP_POP\n");
+        case POP:
+            fprintf(stderr, "POP\n");
             return offset + 1;
-        case OP_CALL: {
+        case CALL: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
                                              chunk->code[offset + 2]);
             uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
@@ -673,56 +707,56 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 targetProcName = AS_STRING(chunk->constants[name_index]);
             }
             fprintf(stderr, "%-16s %04d (%s) (%d args)\n",
-                    "OP_CALL", address, targetProcName, declared_arity);
+                    "CALL", address, targetProcName, declared_arity);
             return offset + 6;
         }
-        case OP_CALL_INDIRECT: {
+        case CALL_INDIRECT: {
             uint8_t arg_count = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s (args=%d)\n", "OP_CALL_INDIRECT", arg_count);
+            fprintf(stderr, "%-16s (args=%d)\n", "CALL_INDIRECT", arg_count);
             return offset + 2;
         }
-        case OP_PROC_CALL_INDIRECT: {
+        case PROC_CALL_INDIRECT: {
             uint8_t arg_count = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s (args=%d)\n", "OP_PROC_CALL_INDIRECT", arg_count);
+            fprintf(stderr, "%-16s (args=%d)\n", "PROC_CALL_INDIRECT", arg_count);
             return offset + 2;
         }
-        case OP_HALT:
-            fprintf(stderr, "OP_HALT\n");
+        case HALT:
+            fprintf(stderr, "HALT\n");
             return offset + 1;
-        case OP_EXIT:
-            fprintf(stderr, "OP_EXIT\n");
+        case EXIT:
+            fprintf(stderr, "EXIT\n");
             return offset + 1;
-        case OP_FORMAT_VALUE: {
+        case FORMAT_VALUE: {
             uint8_t width = chunk->code[offset+1];
             uint8_t precision = chunk->code[offset+2];
-            fprintf(stderr, "%-16s width:%d prec:%d\n", "OP_FORMAT_VALUE", width, (int8_t)precision);
+            fprintf(stderr, "%-16s width:%d prec:%d\n", "FORMAT_VALUE", width, (int8_t)precision);
             return offset + 3;
         }
-        case OP_THREAD_CREATE: {
+        case THREAD_CREATE: {
             uint16_t entry = (uint16_t)((chunk->code[offset + 1] << 8) |
                                        chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %04d\n", "OP_THREAD_CREATE", entry);
+            fprintf(stderr, "%-16s %04d\n", "THREAD_CREATE", entry);
             return offset + 3;
         }
-        case OP_THREAD_JOIN:
-            fprintf(stderr, "OP_THREAD_JOIN\n");
+        case THREAD_JOIN:
+            fprintf(stderr, "THREAD_JOIN\n");
             return offset + 1;
-        case OP_MUTEX_CREATE:
-            fprintf(stderr, "OP_MUTEX_CREATE\n");
+        case MUTEX_CREATE:
+            fprintf(stderr, "MUTEX_CREATE\n");
             return offset + 1;
-        case OP_RCMUTEX_CREATE:
-            fprintf(stderr, "OP_RCMUTEX_CREATE\n");
+        case RCMUTEX_CREATE:
+            fprintf(stderr, "RCMUTEX_CREATE\n");
             return offset + 1;
-        case OP_MUTEX_LOCK:
-            fprintf(stderr, "OP_MUTEX_LOCK\n");
+        case MUTEX_LOCK:
+            fprintf(stderr, "MUTEX_LOCK\n");
             return offset + 1;
-        case OP_MUTEX_UNLOCK:
-            fprintf(stderr, "OP_MUTEX_UNLOCK\n");
+        case MUTEX_UNLOCK:
+            fprintf(stderr, "MUTEX_UNLOCK\n");
             return offset + 1;
-        case OP_MUTEX_DESTROY:
-            fprintf(stderr, "OP_MUTEX_DESTROY\n");
+        case MUTEX_DESTROY:
+            fprintf(stderr, "MUTEX_DESTROY\n");
             return offset + 1;
-        // NOTE: There is no OP_BREAK in your bytecode.h enum, so it cannot be disassembled.
+        // NOTE: There is no BREAK in your bytecode.h enum, so it cannot be disassembled.
         // The AST_BREAK node is handled by the compiler generating jump instructions.
 
         default:

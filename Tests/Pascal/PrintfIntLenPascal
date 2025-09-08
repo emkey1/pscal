@@ -1,5 +1,6 @@
 program PrintfIntLenPascal;
 begin
+  { Updated test to verify integer length modifiers }
   // Mix of length modifiers: ld, jd, zu, llu, hhd
   printf('%ld %jd %zu %llu %hhd', 42, 43, 44, 45, -1);
   writeln;

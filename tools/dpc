@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Dump Pscal cache entries with original source file paths."""
+
+import argparse
+import os
+from pathlib import Path
+
+FNV_OFFSET = 2166136261
+FNV_PRIME = 16777619
+
+def hash_path(path: str) -> int:
+    h = FNV_OFFSET
+    for b in os.fsencode(path):
+        h ^= b
+        h = (h * FNV_PRIME) & 0xFFFFFFFF
+    return h
+
+def build_hash_map(search_dirs: list[str]) -> dict[int, list[str]]:
+    mapping: dict[int, list[str]] = {}
+    for directory in search_dirs:
+        base = Path(directory)
+        if not base.is_dir():
+            continue
+        for file_path in base.rglob("*"):
+            if not file_path.is_file():
+                continue
+            rel_str = file_path.relative_to(base).as_posix()
+            abs_str = str(file_path.resolve())
+            for candidate in (rel_str, abs_str):
+                h = hash_path(candidate)
+                mapping.setdefault(h, []).append(str(file_path))
+    return mapping
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Display original file paths for cached Pscal bytecode files."
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default="~/.pscal_cache",
+        help="Cache directory (default: ~/.pscal_cache)",
+    )
+    parser.add_argument(
+        "search_dirs",
+        nargs="*",
+        default=["."],
+        help="Directories to recursively search for source files",
+    )
+    args = parser.parse_args()
+
+    cache_dir = Path(os.path.expanduser(args.cache_dir))
+    if not cache_dir.is_dir():
+        raise SystemExit(f"Cache directory not found: {cache_dir}")
+
+    hash_map = build_hash_map(args.search_dirs)
+
+    for cache_file in sorted(cache_dir.glob("*.bc")):
+        try:
+            target_hash = int(cache_file.stem)
+        except ValueError:
+            print(f"{cache_file.name}: (invalid cache filename)")
+            continue
+        matches = hash_map.get(target_hash, [])
+        if matches:
+            for m in matches:
+                print(f"{cache_file.name}: {m}")
+        else:
+            print(f"{cache_file.name}: (no match)")
+
+if __name__ == "__main__":
+    main()

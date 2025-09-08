@@ -2,6 +2,6 @@
 == Disassembly: Tests/rea/class_decl.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    0 OP_HALT
+0000    0 HALT
 == End Disassembly: Tests/rea/class_decl.rea ==
 

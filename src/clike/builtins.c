@@ -30,6 +30,7 @@ void clikeRegisterBuiltins(void) {
     registerAllBuiltins();
     registerBuiltinFunction("scanf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("itoa", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("atoi", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("exit", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("remove", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("toupper", AST_FUNCTION_DECL, NULL);

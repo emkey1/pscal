@@ -1,0 +1,21 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/method_this_assign.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    3 JUMP               11 (to 0014)
+
+--- Function point_setx (at 0003) ---
+0003    4 GET_LOCAL           1 (slot)
+0005    | GET_LOCAL_ADDRESS    0 (slot)
+0007    | GET_FIELD_OFFSET    1 (index)
+0009    | SWAP
+0010    | SET_INDIRECT
+0011    3 GET_LOCAL           2 (slot)
+0013    | RETURN
+0014    0 CONSTANT            0 'Value type ARRAY'
+0016    | DEFINE_GLOBAL    NameIdx:1   'point_vtable' Type:UNKNOWN_VAR_TYPE 
+== End Disassembly: Tests/rea/method_this_assign.rea ==
+
+Constants (2):\n  0000: Value type ARRAY
+  0001: STR   "point_vtable"
+

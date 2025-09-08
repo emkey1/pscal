@@ -1,0 +1,3 @@
+writeln("A", 1);
+write("B");
+

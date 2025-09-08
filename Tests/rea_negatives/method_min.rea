@@ -1,0 +1,11 @@
+// Minimal runtime exercise of class method calls (disabled from main suite).
+
+class A {
+  int x;
+  int setX(int v) { this.x = v; return this.x; }
+}
+
+A a = new A();
+a.setX(3);
+writeln(a.x);
+

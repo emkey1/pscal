@@ -31,7 +31,16 @@ add_custom_target(run_http_fetch_demo
 # Rea example target
 add_custom_target(run_rea_examples
     COMMAND ${CMAKE_COMMAND} -E echo "Running Rea examples..."
-    COMMAND ${REA_BIN} --dump-bytecode ${CMAKE_CURRENT_SOURCE_DIR}/rea/hello.rea
+    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/hello.rea
+    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/showcase.rea
+    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/method_demo.rea
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Executing CRT demo (requires unit linking via #import)
+add_custom_target(run_rea_crt_demo
+    COMMAND ${CMAKE_COMMAND} -E echo "Running Rea CRT demo (executing)..."
+    COMMAND ${REA_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/rea/crt_demo.rea
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -40,6 +49,7 @@ if(SDL)
     add_custom_target(run_sdl_examples
         COMMAND ${CMAKE_COMMAND} -E echo "Running SDL examples..."
         COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/SDLSimplePong
+        COMMAND ${REA_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/rea/sdl_demo.rea
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 else()

@@ -111,7 +111,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             overall_success_status = true;
         } else {
             GlobalAST = optimizePascalAST(GlobalAST);
-            used_cache = loadBytecodeFromCache(programName, &chunk);
+            used_cache = loadBytecodeFromCache(programName, NULL, 0, &chunk);
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
                 if (dump_bytecode_flag) {
@@ -145,6 +145,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 } else {
                 VM vm;
                 initVM(&vm);
+                // Inline trace toggle via source comment: {trace on} / {trace off}
+                if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
                 InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                 freeVM(&vm);
                 globalSymbols = NULL;

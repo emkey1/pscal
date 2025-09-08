@@ -161,6 +161,7 @@ typedef enum {
 typedef struct {
     TokenType type;
     char *value;
+    size_t length;
     int line;
     int column;
 } Token;
@@ -218,13 +219,15 @@ typedef enum {
     AST_SET,
     AST_ARRAY_LITERAL,
     AST_BREAK,
+    AST_CONTINUE,
     AST_THREAD_SPAWN,
     AST_THREAD_JOIN,
     AST_POINTER_TYPE,
     AST_PROC_PTR_TYPE,
     AST_DEREFERENCE,
     AST_ADDR_OF,
-    AST_NIL
+    AST_NIL,
+    AST_NEW
 } ASTNodeType;
 
 // Define the function pointer type for built-in handlers

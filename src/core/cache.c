@@ -16,7 +16,6 @@
 
 #define CACHE_DIR ".pscal_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
-#define CACHE_VERSION PSCAL_VM_VERSION /* doubles as VM bytecode version */
 
 
 static unsigned long hashPath(const char* path) {
@@ -37,7 +36,10 @@ static char* buildCachePath(const char* source_path) {
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
     mkdir(dir, 0777); // ensure directory exists
 
-    unsigned long h = hashPath(source_path);
+    char* abs_path = realpath(source_path, NULL);
+    const char* hash_src = abs_path ? abs_path : source_path;
+    unsigned long h = hashPath(hash_src);
+    if (abs_path) free(abs_path);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
@@ -73,7 +75,7 @@ static bool writeToken(FILE* f, const Token* tok) {
     fwrite(&has, sizeof(has), 1, f);
     if (!has) return true;
     fwrite(&tok->type, sizeof(tok->type), 1, f);
-    int len = tok->value ? (int)strlen(tok->value) : 0;
+    int len = tok && tok->value ? (int)tok->length : 0;
     fwrite(&len, sizeof(len), 1, f);
     if (len > 0) fwrite(tok->value, 1, len, f);
     return true;
@@ -87,18 +89,17 @@ static Token* readToken(FILE* f) {
     if (fread(&type, sizeof(type), 1, f) != 1) return NULL;
     int len = 0;
     if (fread(&len, sizeof(len), 1, f) != 1) return NULL;
-    char* buf = NULL;
-    if (len > 0) {
-        buf = (char*)malloc(len + 1);
-        if (!buf) return NULL;
-        if (fread(buf, 1, len, f) != (size_t)len) { free(buf); return NULL; }
-        buf[len] = '\0';
-    } else {
-        buf = strdup("");
-        if (!buf) return NULL;
-    }
-    Token* tok = newToken(type, buf, 0, 0);
-    free(buf);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    if (len > 0 && fread(buf, 1, len, f) != (size_t)len) { free(buf); return NULL; }
+    buf[len] = '\0';
+    Token* tok = (Token*)malloc(sizeof(Token));
+    if (!tok) { free(buf); return NULL; }
+    tok->type = type;
+    tok->value = buf;
+    tok->length = (size_t)len;
+    tok->line = 0;
+    tok->column = 0;
     return tok;
 }
 
@@ -276,7 +277,10 @@ static bool readValue(FILE* f, Value* out) {
     return true;
 }
 
-bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
+bool loadBytecodeFromCache(const char* source_path,
+                           const char** dependencies,
+                           int dep_count,
+                           BytecodeChunk* chunk) {
     char* cache_path = buildCachePath(source_path);
     if (!cache_path) return false;
     if (chunk && chunk->count > 0) {
@@ -291,6 +295,12 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
         free(cache_path);
         return false;
     }
+    for (int i = 0; dependencies && i < dep_count; ++i) {
+        if (!isCacheFresh(cache_path, dependencies[i])) {
+            free(cache_path);
+            return false;
+        }
+    }
 
     FILE* f = fopen(cache_path, "rb");
     if (f) {
@@ -300,18 +310,19 @@ bool loadBytecodeFromCache(const char* source_path, BytecodeChunk* chunk) {
                 magic == CACHE_MAGIC) {
                 const char* strict_env = getenv("PSCAL_STRICT_VM");
                 bool strict = strict_env && strict_env[0] != '\0';
-                if (ver > CACHE_VERSION) {
+                uint32_t vm_ver = pscal_vm_version();
+                if (ver > vm_ver) {
                     if (strict) {
                         fprintf(stderr,
                                 "Cached bytecode requires VM version %u but current VM version is %u\\n",
-                                ver, CACHE_VERSION);
+                                ver, vm_ver);
                         fclose(f);
                         free(cache_path);
                         return false;
                     } else {
                         fprintf(stderr,
                                 "Warning: cached bytecode targets VM version %u but running version is %u\\n",
-                                ver, CACHE_VERSION);
+                                ver, vm_ver);
                     }
                 }
                 chunk->version = ver;
@@ -452,22 +463,19 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
             magic == CACHE_MAGIC) {
             const char* strict_env = getenv("PSCAL_STRICT_VM");
             bool strict = strict_env && strict_env[0] != '\0';
-            if (ver > CACHE_VERSION) {
+            uint32_t vm_ver = pscal_vm_version();
+            if (ver > vm_ver) {
                 if (strict) {
                     fprintf(stderr,
                             "Bytecode requires VM version %u but this VM only supports version %u\\n",
-                            ver, CACHE_VERSION);
+                            ver, vm_ver);
                     fclose(f);
                     return false;
                 } else {
                     fprintf(stderr,
                             "Warning: bytecode targets VM version %u but running version is %u\\n",
-                            ver, CACHE_VERSION);
+                            ver, vm_ver);
                 }
-            } else if (ver < CACHE_VERSION) {
-                fprintf(stderr,
-                        "Warning: bytecode version %u is older than VM version %u\\n",
-                        ver, CACHE_VERSION);
             }
             chunk->version = ver;
             int count = 0;

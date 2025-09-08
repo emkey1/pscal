@@ -2,11 +2,16 @@
 == Disassembly: Tests/rea/field_access_assign.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    3 OP_GET_GLOBAL_ADDRESS    0 'p'
-0002    | OP_GET_FIELD_ADDRESS    1 'x'
-0004    | OP_GET_INDIRECT
-0005    | OP_POP
-0006    0 OP_HALT
+0000    2 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
+0005    4 CONSTANT            2 '1'
+0007    | GET_GLOBAL_ADDRESS    0 'p'
+0009    | GET_FIELD_OFFSET    1 (index)
+0011    | SWAP
+0012    | SET_INDIRECT
+0013    0 HALT
 == End Disassembly: Tests/rea/field_access_assign.rea ==
 
-Constants (2):\n  0000: STR   "p"\n  0001: STR   "x"\n
+Constants (3):\n  0000: STR   "p"
+  0001: STR   "Point"
+  0002: INT   1
+

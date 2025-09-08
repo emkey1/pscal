@@ -28,8 +28,13 @@ The Rea language is a strongly typed, class-based, object-oriented language.
     * **Control Flow:** `if`, `else`, `while`, `for`, `do`, `switch`, `case`,
       `default`, `break`, `continue`, `return`.
     * **Other:** `const`, `#import`.
-* **Literals:** Integer, floating-point, character, and string literals will
-  follow the C-Like language specification.
+* **Operators:** Common arithmetic and comparison operators are supported,
+  including `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, and `>=`.
+* **Literals:** Integer, floating-point, character, and string literals follow
+  C-Like rules. Characters use single quotes (e.g., `'a'`) while strings use
+  double quotes (e.g., "hi"); both forms support standard escape sequences
+  such as `\n`, `\r`, `\t`, `\\`, `\'`, `\"`, and numeric forms like
+  `\0` or `\x41`.
 
 #### 1.2. Data Types
 
@@ -115,11 +120,11 @@ This is where the translation to PSCAL VM opcodes occurs.
 * **Object & Field Opcodes:**
     * `new ClassName(...)` → A call to a runtime built-in function that
       allocates a block of memory for the object and initializes it. This could
-      use the `OP_INIT_LOCAL_ARRAY` opcode with a new type for objects.
-    * `obj.field = value` → `OP_GET_GLOBAL_ADDRESS` (or
-      `OP_GET_LOCAL_ADDRESS`) to get a pointer to the object, followed by
-      `OP_GET_FIELD_ADDRESS` to get a pointer to the field. Finally,
-      `OP_SET_INDIRECT` to write the value to the field.
+      use the `INIT_LOCAL_ARRAY` opcode with a new type for objects.
+    * `obj.field = value` → `GET_GLOBAL_ADDRESS` (or
+      `GET_LOCAL_ADDRESS`) to get a pointer to the object, followed by
+      `GET_FIELD_ADDRESS` to get a pointer to the field. Finally,
+      `SET_INDIRECT` to write the value to the field.
 * **Method Dispatch Opcodes:**
     * `obj.method()` → The compiler will determine if `method` is a virtual
       method (i.e., overridden). If it is, the compiler will emit opcodes to:
@@ -127,7 +132,7 @@ This is where the translation to PSCAL VM opcodes occurs.
         2. Push arguments.
         3. Look up the correct function pointer from the object's V-table based
            on its type.
-        4. Call the function using a modified `OP_CALL`.
+        4. Call the function using a modified `CALL`.
     * **VM Extension:** The VM's `CallFrame` and `procedureTable` will be
       extended to store and look up class and method information to support the
       V-table mechanism.

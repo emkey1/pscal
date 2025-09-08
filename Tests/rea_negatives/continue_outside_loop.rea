@@ -1,0 +1,4 @@
+// This file is not part of the automated test run.
+// It should fail to compile: 'continue' outside of loop.
+continue;
+

@@ -1,0 +1,59 @@
+// Showcase for Rea front end
+
+//#import "crt";
+
+// Define a simple class with two fields
+class Point {
+  int x;
+  int y;
+}
+
+// Allocate and declare variables
+Point p = new Point();
+int sum;
+bool big;
+
+// Initialize fields
+p.x = 10;
+p.y = 20;
+
+// Arithmetic + comparison + logical operators
+sum = p.x + p.y;
+big = (sum >= 30) && (p.x > 0) || (p.y == 0);
+
+if (big) {
+  writeln("sum=", sum);
+}
+
+// For loop (C-style)
+for (int i = 0; i < 3; i = i + 1) {
+  writeln("i=", i);
+}
+
+// While loop
+int n = 3;
+while (n > 0) {
+  writeln("n=", n);
+  n = n - 1;
+}
+
+// Do-while loop
+int k = 0;
+do {
+  writeln("k=", k);
+  k = k + 1;
+} while (k < 2);
+
+// Switch with multi-label case
+int v = 2;
+switch (v) {
+  case 1:
+  case 2:
+    writeln("one or two");
+    break;
+  default:
+    writeln("other");
+}
+
+writeln("Rea showcase complete.");
+

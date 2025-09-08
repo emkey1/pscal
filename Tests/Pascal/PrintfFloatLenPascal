@@ -1,5 +1,6 @@
 program PrintfFloatLenPascal;
 begin
+  { Updated test to ensure length modifiers for floating-point formats }
   printf('%.2Lf', 3.1415926535897932384626);
   writeln;
   printf('%.2f', 3.1415926535897932384626);

@@ -1,0 +1,6 @@
+// Rea + #import CRT demo (executes with VM)
+#import "crt";
+
+writeln("Hello from Rea before clear...");
+ClrScr();
+writeln("Screen cleared. This is after clear.");

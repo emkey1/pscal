@@ -244,6 +244,7 @@ Token *identifier(Lexer *lexer) {
         }
     }
     token->value = id_str;
+    token->length = len;
 
 #ifdef DEBUG // Your existing debug block
     if (token->type == TOKEN_USES) {

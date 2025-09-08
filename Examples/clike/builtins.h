@@ -12,6 +12,7 @@ int fopen();
 int fclose();
 int scanf();
 int strlen();
+int atoi();
 
 int abs();
 int apiReceive();

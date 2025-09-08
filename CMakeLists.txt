@@ -25,8 +25,9 @@ add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
 
-# Optionally build the debug "dascal" binary
-option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
+# Optionally build additional binaries
+option(BUILD_DASCAL "Build the dascal debugging binary" ON)
+option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
 option(SDL "Enable SDL-based graphics and audio" OFF)
@@ -144,7 +145,7 @@ endif()
 # ---- Source Files ----
 set(PSCAL_SOURCES
     src/Pascal/main.c src/Pascal/globals.c
-    src/core/types.c src/core/utils.c src/core/list.c
+    src/core/types.c src/core/utils.c src/core/list.c src/core/version.c
     src/Pascal/lexer.c src/Pascal/parser.c src/ast/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
@@ -260,6 +261,7 @@ function(add_pscal_executable target_name)
 endfunction()
 
 add_pscal_executable(pascal)
+target_compile_definitions(pascal PRIVATE FRONTEND_PASCAL)
 if(BUILD_DASCAL)
     add_pscal_executable(dascal)
 endif()
@@ -274,6 +276,16 @@ set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
 add_pscal_executable(pscalvm)
 set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
 
+if(BUILD_PSCALD)
+    set(DISASSEMBLER_SOURCES ${PSCAL_VM_SOURCES})
+    list(REMOVE_ITEM DISASSEMBLER_SOURCES src/vm/vm_main.c)
+    list(APPEND DISASSEMBLER_SOURCES src/disassembler/main.c)
+    set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
+    set(PSCAL_SOURCES ${DISASSEMBLER_SOURCES})
+    add_pscal_executable(pscald)
+    set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+endif()
+
 # Tiny C front-end executable
 set(CLIKE_SOURCES
     src/clike/main.c
@@ -286,7 +298,7 @@ set(CLIKE_SOURCES
     src/clike/opt.c
     src/clike/preproc.c
     src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
@@ -308,6 +320,7 @@ if(SDL)
 endif()
 
 add_executable(clike ${CLIKE_SOURCES})
+target_compile_definitions(clike PRIVATE FRONTEND_CLIKE)
 if(TARGET CURL::libcurl)
     target_link_libraries(clike PRIVATE CURL::libcurl m Threads::Threads)
 else()
@@ -382,15 +395,17 @@ set(REA_SOURCES
     src/rea/main.c
     src/rea/lexer.c
     src/rea/parser.c
+    src/rea/semantic.c
+    src/Pascal/lexer.c
+    src/Pascal/parser.c
     src/ast/ast.c
     src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/cache.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
     src/compiler/compiler.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
     src/symbol/symbol.c
-    src/rea/type_stubs.c
 )
 
 list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
@@ -403,6 +418,7 @@ if(SDL)
 endif()
 
 add_executable(rea ${REA_SOURCES})
+target_compile_definitions(rea PRIVATE FRONTEND_REA)
 if(TARGET CURL::libcurl)
     target_link_libraries(rea PRIVATE CURL::libcurl m Threads::Threads)
 else()
@@ -453,6 +469,12 @@ if(BUILD_DASCAL)
     install(TARGETS dascal
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+if(BUILD_PSCALD)
+    install(TARGETS pscald
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 
 add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
+add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
+set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")

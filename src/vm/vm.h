@@ -51,12 +51,13 @@ typedef struct {
     uint8_t* return_address;    // IP in the caller to return to
     Value* slots;               // Pointer to this frame's window on the VM value stack
     Symbol* function_symbol;    // Pointer to the Symbol of the function being called (for arity/locals_count)
-                                // Note: Storing Symbol* is one way; alternatively, OP_CALL could carry locals_count,
-                                // or OP_RETURN could be generic if stack is always reset to frame->slots.
+                                // Note: Storing Symbol* is one way; alternatively, CALL could carry locals_count,
+                                // or RETURN could be generic if stack is always reset to frame->slots.
     uint8_t locals_count;       // Number of local variables (excluding params)
     uint8_t upvalue_count;
     Value** upvalues;
     bool discard_result_on_return; // If true, drop any function result on return
+    Value* vtable;               // Reference to class V-table when executing a method
 } CallFrame;
 
 // Thread structure representing a lightweight VM thread
@@ -102,6 +103,10 @@ typedef struct VM_s {
     pthread_mutex_t mutexRegistryLock; // Protects mutex registry updates
     struct VM_s* mutexOwner; // VM that owns the mutex registry
 
+    // Optional tracing: when >0, print execution of first N instructions
+    int trace_head_instructions;
+    int trace_executed;
+
 } VM;
 
 // --- Public VM Interface ---
@@ -112,6 +117,10 @@ void freeVM(VM* vm);    // Free resources associated with a VM instance
 // Takes a BytecodeChunk that was successfully compiled.
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
+
+// Register and lookup class methods in the VM's procedure table
+void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol);
+Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex);
 
 void runtimeError(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);

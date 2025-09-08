@@ -16,9 +16,15 @@
 #include "compiler/bytecode.h"
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
+#define NO_VTABLE_ENTRY -1
 
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
+static AST* gCurrentProgramRoot = NULL;
+
+// Forward declarations for helpers used before definition
+static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
+static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
 
 typedef struct {
     char* name;
@@ -33,6 +39,9 @@ typedef struct {
     int start;          // Address of the loop's start
     int* break_jumps;   // Dynamic array of jump instructions from 'break'
     int break_count;    // Number of 'break' statements
+    int* continue_jumps; // Dynamic array of jump instructions from 'continue'
+    int continue_count;  // Number of 'continue' statements
+    int continue_target; // If known, 'continue' jumps directly here
     int scope_depth;    // The scope depth of this loop
 } Loop;
 
@@ -67,6 +76,13 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
+static int addStringConstantLen(BytecodeChunk* chunk, const char* str, size_t len) {
+    Value val = makeStringLen(str, len);
+    int index = addConstantToChunk(chunk, &val);
+    freeValue(&val);
+    return index;
+}
+
 static int addIntConstant(BytecodeChunk* chunk, long long intValue) {
     Value val = makeInt(intValue);
     int index = addConstantToChunk(chunk, &val);
@@ -93,6 +109,117 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     int index = addConstantToChunk(chunk, &val);
     // No freeValue needed for simple boolean types.
     return index;
+}
+
+typedef struct {
+    char* class_name;
+    int method_count;
+    int capacity;
+    int* addrs;
+    bool merged;
+} VTableInfo;
+
+static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
+    for (int i = 0; i < table_count; i++) {
+        if (strcmp(tables[i].class_name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt) {
+    if (!vt || vt->merged) return;
+    AST* cls = lookupType(vt->class_name);
+    const char* parent_name = NULL;
+    if (cls && cls->extra && cls->extra->token) parent_name = cls->extra->token->value;
+    if (parent_name) {
+        int pidx = findVTableIndex(tables, table_count, parent_name);
+        if (pidx != -1) {
+            mergeParentTable(tables, table_count, &tables[pidx]);
+            VTableInfo* parent = &tables[pidx];
+            if (vt->capacity < parent->method_count) {
+                int newcap = parent->method_count;
+                vt->addrs = realloc(vt->addrs, sizeof(int) * newcap);
+                for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = NO_VTABLE_ENTRY;
+                vt->capacity = newcap;
+            }
+            for (int j = 0; j < parent->method_count; j++) {
+                if (vt->addrs[j] == NO_VTABLE_ENTRY) vt->addrs[j] = parent->addrs[j];
+            }
+            if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
+        }
+    }
+    vt->merged = true;
+}
+
+static void emitVTables(BytecodeChunk* chunk) {
+    VTableInfo* tables = NULL;
+    int table_count = 0;
+    for (int b = 0; b < HASHTABLE_SIZE; b++) {
+        Symbol* sym = procedure_table->buckets[b];
+        while (sym) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (base && base->type_def && base->type_def->is_virtual && base->name) {
+                const char* us = strchr(base->name, '_');
+                if (us) {
+                    size_t cls_len = (size_t)(us - base->name);
+                    char cls[256];
+                    if (cls_len < sizeof(cls)) {
+                        memcpy(cls, base->name, cls_len);
+                        cls[cls_len] = '\0';
+                        int idx = -1;
+                        for (int i = 0; i < table_count; i++) {
+                            if (strcmp(tables[i].class_name, cls) == 0) { idx = i; break; }
+                        }
+                        if (idx == -1) {
+                            tables = realloc(tables, sizeof(VTableInfo) * (table_count + 1));
+                            idx = table_count++;
+                            tables[idx].class_name = strdup(cls);
+                            tables[idx].method_count = 0;
+                            tables[idx].capacity = 0;
+                            tables[idx].addrs = NULL;
+                            tables[idx].merged = false;
+                        }
+                        int mindex = base->type_def->i_val;
+                        if (mindex >= tables[idx].capacity) {
+                            int newcap = mindex + 1;
+                            tables[idx].addrs = realloc(tables[idx].addrs, sizeof(int) * newcap);
+                            for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = NO_VTABLE_ENTRY;
+                            tables[idx].capacity = newcap;
+                        }
+                        tables[idx].addrs[mindex] = base->bytecode_address;
+                        if (mindex + 1 > tables[idx].method_count) tables[idx].method_count = mindex + 1;
+                    }
+                }
+            }
+            sym = sym->next;
+        }
+    }
+
+    for (int i = 0; i < table_count; i++) {
+        mergeParentTable(tables, table_count, &tables[i]);
+    }
+
+    for (int i = 0; i < table_count; i++) {
+        VTableInfo* vt = &tables[i];
+        if (vt->method_count == 0) continue;
+        int lb = 0;
+        int ub = vt->method_count - 1;
+        Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
+        for (int j = 0; j < vt->method_count; j++) {
+            int addr = vt->addrs[j];
+            arr.array_val[j] = makeInt(addr == NO_VTABLE_ENTRY ? 0 : addr);
+        }
+        int cidx = addConstantToChunk(chunk, &arr);
+        freeValue(&arr);
+        emitConstant(chunk, cidx, 0);
+        char gname[512];
+        snprintf(gname, sizeof(gname), "%s_vtable", vt->class_name);
+        int nameIdx = addStringConstant(chunk, gname);
+        emitDefineGlobal(chunk, nameIdx, 0);
+        free(vt->class_name);
+        free(vt->addrs);
+    }
+    free(tables);
 }
 
 // Return an ordinal ranking for integer-like types so we can detect
@@ -127,10 +254,10 @@ static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
         return;
     }
     if (constant_index <= 0xFF) {
-        writeBytecodeChunk(chunk, OP_CONSTANT, line);
+        writeBytecodeChunk(chunk, CONSTANT, line);
         writeBytecodeChunk(chunk, (uint8_t)constant_index, line);
     } else if (constant_index <= 0xFFFF) {
-        writeBytecodeChunk(chunk, OP_CONSTANT16, line);
+        writeBytecodeChunk(chunk, CONSTANT16, line);
         emitShort(chunk, (uint16_t)constant_index, line);
     } else {
         fprintf(stderr, "L%d: Compiler error: too many constants (%d). Limit is 65535.\n",
@@ -171,14 +298,16 @@ static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
     }
 }
 
-// Helper to emit OP_DEFINE_GLOBAL or OP_DEFINE_GLOBAL16 depending on index size.
+// Helper to emit DEFINE_GLOBAL or DEFINE_GLOBAL16 depending on index size.
 static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line) {
-    emitGlobalNameIdx(chunk, OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL16, name_idx, line);
+    emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, name_idx, line);
 }
 
 // Resolve type references to their concrete definitions.
 static AST* resolveTypeAlias(AST* type_node) {
-    while (type_node && type_node->type == AST_TYPE_REFERENCE && type_node->token && type_node->token->value) {
+    while (type_node &&
+           (type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+           type_node->token && type_node->token->value) {
         AST* looked = lookupType(type_node->token->value);
         if (!looked || looked == type_node) break;
         type_node = looked;
@@ -186,11 +315,126 @@ static AST* resolveTypeAlias(AST* type_node) {
     return type_node;
 }
 
+// --- Object layout helpers -------------------------------------------------
+
+// Recursively count fields in a record, including inherited ones.
+static int getRecordFieldCount(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
+
+    int count = 0;
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        if (!decl) continue;
+        if (decl->type == AST_VAR_DECL) {
+            count += decl->child_count; // each child is a field name
+        } else if (decl->token) {
+            // Some passes may have flattened fields directly into the record.
+            count++;
+        }
+    }
+
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        count += getRecordFieldCount(parent);
+    }
+    return count;
+}
+
+// Retrieve zero-based offset of a field within a record hierarchy.
+static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE || !fieldName) return -1;
+
+    int parentCount = 0;
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        int parentOffset = getRecordFieldOffset(parent, fieldName);
+        if (parentOffset != -1) return parentOffset;
+        parentCount = getRecordFieldCount(parent);
+    }
+
+    int offset = parentCount;
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        if (!decl) continue;
+        if (decl->type == AST_VAR_DECL) {
+            for (int j = 0; j < decl->child_count; j++) {
+                AST* var = decl->children[j];
+                if (var && var->token && strcmp(var->token->value, fieldName) == 0) {
+                    return offset;
+                }
+                offset++;
+            }
+        } else if (decl->token) {
+            if (strcmp(decl->token->value, fieldName) == 0) {
+                return offset;
+            }
+            offset++;
+        }
+    }
+    return -1;
+}
+
+// Determine the record type for an expression used as an object base.
+static AST* getRecordTypeFromExpr(AST* expr) {
+    if (!expr) return NULL;
+    if (expr->type == AST_DEREFERENCE) {
+        AST* ptr_type = resolveTypeAlias(expr->left->type_def);
+        if (ptr_type && ptr_type->type == AST_POINTER_TYPE) {
+            return resolveTypeAlias(ptr_type->right);
+        }
+        return NULL;
+    }
+    AST* t = resolveTypeAlias(expr->type_def);
+    if (!t && expr->token && expr->token->value && gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
+        if (decl && decl->right) {
+            t = resolveTypeAlias(decl->right);
+        }
+    }
+    if (t && t->type == AST_POINTER_TYPE) {
+        return resolveTypeAlias(t->right);
+    }
+    return t;
+}
+
+// Find the canonical name for a type AST node.
+static const char* getTypeNameFromAST(AST* typeAst) {
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        if (entry->typeAST == typeAst) return entry->name;
+    }
+    return NULL;
+}
+
+// Check if a record type defines methods and therefore reserves a vtable slot.
+static bool recordTypeHasVTable(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return false;
+    const char* name = getTypeNameFromAST(recordType);
+    if (!name) return false;
+    size_t len = strlen(name);
+    for (int b = 0; b < HASHTABLE_SIZE; b++) {
+        Symbol* sym = procedure_table->buckets[b];
+        while (sym) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (base && base->name &&
+                strncmp(base->name, name, len) == 0 &&
+                base->name[len] == '_') {
+                return true;
+            }
+            sym = sym->next;
+        }
+    }
+    return false;
+}
+
 // Compare two type AST nodes structurally.
 static bool compareTypeNodes(AST* a, AST* b) {
     a = resolveTypeAlias(a);
     b = resolveTypeAlias(b);
     if (!a || !b) return a == b;
+    if (a == b) return true;
     if (a->var_type != b->var_type) return false;
     switch (a->var_type) {
         case TYPE_ARRAY:
@@ -436,6 +680,9 @@ static void startLoop(int start_address) {
     loop_stack[loop_depth].start = start_address;
     loop_stack[loop_depth].break_jumps = NULL;
     loop_stack[loop_depth].break_count = 0;
+    loop_stack[loop_depth].continue_jumps = NULL;
+    loop_stack[loop_depth].continue_count = 0;
+    loop_stack[loop_depth].continue_target = -1;
     loop_stack[loop_depth].scope_depth = current_function_compiler ? current_function_compiler->scope_depth : 0;
 }
 
@@ -455,7 +702,7 @@ static void addBreakJump(BytecodeChunk* chunk, int line) {
     }
     current_loop->break_jumps = temp;
 
-    writeBytecodeChunk(chunk, OP_JUMP, line);
+    writeBytecodeChunk(chunk, JUMP, line);
     current_loop->break_jumps[current_loop->break_count - 1] = chunk->count; // Store offset of the operand
     emitShort(chunk, 0xFFFF, line); // Placeholder
 }
@@ -477,6 +724,47 @@ static void patchBreaks(BytecodeChunk* chunk) {
     }
 }
 
+static void addContinueJump(BytecodeChunk* chunk, int line) {
+    if (loop_depth < 0) {
+        fprintf(stderr, "L%d: Compiler error: 'continue' statement outside of a loop.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+    Loop* current_loop = &loop_stack[loop_depth];
+    writeBytecodeChunk(chunk, JUMP, line);
+    if (current_loop->continue_target >= 0) {
+        int from = chunk->count + 2; // after operand
+        int to = current_loop->continue_target;
+        int16_t rel = (int16_t)(to - from);
+        emitShort(chunk, (uint16_t)rel, line);
+    } else {
+        current_loop->continue_count++;
+        int* temp = realloc(current_loop->continue_jumps, sizeof(int) * current_loop->continue_count);
+        if (!temp) {
+            fprintf(stderr, "L%d: Compiler error: memory allocation failed for continue jumps.\\n", line);
+            compiler_had_error = true;
+            return;
+        }
+        current_loop->continue_jumps = temp;
+        current_loop->continue_jumps[current_loop->continue_count - 1] = chunk->count; // operand offset
+        emitShort(chunk, 0xFFFF, line);
+    }
+}
+
+static void patchContinuesTo(BytecodeChunk* chunk, int targetAddress) {
+    if (loop_depth < 0) return;
+    Loop* current_loop = &loop_stack[loop_depth];
+    for (int i = 0; i < current_loop->continue_count; i++) {
+        int jump_offset = current_loop->continue_jumps[i];
+        patchShort(chunk, jump_offset, (uint16_t)(targetAddress - (jump_offset + 2)));
+    }
+    if (current_loop->continue_jumps) {
+        free(current_loop->continue_jumps);
+        current_loop->continue_jumps = NULL;
+    }
+    current_loop->continue_count = 0;
+}
+
 static void endLoop(void) {
     if (loop_depth < 0) return;
 
@@ -484,11 +772,15 @@ static void endLoop(void) {
     // The patching and freeing of break_jumps is handled entirely by patchBreaks().
     // A check has been added to catch logic errors where endLoop is called
     // without a preceding patchBreaks() call.
-    if (loop_stack[loop_depth].break_jumps != NULL) {
+    if (loop_stack[loop_depth].break_jumps != NULL || loop_stack[loop_depth].continue_jumps != NULL) {
         fprintf(stderr, "Compiler internal warning: endLoop called but break_jumps was not freed. Indicates missing patchBreaks() call.\n");
         // Safeguard free, though the call site is the real issue.
         free(loop_stack[loop_depth].break_jumps);
         loop_stack[loop_depth].break_jumps = NULL;
+        if (loop_stack[loop_depth].continue_jumps) {
+            free(loop_stack[loop_depth].continue_jumps);
+            loop_stack[loop_depth].continue_jumps = NULL;
+        }
     }
 
     loop_depth--;
@@ -640,9 +932,14 @@ Value evaluateCompileTimeValue(AST* node) {
             }
             break;
         case AST_STRING:
-            if (node->token && strlen(node->token->value) == 1)
-                return makeChar((unsigned char)node->token->value[0]);
-            if (node->token) return makeString(node->token->value);
+            if (node->token && node->token->value) {
+                size_t len = (node->i_val > 0) ? (size_t)node->i_val
+                                               : strlen(node->token->value);
+                if (len == 1) {
+                    return makeChar((unsigned char)node->token->value[0]);
+                }
+                return makeStringLen(node->token->value, len);
+            }
             break;
         case AST_BOOLEAN:
             return makeBoolean(node->i_val);
@@ -903,10 +1200,10 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             if (local_slot != -1) {
                 if (is_ref) {
-                    writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                    writeBytecodeChunk(chunk, GET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 } else {
-                    writeBytecodeChunk(chunk, OP_GET_LOCAL_ADDRESS, line);
+                    writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, line);
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 }
             } else {
@@ -917,32 +1214,44 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (upvalue_slot != -1) {
                     bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
                     if (up_is_ref) {
-                        writeBytecodeChunk(chunk, OP_GET_UPVALUE, line);
+                        writeBytecodeChunk(chunk, GET_UPVALUE, line);
                         writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                     } else {
-                        writeBytecodeChunk(chunk, OP_GET_UPVALUE_ADDRESS, line);
+                        writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
                         writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                     }
                 } else {
                     int nameIndex =  addStringConstant(chunk, varName);
-                    emitGlobalNameIdx(chunk, OP_GET_GLOBAL_ADDRESS, OP_GET_GLOBAL_ADDRESS16,
+                    emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16,
                                        nameIndex, line);
                 }
             }
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Recursively compile the L-Value of the base (e.g., myRec or p^)
-            compileLValue(node->left, chunk, getLine(node->left));
-
-            // Now, get the address of the specific field.
-            int fieldNameIndex = addStringConstant(chunk, node->token->value);
-            if (fieldNameIndex <= 0xFF) {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldNameIndex, line);
+            // Base expression might be a record value or a pointer to a record.
+            if (node->left && node->left->var_type == TYPE_POINTER) {
+                compileRValue(node->left, chunk, getLine(node->left));
             } else {
-                writeBytecodeChunk(chunk, OP_GET_FIELD_ADDRESS16, line);
-                emitShort(chunk, (uint16_t)fieldNameIndex, line);
+                compileLValue(node->left, chunk, getLine(node->left));
+            }
+
+            AST* recType = getRecordTypeFromExpr(node->left);
+            int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
+            if (recordTypeHasVTable(recType)) fieldOffset++;
+            if (fieldOffset < 0) {
+                fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
+                        node->token ? node->token->value : "<null>");
+                compiler_had_error = true;
+                break;
+            }
+
+            if (fieldOffset <= 0xFF) {
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+            } else {
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET16, line);
+                emitShort(chunk, (uint16_t)fieldOffset, line);
             }
             break;
         }
@@ -953,12 +1262,12 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 // We need the address of the string variable, then the index.
                 compileLValue(node->left, chunk, getLine(node->left));      // Push address of the string variable
                 compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index value
-                writeBytecodeChunk(chunk, OP_GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
+                writeBytecodeChunk(chunk, GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
                 break; // We are done with this case
             } else {
                 // Standard array access: push index expressions first so the
                 // array base address ends up on top of the stack.  This order
-                // matches OP_GET_ELEMENT_ADDRESS's expectation (it pops the base
+                // matches GET_ELEMENT_ADDRESS's expectation (it pops the base
                 // first, then each index).
 
                 // Compile all index expressions. Their values will be on the stack
@@ -972,7 +1281,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                 // If the base resolves to an upvalue, ensure no extra temporary
                 // values remain above the array pointer.  We want the stack to be
-                // [..., index, array] before emitting OP_GET_ELEMENT_ADDRESS.
+                // [..., index, array] before emitting GET_ELEMENT_ADDRESS.
                 if (current_function_compiler && node->left &&
                     node->left->type == AST_VARIABLE && node->left->token) {
                     const char* base_name = node->left->token->value;
@@ -984,16 +1293,59 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                             if (!up_is_ref) {
                                 // Drop any temporary left behind when accessing the upvalue
                                 // so only the index and the array pointer remain.
-                                writeBytecodeChunk(chunk, OP_SWAP, line);
-                                writeBytecodeChunk(chunk, OP_POP, line);
+                                writeBytecodeChunk(chunk, SWAP, line);
+                                writeBytecodeChunk(chunk, POP, line);
                             }
                         }
                     }
                 }
 
                 // Now, get the address of the specific element.
-                writeBytecodeChunk(chunk, OP_GET_ELEMENT_ADDRESS, line);
+                writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS, line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+            }
+            break;
+        }
+        case AST_NEW: {
+            if (!node || !node->token || !node->token->value) { break; }
+            const char* className = node->token->value;
+            AST* classType = lookupType(className);
+
+            bool hasVTable = recordTypeHasVTable(classType);
+            int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+
+            if (fieldCount <= 0xFF) {
+                writeBytecodeChunk(chunk, ALLOC_OBJECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
+            } else {
+                writeBytecodeChunk(chunk, ALLOC_OBJECT16, line);
+                emitShort(chunk, (uint16_t)fieldCount, line);
+            }
+
+            if (hasVTable) {
+                // Initialise hidden __vtable field (offset 0)
+                writeBytecodeChunk(chunk, DUP, line);
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                char vtName[512];
+                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                int vtNameIdx = addStringConstant(chunk, vtName);
+                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, vtNameIdx, line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);
+            }
+
+            if (node->child_count > 0) {
+                writeBytecodeChunk(chunk, DUP, line);
+                for (int i = 0; i < node->child_count; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                int ctorNameIdx = addStringConstant(chunk, className);
+                writeBytecodeChunk(chunk, CALL, line);
+                emitShort(chunk, (uint16_t)ctorNameIdx, line);
+                emitShort(chunk, 0xFFFF, line);
+                writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
             break;
         }
@@ -1013,6 +1365,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    gCurrentProgramRoot = rootNode;
     // Do NOT re-initialize the chunk here, it's already populated with unit code.
     // initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;
@@ -1035,7 +1388,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
         compiler_had_error = true;
     }
     if (!compiler_had_error) {
-        writeBytecodeChunk(outputChunk, OP_HALT, rootNode ? getLine(rootNode) : 0);
+        writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
     }
     return !compiler_had_error;
 }
@@ -1068,7 +1421,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     }
                 }
             }
-            
+
+            if (node->parent && node->parent->type == AST_PROGRAM) {
+                emitVTables(chunk);
+            }
+
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
                  for (int i = 0; i < statements->child_count; i++) {
@@ -1175,7 +1532,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                  * For user-defined enum types the copied type specifier may not carry
                                  * a token with the enum's name.  Falling back to the resolved type
                                  * definition guarantees that the enum's identifier is embedded in the
-                                 * bytecode so that OP_DEFINE_GLOBAL can later reconstruct the type.
+                                 * bytecode so that DEFINE_GLOBAL can later reconstruct the type.
                                  */
                                 type_name = actual_type_def_node->token->value;
                             }
@@ -1229,7 +1586,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 compileRValue(node->left, chunk, getLine(node->left));
                             }
                             int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
-                            emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16, name_idx_set, getLine(varNameNode));
+                            emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, name_idx_set, getLine(varNameNode));
                         }
                     }
                 }
@@ -1273,7 +1630,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             break;
                         }
 
-                        writeBytecodeChunk(chunk, OP_INIT_LOCAL_ARRAY, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, INIT_LOCAL_ARRAY, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
 
@@ -1311,11 +1668,31 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                         writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                    } else if (node->var_type == TYPE_STRING) {
+                        int len = 0;
+                        if (actual_type_def_node->right) {
+                            Value len_val = evaluateCompileTimeValue(actual_type_def_node->right);
+                            if (len_val.type == TYPE_INTEGER) {
+                                len = (int)len_val.i_val;
+                                if (len < 0 || len > 255) {
+                                    fprintf(stderr, "L%d: Compiler error: Fixed string length out of range (0-255).\n", getLine(varNameNode));
+                                    compiler_had_error = true;
+                                    len = 0;
+                                }
+                            } else {
+                                fprintf(stderr, "L%d: Compiler error: String length did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                compiler_had_error = true;
+                            }
+                            freeValue(&len_val);
+                        }
+                        writeBytecodeChunk(chunk, INIT_LOCAL_STRING, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)len, getLine(varNameNode));
                     } else if (node->var_type == TYPE_FILE) {
-                        writeBytecodeChunk(chunk, OP_INIT_LOCAL_FILE, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, INIT_LOCAL_FILE, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     } else if (node->var_type == TYPE_POINTER) {
-                        writeBytecodeChunk(chunk, OP_INIT_LOCAL_POINTER, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
 
                         const char* type_name = "";
@@ -1370,7 +1747,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         } else {
                             compileRValue(node->left, chunk, getLine(node->left));
                         }
-                        writeBytecodeChunk(chunk, OP_SET_LOCAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, SET_LOCAL, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     }
                 }
@@ -1443,7 +1820,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
             if (!node->token || !node->token->value) break;
-            writeBytecodeChunk(chunk, OP_JUMP, line);
+            writeBytecodeChunk(chunk, JUMP, line);
             int jump_over_body_operand_offset = chunk->count;
             emitShort(chunk, 0xFFFF, line);
             compileDefinedFunction(node, chunk, line);
@@ -1574,10 +1951,10 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
 
     // Step 5: Emit the return instruction.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
-        writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+        writeBytecodeChunk(chunk, GET_LOCAL, line);
         writeBytecodeChunk(chunk, (uint8_t)return_value_slot, line);
     }
-    writeBytecodeChunk(chunk, OP_RETURN, line);
+    writeBytecodeChunk(chunk, RETURN, line);
     
     // Step 6: Cleanup.
     if (proc_symbol) {
@@ -1605,7 +1982,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
 
     // If we're in the top-level program (no active FunctionCompilerState),
     // create a temporary one so the inliner can allocate locals and emit
-    // OP_GET_LOCAL/OP_SET_LOCAL instructions as usual. This mirrors how
+    // GET_LOCAL/SET_LOCAL instructions as usual. This mirrors how
     // other compilers conceptually treat the main program body as a routine.
     FunctionCompilerState temp_fc;
     FunctionCompilerState* saved_fc = current_function_compiler;
@@ -1638,7 +2015,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             } else {
                 compileRValue(arg_node, chunk, getLine(arg_node));
             }
-            writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+            writeBytecodeChunk(chunk, SET_LOCAL, line);
             writeBytecodeChunk(chunk, (uint8_t)slot, line);
         }
     }
@@ -1660,7 +2037,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
 
     if (push_result && decl->type == AST_FUNCTION_DECL) {
         if (result_slot != -1) {
-            writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+            writeBytecodeChunk(chunk, GET_LOCAL, line);
             writeBytecodeChunk(chunk, (uint8_t)result_slot, line);
         } else {
             emitConstant(chunk, addNilConstant(chunk), line);
@@ -1732,7 +2109,7 @@ static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
             }
 
             int nameIndex = addStringConstant(chunk, "write");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
             emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)write_arg_count, line);
 
@@ -1751,7 +2128,7 @@ static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
     int idx = addConstantToChunk(chunk, &cnt);
     freeValue(&cnt);
     emitConstant(chunk, idx, line);
-    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+    writeBytecodeChunk(chunk, CALL_HOST, line);
     writeBytecodeChunk(chunk, (uint8_t)HOST_FN_PRINTF, line);
 }
 
@@ -1765,7 +2142,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (node->left) {
                 compileRValue(node->left, chunk, getLine(node->left));
             }
-            writeBytecodeChunk(chunk, OP_RETURN, line);
+            writeBytecodeChunk(chunk, RETURN, line);
+            break;
+        }
+        case AST_CONTINUE: {
+            addContinueJump(chunk, line);
             break;
         }
         case AST_BREAK: {
@@ -1774,20 +2155,27 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_THREAD_SPAWN: {
             compileRValue(node, chunk, line);
-            writeBytecodeChunk(chunk, OP_POP, line);
+            writeBytecodeChunk(chunk, POP, line);
             break;
         }
         case AST_THREAD_JOIN: {
             if (node->left) {
                 compileRValue(node->left, chunk, getLine(node->left));
             }
-            writeBytecodeChunk(chunk, OP_THREAD_JOIN, line);
+            writeBytecodeChunk(chunk, THREAD_JOIN, line);
             break;
         }
         case AST_EXPR_STMT: {
             if (node->left) {
-                compileRValue(node->left, chunk, getLine(node->left));
-                writeBytecodeChunk(chunk, OP_POP, line);
+                if (node->left->type == AST_PROCEDURE_CALL ||
+                    node->left->type == AST_WRITE ||
+                    node->left->type == AST_WRITELN) {
+                    // Compile as a statement to avoid treating procedures as R-values
+                    compileNode(node->left, chunk, getLine(node->left));
+                } else {
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    writeBytecodeChunk(chunk, POP, line);
+                }
             }
             break;
         }
@@ -1815,7 +2203,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
             int nameIndex = addStringConstant(chunk, "write");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
             emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)(argCount + 1), line);
             break;
@@ -1824,16 +2212,21 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             startLoop(chunk->count); // <<< MODIFIED: Mark loop start
 
             int loopStart = chunk->count;
+            // In WHILE, 'continue' jumps to re-evaluate the condition
+            loop_stack[loop_depth].continue_target = loopStart;
 
             compileRValue(node->left, chunk, line);
 
-            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
             int exitJumpOffset = chunk->count;
             emitShort(chunk, 0xFFFF, line);
 
             compileStatement(node->right, chunk, getLine(node->right));
 
-            writeBytecodeChunk(chunk, OP_JUMP, line);
+            // All 'continue' statements in the body should jump to loopStart to re-evaluate condition
+            patchContinuesTo(chunk, loopStart);
+
+            writeBytecodeChunk(chunk, JUMP, line);
             int backwardJumpOffset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backwardJumpOffset, line);
 
@@ -1876,45 +2269,45 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 for (int j = 0; j < num_labels; j++) {
                     AST* label = labels_to_check[j];
                     
-                    writeBytecodeChunk(chunk, OP_DUP, line);
+                    writeBytecodeChunk(chunk, DUP, line);
                     
                     if (label->type == AST_SUBRANGE) {
                         // Logic for range: (case_val >= lower) AND (case_val <= upper)
                         // This is a more direct and correct translation.
                         
                         // Check lower bound
-                        writeBytecodeChunk(chunk, OP_DUP, line);                   // Stack: [case, case]
+                        writeBytecodeChunk(chunk, DUP, line);                   // Stack: [case, case]
                         compileRValue(label->left, chunk, getLine(label));      // Stack: [case, case, lower]
-                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, lower, case]
-                        writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line);          // Stack: [case, case, bool1]
+                        writeBytecodeChunk(chunk, SWAP, line);                   // Stack: [case, lower, case]
+                        writeBytecodeChunk(chunk, GREATER_EQUAL, line);          // Stack: [case, case, bool1]
 
                         // Check upper bound
-                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, bool1, case]
+                        writeBytecodeChunk(chunk, SWAP, line);                   // Stack: [case, bool1, case]
                         compileRValue(label->right, chunk, getLine(label));     // Stack: [case, bool1, case, upper]
-                        writeBytecodeChunk(chunk, OP_SWAP, line);                   // Stack: [case, bool1, upper, case]
-                        writeBytecodeChunk(chunk, OP_LESS_EQUAL, line);           // Stack: [case, bool1, bool2]
+                        writeBytecodeChunk(chunk, SWAP, line);                   // Stack: [case, bool1, upper, case]
+                        writeBytecodeChunk(chunk, LESS_EQUAL, line);           // Stack: [case, bool1, bool2]
                         
                         // Combine the two boolean results
-                        writeBytecodeChunk(chunk, OP_AND, line);                    // Stack: [case, final_bool]
+                        writeBytecodeChunk(chunk, AND, line);                    // Stack: [case, final_bool]
 
                     } else {
                         // For single labels
                         compileRValue(label, chunk, getLine(label));
-                        writeBytecodeChunk(chunk, OP_EQUAL, line);                  // Stack: [case, bool]
+                        writeBytecodeChunk(chunk, EQUAL, line);                  // Stack: [case, bool]
                     }
                     
                     // If the comparison is false, skip the branch body.
                     int false_jump = chunk->count;
-                    writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
+                    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
 
                     // The branch body starts here when the label matches.
-                    writeBytecodeChunk(chunk, OP_POP, line); // Pop the matched case value.
+                    writeBytecodeChunk(chunk, POP, line); // Pop the matched case value.
                     compileStatement(branch->right, chunk, getLine(branch->right));
 
                     // After body, jump to the end of the CASE.
                     end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
                     end_jumps[end_jumps_count++] = chunk->count;
-                    writeBytecodeChunk(chunk, OP_JUMP, line); emitShort(chunk, 0xFFFF, line);
+                    writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
 
                     // Patch the false jump to point to the next label.
                     patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
@@ -1932,7 +2325,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (fallthrough_jump != -1) {
                 patchShort(chunk, fallthrough_jump, chunk->count - (fallthrough_jump + 2));
             }
-            writeBytecodeChunk(chunk, OP_POP, line); // Pop the case value if no branch was taken.
+            writeBytecodeChunk(chunk, POP, line); // Pop the case value if no branch was taken.
             
             if (node->extra) {
                 compileStatement(node->extra, chunk, getLine(node->extra));
@@ -1954,6 +2347,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileStatement(node->left, chunk, getLine(node->left));
             }
 
+            // In REPEAT..UNTIL, 'continue' jumps to the condition check point (here)
+            patchContinuesTo(chunk, chunk->count);
+
             if (node->right) {
                 compileRValue(node->right, chunk, getLine(node->right));
             } else {
@@ -1961,7 +2357,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 emitConstant(chunk, falseConstIdx, line);
             }
 
-            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
             int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
 
@@ -1987,7 +2383,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             // Call built-in 'read'
             int nameIndex = addStringConstant(chunk, "read");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
             emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
@@ -2012,7 +2408,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             // Call the built-in `readln` function. This part is correct.
             int nameIndex = addStringConstant(chunk, "readln");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
             emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
@@ -2027,7 +2423,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
             int nameIndex = addStringConstant(chunk, "write");
-            writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
             emitShort(chunk, (uint16_t)nameIndex, line);
             writeBytecodeChunk(chunk, (uint8_t)(argCount + 1), line);
             break;
@@ -2054,17 +2450,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 
                 int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 if (return_slot != -1) {
-                    writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                    writeBytecodeChunk(chunk, SET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                    // The OP_POP instruction that was here has been removed.
+                    // The POP instruction that was here has been removed.
                 } else {
                     fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
                     compiler_had_error = true;
                 }
             } else {
                 compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, OP_SWAP, line);
-                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
             break;
         }
@@ -2090,10 +2486,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // 1. Initial assignment of the loop variable
             compileRValue(start_node, chunk, getLine(start_node));
             if (var_slot != -1) {
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                writeBytecodeChunk(chunk, SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16,
+                emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16,
                                    var_name_idx, line);
             }
 
@@ -2104,18 +2500,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             // 3. The loop condition check
             if (var_slot != -1) {
-                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
                                    var_name_idx, line);
             }
             
             compileRValue(end_node, chunk, getLine(end_node));
             
-            writeBytecodeChunk(chunk, is_downto ? OP_GREATER_EQUAL : OP_LESS_EQUAL, line);
+            writeBytecodeChunk(chunk, is_downto ? GREATER_EQUAL : LESS_EQUAL, line);
 
-            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
             int exitJump = chunk->count;
             emitShort(chunk, 0xFFFF, line);
 
@@ -2123,31 +2519,34 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             compileStatement(body_node, chunk, getLine(body_node));
             
             // 5. Increment/Decrement the loop variable
+            // Any 'continue' in the body should land here (the post step), not at the condition.
+            loop_stack[loop_depth].continue_target = chunk->count;
+            patchContinuesTo(chunk, chunk->count);
             if (var_slot != -1) {
-                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
                                    var_name_idx, line);
             }
             int one_const_idx = addIntConstant(chunk, 1);
             emitConstant(chunk, one_const_idx, line);
-            writeBytecodeChunk(chunk, is_downto ? OP_SUBTRACT : OP_ADD, line);
+            writeBytecodeChunk(chunk, is_downto ? SUBTRACT : ADD, line);
 
             if (var_slot != -1) {
-                writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                writeBytecodeChunk(chunk, SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
-                emitGlobalNameIdx(chunk, OP_SET_GLOBAL, OP_SET_GLOBAL16,
+                emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16,
                                    var_name_idx, line);
             }
 
             // The value from the increment/decrement is still on the stack.
             // Pop it to prevent stack overflow.
-            //writeBytecodeChunk(chunk, OP_POP, line);
+            //writeBytecodeChunk(chunk, POP, line);
 
             // 6. Jump back to the top of the loop to re-evaluate the condition
-            writeBytecodeChunk(chunk, OP_JUMP, line);
+            writeBytecodeChunk(chunk, JUMP, line);
             int backward_jump_offset = loopStart - (chunk->count + 2);
             emitShort(chunk, (uint16_t)backward_jump_offset, line);
 
@@ -2164,12 +2563,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (!node->left || !node->right) { return; }
             compileRValue(node->left, chunk, line);
             int jump_to_else_or_end_addr = chunk->count;
-            writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
             emitShort(chunk, 0xFFFF, line);
             compileStatement(node->right, chunk, getLine(node->right));
             if (node->extra) {
                 int jump_over_else_addr = chunk->count;
-                writeBytecodeChunk(chunk, OP_JUMP, line);
+                writeBytecodeChunk(chunk, JUMP, line);
                 emitShort(chunk, 0xFFFF, line);
                 uint16_t offsetToElse = (uint16_t)(chunk->count - (jump_to_else_or_end_addr + 3));
                 patchShort(chunk, jump_to_else_or_end_addr + 1, offsetToElse);
@@ -2211,9 +2610,53 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
+            bool isVirtualMethod = (node->child_count > 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+
+#ifdef FRONTEND_REA
+            // Fallback: receiver-aware method call mangle (Rea-only)
+            if (!proc_symbol && node->child_count > 0 && node->children[0]) {
+                AST* recv = node->children[0];
+                AST* tdef = recv->type_def;
+                // Resolve TYPE_REFERENCE chain
+                while (tdef && tdef->type == AST_TYPE_REFERENCE) tdef = tdef->right;
+                const char* cls_name = NULL;
+                if (tdef && tdef->token && tdef->token->value &&
+                    (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE || tdef->type == AST_RECORD_TYPE)) {
+                    // Prefer explicit type identifier token value
+                    if (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE) {
+                        cls_name = tdef->token->value;
+                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "this") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
+                        // Derive from current function name 'Class_method' if available
+                        const char* fname = current_function_compiler->function_symbol->name;
+                        const char* us = fname ? strchr(fname, '_') : NULL;
+                        static char buf[256];
+                        if (fname && us && (us - fname) < (int)sizeof(buf)) {
+                            size_t n = (size_t)(us - fname);
+                            memcpy(buf, fname, n); buf[n] = '\0';
+                            cls_name = buf;
+                        }
+                    }
+                }
+                if (cls_name && calleeName) {
+                    char mangled[MAX_SYMBOL_LENGTH * 2 + 2];
+                    snprintf(mangled, sizeof(mangled), "%s_%s", cls_name, calleeName);
+                    char mangled_lower[MAX_SYMBOL_LENGTH * 2 + 2];
+                    strncpy(mangled_lower, mangled, sizeof(mangled_lower) - 1);
+                    mangled_lower[sizeof(mangled_lower) - 1] = '\0';
+                    toLowerString(mangled_lower);
+                    Symbol* m = lookupProcedure(mangled_lower);
+                    if (m && m->is_alias) m = m->real_symbol;
+                    if (m) {
+                        proc_symbol = m;
+                        calleeName = m->name; // use resolved name for emission
+                    }
+                }
+            }
+#endif
+
             if (strcasecmp(calleeName, "printf") == 0) {
                 compilePrintf(node, chunk, line);
-                writeBytecodeChunk(chunk, OP_POP, line);
+                writeBytecodeChunk(chunk, POP, line);
                 break;
             }
 
@@ -2223,7 +2666,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, line);
+                writeBytecodeChunk(chunk, MUTEX_LOCK, line);
                 break;
             }
             if (strcasecmp(calleeName, "unlock") == 0) {
@@ -2232,7 +2675,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
+                writeBytecodeChunk(chunk, MUTEX_UNLOCK, line);
                 break;
             }
             if (strcasecmp(calleeName, "destroy") == 0) {
@@ -2242,21 +2685,21 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, line);
+                writeBytecodeChunk(chunk, MUTEX_DESTROY, line);
                 break;
             }
             if (strcasecmp(calleeName, "mutex") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
+                writeBytecodeChunk(chunk, MUTEX_CREATE, line);
                 break;
             }
             if (strcasecmp(calleeName, "rcmutex") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
                 }
-                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
+                writeBytecodeChunk(chunk, RCMUTEX_CREATE, line);
                 break;
             }
 
@@ -2371,6 +2814,37 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
+            if (isVirtualMethod) {
+                AST* recv = node->children[0];
+                compileRValue(recv, chunk, getLine(recv));
+                writeBytecodeChunk(chunk, DUP, line);
+                for (int i = 1; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    bool is_var_param = false;
+                    if (proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
+                        AST* param_node = proc_symbol->type_def->children[i];
+                        if (param_node && param_node->by_ref) is_var_param = true;
+                    }
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileRValue(arg_node, chunk, getLine(arg_node));
+                    }
+                    writeBytecodeChunk(chunk, SWAP, line);
+                }
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                emitConstant(chunk, addIntConstant(chunk, proc_symbol->type_def->i_val), line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS, line);
+                writeBytecodeChunk(chunk, (uint8_t)1, line);
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                break;
+            }
+
             // (Argument compilation logic remains the same...)
             for (int i = 0; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
@@ -2419,10 +2893,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     }
                     if (slot != -1) {
-                        writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                        writeBytecodeChunk(chunk, GET_LOCAL, line);
                         writeBytecodeChunk(chunk, (uint8_t)slot, line);
                     }
-                    writeBytecodeChunk(chunk, OP_EXIT, line);
+                    writeBytecodeChunk(chunk, EXIT, line);
                 } else {
                     BuiltinRoutineType type = getBuiltinType(calleeName);
                     if (type == BUILTIN_TYPE_PROCEDURE || type == BUILTIN_TYPE_FUNCTION) {
@@ -2431,11 +2905,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         normalized_name[sizeof(normalized_name) - 1] = '\0';
                         toLowerString(normalized_name);
                         int nameIndex = addStringConstant(chunk, normalized_name);
-                        writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                        writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
                         writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                         if (type == BUILTIN_TYPE_FUNCTION) {
-                            writeBytecodeChunk(chunk, OP_POP, line);
+                            writeBytecodeChunk(chunk, POP, line);
                         }
                     } else {
                         // This case handles if a name is in the isBuiltin list but not in getBuiltinType,
@@ -2446,7 +2920,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
                 int nameIndex = addStringConstant(chunk, calleeName);
-                writeBytecodeChunk(chunk, OP_CALL, line);
+                writeBytecodeChunk(chunk, CALL, line);
                 emitShort(chunk, (uint16_t)nameIndex, line);
 
                 if (proc_symbol->is_defined) {
@@ -2458,7 +2932,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                 // This logic for user-defined functions is already correct.
                 if (proc_symbol->type != TYPE_VOID) {
-                    writeBytecodeChunk(chunk, OP_POP, line);
+                    writeBytecodeChunk(chunk, POP, line);
                 }
             } else {
                 // Fallback: map known host-threading helpers by name
@@ -2478,7 +2952,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     } else {
                         emitConstant(chunk, addNilConstant(chunk), line); // default arg = nil
                     }
-                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                    writeBytecodeChunk(chunk, CALL_HOST, line);
                     writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_THREAD_ADDR, line);
                 } else if (strcasecmp(calleeName, "waitforthread") == 0) {
                     if (node->child_count != 1) {
@@ -2486,7 +2960,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     } else {
                         compileRValue(node->children[0], chunk, getLine(node->children[0]));
                     }
-                    writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                    writeBytecodeChunk(chunk, CALL_HOST, line);
                     writeBytecodeChunk(chunk, (uint8_t)HOST_FN_WAIT_THREAD, line);
                 } else {
                     // Indirect call through a procedure pointer variable: arguments are already on stack.
@@ -2496,7 +2970,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     tmpVar.type = AST_VARIABLE;
                     tmpVar.token = node->token; // reference only; compileRValue copies token if needed
                     compileRValue(&tmpVar, chunk, line);
-                    writeBytecodeChunk(chunk, OP_PROC_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 }
             }
@@ -2550,6 +3024,49 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
     Token* node_token = node->token;
 
     switch (node->type) {
+        case AST_NEW: {
+            if (!node || !node->token || !node->token->value) { break; }
+            const char* className = node->token->value;
+            AST* classType = lookupType(className);
+
+            bool hasVTable = recordTypeHasVTable(classType);
+            int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+
+            if (fieldCount <= 0xFF) {
+                writeBytecodeChunk(chunk, ALLOC_OBJECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
+            } else {
+                writeBytecodeChunk(chunk, ALLOC_OBJECT16, line);
+                emitShort(chunk, (uint16_t)fieldCount, line);
+            }
+
+            if (hasVTable) {
+                // Store class vtable pointer into hidden __vtable field (offset 0)
+                writeBytecodeChunk(chunk, DUP, line);
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)0, line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                char vtName[512];
+                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                int vtNameIdx = addStringConstant(chunk, vtName);
+                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, vtNameIdx, line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);
+            }
+
+            if (node->child_count > 0) {
+                writeBytecodeChunk(chunk, DUP, line);
+                for (int i = 0; i < node->child_count; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                int ctorNameIdx = addStringConstant(chunk, className);
+                writeBytecodeChunk(chunk, CALL, line);
+                emitShort(chunk, (uint16_t)ctorNameIdx, line);
+                emitShort(chunk, 0xFFFF, line);
+                writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
+            }
+            break;
+        }
         case AST_SET: {
             Value set_const_val;
             memset(&set_const_val, 0, sizeof(Value));
@@ -2624,7 +3141,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             // Emit the format opcode and its operands
-            writeBytecodeChunk(chunk, OP_FORMAT_VALUE, line);
+            writeBytecodeChunk(chunk, FORMAT_VALUE, line);
             writeBytecodeChunk(chunk, (uint8_t)width, line);
             writeBytecodeChunk(chunk, (uint8_t)decimals, line); // Using -1 (0xFF) for "not specified"
             break;
@@ -2632,8 +3149,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_STRING: {
             if (!node_token || !node_token->value) { /* error */ break; }
 
-            // If the string literal has a length of 1, treat it as a character constant
-            if (strlen(node_token->value) == 1) {
+            size_t len = (node->i_val > 0) ? (size_t)node->i_val
+                                           : strlen(node_token->value);
+            if (len == 1) {
                 /* Single-character string literals represent CHAR constants.
                  * Cast through unsigned char so values in the 128..255 range
                  * are preserved correctly. */
@@ -2642,8 +3160,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitConstant(chunk, constIndex, line);
                 // The temporary char value `val` does not need `freeValue`
             } else {
-                // For strings longer than 1 character, use the existing logic
-                int constIndex = addStringConstant(chunk, node_token->value);
+                int constIndex = addStringConstantLen(chunk, node_token->value, len);
                 emitConstant(chunk, constIndex, line);
             }
             break;
@@ -2682,7 +3199,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (call->child_count > 0) {
                 fprintf(stderr, "L%d: Compiler warning: Arguments to '%s' ignored in spawn.\n", line, calleeName);
             }
-            writeBytecodeChunk(chunk, OP_THREAD_CREATE, line);
+            writeBytecodeChunk(chunk, THREAD_CREATE, line);
             emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
             break;
         }
@@ -2691,7 +3208,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             // First, get the pointer value itself onto the stack by compiling the l-value.
             compileRValue(node->left, chunk, getLine(node->left));
             // Then, use GET_INDIRECT to replace the pointer with the value it points to.
-            writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+            writeBytecodeChunk(chunk, GET_INDIRECT, line);
             break;
         }
         case AST_VARIABLE: {
@@ -2716,16 +3233,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (strcasecmp(varName, "break_requested") == 0) {
                 // This is a special host-provided variable.
                 // Instead of treating it as a global, we call a host function.
-                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_QUIT_REQUESTED, line);
                 break; // We are done compiling this node.
             }
             
             if (local_slot != -1) {
-                writeBytecodeChunk(chunk, OP_GET_LOCAL, line);
+                writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 if (is_ref && node->var_type != TYPE_ARRAY) {
-                    writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                    writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 }
             } else {
                 int upvalue_slot = -1;
@@ -2734,10 +3251,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
                 if (upvalue_slot != -1) {
                     bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
-                    writeBytecodeChunk(chunk, OP_GET_UPVALUE, line);
+                    writeBytecodeChunk(chunk, GET_UPVALUE, line);
                     writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                     if (up_is_ref && node->var_type != TYPE_ARRAY) {
-                        writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+                        writeBytecodeChunk(chunk, GET_INDIRECT, line);
                     }
                 } else {
                     // Check if it's a compile-time constant first.
@@ -2746,7 +3263,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
                     } else {
                         int nameIndex = addStringConstant(chunk, varName);
-                        emitGlobalNameIdx(chunk, OP_GET_GLOBAL, OP_GET_GLOBAL16,
+                        emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
                                            nameIndex, line);
                     }
                 }
@@ -2756,7 +3273,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_FIELD_ACCESS: {
             // Get the address of the field, then get the value at that address.
             compileLValue(node, chunk, getLine(node));
-            writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+            writeBytecodeChunk(chunk, GET_INDIRECT, line);
             break;
         }
         case AST_ARRAY_ACCESS: {
@@ -2764,13 +3281,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (node->left && (node->left->var_type == TYPE_STRING || node->left->var_type == TYPE_CHAR)) {
                 compileRValue(node->left, chunk, getLine(node->left));      // Push the string or char
                 compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index
-                writeBytecodeChunk(chunk, OP_GET_CHAR_FROM_STRING, line); // Use the specialized opcode
+                writeBytecodeChunk(chunk, GET_CHAR_FROM_STRING, line); // Use the specialized opcode
                 break;
             }
 
             // Default behavior for actual arrays: get address, then get value.
             compileLValue(node, chunk, getLine(node));
-            writeBytecodeChunk(chunk, OP_GET_INDIRECT, line);
+            writeBytecodeChunk(chunk, GET_INDIRECT, line);
             break;
         }
         case AST_ASSIGN: {
@@ -2787,7 +3304,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             compileRValue(rvalue, chunk, getLine(rvalue));
-            writeBytecodeChunk(chunk, OP_DUP, line); // Preserve assigned value as the expression result
+            writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
 
             if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                 lvalue->token && lvalue->token->value &&
@@ -2796,7 +3313,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                 int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 if (return_slot != -1) {
-                    writeBytecodeChunk(chunk, OP_SET_LOCAL, line);
+                    writeBytecodeChunk(chunk, SET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
                 } else {
                     fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
@@ -2804,8 +3321,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             } else {
                 compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, OP_SWAP, line);
-                writeBytecodeChunk(chunk, OP_SET_INDIRECT, line);
+                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
             break;
         }
@@ -2816,18 +3333,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     // Bitwise AND for integers
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
-                    writeBytecodeChunk(chunk, OP_AND, line);
+                    writeBytecodeChunk(chunk, AND, line);
                 } else {
                     // Logical AND for booleans (with short-circuiting)
                     compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
                     int jump_if_false = chunk->count;
-                    writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
+                    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
                     emitShort(chunk, 0xFFFF, line);
 
                     // If A was true, result is B.
                     compileRValue(node->right, chunk, getLine(node->right)); // stack: [B]
                     int jump_over_false_case = chunk->count;
-                    writeBytecodeChunk(chunk, OP_JUMP, line);
+                    writeBytecodeChunk(chunk, JUMP, line);
                     emitShort(chunk, 0xFFFF, line);
                     // If A was false, jump here and push 'false' as the result.
                     patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
@@ -2843,19 +3360,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     // Bitwise OR for integers
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
-                    writeBytecodeChunk(chunk, OP_OR, line);
+                    writeBytecodeChunk(chunk, OR, line);
                 } else {
                     // Logical OR for booleans (with short-circuiting)
                 compileRValue(node->left, chunk, getLine(node->left)); // stack: [A]
                 int jump_if_false = chunk->count;
-                writeBytecodeChunk(chunk, OP_JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
+                writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);     // Pops A. Jumps if A is false.
                 emitShort(chunk, 0xFFFF, line);
 
                 // If we get here, A was true. Stack is empty. The result must be 'true'.
                 int true_const_idx = addBooleanConstant(chunk, true);
                 emitConstant(chunk, true_const_idx, line);
                 int jump_to_end = chunk->count;
-                writeBytecodeChunk(chunk, OP_JUMP, line);
+                writeBytecodeChunk(chunk, JUMP, line);
                 emitShort(chunk, 0xFFFF, line);
 
                 // This is where we land if A was false. Stack is empty.
@@ -2872,22 +3389,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compileRValue(node->right, chunk, getLine(node->right));
                 if (node_token) { // node_token is the operator
                     switch (node_token->type) {
-                        case TOKEN_PLUS:          writeBytecodeChunk(chunk, OP_ADD, line); break;
-                        case TOKEN_MINUS:         writeBytecodeChunk(chunk, OP_SUBTRACT, line); break;
-                        case TOKEN_MUL:           writeBytecodeChunk(chunk, OP_MULTIPLY, line); break;
-                        case TOKEN_SLASH:         writeBytecodeChunk(chunk, OP_DIVIDE, line); break;
-                        case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, OP_INT_DIV, line); break;
-                        case TOKEN_MOD:           writeBytecodeChunk(chunk, OP_MOD, line); break;
+                        case TOKEN_PLUS:          writeBytecodeChunk(chunk, ADD, line); break;
+                        case TOKEN_MINUS:         writeBytecodeChunk(chunk, SUBTRACT, line); break;
+                        case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
+                        case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
+                        case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, INT_DIV, line); break;
+                        case TOKEN_MOD:           writeBytecodeChunk(chunk, MOD, line); break;
                         // AND and OR are now handled above
-                        case TOKEN_SHL:           writeBytecodeChunk(chunk, OP_SHL, line); break;
-                        case TOKEN_SHR:           writeBytecodeChunk(chunk, OP_SHR, line); break;
-                        case TOKEN_EQUAL:         writeBytecodeChunk(chunk, OP_EQUAL, line); break;
-                        case TOKEN_NOT_EQUAL:     writeBytecodeChunk(chunk, OP_NOT_EQUAL, line); break;
-                        case TOKEN_LESS:          writeBytecodeChunk(chunk, OP_LESS, line); break;
-                        case TOKEN_LESS_EQUAL:    writeBytecodeChunk(chunk, OP_LESS_EQUAL, line); break;
-                        case TOKEN_GREATER:       writeBytecodeChunk(chunk, OP_GREATER, line); break;
-                        case TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, OP_GREATER_EQUAL, line); break;
-                        case TOKEN_IN:            writeBytecodeChunk(chunk, OP_IN, line); break;
+                        case TOKEN_SHL:           writeBytecodeChunk(chunk, SHL, line); break;
+                        case TOKEN_SHR:           writeBytecodeChunk(chunk, SHR, line); break;
+                        case TOKEN_EQUAL:         writeBytecodeChunk(chunk, EQUAL, line); break;
+                        case TOKEN_NOT_EQUAL:     writeBytecodeChunk(chunk, NOT_EQUAL, line); break;
+                        case TOKEN_LESS:          writeBytecodeChunk(chunk, LESS, line); break;
+                        case TOKEN_LESS_EQUAL:    writeBytecodeChunk(chunk, LESS_EQUAL, line); break;
+                        case TOKEN_GREATER:       writeBytecodeChunk(chunk, GREATER, line); break;
+                        case TOKEN_GREATER_EQUAL: writeBytecodeChunk(chunk, GREATER_EQUAL, line); break;
+                        case TOKEN_IN:            writeBytecodeChunk(chunk, IN, line); break;
                         default:
                             fprintf(stderr, "L%d: Compiler error: Unknown binary operator %s\n", line, tokenTypeToString(node_token->type));
                             compiler_had_error = true;
@@ -2901,8 +3418,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             compileRValue(node->left, chunk, getLine(node->left)); // Operand
             if (node_token) { // node_token is the operator
                 switch (node_token->type) {
-                    case TOKEN_MINUS: writeBytecodeChunk(chunk, OP_NEGATE, line); break;
-                    case TOKEN_NOT:   writeBytecodeChunk(chunk, OP_NOT, line);    break;
+                    case TOKEN_MINUS: writeBytecodeChunk(chunk, NEGATE, line); break;
+                    case TOKEN_NOT:   writeBytecodeChunk(chunk, NOT, line);    break;
                     default:
                         fprintf(stderr, "L%d: Compiler error: Unknown unary operator %s\n", line, tokenTypeToString(node_token->type));
                         compiler_had_error = true;
@@ -2947,6 +3464,29 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
+            // If this is a qualified call like receiver.method(...), attempt to
+            // mangle to ClassName_method by inspecting the receiver's static type.
+            char mangled_name_buf[MAX_SYMBOL_LENGTH * 2 + 2];
+            if (isCallQualified && node->left) {
+                const char* cls_name = NULL;
+                AST* type_ref = node->left->type_def;
+                if (type_ref) {
+                    // Resolve possible type alias to get to TYPE_REFERENCE
+                    while (type_ref && type_ref->type == AST_TYPE_REFERENCE && type_ref->right) {
+                        type_ref = type_ref->right;
+                    }
+                    if (node->left->type_def && node->left->type_def->token && node->left->type_def->token->value) {
+                        cls_name = node->left->type_def->token->value;
+                    } else if (type_ref && type_ref->token && type_ref->token->value) {
+                        cls_name = type_ref->token->value;
+                    }
+                }
+                if (cls_name) {
+                    snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s_%s", cls_name, functionName);
+                    functionName = mangled_name_buf;
+                }
+            }
+
             if (strcasecmp(functionName, "printf") == 0) {
                 compilePrintf(node, chunk, line);
                 break;
@@ -2967,7 +3507,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     emitConstant(chunk, addNilConstant(chunk), line); // default arg
                 }
-                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_THREAD_ADDR, line);
                 break;
             }
@@ -2978,7 +3518,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_CALL_HOST, line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_WAIT_THREAD, line);
                 break;
             }
@@ -2986,14 +3526,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (node->child_count != 0) {
                     fprintf(stderr, "L%d: Compiler Error: mutex expects no arguments.\n", line);
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_CREATE, line);
+                writeBytecodeChunk(chunk, MUTEX_CREATE, line);
                 break;
             }
             if (strcasecmp(functionName, "rcmutex") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr, "L%d: Compiler Error: rcmutex expects no arguments.\n", line);
                 }
-                writeBytecodeChunk(chunk, OP_RCMUTEX_CREATE, line);
+                writeBytecodeChunk(chunk, RCMUTEX_CREATE, line);
                 break;
             }
             // (indirect function pointer calls are handled later in the fallback path)
@@ -3003,7 +3543,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_LOCK, line);
+                writeBytecodeChunk(chunk, MUTEX_LOCK, line);
                 break;
             }
             if (strcasecmp(functionName, "unlock") == 0) {
@@ -3012,7 +3552,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_UNLOCK, line);
+                writeBytecodeChunk(chunk, MUTEX_UNLOCK, line);
                 break;
             }
 
@@ -3022,7 +3562,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     compileRValue(node->children[0], chunk, getLine(node->children[0]));
                 }
-                writeBytecodeChunk(chunk, OP_MUTEX_DESTROY, line);
+                writeBytecodeChunk(chunk, MUTEX_DESTROY, line);
                 break;
             }
 
@@ -3034,14 +3574,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             toLowerString(func_name_lower);
 
             func_symbol_lookup = lookupProcedure(func_name_lower);
-            
+
             if (!func_symbol_lookup && current_compilation_unit_name) {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, func_name_lower);
                 toLowerString(qualified_name_lower);
                 func_symbol_lookup = lookupProcedure(qualified_name_lower);
             }
-            
+
             Symbol* func_symbol = func_symbol_lookup;
 
             // <<<< THIS IS THE CRITICAL FIX: Follow the alias to the real symbol >>>>
@@ -3049,10 +3589,46 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 func_symbol = func_symbol->real_symbol;
             }
 
+            bool isVirtualMethod = isCallQualified && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
                 compileInlineRoutine(func_symbol, node, chunk, line, true);
                 break;
+            }
+
+            if (isVirtualMethod) {
+                if (node->child_count > 0) {
+                    // Compile receiver and keep duplicate on top
+                    AST* recv = node->children[0];
+                    compileRValue(recv, chunk, getLine(recv));
+                    writeBytecodeChunk(chunk, DUP, line);
+                    for (int i = 1; i < node->child_count; i++) {
+                        AST* arg_node = node->children[i];
+                        bool is_var_param = false;
+                        if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
+                            AST* param_node = func_symbol->type_def->children[i];
+                            if (param_node && param_node->by_ref) is_var_param = true;
+                        }
+                        if (is_var_param) {
+                            compileLValue(arg_node, chunk, getLine(arg_node));
+                        } else {
+                            compileRValue(arg_node, chunk, getLine(arg_node));
+                        }
+                        writeBytecodeChunk(chunk, SWAP, line);
+                    }
+                    writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                    writeBytecodeChunk(chunk, (uint8_t)0, line);
+                    writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                    emitConstant(chunk, addIntConstant(chunk, func_symbol->type_def->i_val), line);
+                    writeBytecodeChunk(chunk, SWAP, line);
+                    writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS, line);
+                    writeBytecodeChunk(chunk, (uint8_t)1, line);
+                    writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                    writeBytecodeChunk(chunk, CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    break;
+                }
             }
 
             if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
@@ -3093,7 +3669,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (type == BUILTIN_TYPE_PROCEDURE) {
                     fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
                     compiler_had_error = true;
-                    for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                    for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, POP, line);
                     emitConstant(chunk, addNilConstant(chunk), line);
                 } else if (type == BUILTIN_TYPE_FUNCTION) {
                     char normalized_name[MAX_SYMBOL_LENGTH];
@@ -3101,7 +3677,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     normalized_name[sizeof(normalized_name) - 1] = '\0';
                     toLowerString(normalized_name);
                     int nameIndex = addStringConstant(chunk, normalized_name);
-                    writeBytecodeChunk(chunk, OP_CALL_BUILTIN, line);
+                    writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                     emitShort(chunk, (uint16_t)nameIndex, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 } else {
@@ -3110,7 +3686,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     tmpVar.type = AST_VARIABLE; tmpVar.token = node->token;
                     // Arguments are already compiled (above) and on the stack; now push callee address
                     compileRValue(&tmpVar, chunk, line);
-                    writeBytecodeChunk(chunk, OP_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, CALL_INDIRECT, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 }
             } else {
@@ -3122,10 +3698,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
                 
                 if (func_symbol) {
+                    
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                         compiler_had_error = true;
-                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
                     } else if ((strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)
                                ? !(node->child_count == 1 || node->child_count == 2)
@@ -3138,11 +3715,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                                     line, original_display_name, func_symbol->arity, node->child_count);
                         }
                         compiler_had_error = true;
-                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, OP_POP, line);
+                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
                     } else {
                         int nameIndex = addStringConstant(chunk, functionName);
-                        writeBytecodeChunk(chunk, OP_CALL, line);
+                        writeBytecodeChunk(chunk, CALL, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
 
                         if (func_symbol->is_defined) {
@@ -3157,7 +3734,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     AST tmpVar; memset(&tmpVar, 0, sizeof(AST));
                     tmpVar.type = AST_VARIABLE; tmpVar.token = node->token;
                     compileRValue(&tmpVar, chunk, line);
-                    writeBytecodeChunk(chunk, OP_CALL_INDIRECT, line);
+                    writeBytecodeChunk(chunk, CALL_INDIRECT, line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                 }
             }
@@ -3201,10 +3778,10 @@ void finalizeBytecode(BytecodeChunk* chunk) {
     for (int offset = 0; offset < chunk->count; ) {
         uint8_t opcode = chunk->code[offset];
 
-        if (opcode == OP_CALL) {
-            // Ensure we can read the full OP_CALL instruction
+        if (opcode == CALL) {
+            // Ensure we can read the full CALL instruction
             if (offset + 5 >= chunk->count) {
-                fprintf(stderr, "Compiler Error: Malformed OP_CALL instruction at offset %d.\n", offset);
+                fprintf(stderr, "Compiler Error: Malformed CALL instruction at offset %d.\n", offset);
                 compiler_had_error = true;
                 break;
             }
@@ -3217,7 +3794,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
                                                  chunk->code[offset + 2]);
                 if (name_index >= chunk->constants_count) {
-                    fprintf(stderr, "Compiler Error: Invalid name index in OP_CALL at offset %d.\n", name_index);
+                    fprintf(stderr, "Compiler Error: Invalid name index in CALL at offset %d.\n", name_index);
                     compiler_had_error = true;
                     offset += 6; // Skip this malformed instruction
                     continue;
@@ -3225,7 +3802,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
 
                 Value name_val = chunk->constants[name_index];
                 if (name_val.type != TYPE_STRING) {
-                    fprintf(stderr, "Compiler Error: Constant at index %d is not a string for OP_CALL.\n", name_index);
+                    fprintf(stderr, "Compiler Error: Constant at index %d is not a string for CALL.\n", name_index);
                     compiler_had_error = true;
                     offset += 6; // Skip
                     continue;
@@ -3255,7 +3832,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                     compiler_had_error = true;
                 }
             }
-            offset += 6; // Advance past the 6-byte OP_CALL instruction
+            offset += 6; // Advance past the 6-byte CALL instruction
         } else {
             // For any other instruction, use the new helper to get the correct length and advance the offset.
             offset += getInstructionLength(chunk, offset);

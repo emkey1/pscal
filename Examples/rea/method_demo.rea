@@ -1,0 +1,20 @@
+// Rea method-call sugar demo
+
+class Counter {
+  int n;
+  void inc() { this.n = this.n + 1; }
+  int set(int v) { this.n = v; return this.n; }
+}
+
+Counter c = new Counter();
+c.set(3);
+writeln("c=", c.n);
+c.inc();
+writeln("c=", c.n);
+
+// new-expression receiver
+Counter d = new Counter();
+new Counter().set(7); // temporary; not printed
+d.set(5);
+writeln("d=", d.n);
+

@@ -1,0 +1,20 @@
+// Verify method-call sugar + compiler fallback for obj.method(args)
+
+class Point {
+  int x;
+  int setX(int nx) { this.x = nx; return this.x; }
+  void incX() { this.setX(this.x + 1); }
+}
+
+// Variable receiver
+Point p = new Point();
+p.setX(5);
+writeln(p.x);
+p.incX();
+writeln(p.x);
+
+// new-expression receiver
+Point q = new Point();
+q.setX(10);
+writeln(q.x);
+

@@ -304,6 +304,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"mstreambuffer", vmBuiltinMstreambuffer},
+    {"newobj", vmBuiltinNewObj},
     {"new", vmBuiltinNew},
     {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
@@ -650,10 +651,25 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 }
             }
             // Parse length modifiers and record small-width flags; we normalize by truncating manually
-            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
-            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
-            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
-            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
+            bool mod_h = false, mod_hh = false;
+            if (fmt[j] == 'h') {
+                mod_h = true;
+                j++;
+                if (fmt[j] == 'h') {
+                    mod_hh = true;
+                    mod_h = false;
+                    j++;
+                }
+            } else if (fmt[j] == 'l') {
+                // We currently ignore 'l' and 'll' modifiers but need to consume them
+                j++;
+                if (fmt[j] == 'l') {
+                    j++;
+                }
+            } else {
+                const char* length_mods = "Ljzt";
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+            }
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
@@ -783,11 +799,27 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 j++; precision = 0;
                 while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
             }
-            bool mod_h = false, mod_hh = false, mod_l = false, mod_ll = false;
-            if (fmt[j] == 'h') { mod_h = true; j++; if (fmt[j] == 'h') { mod_hh = true; mod_h = false; j++; } }
-            else if (fmt[j] == 'l') { mod_l = true; j++; if (fmt[j] == 'l') { mod_ll = true; mod_l = false; j++; } }
-            else { const char* length_mods = "Ljzt"; while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++; }
-            char spec = fmt[j]; if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
+            bool mod_h = false, mod_hh = false;
+            if (fmt[j] == 'h') {
+                mod_h = true;
+                j++;
+                if (fmt[j] == 'h') {
+                    mod_hh = true;
+                    mod_h = false;
+                    j++;
+                }
+            } else if (fmt[j] == 'l') {
+                // Ignore 'l' and 'll' modifiers but consume them
+                j++;
+                if (fmt[j] == 'l') {
+                    j++;
+                }
+            } else {
+                const char* length_mods = "Ljzt";
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+            }
+            char spec = fmt[j];
+            if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
             char fmtbuf[32]; char buf[256];
             if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
             else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
@@ -2360,6 +2392,29 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+// newobj(typeName: string): pointer
+Value vmBuiltinNewObj(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "newobj expects 1 string type name.");
+        return makeNil();
+    }
+    const char* typeName = args[0].s_val;
+    AST* typeDef = lookupType(typeName);
+    if (!typeDef) {
+        runtimeError(vm, "newobj: unknown type '%s'", typeName ? typeName : "");
+        return makeNil();
+    }
+    VarType vt = typeDef->var_type;
+    Value* allocated = (Value*)malloc(sizeof(Value));
+    if (!allocated) { runtimeError(vm, "newobj: allocation failed"); return makeNil(); }
+    *allocated = makeValueForType(vt, typeDef, NULL);
+    Value ret = makeVoid();
+    ret.type = TYPE_POINTER;
+    ret.ptr_val = allocated;
+    ret.base_type_node = typeDef;
+    return ret;
+}
+
 Value vmBuiltinExit(VM* vm, int arg_count, Value* args) {
     if (arg_count > 1 || (arg_count == 1 && !IS_INTLIKE(args[0]))) {
         runtimeError(vm, "exit expects 0 or 1 integer argument.");
@@ -3062,7 +3117,7 @@ Value vmBuiltinValreal(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinVMVersion(VM* vm, int arg_count, Value* args) {
     (void)vm; (void)args;
-    return arg_count == 0 ? makeInt(PSCAL_VM_VERSION) : makeInt(-1);
+    return arg_count == 0 ? makeInt(pscal_vm_version()) : makeInt(-1);
 }
 
 Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
@@ -3665,6 +3720,8 @@ void registerAllBuiltins(void) {
 #endif
 
     /* General built-in functions and procedures */
+    // Rea/CLike: object allocation helper
+    registerBuiltinFunction("newobj", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);
