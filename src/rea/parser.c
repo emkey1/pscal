@@ -875,6 +875,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
             snprintf(m, ln, "%s_%s", p->currentClassName, nameTok->value);
             free(nameTok->value);
             nameTok->value = m;
+            nameTok->length = strlen(m); // keep token length in sync with new name
         }
     }
 
