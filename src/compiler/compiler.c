@@ -1506,17 +1506,20 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 emitVTables(chunk);
                 for (int pg = 0; pg < pending_global_vtable_count; pg++) {
                     PendingGlobalVTableInit* p = &pending_global_vtables[pg];
-                    int objNameIdx = addStringConstant(chunk, p->var_name);
-                    emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, objNameIdx, 0);
-                    writeBytecodeChunk(chunk, DUP, 0);
-                    writeBytecodeChunk(chunk, GET_FIELD_OFFSET, 0);
-                    writeBytecodeChunk(chunk, (uint8_t)0, 0);
-                    char vtName[512];
-                    snprintf(vtName, sizeof(vtName), "%s_vtable", p->class_name);
-                    int vtIdx = addStringConstant(chunk, vtName);
-                    emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtIdx, 0);
-                    writeBytecodeChunk(chunk, SET_INDIRECT, 0);
-                    writeBytecodeChunk(chunk, POP, 0);
+                    AST* cls = lookupType(p->class_name);
+                    if (recordTypeHasVTable(cls)) {
+                        int objNameIdx = addStringConstant(chunk, p->var_name);
+                        emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, objNameIdx, 0);
+                        writeBytecodeChunk(chunk, DUP, 0);
+                        writeBytecodeChunk(chunk, GET_FIELD_OFFSET, 0);
+                        writeBytecodeChunk(chunk, (uint8_t)0, 0);
+                        char vtName[512];
+                        snprintf(vtName, sizeof(vtName), "%s_vtable", p->class_name);
+                        int vtIdx = addStringConstant(chunk, vtName);
+                        emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtIdx, 0);
+                        writeBytecodeChunk(chunk, SET_INDIRECT, 0);
+                        writeBytecodeChunk(chunk, POP, 0);
+                    }
                     free(p->var_name);
                     free(p->class_name);
                 }
@@ -1693,13 +1696,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 compileRValue(node->left, chunk, getLine(node->left));
                                 if (current_function_compiler == NULL && node->left->type == AST_NEW &&
                                     node->left->token && node->left->token->value) {
-                                    pending_global_vtables = realloc(pending_global_vtables,
-                                        sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
-                                    pending_global_vtables[pending_global_vtable_count].var_name =
-                                        strdup(varNameNode->token->value);
-                                    pending_global_vtables[pending_global_vtable_count].class_name =
-                                        strdup(node->left->token->value);
-                                    pending_global_vtable_count++;
+                                    AST* classType = lookupType(node->left->token->value);
+                                    if (recordTypeHasVTable(classType)) {
+                                        pending_global_vtables = realloc(pending_global_vtables,
+                                            sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
+                                        pending_global_vtables[pending_global_vtable_count].var_name =
+                                            strdup(varNameNode->token->value);
+                                        pending_global_vtables[pending_global_vtable_count].class_name =
+                                            strdup(node->left->token->value);
+                                        pending_global_vtable_count++;
+                                    }
                                 }
                             }
                             int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
