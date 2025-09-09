@@ -2322,6 +2322,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             compileNode(node, chunk, line);
             break;
         }
+        case AST_CONST_DECL: {
+            // Local constant declarations do not emit bytecode but must be recorded
+            // in the local symbol table so they can be referenced in subsequent
+            // expressions within the same scope.
+            if (current_function_compiler != NULL && node->token) {
+                Value const_val = evaluateCompileTimeValue(node->left);
+                AST *type_node = node->right ? node->right : node->left;
+                Symbol *sym = insertLocalSymbol(node->token->value,
+                                                const_val.type,
+                                                type_node,
+                                                false);
+                if (sym && sym->value) {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&const_val);
+                    sym->is_const = true;
+                }
+                freeValue(&const_val);
+            }
+            break;
+        }
         case AST_WRITELN: {
             int argCount = node->child_count;
             Value nl = makeInt(1);
