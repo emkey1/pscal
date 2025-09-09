@@ -2322,6 +2322,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             compileNode(node, chunk, line);
             break;
         }
+        case AST_CONST_DECL: {
+            // Local constant declarations do not emit bytecode but must be recorded
+            // in the local symbol table so they can be referenced in subsequent
+            // expressions within the same scope.
+            if (current_function_compiler != NULL && node->token) {
+                Value const_val = evaluateCompileTimeValue(node->left);
+                AST *type_node = node->right ? node->right : node->left;
+                Symbol *sym = insertLocalSymbol(node->token->value,
+                                                const_val.type,
+                                                type_node,
+                                                false);
+                if (sym && sym->value) {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&const_val);
+                    sym->is_const = true;
+                }
+                freeValue(&const_val);
+            }
+            break;
+        }
         case AST_WRITELN: {
             int argCount = node->child_count;
             Value nl = makeInt(1);
@@ -3373,26 +3393,35 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 }
             } else {
-                int upvalue_slot = -1;
-                if (current_function_compiler) {
-                    upvalue_slot = resolveUpvalue(current_function_compiler, varName);
-                }
-                if (upvalue_slot != -1) {
-                    bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
-                    writeBytecodeChunk(chunk, GET_UPVALUE, line);
-                    writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
-                    if (up_is_ref && node->var_type != TYPE_ARRAY) {
-                        writeBytecodeChunk(chunk, GET_INDIRECT, line);
-                    }
+                // Check if the identifier refers to a local constant recorded in the
+                // symbol table before resolving upvalues or globals. These constants do
+                // not occupy a slot in the function's locals array, so `resolveLocal`
+                // does not detect them.
+                Symbol *local_const_sym = lookupLocalSymbol(varName);
+                if (local_const_sym && local_const_sym->is_const && local_const_sym->value) {
+                    emitConstant(chunk, addConstantToChunk(chunk, local_const_sym->value), line);
                 } else {
-                    // Check if it's a compile-time constant first.
-                    Value* const_val_ptr = findCompilerConstant(varName);
-                    if (const_val_ptr) {
-                        emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                    int upvalue_slot = -1;
+                    if (current_function_compiler) {
+                        upvalue_slot = resolveUpvalue(current_function_compiler, varName);
+                    }
+                    if (upvalue_slot != -1) {
+                        bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
+                        writeBytecodeChunk(chunk, GET_UPVALUE, line);
+                        writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
+                        if (up_is_ref && node->var_type != TYPE_ARRAY) {
+                            writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                        }
                     } else {
-                        int nameIndex = addStringConstant(chunk, varName);
-                        emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
-                                           nameIndex, line);
+                        // Check if it's a compile-time constant first.
+                        Value* const_val_ptr = findCompilerConstant(varName);
+                        if (const_val_ptr) {
+                            emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                        } else {
+                            int nameIndex = addStringConstant(chunk, varName);
+                            emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
+                                               nameIndex, line);
+                        }
                     }
                 }
             }
