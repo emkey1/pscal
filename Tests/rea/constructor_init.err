@@ -1,34 +1,37 @@
-Compilation successful. Byte code size: 40 bytes, Constants: 4
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: rea/constructor_init.rea ==
+== Disassembly: Tests/rea/constructor_init.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
-0005    | ALLOC_OBJECT        2 (fields)
+0005    | ALLOC_OBJECT        3 (fields)
 0007    | DUP
-0008    | CONSTANT            2 '5'
-0010    | CALL             0021 (Point) (2 args)
-0016    | SET_GLOBAL          0 'p'
-0018    1 JUMP                9 (to 0030)
+0008    | GET_FIELD_OFFSET    0 (index)
+0010    | GET_GLOBAL_ADDRESS    2 'Point_vtable'
+0012    | SET_INDIRECT
+0013    | DUP
+0014    | CONSTANT            3 '5'
+0016    | CALL             0027 (Point) (2 args)
+0022    | SET_GLOBAL          0 'p'
+0024    1 JUMP                9 (to 0036)
 
---- Procedure point_point (at 0021) ---
-0021    | GET_LOCAL           1 (slot)
-0023    | GET_LOCAL           0 (slot)
-0025    | GET_FIELD_OFFSET    1 (index)
-0027    | SWAP
-0028    | SET_INDIRECT
-0029    | RETURN
-0030    0 GET_GLOBAL          0 'p'
-0032    | DUP
-0033    | GET_FIELD_OFFSET    0 (index)
-0035    | GET_GLOBAL_ADDRESS    3 'Point_vtable'
-0037    | SET_INDIRECT
-0038    | POP
-0039    | HALT
-== End Disassembly: rea/constructor_init.rea ==
+--- Procedure point_point (at 0027) ---
+0027    | GET_LOCAL           1 (slot)
+0029    | GET_LOCAL           0 (slot)
+0031    | GET_FIELD_OFFSET    2 (index)
+0033    | SWAP
+0034    | SET_INDIRECT
+0035    | RETURN
+0036    0 GET_GLOBAL          0 'p'
+0038    | DUP
+0039    | GET_FIELD_OFFSET    0 (index)
+0041    | GET_GLOBAL_ADDRESS    2 'Point_vtable'
+0043    | SET_INDIRECT
+0044    | POP
+0045    | HALT
+== End Disassembly: Tests/rea/constructor_init.rea ==
 
 Constants (4):\n  0000: STR   "p"
   0001: STR   "Point"
-  0002: INT   5
-  0003: STR   "Point_vtable"
+  0002: STR   "Point_vtable"
+  0003: INT   5
 

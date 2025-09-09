@@ -1,5 +1,5 @@
-Loaded cached byte code. Byte code size: 19 bytes, Constants: 3
-== Disassembly: rea/new_alloc.rea ==
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/new_alloc.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    3 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
@@ -12,7 +12,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0016    | SET_INDIRECT
 0017    | POP
 0018    | HALT
-== End Disassembly: rea/new_alloc.rea ==
+== End Disassembly: Tests/rea/new_alloc.rea ==
 
 Constants (3):\n  0000: STR   "p"
   0001: STR   "Point"
