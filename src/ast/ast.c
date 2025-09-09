@@ -1228,12 +1228,6 @@ static void dumpASTJSONRecursive(AST *node, FILE *outFile, int indentLevel, bool
         printJSONIndent(outFile, nextIndent);
         fprintf(outFile, "\"i_val\": %d", node->i_val);
     }
-
-    if (node->type_def) {
-        PRINT_JSON_FIELD_SEPARATOR();
-        printJSONIndent(outFile, nextIndent);
-        fprintf(outFile, "\"type_definition_link\": \"%s (details not expanded)\"", astTypeToString(node->type_def->type));
-    }
     if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
         PRINT_JSON_FIELD_SEPARATOR();
         printJSONIndent(outFile, nextIndent);
