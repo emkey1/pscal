@@ -1,0 +1,4 @@
+class Base { int x; Base(int v) { this.x = v; } }
+class Child extends Base { Child(int v) { super(v); } }
+Child c = new Child(42);
+writeln(c.x);

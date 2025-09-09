@@ -467,17 +467,29 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     node->token->length = ln - 1;
                 }
 
-                Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", node->token ? node->token->line : 0, 0);
-                AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-                thisVar->var_type = TYPE_POINTER;
-                addChild(node, NULL);
-                for (int i = node->child_count - 1; i > 0; i--) {
-                    node->children[i] = node->children[i - 1];
-                    if (node->children[i]) node->children[i]->parent = node;
+                bool firstIsThis = false;
+                if (node->child_count > 0 && node->children[0] &&
+                    node->children[0]->type == AST_VARIABLE &&
+                    node->children[0]->token && node->children[0]->token->value &&
+                    strcasecmp(node->children[0]->token->value, "this") == 0) {
+                    firstIsThis = true;
                 }
-                node->children[0] = thisVar;
-                thisVar->parent = node;
-                setLeft(node, thisVar);
+
+                if (!firstIsThis && node->i_val == 0) {
+                    Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", node->token ? node->token->line : 0, 0);
+                    AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
+                    thisVar->var_type = TYPE_POINTER;
+                    addChild(node, NULL);
+                    for (int i = node->child_count - 1; i > 0; i--) {
+                        node->children[i] = node->children[i - 1];
+                        if (node->children[i]) node->children[i]->parent = node;
+                    }
+                    node->children[0] = thisVar;
+                    thisVar->parent = node;
+                    setLeft(node, thisVar);
+                } else if (firstIsThis) {
+                    setLeft(node, node->children[0]);
+                }
             }
         }
     } else if (node->type == AST_ARRAY_ACCESS) {

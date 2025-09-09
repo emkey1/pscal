@@ -1,0 +1,48 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/super_constructor.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    3 DEFINE_GLOBAL    NameIdx:0   'c' Type:POINTER ('Child')
+0005    | ALLOC_OBJECT        3 (fields)
+0007    | DUP
+0008    | CONSTANT            2 '42'
+0010    | CALL             0033 (Child) (2 args)
+0016    | SET_GLOBAL          0 'c'
+0018    1 JUMP                9 (to 0030)
+
+--- Procedure base_base (at 0021) ---
+0021    | GET_LOCAL           1 (slot)
+0023    | GET_LOCAL           0 (slot)
+0025    | GET_FIELD_OFFSET    1 (index)
+0027    | SWAP
+0028    | SET_INDIRECT
+0029    | RETURN
+0030    2 JUMP               11 (to 0044)
+
+--- Procedure child_child (at 0033) ---
+0033    | GET_LOCAL           0 (slot)
+0035    | GET_LOCAL           1 (slot)
+0037    | CALL             0021 (Base_Base) (2 args)
+0043    | RETURN
+0044    0 GET_GLOBAL          0 'c'
+0046    | DUP
+0047    | GET_FIELD_OFFSET    0 (index)
+0049    | GET_GLOBAL_ADDRESS    4 'Child_vtable'
+0051    | SET_INDIRECT
+0052    | POP
+0053    4 CONSTANT            5 '1'
+0055    | GET_GLOBAL          0 'c'
+0057    | GET_FIELD_OFFSET    1 (index)
+0059    | GET_INDIRECT
+0060    | CALL_BUILTIN         6 'write' (2 args)
+0064    0 HALT
+== End Disassembly: Tests/rea/super_constructor.rea ==
+
+Constants (7):\n  0000: STR   "c"
+  0001: STR   "Child"
+  0002: INT   42
+  0003: STR   "Base_Base"
+  0004: STR   "Child_vtable"
+  0005: INT   1
+  0006: STR   "write"
+
