@@ -1,6 +1,8 @@
 // SDL Multi Bouncing Balls demo ported to Rea using classes.
 // Requires building Pscal with SDL support.
 
+const int NumBalls = 90;
+
 class Ball {
   float x;
   float y;
@@ -58,16 +60,15 @@ class Ball {
   }
 }
 
+Ball balls[NumBalls + 1];
+
 class BallsApp {
   const int WindowWidth = 1280;
   const int WindowHeight = 1024;
   const int TargetFPS = 60;
   const int FrameDelay = trunc(1000 / TargetFPS);
-  const int NumBalls = 90;
   const float MaxInitialSpeed = 250.0;
   const float MinInitialSpeed = 80.0;
-
-  Ball balls[NumBalls + 1];
   int maxX;
   int maxY;
   bool quitRequested = false;
@@ -77,11 +78,10 @@ class BallsApp {
     randomize();
     this.maxX = getmaxx();
     this.maxY = getmaxy();
-    this.balls = new Ball[NumBalls + 1];
     int i = 1;
     while (i <= NumBalls) {
-      this.balls[i] = new Ball();
-      Ball_init(this.balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+      balls[i] = new Ball();
+      Ball_init(balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
       i = i + 1;
     }
   }
@@ -89,43 +89,43 @@ class BallsApp {
   void handleCollisions() {
     int i = 1;
     while (i <= NumBalls) {
-      if (this.balls[i].active) {
+      if (balls[i].active) {
         int j = i + 1;
         while (j <= NumBalls) {
-          if (this.balls[j].active) {
-            float distSq = (this.balls[i].x - this.balls[j].x) * (this.balls[i].x - this.balls[j].x) +
-                           (this.balls[i].y - this.balls[j].y) * (this.balls[i].y - this.balls[j].y);
-            float sumR = this.balls[i].radius + this.balls[j].radius;
+          if (balls[j].active) {
+            float distSq = (balls[i].x - balls[j].x) * (balls[i].x - balls[j].x) +
+                           (balls[i].y - balls[j].y) * (balls[i].y - balls[j].y);
+            float sumR = balls[i].radius + balls[j].radius;
             float sumR2 = sumR * sumR;
             if (distSq <= sumR2) {
               float dist = sqrt(distSq);
               if (dist == 0.0) dist = 0.001;
-              float nx = (this.balls[j].x - this.balls[i].x) / dist;
-              float ny = (this.balls[j].y - this.balls[i].y) / dist;
+              float nx = (balls[j].x - balls[i].x) / dist;
+              float ny = (balls[j].y - balls[i].y) / dist;
               float tx = -ny;
               float ty = nx;
-              float v1x = this.balls[i].dx;
-              float v1y = this.balls[i].dy;
-              float v2x = this.balls[j].dx;
-              float v2y = this.balls[j].dy;
+              float v1x = balls[i].dx;
+              float v1y = balls[i].dy;
+              float v2x = balls[j].dx;
+              float v2y = balls[j].dy;
               float v1n = v1x * nx + v1y * ny;
               float v1t = v1x * tx + v1y * ty;
               float v2n = v2x * nx + v2y * ny;
               float v2t = v2x * tx + v2y * ty;
-              float m1 = this.balls[i].mass;
-              float m2 = this.balls[j].mass;
+              float m1 = balls[i].mass;
+              float m2 = balls[j].mass;
               float new_v1n = (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
               float new_v2n = (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
-              this.balls[i].dx = new_v1n * nx + v1t * tx;
-              this.balls[i].dy = new_v1n * ny + v1t * ty;
-              this.balls[j].dx = new_v2n * nx + v2t * tx;
-              this.balls[j].dy = new_v2n * ny + v2t * ty;
+              balls[i].dx = new_v1n * nx + v1t * tx;
+              balls[i].dy = new_v1n * ny + v1t * ty;
+              balls[j].dx = new_v2n * nx + v2t * tx;
+              balls[j].dy = new_v2n * ny + v2t * ty;
               float overlap = sumR - dist;
               if (overlap > 0.0) {
-                this.balls[i].x = this.balls[i].x - (overlap / 2.0) * nx;
-                this.balls[i].y = this.balls[i].y - (overlap / 2.0) * ny;
-                this.balls[j].x = this.balls[j].x + (overlap / 2.0) * nx;
-                this.balls[j].y = this.balls[j].y + (overlap / 2.0) * ny;
+                balls[i].x = balls[i].x - (overlap / 2.0) * nx;
+                balls[i].y = balls[i].y - (overlap / 2.0) * ny;
+                balls[j].x = balls[j].x + (overlap / 2.0) * nx;
+                balls[j].y = balls[j].y + (overlap / 2.0) * ny;
               }
             }
           }
@@ -139,7 +139,7 @@ class BallsApp {
   void update() {
     int i = 1;
     while (i <= NumBalls) {
-      if (this.balls[i].active) Ball_move(this.balls[i], this.maxX, this.maxY);
+      if (balls[i].active) Ball_move(balls[i], this.maxX, this.maxY);
       i = i + 1;
     }
     this.handleCollisions();
@@ -149,7 +149,7 @@ class BallsApp {
     cleardevice();
     int i = 1;
     while (i <= NumBalls) {
-      if (this.balls[i].active) Ball_draw(this.balls[i]);
+      if (balls[i].active) Ball_draw(balls[i]);
       i = i + 1;
     }
     updatescreen();
@@ -173,4 +173,4 @@ class BallsApp {
 }
 
 BallsApp app = new BallsApp();
-BallsApp_run(app);
+app.run();
