@@ -14,47 +14,47 @@ class Ball {
   bool active;
 
   void init(int w, int h, float minSpeed, float maxSpeed) {
-    radius = 8 + random(13);
-    x = radius + random(w - 2 * radius);
-    y = radius + random(h - 2 * radius);
+    this.radius = 8 + random(13);
+    this.x = this.radius + random(w - 2 * this.radius);
+    this.y = this.radius + random(h - 2 * this.radius);
     int speedRange = trunc(maxSpeed - minSpeed + 1);
     float speed = minSpeed + random(speedRange);
     float angle = random(360) * (3.14159265 / 180.0);
-    dx = cos(angle) * speed / 60.0;
-    dy = sin(angle) * speed / 60.0;
-    if ((abs(dx) < 0.1) && (abs(dy) < 0.1)) {
-      dx = (minSpeed / 60.0) * 0.707;
-      dy = (minSpeed / 60.0) * 0.707;
+    this.dx = cos(angle) * speed / 60.0;
+    this.dy = sin(angle) * speed / 60.0;
+    if ((abs(this.dx) < 0.1) && (abs(this.dy) < 0.1)) {
+      this.dx = (minSpeed / 60.0) * 0.707;
+      this.dy = (minSpeed / 60.0) * 0.707;
     }
-    r = random(206) + 50;
-    g = random(206) + 50;
-    b = random(206) + 50;
-    mass = radius * radius;
-    active = true;
+    this.r = random(206) + 50;
+    this.g = random(206) + 50;
+    this.b = random(206) + 50;
+    this.mass = this.radius * this.radius;
+    this.active = true;
   }
 
   void move(int maxX, int maxY) {
-    x = x + dx;
-    y = y + dy;
-    if ((x - radius) < 0) {
-      x = radius;
-      dx = -dx;
-    } else if ((x + radius) > maxX) {
-      x = maxX - radius;
-      dx = -dx;
+    this.x = this.x + this.dx;
+    this.y = this.y + this.dy;
+    if ((this.x - this.radius) < 0) {
+      this.x = this.radius;
+      this.dx = -this.dx;
+    } else if ((this.x + this.radius) > maxX) {
+      this.x = maxX - this.radius;
+      this.dx = -this.dx;
     }
-    if ((y - radius) < 0) {
-      y = radius;
-      dy = -dy;
-    } else if ((y + radius) > maxY) {
-      y = maxY - radius;
-      dy = -dy;
+    if ((this.y - this.radius) < 0) {
+      this.y = this.radius;
+      this.dy = -this.dy;
+    } else if ((this.y + this.radius) > maxY) {
+      this.y = maxY - this.radius;
+      this.dy = -this.dy;
     }
   }
 
   void draw() {
-    setrgbcolor(r, g, b);
-    fillcircle(trunc(x), trunc(y), radius);
+    setrgbcolor(this.r, this.g, this.b);
+    fillcircle(trunc(this.x), trunc(this.y), this.radius);
   }
 }
 
@@ -75,57 +75,57 @@ class BallsApp {
   void init() {
     initgraph(WindowWidth, WindowHeight, "Multi Bouncing Balls in Rea");
     randomize();
-    maxX = getmaxx();
-    maxY = getmaxy();
+    this.maxX = getmaxx();
+    this.maxY = getmaxy();
     int i = 1;
     while (i <= NumBalls) {
-      balls[i] = new Ball();
-      Ball_init(balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+      this.balls[i] = new Ball();
+      Ball_init(this.balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
       i = i + 1;
     }
-    quit = false;
+    this.quit = false;
   }
 
   void handleCollisions() {
     int i = 1;
     while (i <= NumBalls) {
-      if (balls[i].active) {
+      if (this.balls[i].active) {
         int j = i + 1;
         while (j <= NumBalls) {
-          if (balls[j].active) {
-            float distSq = (balls[i].x - balls[j].x) * (balls[i].x - balls[j].x) +
-                           (balls[i].y - balls[j].y) * (balls[i].y - balls[j].y);
-            float sumR = balls[i].radius + balls[j].radius;
+          if (this.balls[j].active) {
+            float distSq = (this.balls[i].x - this.balls[j].x) * (this.balls[i].x - this.balls[j].x) +
+                           (this.balls[i].y - this.balls[j].y) * (this.balls[i].y - this.balls[j].y);
+            float sumR = this.balls[i].radius + this.balls[j].radius;
             float sumR2 = sumR * sumR;
             if (distSq <= sumR2) {
               float dist = sqrt(distSq);
               if (dist == 0.0) dist = 0.001;
-              float nx = (balls[j].x - balls[i].x) / dist;
-              float ny = (balls[j].y - balls[i].y) / dist;
+              float nx = (this.balls[j].x - this.balls[i].x) / dist;
+              float ny = (this.balls[j].y - this.balls[i].y) / dist;
               float tx = -ny;
               float ty = nx;
-              float v1x = balls[i].dx;
-              float v1y = balls[i].dy;
-              float v2x = balls[j].dx;
-              float v2y = balls[j].dy;
+              float v1x = this.balls[i].dx;
+              float v1y = this.balls[i].dy;
+              float v2x = this.balls[j].dx;
+              float v2y = this.balls[j].dy;
               float v1n = v1x * nx + v1y * ny;
               float v1t = v1x * tx + v1y * ty;
               float v2n = v2x * nx + v2y * ny;
               float v2t = v2x * tx + v2y * ty;
-              float m1 = balls[i].mass;
-              float m2 = balls[j].mass;
+              float m1 = this.balls[i].mass;
+              float m2 = this.balls[j].mass;
               float new_v1n = (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
               float new_v2n = (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
-              balls[i].dx = new_v1n * nx + v1t * tx;
-              balls[i].dy = new_v1n * ny + v1t * ty;
-              balls[j].dx = new_v2n * nx + v2t * tx;
-              balls[j].dy = new_v2n * ny + v2t * ty;
+              this.balls[i].dx = new_v1n * nx + v1t * tx;
+              this.balls[i].dy = new_v1n * ny + v1t * ty;
+              this.balls[j].dx = new_v2n * nx + v2t * tx;
+              this.balls[j].dy = new_v2n * ny + v2t * ty;
               float overlap = sumR - dist;
               if (overlap > 0.0) {
-                balls[i].x = balls[i].x - (overlap / 2.0) * nx;
-                balls[i].y = balls[i].y - (overlap / 2.0) * ny;
-                balls[j].x = balls[j].x + (overlap / 2.0) * nx;
-                balls[j].y = balls[j].y + (overlap / 2.0) * ny;
+                this.balls[i].x = this.balls[i].x - (overlap / 2.0) * nx;
+                this.balls[i].y = this.balls[i].y - (overlap / 2.0) * ny;
+                this.balls[j].x = this.balls[j].x + (overlap / 2.0) * nx;
+                this.balls[j].y = this.balls[j].y + (overlap / 2.0) * ny;
               }
             }
           }
@@ -139,7 +139,7 @@ class BallsApp {
   void update() {
     int i = 1;
     while (i <= NumBalls) {
-        if (balls[i].active) Ball_move(balls[i], maxX, maxY);
+        if (this.balls[i].active) Ball_move(this.balls[i], this.maxX, this.maxY);
       i = i + 1;
     }
     this.handleCollisions();
@@ -149,7 +149,7 @@ class BallsApp {
     cleardevice();
     int i = 1;
     while (i <= NumBalls) {
-      if (balls[i].active) Ball_draw(balls[i]);
+      if (this.balls[i].active) Ball_draw(this.balls[i]);
       i = i + 1;
     }
     updatescreen();
@@ -158,10 +158,10 @@ class BallsApp {
   void run() {
     this.init();
     writeln("Multi Bouncing Balls... Press Q to quit.");
-    while (!quit) {
+    while (!this.quit) {
       if (keypressed()) {
         char c = readkey();
-        if (toupper(c) == 'Q') quit = true;
+        if (toupper(c) == 'Q') this.quit = true;
       }
       this.update();
       this.draw();
