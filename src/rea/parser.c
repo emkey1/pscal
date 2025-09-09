@@ -249,11 +249,13 @@ static AST *parseFactor(ReaParser *p) {
             // Build call to parent constructor alias: ParentName(this, ...)
             Token *ctorTok = newToken(TOKEN_IDENTIFIER, p->currentParentClassName, supTok.line, 0);
             AST *call = newASTNode(AST_PROCEDURE_CALL, ctorTok);
-            // Prepend implicit 'this'
+            // Prepend implicit 'this' and flag the node so semantic analysis
+            // knows it already includes it (for super constructor calls)
             Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
             AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
             setTypeAST(thisVar, TYPE_POINTER);
             addChild(call, thisVar);
+            call->i_val = 1; // mark as super call containing implicit 'this'
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
                     addChild(call, args->children[i]);
@@ -296,11 +298,12 @@ static AST *parseFactor(ReaParser *p) {
             Token *nameTok = newToken(TOKEN_IDENTIFIER, mangled, supTok.line, 0);
             free(mangled);
             AST *call = newASTNode(AST_PROCEDURE_CALL, nameTok);
-            // Prepend implicit 'this'
+            // Prepend implicit 'this' and flag node to avoid duplicate insertion
             Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
             AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
             setTypeAST(thisVar, TYPE_POINTER);
             addChild(call, thisVar);
+            call->i_val = 1; // mark as super call containing implicit 'this'
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
                     addChild(call, args->children[i]);
