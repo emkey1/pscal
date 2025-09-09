@@ -1537,11 +1537,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
-                 for (int i = 0; i < statements->child_count; i++) {
+                for (int i = 0; i < statements->child_count; i++) {
                     if (statements->children[i]) {
-                        compileNode(statements->children[i], chunk, getLine(statements->children[i]));
+                        compileStatement(statements->children[i], chunk,
+                                         getLine(statements->children[i]));
                     }
-                 }
+                }
             }
             break;
         }
@@ -1958,7 +1959,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_COMPOUND:
             for (int i = 0; i < node->child_count; i++) {
                 if (node->children[i]) {
-                    compileNode(node->children[i], chunk, getLine(node->children[i]));
+                    compileStatement(node->children[i], chunk,
+                                      getLine(node->children[i]));
                 }
             }
             break;
