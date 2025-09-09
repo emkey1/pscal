@@ -70,20 +70,20 @@ class BallsApp {
   Ball balls[NumBalls + 1];
   int maxX;
   int maxY;
-  bool quit;
+  bool quitRequested = false;
 
   void init() {
     initgraph(WindowWidth, WindowHeight, "Multi Bouncing Balls in Rea");
     randomize();
     this.maxX = getmaxx();
     this.maxY = getmaxy();
+    this.balls = new Ball[NumBalls + 1];
     int i = 1;
     while (i <= NumBalls) {
       this.balls[i] = new Ball();
       Ball_init(this.balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
       i = i + 1;
     }
-    this.quit = false;
   }
 
   void handleCollisions() {
@@ -139,7 +139,7 @@ class BallsApp {
   void update() {
     int i = 1;
     while (i <= NumBalls) {
-        if (this.balls[i].active) Ball_move(this.balls[i], this.maxX, this.maxY);
+      if (this.balls[i].active) Ball_move(this.balls[i], this.maxX, this.maxY);
       i = i + 1;
     }
     this.handleCollisions();
@@ -157,21 +157,20 @@ class BallsApp {
 
   void run() {
     this.init();
-    writeln("Multi Bouncing Balls... Press Q to quit.");
-    while (!this.quit) {
+    write("Multi Bouncing Balls... Press Q to quit.\n");
+    while (!this.quitRequested) {
       if (keypressed()) {
         char c = readkey();
-        if (toupper(c) == 'Q') this.quit = true;
+        if (toupper(c) == 'Q') this.quitRequested = true;
       }
       this.update();
       this.draw();
       graphloop(FrameDelay);
     }
     closegraph();
-    writeln("Demo finished.");
+    write("Demo finished.\n");
   }
 }
 
 BallsApp app = new BallsApp();
 BallsApp_run(app);
-
