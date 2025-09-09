@@ -490,10 +490,20 @@ static bool recordTypeHasVTable(AST* recordType) {
         Symbol* sym = procedure_table->buckets[b];
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
-            if (base && base->name &&
-                strncasecmp(base->name, name, len) == 0 &&
-                base->name[len] == '_') {
-                return true;
+            if (base && base->name && base->type_def && base->type_def->is_virtual &&
+                strncasecmp(base->name, name, len) == 0 && base->name[len] == '_') {
+                AST* func = base->type_def;
+                if (func->child_count > 0) {
+                    AST* firstParam = func->children[0];
+                    AST* paramType = resolveTypeAlias(firstParam ? firstParam->right : NULL);
+                    if (paramType && paramType->type == AST_POINTER_TYPE) {
+                        AST* target = resolveTypeAlias(paramType->right);
+                        const char* targetName = getTypeNameFromAST(target);
+                        if (targetName && strcasecmp(targetName, name) == 0) {
+                            return true;
+                        }
+                    }
+                }
             }
             sym = sym->next;
         }
