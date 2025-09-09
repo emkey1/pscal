@@ -25,6 +25,9 @@ static AST* gCurrentProgramRoot = NULL;
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
 static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
+static void emitConstantIndex16(BytecodeChunk* chunk, int constant_index, int line);
+static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
+                              int name_idx, int line);
 
 typedef struct {
     char* name;
@@ -68,6 +71,16 @@ typedef struct FunctionCompilerState {
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
+
+// Track global objects created with NEW so their hidden
+// vtable fields can be initialised after all vtables are defined.
+typedef struct {
+    char* var_name;
+    char* class_name;
+} PendingGlobalVTableInit;
+
+static PendingGlobalVTableInit* pending_global_vtables = NULL;
+static int pending_global_vtable_count = 0;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
@@ -216,6 +229,16 @@ static void emitVTables(BytecodeChunk* chunk) {
         snprintf(gname, sizeof(gname), "%s_vtable", vt->class_name);
         int nameIdx = addStringConstant(chunk, gname);
         emitDefineGlobal(chunk, nameIdx, 0);
+        writeBytecodeChunk(chunk, (uint8_t)TYPE_ARRAY, 0); // variable type
+        writeBytecodeChunk(chunk, 1, 0);                   // dimension count
+        int lbIdx = addIntConstant(chunk, lb);
+        int ubIdx = addIntConstant(chunk, ub);
+        emitConstantIndex16(chunk, lbIdx, 0);              // lower bound
+        emitConstantIndex16(chunk, ubIdx, 0);              // upper bound
+        writeBytecodeChunk(chunk, (uint8_t)TYPE_INT32, 0); // element type
+        int elemNameIdx = addStringConstant(chunk, "integer");
+        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, 0);
+        emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, 0);
         free(vt->class_name);
         free(vt->addrs);
     }
@@ -1386,12 +1409,10 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)0, line);
-                writeBytecodeChunk(chunk, SWAP, line);
                 char vtName[512];
                 snprintf(vtName, sizeof(vtName), "%s_vtable", className);
                 int vtNameIdx = addStringConstant(chunk, vtName);
-                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, vtNameIdx, line);
-                writeBytecodeChunk(chunk, SWAP, line);
+                emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
 
@@ -1483,6 +1504,25 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
             if (node->parent && node->parent->type == AST_PROGRAM) {
                 emitVTables(chunk);
+                for (int pg = 0; pg < pending_global_vtable_count; pg++) {
+                    PendingGlobalVTableInit* p = &pending_global_vtables[pg];
+                    int objNameIdx = addStringConstant(chunk, p->var_name);
+                    emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, objNameIdx, 0);
+                    writeBytecodeChunk(chunk, DUP, 0);
+                    writeBytecodeChunk(chunk, GET_FIELD_OFFSET, 0);
+                    writeBytecodeChunk(chunk, (uint8_t)0, 0);
+                    char vtName[512];
+                    snprintf(vtName, sizeof(vtName), "%s_vtable", p->class_name);
+                    int vtIdx = addStringConstant(chunk, vtName);
+                    emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtIdx, 0);
+                    writeBytecodeChunk(chunk, SET_INDIRECT, 0);
+                    writeBytecodeChunk(chunk, POP, 0);
+                    free(p->var_name);
+                    free(p->class_name);
+                }
+                free(pending_global_vtables);
+                pending_global_vtables = NULL;
+                pending_global_vtable_count = 0;
             }
 
             // Pass 3: Compile the main statement block.
@@ -1651,6 +1691,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 }
                             } else {
                                 compileRValue(node->left, chunk, getLine(node->left));
+                                if (current_function_compiler == NULL && node->left->type == AST_NEW &&
+                                    node->left->token && node->left->token->value) {
+                                    pending_global_vtables = realloc(pending_global_vtables,
+                                        sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
+                                    pending_global_vtables[pending_global_vtable_count].var_name =
+                                        strdup(varNameNode->token->value);
+                                    pending_global_vtables[pending_global_vtable_count].class_name =
+                                        strdup(node->left->token->value);
+                                    pending_global_vtable_count++;
+                                }
                             }
                             int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
                             emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, name_idx_set, getLine(varNameNode));
@@ -3113,12 +3163,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)0, line);
-                writeBytecodeChunk(chunk, SWAP, line);
                 char vtName[512];
                 snprintf(vtName, sizeof(vtName), "%s_vtable", className);
                 int vtNameIdx = addStringConstant(chunk, vtName);
-                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, vtNameIdx, line);
-                writeBytecodeChunk(chunk, SWAP, line);
+                emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
 
