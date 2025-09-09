@@ -638,8 +638,10 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
         if (!compareTypeNodes(param_actual, arg_actual)) {
             AST* pa = resolveTypeAlias(param_actual->right);
             AST* aa = resolveTypeAlias(arg_actual->right);
-            const char* pn = pa && pa->token ? pa->token->value : NULL;
-            const char* an = aa && aa->token ? aa->token->value : NULL;
+            const char* pn = getTypeNameFromAST(pa);
+            const char* an = getTypeNameFromAST(aa);
+            if (!pn && pa && pa->token) pn = pa->token->value;
+            if (!an && aa && aa->token) an = aa->token->value;
             if (pn && an && strcasecmp(pn, an) == 0) return true;
             return false;
         }
@@ -2805,7 +2807,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
-                        AST* param_type = param_node->type_def ? param_node->type_def : param_node;
+                        AST* param_type = param_node->type_def ? param_node->type_def
+                                                            : (param_node->right ? param_node->right : param_node);
                         bool match = typesMatch(param_type, arg_node, callee_is_builtin);
                         if (!match) {
                             AST* param_actual = resolveTypeAlias(param_type);
