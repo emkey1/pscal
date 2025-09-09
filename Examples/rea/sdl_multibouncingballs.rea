@@ -13,7 +13,7 @@ class Ball {
   int b;
   bool active;
 
-  void init(int w, int h, float minSpeed, float maxSpeed) {
+  Ball init(int w, int h, float minSpeed, float maxSpeed) {
     this.radius = 8 + random(13);
     this.x = this.radius + random(w - 2 * this.radius);
     this.y = this.radius + random(h - 2 * this.radius);
@@ -31,6 +31,7 @@ class Ball {
     this.b = random(206) + 50;
     this.mass = this.radius * this.radius;
     this.active = true;
+    return this;
   }
 
   void move(int maxX, int maxY) {
@@ -79,8 +80,8 @@ class BallsApp {
     this.maxY = getmaxy();
     int i = 1;
     while (i <= NumBalls) {
-      this.balls[i] = new Ball();
-      Ball_init(this.balls[i], WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+      Ball b = new Ball();
+      this.balls[i] = b.init(WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
       i = i + 1;
     }
     this.quit = false;
@@ -139,7 +140,7 @@ class BallsApp {
   void update() {
     int i = 1;
     while (i <= NumBalls) {
-        if (this.balls[i].active) Ball_move(this.balls[i], this.maxX, this.maxY);
+      if (this.balls[i].active) this.balls[i].move(this.maxX, this.maxY);
       i = i + 1;
     }
     this.handleCollisions();
@@ -149,7 +150,7 @@ class BallsApp {
     cleardevice();
     int i = 1;
     while (i <= NumBalls) {
-      if (this.balls[i].active) Ball_draw(this.balls[i]);
+      if (this.balls[i].active) this.balls[i].draw();
       i = i + 1;
     }
     updatescreen();
