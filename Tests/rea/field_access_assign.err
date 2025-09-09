@@ -1,5 +1,5 @@
-Loaded cached byte code. Byte code size: 14 bytes, Constants: 3
-== Disassembly: rea/field_access_assign.rea ==
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/field_access_assign.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
@@ -9,7 +9,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0011    | SWAP
 0012    | SET_INDIRECT
 0013    0 HALT
-== End Disassembly: rea/field_access_assign.rea ==
+== End Disassembly: Tests/rea/field_access_assign.rea ==
 
 Constants (3):\n  0000: STR   "p"
   0001: STR   "Point"

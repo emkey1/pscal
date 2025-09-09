@@ -1,25 +1,18 @@
-Loaded cached byte code. Byte code size: 27 bytes, Constants: 5
-== Disassembly: rea/class_instantiation.rea ==
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/class_instantiation.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 DEFINE_GLOBAL    NameIdx:0   'd' Type:POINTER ('Dummy')
 0005    | ALLOC_OBJECT        1 (fields)
 0007    | SET_GLOBAL          0 'd'
-0009    0 GET_GLOBAL          0 'd'
-0011    | DUP
-0012    | GET_FIELD_OFFSET    0 (index)
-0014    | GET_GLOBAL_ADDRESS    2 'Dummy_vtable'
-0016    | SET_INDIRECT
-0017    | POP
-0018    3 CONSTANT            3 '1'
-0020    | CONSTANT            3 '1'
-0022    | CALL_BUILTIN         4 'write' (2 args)
-0026    0 HALT
-== End Disassembly: rea/class_instantiation.rea ==
+0009    3 CONSTANT            2 '1'
+0011    | CONSTANT            2 '1'
+0013    | CALL_BUILTIN         3 'write' (2 args)
+0017    0 HALT
+== End Disassembly: Tests/rea/class_instantiation.rea ==
 
-Constants (5):\n  0000: STR   "d"
+Constants (4):\n  0000: STR   "d"
   0001: STR   "Dummy"
-  0002: STR   "Dummy_vtable"
-  0003: INT   1
-  0004: STR   "write"
+  0002: INT   1
+  0003: STR   "write"
 
