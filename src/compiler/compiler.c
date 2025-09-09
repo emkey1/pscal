@@ -1971,6 +1971,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 }
 
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
+    SymbolEnvSnapshot env_snap;
+    saveLocalEnv(&env_snap);
+
     FunctionCompilerState fc;
     initFunctionCompiler(&fc);
     fc.enclosing = current_function_compiler;
@@ -2003,6 +2006,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
         compiler_had_error = true;
         current_function_compiler = NULL;
+        restoreLocalEnv(&env_snap);
         return;
     }
 
@@ -2099,6 +2103,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         free(fc.locals[i].name);
     }
     current_function_compiler = fc.enclosing;
+    restoreLocalEnv(&env_snap);
 }
 
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result) {
