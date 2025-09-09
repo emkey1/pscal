@@ -414,9 +414,15 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         if (cls) {
             ClassInfo *ci = lookupClass(cls);
             const char *fname = node->right && node->right->token ? node->right->token->value : NULL;
-            if (ci && !lookupField(ci, fname)) {
-                fprintf(stderr, "Unknown field '%s' on class '%s'\n", fname ? fname : "(null)", cls);
-                pascal_semantic_error_count++;
+            if (ci) {
+                Symbol *fs = lookupField(ci, fname);
+                if (!fs) {
+                    fprintf(stderr, "Unknown field '%s' on class '%s'\n", fname ? fname : "(null)", cls);
+                    pascal_semantic_error_count++;
+                } else if (fs->type_def) {
+                    node->var_type = fs->type_def->var_type;
+                    node->type_def = copyAST(fs->type_def);
+                }
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
