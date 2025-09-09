@@ -4,6 +4,7 @@
 #include "symbol/symbol.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include "core/list.h"
 
@@ -1760,6 +1761,27 @@ AST *parseRea(const char *source) {
     if (p.hadError) {
         freeAST(program);
         return NULL;
+    }
+
+    // If a function or procedure named 'main' is declared and there are no
+    // top-level statements, insert an implicit call to `main` so the VM
+    // executes user code on program start.
+    bool has_main = false;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *d = decls->children[i];
+        if (!d || !d->token || !d->token->value) continue;
+        if ((d->type == AST_FUNCTION_DECL || d->type == AST_PROCEDURE_DECL) &&
+            strcasecmp(d->token->value, "main") == 0) {
+            has_main = true;
+            break;
+        }
+    }
+    if (has_main && stmts->child_count == 0) {
+        Token *mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
+        AST *call = newASTNode(AST_PROCEDURE_CALL, mainTok);
+        AST *stmt = newASTNode(AST_EXPR_STMT, call->token);
+        setLeft(stmt, call);
+        addChild(stmts, stmt);
     }
 
     return program;
