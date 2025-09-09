@@ -1779,7 +1779,9 @@ AST *parseRea(const char *source) {
     if (has_main && stmts->child_count == 0) {
         Token *mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
         AST *call = newASTNode(AST_PROCEDURE_CALL, mainTok);
-        addChild(stmts, call);
+        AST *stmt = newASTNode(AST_EXPR_STMT, call->token);
+        setLeft(stmt, call);
+        addChild(stmts, stmt);
     }
 
     return program;
