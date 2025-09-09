@@ -635,7 +635,15 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
         if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
         if (!param_actual->right) return true; // Generic pointer accepts any pointer
         if (!arg_actual) return false;
-        return compareTypeNodes(param_actual, arg_actual);
+        if (!compareTypeNodes(param_actual, arg_actual)) {
+            AST* pa = resolveTypeAlias(param_actual->right);
+            AST* aa = resolveTypeAlias(arg_actual->right);
+            const char* pn = pa && pa->token ? pa->token->value : NULL;
+            const char* an = aa && aa->token ? aa->token->value : NULL;
+            if (pn && an && strcasecmp(pn, an) == 0) return true;
+            return false;
+        }
+        return true;
     }
 
     if (param_actual->var_type == TYPE_ENUM && arg_vt == TYPE_ENUM) {

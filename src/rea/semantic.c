@@ -389,12 +389,23 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         }
     }
 
-    if (node->type == AST_VARIABLE && clsContext) {
-        const char *vname = node->token ? node->token->value : NULL;
-        Symbol *fs = lookupField(clsContext, vname);
-        if (fs && fs->type_def) {
-            node->var_type = fs->type_def->var_type;
-            node->type_def = copyAST(fs->type_def);
+    if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        bool resolved = false;
+        if (clsContext) {
+            const char *vname = node->token->value;
+            Symbol *fs = lookupField(clsContext, vname);
+            if (fs && fs->type_def) {
+                node->var_type = fs->type_def->var_type;
+                node->type_def = copyAST(fs->type_def);
+                resolved = true;
+            }
+        }
+        if (!resolved && gProgramRoot) {
+            AST *decl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+            if (decl && decl->right) {
+                node->var_type = decl->right->var_type;
+                node->type_def = copyAST(decl->right);
+            }
         }
     }
 
@@ -463,6 +474,27 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 setLeft(node, thisVar);
             }
         }
+    } else if (node->type == AST_ARRAY_ACCESS) {
+        if (node->left) validateNodeInternal(node->left, clsContext);
+        for (int i = 0; i < node->child_count; i++) {
+            if (node->children[i]) validateNodeInternal(node->children[i], clsContext);
+        }
+        if (node->right) validateNodeInternal(node->right, clsContext);
+        if (node->extra) validateNodeInternal(node->extra, clsContext);
+
+        AST *baseType = node->left ? node->left->type_def : NULL;
+        for (int i = 0; i < node->child_count && baseType; i++) {
+            if (baseType->type == AST_ARRAY_TYPE) {
+                baseType = baseType->right;
+            } else {
+                baseType = NULL;
+            }
+        }
+        if (baseType) {
+            node->var_type = baseType->var_type;
+            node->type_def = copyAST(baseType);
+        }
+        return;
     }
 
     if (node->left) validateNodeInternal(node->left, clsContext);
