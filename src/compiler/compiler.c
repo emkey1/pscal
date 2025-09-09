@@ -491,7 +491,7 @@ static bool recordTypeHasVTable(AST* recordType) {
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
             if (base && base->name &&
-                strncmp(base->name, name, len) == 0 &&
+                strncasecmp(base->name, name, len) == 0 &&
                 base->name[len] == '_') {
                 return true;
             }

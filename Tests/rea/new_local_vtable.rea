@@ -1,0 +1,5 @@
+class MixedCase { void hi() {} }
+void run() {
+  MixedCase mc = new MixedCase();
+}
+run();

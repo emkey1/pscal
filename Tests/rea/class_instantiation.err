@@ -1,5 +1,5 @@
-Loaded cached byte code. Byte code size: 27 bytes, Constants: 5
-== Disassembly: rea/class_instantiation.rea ==
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/class_instantiation.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 DEFINE_GLOBAL    NameIdx:0   'd' Type:POINTER ('Dummy')
@@ -15,7 +15,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0020    | CONSTANT            3 '1'
 0022    | CALL_BUILTIN         4 'write' (2 args)
 0026    0 HALT
-== End Disassembly: rea/class_instantiation.rea ==
+== End Disassembly: Tests/rea/class_instantiation.rea ==
 
 Constants (5):\n  0000: STR   "d"
   0001: STR   "Dummy"
