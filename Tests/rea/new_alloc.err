@@ -8,7 +8,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0009    0 GET_GLOBAL          0 'p'
 0011    | DUP
 0012    | GET_FIELD_OFFSET    0 (index)
-0014    | GET_GLOBAL_ADDRESS    2 'Point_vtable'
+0014    | GET_GLOBAL_ADDRESS    2 'point_vtable'
 0016    | SET_INDIRECT
 0017    | POP
 0018    | HALT
@@ -16,5 +16,5 @@ Offset Line Opcode           Operand  Value / Target (Args)
 
 Constants (3):\n  0000: STR   "p"
   0001: STR   "Point"
-  0002: STR   "Point_vtable"
+  0002: STR   "point_vtable"
 

@@ -8,7 +8,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0009    0 GET_GLOBAL          0 'd'
 0011    | DUP
 0012    | GET_FIELD_OFFSET    0 (index)
-0014    | GET_GLOBAL_ADDRESS    2 'Dummy_vtable'
+0014    | GET_GLOBAL_ADDRESS    2 'dummy_vtable'
 0016    | SET_INDIRECT
 0017    | POP
 0018    3 CONSTANT            3 '1'
@@ -19,7 +19,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 
 Constants (5):\n  0000: STR   "d"
   0001: STR   "Dummy"
-  0002: STR   "Dummy_vtable"
+  0002: STR   "dummy_vtable"
   0003: INT   1
   0004: STR   "write"
 

@@ -6,7 +6,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0005    | ALLOC_OBJECT        3 (fields)
 0007    | DUP
 0008    | CONSTANT            2 '42'
-0010    | CALL             0033 (Child) (2 args)
+0010    | CALL             0033 (child) (2 args)
 0016    | SET_GLOBAL          0 'c'
 0018    1 JUMP                9 (to 0030)
 
@@ -27,22 +27,23 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0044    0 GET_GLOBAL          0 'c'
 0046    | DUP
 0047    | GET_FIELD_OFFSET    0 (index)
-0049    | GET_GLOBAL_ADDRESS    4 'Child_vtable'
+0049    | GET_GLOBAL_ADDRESS    5 'child_vtable'
 0051    | SET_INDIRECT
 0052    | POP
-0053    4 CONSTANT            5 '1'
+0053    4 CONSTANT            6 '1'
 0055    | GET_GLOBAL          0 'c'
 0057    | GET_FIELD_OFFSET    1 (index)
 0059    | GET_INDIRECT
-0060    | CALL_BUILTIN         6 'write' (2 args)
+0060    | CALL_BUILTIN         7 'write' (2 args)
 0064    0 HALT
 == End Disassembly: Tests/rea/super_constructor.rea ==
 
-Constants (7):\n  0000: STR   "c"
+Constants (8):\n  0000: STR   "c"
   0001: STR   "Child"
   0002: INT   42
-  0003: STR   "Base_Base"
-  0004: STR   "Child_vtable"
-  0005: INT   1
-  0006: STR   "write"
+  0003: STR   "child"
+  0004: STR   "Base_Base"
+  0005: STR   "child_vtable"
+  0006: INT   1
+  0007: STR   "write"
 
