@@ -63,6 +63,7 @@ typedef enum {
     INIT_LOCAL_FILE,  // Initialize local file variable
     INIT_LOCAL_POINTER, // Initialize local pointer variable
     INIT_LOCAL_STRING, // Initialize local fixed-length string variable
+    INIT_FIELD_ARRAY, // Initialize object field array
     GET_LOCAL_ADDRESS,
 
     GET_UPVALUE,
