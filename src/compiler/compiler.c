@@ -1401,7 +1401,11 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_NEW: {
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            AST* classType = lookupType(className);
+            char lowerClassName[MAX_SYMBOL_LENGTH];
+            strncpy(lowerClassName, className, sizeof(lowerClassName) - 1);
+            lowerClassName[sizeof(lowerClassName) - 1] = '\0';
+            toLowerString(lowerClassName);
+            AST* classType = lookupType(lowerClassName);
 
             bool hasVTable = recordTypeHasVTable(classType);
             int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
@@ -1420,7 +1424,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)0, line);
                 char vtName[512];
-                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                snprintf(vtName, sizeof(vtName), "%s_vtable", lowerClassName);
                 int vtNameIdx = addStringConstant(chunk, vtName);
                 emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
@@ -1431,7 +1435,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                int ctorNameIdx = addStringConstant(chunk, className);
+                int ctorNameIdx = addStringConstant(chunk, lowerClassName);
                 writeBytecodeChunk(chunk, CALL, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
                 emitShort(chunk, 0xFFFF, line);
@@ -1708,8 +1712,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                         sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
                                     pending_global_vtables[pending_global_vtable_count].var_name =
                                         strdup(varNameNode->token->value);
-                                    pending_global_vtables[pending_global_vtable_count].class_name =
-                                        strdup(node->left->token->value);
+                                    char* lower_cls = strdup(node->left->token->value);
+                                    toLowerString(lower_cls);
+                                    pending_global_vtables[pending_global_vtable_count].class_name = lower_cls;
                                     pending_global_vtable_count++;
                                 }
                             }
@@ -3182,7 +3187,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_NEW: {
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            AST* classType = lookupType(className);
+            char lowerClassName[MAX_SYMBOL_LENGTH];
+            strncpy(lowerClassName, className, sizeof(lowerClassName) - 1);
+            lowerClassName[sizeof(lowerClassName) - 1] = '\0';
+            toLowerString(lowerClassName);
+            AST* classType = lookupType(lowerClassName);
 
             bool hasVTable = recordTypeHasVTable(classType);
             int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
@@ -3201,7 +3210,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)0, line);
                 char vtName[512];
-                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                snprintf(vtName, sizeof(vtName), "%s_vtable", lowerClassName);
                 int vtNameIdx = addStringConstant(chunk, vtName);
                 emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
@@ -3212,7 +3221,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                int ctorNameIdx = addStringConstant(chunk, className);
+                int ctorNameIdx = addStringConstant(chunk, lowerClassName);
                 writeBytecodeChunk(chunk, CALL, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
                 emitShort(chunk, 0xFFFF, line);

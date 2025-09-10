@@ -13,22 +13,21 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0011    | ALLOC_OBJECT        2 (fields)
 0013    | DUP
 0014    | GET_FIELD_OFFSET    0 (index)
-0016    | GET_GLOBAL_ADDRESS    1 'MixedCase_vtable'
+0016    | GET_GLOBAL_ADDRESS    1 'mixedcase_vtable'
 0018    | SET_INDIRECT
 0019    | SET_LOCAL           0 (slot)
 0021    2 RETURN
 0022    0 CONSTANT            2 'Value type ARRAY'
-0024    | DEFINE_GLOBAL    NameIdx:3   'mixedcase_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
-0034    | SET_GLOBAL          3 'mixedcase_vtable'
+0024    | DEFINE_GLOBAL    NameIdx:1   'mixedcase_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
+0034    | SET_GLOBAL          1 'mixedcase_vtable'
 0036    5 CALL             0007 (run) (0 args)
 0042    0 HALT
 == End Disassembly: Tests/rea/new_local_vtable.rea ==
 
-Constants (7):\n  0000: STR   "MixedCase"
-  0001: STR   "MixedCase_vtable"
+Constants (6):\n  0000: STR   "MixedCase"
+  0001: STR   "mixedcase_vtable"
   0002: Value type ARRAY
-  0003: STR   "mixedcase_vtable"
-  0004: INT   0
-  0005: STR   "integer"
-  0006: STR   "run"
+  0003: INT   0
+  0004: STR   "integer"
+  0005: STR   "run"
 

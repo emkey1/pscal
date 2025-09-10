@@ -6,7 +6,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0005    | ALLOC_OBJECT        2 (fields)
 0007    | DUP
 0008    | CONSTANT            2 '5'
-0010    | CALL             0021 (Point) (2 args)
+0010    | CALL             0021 (point) (2 args)
 0016    | SET_GLOBAL          0 'p'
 0018    1 JUMP                9 (to 0030)
 
@@ -20,14 +20,15 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0030    0 GET_GLOBAL          0 'p'
 0032    | DUP
 0033    | GET_FIELD_OFFSET    0 (index)
-0035    | GET_GLOBAL_ADDRESS    3 'Point_vtable'
+0035    | GET_GLOBAL_ADDRESS    4 'point_vtable'
 0037    | SET_INDIRECT
 0038    | POP
 0039    | HALT
 == End Disassembly: Tests/rea/constructor_init.rea ==
 
-Constants (4):\n  0000: STR   "p"
+Constants (5):\n  0000: STR   "p"
   0001: STR   "Point"
   0002: INT   5
-  0003: STR   "Point_vtable"
+  0003: STR   "point"
+  0004: STR   "point_vtable"
 
