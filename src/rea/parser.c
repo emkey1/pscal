@@ -805,6 +805,7 @@ static const char *opLexeme(TokenType t) {
         case TOKEN_GREATER_EQUAL: return ">=";
         case TOKEN_LESS: return "<";
         case TOKEN_LESS_EQUAL: return "<=";
+        case TOKEN_ASSIGN: return "=";
         default: return "";
     }
 }
