@@ -1333,6 +1333,29 @@ static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, in
     return -1;
 }
 
+// Check whether a global variable with the given name has already been declared.
+static bool globalVariableExists(const char* name) {
+    for (int i = 0; i < compilerGlobalCount; i++) {
+        if (compilerGlobals[i].name && strcmp(compilerGlobals[i].name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Returns true if the given const declaration node is nested inside a class
+// definition (represented as a RECORD_TYPE within a TYPE_DECL).
+static bool constIsClassMember(AST* node) {
+    AST* p = node ? node->parent : NULL;
+    while (p) {
+        if (p->type == AST_RECORD_TYPE && p->parent && p->parent->type == AST_TYPE_DECL) {
+            return true;
+        }
+        p = p->parent;
+    }
+    return false;
+}
+
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1381,7 +1404,12 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                     }
                 } else {
-                    int nameIndex =  addStringConstant(chunk, varName);
+                    if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
+                        fprintf(stderr, "L%d: Undefined variable '%s'.\n", line, varName);
+                        compiler_had_error = true;
+                        break;
+                    }
+                    int nameIndex = addStringConstant(chunk, varName);
                     emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16,
                                        nameIndex, line);
                 }
@@ -2008,16 +2036,21 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     const_val = evaluateCompileTimeValue(node->left);
                 }
 
-                // Insert into global symbol table so subsequent declarations can reference it.
-                insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
-                Symbol* sym = lookupGlobalSymbol(node->token->value);
-                if (sym && sym->value) {
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&const_val);
-                    sym->is_const = true;
-                }
+                if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+                    fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
+                    compiler_had_error = true;
+                } else if (!constIsClassMember(node)) {
+                    // Insert into global symbol table so subsequent declarations can reference it.
+                    insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
+                    Symbol* sym = lookupGlobalSymbol(node->token->value);
+                    if (sym && sym->value) {
+                        freeValue(sym->value);
+                        *(sym->value) = makeCopyOfValue(&const_val);
+                        sym->is_const = true;
+                    }
 
-                insertConstGlobalSymbol(node->token->value, const_val);
+                    insertConstGlobalSymbol(node->token->value, const_val);
+                }
 
                 // Constants are resolved at compile time, so no bytecode emission is needed.
                 freeValue(&const_val);
