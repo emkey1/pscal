@@ -40,7 +40,7 @@ void freeValue(Value *v);                  // from core/utils.c
 void addCompilerConstant(const char* name, const Value* value, int line); // from compiler/compiler.h
 static AST *parseExpression(ReaParser *p); // forward for array helpers
 static AST *parseWriteArgument(ReaParser *p); // forward
-static void transformPrintfArgs(AST *call, AST *argList);
+static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList);
 
 // Parse a sequence of bracketed index expressions after an expression and
 // build an AST_ARRAY_ACCESS node.  For multi-dimensional access like
@@ -271,7 +271,7 @@ static AST *parseWriteArgument(ReaParser *p) {
 }
 
 // Transform printf-style calls into a sequence of write arguments.
-static void transformPrintfArgs(AST *call, AST *argList) {
+static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList) {
     size_t nextArg = 0;
     if (!call || !argList) return;
     if (argList->child_count > 0 && argList->children[0] &&
@@ -310,30 +310,42 @@ static void transformPrintfArgs(AST *call, AST *argList) {
                         j++;
                     }
                     const char *specifiers = "cdiuoxXfFeEgGaAspn";
-                    if (j < flen && strchr(specifiers, fmt[j]) != NULL &&
-                        nextArg < (size_t)argList->child_count) {
-                        if (seglen > 0) {
-                            seg[seglen] = '\0';
-                            Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
-                            AST *segNode = newASTNode(AST_STRING, segTok);
-                            segNode->i_val = (int)seglen;
-                            setTypeAST(segNode, TYPE_STRING);
-                            addChild(call, segNode);
-                            seglen = 0;
-                        }
-                        AST *expr = argList->children[nextArg++];
-                        if (width > 0 || precision >= 0) {
-                            char fmtbuf[32];
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, precision);
-                            Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, line, 0);
-                            AST *fmtExpr = newASTNode(AST_FORMATTED_EXPR, fmtTok);
-                            setLeft(fmtExpr, expr);
-                            setTypeAST(fmtExpr, TYPE_UNKNOWN);
-                            addChild(call, fmtExpr);
+                    if (j < flen && strchr(specifiers, fmt[j]) != NULL) {
+                        char spec = fmt[j];
+                        const char *supported = "cdiufFeEgGaAsc";
+                        if (!strchr(supported, spec)) {
+                            fprintf(stderr, "L%d: Unsupported printf format specifier '%c'.\n", line, spec);
+                            if (p) p->hadError = true;
+                            for (size_t k = i; k <= j && k < flen; ++k) {
+                                seg[seglen++] = fmt[k];
+                            }
+                            i = j; // skip specifier
+                        } else if (nextArg < (size_t)argList->child_count) {
+                            if (seglen > 0) {
+                                seg[seglen] = '\0';
+                                Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
+                                AST *segNode = newASTNode(AST_STRING, segTok);
+                                segNode->i_val = (int)seglen;
+                                setTypeAST(segNode, TYPE_STRING);
+                                addChild(call, segNode);
+                                seglen = 0;
+                            }
+                            AST *expr = argList->children[nextArg++];
+                            if (width > 0 || precision >= 0) {
+                                char fmtbuf[32];
+                                snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, precision);
+                                Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, line, 0);
+                                AST *fmtExpr = newASTNode(AST_FORMATTED_EXPR, fmtTok);
+                                setLeft(fmtExpr, expr);
+                                setTypeAST(fmtExpr, TYPE_UNKNOWN);
+                                addChild(call, fmtExpr);
+                            } else {
+                                addChild(call, expr);
+                            }
+                            i = j; // skip specifier
                         } else {
-                            addChild(call, expr);
+                            seg[seglen++] = '%';
                         }
-                        i = j; // skip specifier
                     } else {
                         seg[seglen++] = '%';
                     }
@@ -586,7 +598,7 @@ static AST *parseFactor(ReaParser *p) {
             AST *call = NULL;
             if (isPrintf) {
                 call = newASTNode(AST_WRITE, NULL);
-                transformPrintfArgs(call, call_args);
+                transformPrintfArgs(p, call, call_args);
                 if (call_args) freeAST(call_args);
                 freeToken(tok);
             } else {
