@@ -98,9 +98,7 @@ class MandelbrotApp {
       else if (key == this.KEY_UP) { this.minIm += dy; this.maxIm += dy; }
       else if (key == this.KEY_DOWN) { this.minIm -= dy; this.maxIm -= dy; }
     }
-    int x = 0;
-    int y = 0;
-    int b = 0;
+    int x = 0, y = 0, b = 0;
     getmousestate(x, y, b);
     if ((b & this.ButtonLeft) != 0 && (this.prevButtons & this.ButtonLeft) == 0) {
       this.zoom(x, y, 1.0 / this.ZoomFactor);

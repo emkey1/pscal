@@ -1287,6 +1287,18 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
             if (!stmt) break;
             if (stmt->type == AST_VAR_DECL) {
                 addChild(decls, stmt);
+            } else if (stmt->type == AST_COMPOUND) {
+                for (int si = 0; si < stmt->child_count; si++) {
+                    AST *child = stmt->children[si];
+                    if (!child) continue;
+                    if (child->type == AST_VAR_DECL) {
+                        addChild(decls, child);
+                    } else {
+                        addChild(stmts, child);
+                    }
+                    stmt->children[si] = NULL;
+                }
+                freeAST(stmt);
             } else {
                 addChild(stmts, stmt);
             }
