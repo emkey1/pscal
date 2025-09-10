@@ -915,6 +915,13 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
     if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
+    /* CLike-style cast helpers */
+    if (strcasecmp(name, "int") == 0 || strcasecmp(name, "toint") == 0) return TYPE_INT64;
+    if (strcasecmp(name, "double") == 0 || strcasecmp(name, "todouble") == 0) return TYPE_DOUBLE;
+    if (strcasecmp(name, "float") == 0 || strcasecmp(name, "tofloat") == 0) return TYPE_FLOAT;
+    if (strcasecmp(name, "char") == 0 || strcasecmp(name, "tochar") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "bool") == 0 || strcasecmp(name, "tobool") == 0) return TYPE_BOOLEAN;
+
     /* Math routines returning REAL */
     if (strcasecmp(name, "cos")   == 0 ||
         strcasecmp(name, "sin")   == 0 ||

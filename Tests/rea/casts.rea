@@ -1,0 +1,7 @@
+writeln(int(3.7));
+writeln(int(-3.7));
+writeln(int(float(5)));
+writeln(int(float(6)));
+writeln(int(char(300)));
+writeln(int(bool(0.0)));
+writeln(int(bool(2)));
