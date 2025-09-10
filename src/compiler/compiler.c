@@ -2781,26 +2781,36 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            compileRValue(rvalue, chunk, getLine(rvalue));
-
-            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
-                lvalue->token && lvalue->token->value &&
-                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                 strcasecmp(lvalue->token->value, "result") == 0)) {
-                
-                int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
-                if (return_slot != -1) {
-                    writeBytecodeChunk(chunk, SET_LOCAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                    // The POP instruction that was here has been removed.
-                } else {
-                    fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
-                    compiler_had_error = true;
-                }
-            } else {
+            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
                 compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, DUP, line);
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                compileRValue(rvalue, chunk, getLine(rvalue));
+                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
+                else writeBytecodeChunk(chunk, SUBTRACT, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
+            } else {
+                compileRValue(rvalue, chunk, getLine(rvalue));
+
+                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                    lvalue->token && lvalue->token->value &&
+                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                     strcasecmp(lvalue->token->value, "result") == 0)) {
+
+                    int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+                    if (return_slot != -1) {
+                        writeBytecodeChunk(chunk, SET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
+                        // The POP instruction that was here has been removed.
+                    } else {
+                        fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
+                        compiler_had_error = true;
+                    }
+                } else {
+                    compileLValue(lvalue, chunk, getLine(lvalue));
+                    writeBytecodeChunk(chunk, SWAP, line);
+                    writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                }
             }
             break;
         }
@@ -3661,34 +3671,47 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            compileRValue(rvalue, chunk, getLine(rvalue));
-            writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
-
-            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
-                lvalue->token && lvalue->token->value &&
-                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                 strcasecmp(lvalue->token->value, "result") == 0)) {
-
-                int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
-                if (return_slot != -1) {
-                    writeBytecodeChunk(chunk, SET_LOCAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                } else {
-                    fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
-                    compiler_had_error = true;
-                }
+            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
+                // Compound assignment: evaluate LHS once and preserve result on the stack
+                compileLValue(lvalue, chunk, getLine(lvalue));            // stack: [addr]
+                writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr]
+                writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr, addr]
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [addr, addr, value]
+                compileRValue(rvalue, chunk, getLine(rvalue));            // [addr, addr, value, rhs]
+                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
+                else writeBytecodeChunk(chunk, SUBTRACT, line);           // [addr, addr, result]
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);            // [addr]
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {
-                compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, SWAP, line);
-                writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                compileRValue(rvalue, chunk, getLine(rvalue));
+                writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
+
+                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                    lvalue->token && lvalue->token->value &&
+                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                     strcasecmp(lvalue->token->value, "result") == 0)) {
+
+                    int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+                    if (return_slot != -1) {
+                        writeBytecodeChunk(chunk, SET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
+                    } else {
+                        fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
+                        compiler_had_error = true;
+                    }
+                } else {
+                    compileLValue(lvalue, chunk, getLine(lvalue));
+                    writeBytecodeChunk(chunk, SWAP, line);
+                    writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                }
             }
             break;
         }
         case AST_BINARY_OP: {
             if (node_token && node_token->type == TOKEN_AND) {
                 // Check annotated type to decide between bitwise and logical AND
-                if (node->left && node->left->var_type == TYPE_INTEGER) {
-                    // Bitwise AND for integers
+                if (node->left && isIntlikeType(node->left->var_type)) {
+                    // Bitwise AND for integer types
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
                     writeBytecodeChunk(chunk, AND, line);
@@ -3714,8 +3737,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             } else if (node_token && node_token->type == TOKEN_OR) {
                 // Check annotated type for bitwise vs. logical OR
-                if (node->left && node->left->var_type == TYPE_INTEGER) {
-                    // Bitwise OR for integers
+                if (node->left && isIntlikeType(node->left->var_type)) {
+                    // Bitwise OR for integer types
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
                     writeBytecodeChunk(chunk, OR, line);

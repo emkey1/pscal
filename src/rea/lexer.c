@@ -172,9 +172,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case ':':
             return makeToken(lexer, REA_TOKEN_COLON, start);
         case '+':
-            return makeToken(lexer, REA_TOKEN_PLUS, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PLUS_EQUAL : REA_TOKEN_PLUS, start);
         case '-':
-            return makeToken(lexer, REA_TOKEN_MINUS, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_MINUS_EQUAL : REA_TOKEN_MINUS, start);
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
@@ -185,10 +185,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_BANG_EQUAL : REA_TOKEN_BANG, start);
         case '&':
             if (match(lexer, '&')) return makeToken(lexer, REA_TOKEN_AND_AND, start);
-            break;
+            return makeToken(lexer, REA_TOKEN_AND, start);
         case '|':
             if (match(lexer, '|')) return makeToken(lexer, REA_TOKEN_OR_OR, start);
-            break;
+            return makeToken(lexer, REA_TOKEN_OR, start);
         case '=':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_EQUAL_EQUAL : REA_TOKEN_EQUAL, start);
         case '<':
