@@ -1,0 +1,31 @@
+// This program tests the basic syntax of Rea,
+// including variable declarations, constants, arithmetic,
+// and simple control flow. It should compile and run
+// correctly on the PSCAL VM.
+
+int main() {
+
+  // 1. Variable and constant declarations
+  int a = 10;
+  int b = 25;
+  const int FACTOR = 2;
+  writeln("Initial values: a=", a, ", b=", b);
+
+  // 2. Arithmetic operations and assignments
+  int result = a * b + 5;
+  writeln("Result of a * b + 5 is: ", result);
+
+  // 3. Conditional statement (if/else)
+  if (result > 200) {
+    writeln("Result is greater than 200.");
+  } else {
+    writeln("Result is not greater than 200.");
+  }
+
+  // 4. For loop
+  writeln("Counting up to FACTOR...");
+  for (int i = 0; i < FACTOR; i = i + 1) {
+    writeln("Iteration: ", i);
+}
+
+return 0;

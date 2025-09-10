@@ -1,0 +1,55 @@
+// This program tests class inheritance, object instantiation,
+// and the use of the super keyword to call a parent's
+// constructor and methods.
+
+
+// Define a base class Animal
+class Animal {
+  str name;
+  int age;
+
+  // Constructor for the base class
+  void Animal(str animalName, int animalAge) {
+      this.name = animalName;
+      this.age = animalAge;
+      writeln("An animal was created with name: ", this.name);
+  }
+
+  void speak() {
+    writeln(this.name, " makes a sound.");
+  }
+}
+
+// Define a subclass Dog that inherits from Animal
+class Dog extends Animal {
+  str breed;
+
+  // Constructor for the subclass
+  void Dog(str dogName, int dogAge, str dogBreed) {
+    // Call the parent's constructor using `super`
+    super(dogName, dogAge);
+    this.breed = dogBreed;
+    writeln(this.name, " is a dog of breed ", this.breed, ".");
+  }
+
+  // Override the `speak` method
+  void speak() {
+    writeln(this.name, " barks loudly.");
+    
+    // Call the parent's `speak` method
+    super.speak();
+  }
+}
+
+int main() {
+  // Instantiate a Dog object
+  Dog myDog = new Dog("Rex", 3, "German Shepherd");
+
+  // Call the overridden method
+  myDog.speak();
+
+  // Access inherited fields
+  writeln("My dog's name is: ", myDog.name, " and he is ", myDog.age, " years old.");
+
+  return 0;
+}
