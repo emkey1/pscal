@@ -4,7 +4,7 @@
 writeln("Starting Rea SDL demo (initializing text system)...");
 InitTextSystem();
 SetColor(255, 255, 255, 255);
-writeln("Text system initialized. (No window shown in my demo.)");
+writeln("Text system initialized. (No window shown in this demo.)");
 QuitTextSystem();
 writeln("Rea SDL demo finished.");
 
