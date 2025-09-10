@@ -358,8 +358,14 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
             pascal_semantic_error_count++;
             return NULL;
         }
-        if (fs->type_def && fs->type_def->token) {
-            return fs->type_def->token->value;
+        if (fs->type_def) {
+            AST *type = fs->type_def;
+            while (type && (type->type == AST_ARRAY_TYPE || type->type == AST_POINTER_TYPE)) {
+                type = type->right;
+            }
+            if (type && type->token) {
+                return type->token->value;
+            }
         }
         return NULL;
     }
