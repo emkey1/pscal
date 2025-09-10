@@ -86,6 +86,10 @@ static int pending_global_vtable_count = 0;
 // situation vtables have not yet been emitted, so NEW expressions should not
 // attempt to resolve their class vtables immediately.
 static bool compiling_global_var_init = false;
+// Tracks nested NEW expressions when compiling a global initializer so that
+// only the outermost object defers its vtable setup. Nested NEWs must initialize
+// their vtable pointers immediately.
+static int global_init_new_depth = 0;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
@@ -1405,6 +1409,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_NEW: {
             if (!node || !node->token || !node->token->value) { break; }
+            global_init_new_depth++;
             const char* className = node->token->value;
             char lowerClassName[MAX_SYMBOL_LENGTH];
             strncpy(lowerClassName, className, sizeof(lowerClassName) - 1);
@@ -1414,6 +1419,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             bool hasVTable = recordTypeHasVTable(classType);
             int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+            bool defer_vtable = compiling_global_var_init && global_init_new_depth == 1;
 
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, ALLOC_OBJECT, line);
@@ -1423,7 +1429,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable && !compiling_global_var_init) {
+            if (hasVTable && !defer_vtable) {
                 // Initialise hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
@@ -1446,6 +1452,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
+            global_init_new_depth--;
             break;
         }
         case AST_DEREFERENCE: {
@@ -1711,11 +1718,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 }
                             } else {
                                 bool prev_global_init = compiling_global_var_init;
-                                if (current_function_compiler == NULL) compiling_global_var_init = true;
+                                bool set_global_guard = (current_function_compiler == NULL &&
+                                                          node->left->type == AST_NEW);
+                                if (set_global_guard) compiling_global_var_init = true;
                                 compileRValue(node->left, chunk, getLine(node->left));
-                                if (current_function_compiler == NULL) compiling_global_var_init = prev_global_init;
-                                if (current_function_compiler == NULL && node->left->type == AST_NEW &&
-                                    node->left->token && node->left->token->value) {
+                                if (set_global_guard) compiling_global_var_init = prev_global_init;
+                                if (set_global_guard && node->left->token && node->left->token->value) {
                                     pending_global_vtables = realloc(pending_global_vtables,
                                         sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
                                     pending_global_vtables[pending_global_vtable_count].var_name =
@@ -3204,6 +3212,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool hasVTable = recordTypeHasVTable(classType);
             int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
 
+            global_init_new_depth++;
+            bool defer_vtable = compiling_global_var_init && global_init_new_depth == 1;
+
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, ALLOC_OBJECT, line);
                 writeBytecodeChunk(chunk, (uint8_t)fieldCount, line);
@@ -3212,7 +3223,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable && !compiling_global_var_init) {
+            if (hasVTable && !defer_vtable) {
                 // Store class vtable pointer into hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
@@ -3235,6 +3246,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
+            global_init_new_depth--;
             break;
         }
         case AST_SET: {
