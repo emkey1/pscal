@@ -190,8 +190,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"biwherey", vmBuiltinWherey},
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
+    {"bool", vmBuiltinToBool},
     {"bytecodeversion", vmBuiltinBytecodeVersion},
     {"ceil", vmBuiltinCeil},
+    {"char", vmBuiltinToChar},
     {"chr", vmBuiltinChr},
 #ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
@@ -229,6 +231,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"dosGettime", vmBuiltinDosGettime},
     {"dosMkdir", vmBuiltinDosMkdir},
     {"dosRmdir", vmBuiltinDosRmdir},
+    {"double", vmBuiltinToDouble},
 #ifdef SDL
     {"drawcircle", vmBuiltinDrawcircle}, // Moved
     {"drawline", vmBuiltinDrawline}, // Moved
@@ -246,6 +249,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #endif
     {"findfirst", vmBuiltinDosFindfirst},
     {"findnext", vmBuiltinDosFindnext},
+    {"float", vmBuiltinToFloat},
     {"floor", vmBuiltinFloor},
 #ifdef SDL
     {"freesound", vmBuiltinFreesound},
@@ -280,6 +284,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"inittextsystem", vmBuiltinInittextsystem},
 #endif
     {"insline", vmBuiltinInsline},
+    {"int", vmBuiltinToInt},
     {"inttostr", vmBuiltinInttostr},
     {"invertcolors", vmBuiltinInvertcolors},
     {"ioresult", vmBuiltinIoresult},
@@ -3905,13 +3910,7 @@ void registerAllBuiltins(void) {
 
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
-    /* CLike-style cast helpers (exposed as lowercase names): */
-    registerVmBuiltin("int",     vmBuiltinToInt);
-    registerVmBuiltin("double",  vmBuiltinToDouble);
-    registerVmBuiltin("float",   vmBuiltinToFloat);
-    registerVmBuiltin("char",    vmBuiltinToChar);
-    registerVmBuiltin("bool",    vmBuiltinToBool);
-    /* synonyms for CLike to avoid keyword collisions */
+    /* CLike-style cast helper synonyms to avoid keyword collisions */
     registerVmBuiltin("toint",    vmBuiltinToInt);
     registerVmBuiltin("todouble", vmBuiltinToDouble);
     registerVmBuiltin("tofloat",  vmBuiltinToFloat);
