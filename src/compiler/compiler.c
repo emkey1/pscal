@@ -1768,16 +1768,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 Value lower_b = evaluateCompileTimeValue(subrange->left);
                                 Value upper_b = evaluateCompileTimeValue(subrange->right);
 
-                                if (lower_b.type == TYPE_INTEGER) {
-                                    emitConstantIndex16(chunk, addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                if (IS_INTLIKE(lower_b)) {
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(lower_b)), getLine(varNameNode));
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                     compiler_had_error = true;
                                 }
                                 freeValue(&lower_b);
 
-                                if (upper_b.type == TYPE_INTEGER) {
-                                    emitConstantIndex16(chunk, addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                if (IS_INTLIKE(upper_b)) {
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(upper_b)), getLine(varNameNode));
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                     compiler_had_error = true;
