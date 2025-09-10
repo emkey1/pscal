@@ -939,26 +939,14 @@ static AST *parseAssignment(ReaParser *p) {
         reaAdvance(p);
         AST *value = parseAssignment(p);
         if (!value) return NULL;
-        Token *assignTok = newToken(TOKEN_ASSIGN, "=", op.line, 0);
+        TokenType assignType = TOKEN_ASSIGN;
+        if (op.type == REA_TOKEN_PLUS_EQUAL) assignType = TOKEN_PLUS;
+        else if (op.type == REA_TOKEN_MINUS_EQUAL) assignType = TOKEN_MINUS;
+
+        Token *assignTok = newToken(assignType, opLexeme(assignType), op.line, 0);
         AST *node = newASTNode(AST_ASSIGN, assignTok);
         setLeft(node, left);
-        if (op.type == REA_TOKEN_EQUAL) {
-            setRight(node, value);
-        } else {
-            TokenType opType = (op.type == REA_TOKEN_PLUS_EQUAL) ? TOKEN_PLUS : TOKEN_MINUS;
-            Token *opTok = newToken(opType, opLexeme(opType), op.line, 0);
-            AST *binary = newASTNode(AST_BINARY_OP, opTok);
-            setLeft(binary, copyAST(left));
-            setRight(binary, value);
-            VarType lt = left->var_type;
-            VarType rt = value->var_type;
-            VarType res;
-            if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) res = TYPE_DOUBLE;
-            else if (lt == TYPE_INT64 || rt == TYPE_INT64) res = TYPE_INT64;
-            else res = TYPE_INT32;
-            setTypeAST(binary, res);
-            setRight(node, binary);
-        }
+        setRight(node, value);
         setTypeAST(node, left->var_type);
         return node;
     }
