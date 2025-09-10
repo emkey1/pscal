@@ -9,6 +9,8 @@
 
 // Forward declaration from core/utils.c
 Token *newToken(TokenType type, const char *value, int line, int column);
+// Needed to evaluate class constant expressions at compile time
+Value evaluateCompileTimeValue(AST *node);
 
 /* ------------------------------------------------------------------------- */
 /*  Internal helpers                                                         */
@@ -134,6 +136,8 @@ static void collectClasses(AST *node) {
             } else if (field->type == AST_CONST_DECL) {
                 if (!field->token || !field->token->value) continue;
                 fname = field->token->value;
+                /* For const declarations, ftype may appear on the right or, if omitted,
+                   the value's node carries the type information. */
                 ftype = field->right ? field->right : (field->left ? field->left : NULL);
             } else {
                 continue;
@@ -150,6 +154,19 @@ static void collectClasses(AST *node) {
             if (!sym) { free(lname); continue; }
             sym->name = lname;
             sym->type_def = ftype ? copyAST(ftype) : NULL;
+            if (field->type == AST_CONST_DECL) {
+                sym->is_const = true;
+                if (field->left) {
+                    Value v = evaluateCompileTimeValue(field->left);
+                    if (v.type != TYPE_VOID && v.type != TYPE_UNKNOWN) {
+                        Value *vp = (Value *)calloc(1, sizeof(Value));
+                        if (vp) {
+                            *vp = v; /* shallow copy; safe for numeric types */
+                            sym->value = vp;
+                        }
+                    }
+                }
+            }
             hashTableInsert(ci->fields, sym);
         }
         insertClassInfo(ci);
@@ -409,6 +426,32 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 if (!fs) {
                     fprintf(stderr, "Unknown field '%s' on class '%s'\n", fname ? fname : "(null)", cls);
                     pascal_semantic_error_count++;
+                } else if (fs->is_const && fs->value) {
+                    /* Replace field access with constant literal */
+                    Value *v = fs->value;
+                    char buf[64];
+                    Token *tok = NULL;
+                    ASTNodeType newType = AST_NUMBER;
+                    if (v->type == TYPE_DOUBLE || v->type == TYPE_REAL ||
+                        v->type == TYPE_LONG_DOUBLE || v->type == TYPE_FLOAT) {
+                        snprintf(buf, sizeof(buf), "%Lf", v->real.r_val);
+                        tok = newToken(TOKEN_REAL_CONST, strdup(buf), 0, 0);
+                        newType = AST_NUMBER;
+                    } else {
+                        snprintf(buf, sizeof(buf), "%lld", (long long)v->i_val);
+                        tok = newToken(TOKEN_INTEGER_CONST, strdup(buf), 0, 0);
+                        newType = AST_NUMBER;
+                    }
+                    if (tok) {
+                        if (node->left) freeAST(node->left);
+                        if (node->right) freeAST(node->right);
+                        node->left = node->right = node->extra = NULL;
+                        node->child_count = 0;
+                        node->children = NULL;
+                        node->token = tok;
+                        node->type = newType;
+                        setTypeAST(node, v->type);
+                    }
                 } else if (fs->type_def) {
                     node->var_type = fs->type_def->var_type;
                     node->type_def = copyAST(fs->type_def);
