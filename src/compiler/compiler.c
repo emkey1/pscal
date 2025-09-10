@@ -3213,7 +3213,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "dosgetdate") == 0) ||
                     (strcasecmp(calleeName, "dosgettime") == 0) ||
                     (strcasecmp(calleeName, "getdate") == 0) ||
-                    (strcasecmp(calleeName, "gettime") == 0)
+                    (strcasecmp(calleeName, "gettime") == 0) ||
+                    /* MandelbrotRow returns results via the sixth VAR parameter */
+                    (strcasecmp(calleeName, "mandelbrotrow") == 0 && i == 5)
                 )) {
                     is_var_param = true;
                 }
