@@ -1,0 +1,24 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/printf_format.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 CONSTANT            0 '0'
+0002    | CONSTANT            1 'X='
+0004    | CONSTANT            2 '7'
+0006    | FORMAT_VALUE     width:5 prec:-1
+0009    | CONSTANT            3 ' Y='
+0011    | CONSTANT            4 '1.234560'
+0013    | FORMAT_VALUE     width:0 prec:2
+0016    | CONSTANT            5 '\n'
+0018    | CALL_BUILTIN         6 'write' (6 args)
+0022    0 HALT
+== End Disassembly: Tests/rea/printf_format.rea ==
+
+Constants (7):\n  0000: INT   0
+  0001: STR   "X="
+  0002: INT   7
+  0003: STR   " Y="
+  0004: REAL  1.234560
+  0005: CHAR  '\n'
+  0006: STR   "write"
+

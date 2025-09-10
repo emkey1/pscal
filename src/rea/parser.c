@@ -2,10 +2,12 @@
 #include "ast/ast.h"
 #include "core/types.h"
 #include "symbol/symbol.h"
+#include "core/utils.h"
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "core/list.h"
 
 // Forward declaration from core/utils.c
@@ -37,6 +39,8 @@ Value evaluateCompileTimeValue(AST *node); // from compiler/compiler.c
 void freeValue(Value *v);                  // from core/utils.c
 void addCompilerConstant(const char* name, const Value* value, int line); // from compiler/compiler.h
 static AST *parseExpression(ReaParser *p); // forward for array helpers
+static AST *parseWriteArgument(ReaParser *p); // forward
+static void transformPrintfArgs(AST *call, AST *argList);
 
 // Parse a sequence of bracketed index expressions after an expression and
 // build an AST_ARRAY_ACCESS node.  For multi-dimensional access like
@@ -224,6 +228,137 @@ static char *reaUnescapeString(const char *src, size_t len, size_t *out_len) {
     buf[j] = '\0';
     if (out_len) *out_len = j;
     return buf;
+}
+
+// Parses an expression optionally followed by formatting specifiers.
+static AST *parseWriteArgument(ReaParser *p) {
+    int expr_line = p->current.line;
+    AST *expr = parseExpression(p);
+    if (!expr) return NULL;
+    if (p->current.type == REA_TOKEN_COLON) {
+        reaAdvance(p);
+        if (p->current.type != REA_TOKEN_NUMBER) return expr;
+        char *wlex = (char*)malloc(p->current.length + 1);
+        if (!wlex) return expr;
+        memcpy(wlex, p->current.start, p->current.length);
+        wlex[p->current.length] = '\0';
+        int width = atoi(wlex);
+        free(wlex);
+        reaAdvance(p);
+        int prec = -1;
+        if (p->current.type == REA_TOKEN_COLON) {
+            reaAdvance(p);
+            if (p->current.type == REA_TOKEN_NUMBER) {
+                char *plex = (char*)malloc(p->current.length + 1);
+                if (plex) {
+                    memcpy(plex, p->current.start, p->current.length);
+                    plex[p->current.length] = '\0';
+                    prec = atoi(plex);
+                    free(plex);
+                }
+                reaAdvance(p);
+            }
+        }
+        char fmtbuf[32];
+        snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, prec);
+        Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, expr_line, 0);
+        AST *fmtNode = newASTNode(AST_FORMATTED_EXPR, fmtTok);
+        setLeft(fmtNode, expr);
+        setTypeAST(fmtNode, TYPE_UNKNOWN);
+        return fmtNode;
+    }
+    return expr;
+}
+
+// Transform printf-style calls into a sequence of write arguments.
+static void transformPrintfArgs(AST *call, AST *argList) {
+    size_t nextArg = 0;
+    if (!call || !argList) return;
+    if (argList->child_count > 0 && argList->children[0] &&
+        argList->children[0]->type == AST_STRING &&
+        argList->children[0]->token && argList->children[0]->token->value) {
+        AST *fmtNode = argList->children[0];
+        char *fmt = fmtNode->token->value;
+        int line = fmtNode->token->line;
+        size_t flen = strlen(fmt);
+        char *seg = (char*)malloc(flen + 1);
+        size_t seglen = 0;
+        nextArg = 1;
+        for (size_t i = 0; i < flen; ++i) {
+            if (fmt[i] == '%' && i + 1 < flen) {
+                if (fmt[i + 1] == '%') {
+                    seg[seglen++] = '%';
+                    i++;
+                } else {
+                    size_t j = i + 1;
+                    int width = 0;
+                    int precision = -1;
+                    while (j < flen && isdigit((unsigned char)fmt[j])) {
+                        width = width * 10 + (fmt[j] - '0');
+                        j++;
+                    }
+                    if (j < flen && fmt[j] == '.') {
+                        j++;
+                        precision = 0;
+                        while (j < flen && isdigit((unsigned char)fmt[j])) {
+                            precision = precision * 10 + (fmt[j] - '0');
+                            j++;
+                        }
+                    }
+                    const char *length_mods = "hlLjzt";
+                    while (j < flen && strchr(length_mods, fmt[j]) != NULL) {
+                        j++;
+                    }
+                    const char *specifiers = "cdiuoxXfFeEgGaAspn";
+                    if (j < flen && strchr(specifiers, fmt[j]) != NULL &&
+                        nextArg < (size_t)argList->child_count) {
+                        if (seglen > 0) {
+                            seg[seglen] = '\0';
+                            Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
+                            AST *segNode = newASTNode(AST_STRING, segTok);
+                            segNode->i_val = (int)seglen;
+                            setTypeAST(segNode, TYPE_STRING);
+                            addChild(call, segNode);
+                            seglen = 0;
+                        }
+                        AST *expr = argList->children[nextArg++];
+                        if (width > 0 || precision >= 0) {
+                            char fmtbuf[32];
+                            snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, precision);
+                            Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, line, 0);
+                            AST *fmtExpr = newASTNode(AST_FORMATTED_EXPR, fmtTok);
+                            setLeft(fmtExpr, expr);
+                            setTypeAST(fmtExpr, TYPE_UNKNOWN);
+                            addChild(call, fmtExpr);
+                        } else {
+                            addChild(call, expr);
+                        }
+                        i = j; // skip specifier
+                    } else {
+                        seg[seglen++] = '%';
+                    }
+                }
+            } else {
+                seg[seglen++] = fmt[i];
+            }
+        }
+        if (seglen > 0) {
+            seg[seglen] = '\0';
+            Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
+            AST *segNode = newASTNode(AST_STRING, segTok);
+            segNode->i_val = (int)seglen;
+            setTypeAST(segNode, TYPE_STRING);
+            addChild(call, segNode);
+        }
+        free(seg);
+        freeAST(fmtNode);
+    }
+    for (; nextArg < (size_t)argList->child_count; ++nextArg) {
+        if (argList->children[nextArg]) addChild(call, argList->children[nextArg]);
+    }
+    argList->children = NULL;
+    argList->child_count = 0;
+    argList->child_capacity = 0;
 }
 
 static AST *parseFactor(ReaParser *p) {
@@ -425,6 +560,8 @@ static AST *parseFactor(ReaParser *p) {
             memcpy(lex, p->current.start, p->current.length);
             lex[p->current.length] = '\0';
         }
+        bool isWriteBuiltin = (strcasecmp(lex, "writeln") == 0 || strcasecmp(lex, "write") == 0);
+        bool isPrintf = (strcasecmp(lex, "printf") == 0);
         Token *tok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
         reaAdvance(p); // consume identifier
@@ -434,7 +571,7 @@ static AST *parseFactor(ReaParser *p) {
             reaAdvance(p); // consume '('
             call_args = newASTNode(AST_COMPOUND, NULL);
             while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
-                AST *arg = parseExpression(p);
+                AST *arg = isWriteBuiltin ? parseWriteArgument(p) : parseExpression(p);
                 if (!arg) break;
                 addChild(call_args, arg);
                 if (p->current.type == REA_TOKEN_COMMA) {
@@ -446,27 +583,35 @@ static AST *parseFactor(ReaParser *p) {
             if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
                 reaAdvance(p);
             }
-            // Syntactic sugar: map writeln/write to dedicated AST nodes for direct builtin handling
             AST *call = NULL;
-            if (tok && tok->value && strcasecmp(tok->value, "writeln") == 0) {
-                call = newASTNode(AST_WRITELN, NULL);
-            } else if (tok && tok->value && strcasecmp(tok->value, "write") == 0) {
+            if (isPrintf) {
                 call = newASTNode(AST_WRITE, NULL);
+                transformPrintfArgs(call, call_args);
+                if (call_args) freeAST(call_args);
+                freeToken(tok);
             } else {
-                call = newASTNode(AST_PROCEDURE_CALL, tok);
-            }
-            if (call_args && call_args->child_count > 0) {
-                call->children = call_args->children;
-                call->child_count = call_args->child_count;
-                call->child_capacity = call_args->child_capacity;
-                for (int i = 0; i < call->child_count; i++) {
-                    if (call->children[i]) call->children[i]->parent = call;
+                if (tok && tok->value && strcasecmp(tok->value, "writeln") == 0) {
+                    call = newASTNode(AST_WRITELN, NULL);
+                    freeToken(tok);
+                } else if (tok && tok->value && strcasecmp(tok->value, "write") == 0) {
+                    call = newASTNode(AST_WRITE, NULL);
+                    freeToken(tok);
+                } else {
+                    call = newASTNode(AST_PROCEDURE_CALL, tok);
                 }
-                call_args->children = NULL;
-                call_args->child_count = 0;
-                call_args->child_capacity = 0;
+                if (call_args && call_args->child_count > 0) {
+                    call->children = call_args->children;
+                    call->child_count = call_args->child_count;
+                    call->child_capacity = call_args->child_capacity;
+                    for (int i = 0; i < call->child_count; i++) {
+                        if (call->children[i]) call->children[i]->parent = call;
+                    }
+                    call_args->children = NULL;
+                    call_args->child_count = 0;
+                    call_args->child_capacity = 0;
+                }
+                if (call_args) freeAST(call_args);
             }
-            if (call_args) freeAST(call_args);
             setTypeAST(call, TYPE_UNKNOWN);
             // Support member access chaining after call (dots or brackets)
             AST *node = call;
