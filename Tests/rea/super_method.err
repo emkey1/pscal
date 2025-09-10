@@ -4,67 +4,63 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    3 DEFINE_GLOBAL    NameIdx:0   'c' Type:POINTER ('Child')
 0005    | ALLOC_OBJECT        3 (fields)
-0007    | DUP
-0008    | GET_FIELD_OFFSET    0 (index)
-0010    | GET_GLOBAL_ADDRESS    2 'child_vtable'
-0012    | SET_INDIRECT
-0013    | SET_GLOBAL          0 'c'
-0015    1 JUMP                1 (to 0019)
+0007    | SET_GLOBAL          0 'c'
+0009    1 JUMP                1 (to 0013)
 
---- Procedure base_base (at 0018) ---
-0018    | RETURN
-0019    | JUMP                9 (to 0031)
+--- Procedure base_base (at 0012) ---
+0012    | RETURN
+0013    | JUMP                9 (to 0025)
 
---- Procedure base_speak (at 0022) ---
-0022    | CONSTANT            3 '1'
-0024    | CONSTANT            4 'base'
-0026    | CALL_BUILTIN         5 'write' (2 args)
-0030    | RETURN
-0031    2 JUMP                9 (to 0043)
+--- Procedure base_speak (at 0016) ---
+0016    | CONSTANT            2 '1'
+0018    | CONSTANT            3 'base'
+0020    | CALL_BUILTIN         4 'write' (2 args)
+0024    | RETURN
+0025    2 JUMP                9 (to 0037)
 
---- Procedure child_child (at 0034) ---
-0034    | GET_LOCAL           0 (slot)
-0036    | CALL             0018 (Base_Base) (1 args)
-0042    | RETURN
-0043    | JUMP                9 (to 0055)
+--- Procedure child_child (at 0028) ---
+0028    | GET_LOCAL           0 (slot)
+0030    | CALL             0012 (Base_Base) (1 args)
+0036    | RETURN
+0037    | JUMP                9 (to 0049)
 
---- Procedure child_speak (at 0046) ---
-0046    | GET_LOCAL           0 (slot)
-0048    | CALL             0022 (Base_speak) (1 args)
-0054    | RETURN
-0055    0 CONSTANT            8 'Value type ARRAY'
-0057    | DEFINE_GLOBAL    NameIdx:2   'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0067    | SET_GLOBAL          2 'child_vtable'
-0069    | CONSTANT           11 'Value type ARRAY'
-0071    | DEFINE_GLOBAL    NameIdx:12  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0081    | SET_GLOBAL         12 'base_vtable'
-0083    | GET_GLOBAL          0 'c'
-0085    | DUP
-0086    | GET_FIELD_OFFSET    0 (index)
-0088    | GET_GLOBAL_ADDRESS    2 'child_vtable'
-0090    | SET_INDIRECT
-0091    | POP
-0092    4 GET_GLOBAL          0 'c'
-0094    | DUP
-0095    | GET_FIELD_OFFSET    0 (index)
+--- Procedure child_speak (at 0040) ---
+0040    | GET_LOCAL           0 (slot)
+0042    | CALL             0016 (Base_speak) (1 args)
+0048    | RETURN
+0049    0 CONSTANT            7 'Value type ARRAY'
+0051    | DEFINE_GLOBAL    NameIdx:8   'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0061    | SET_GLOBAL          8 'child_vtable'
+0063    | CONSTANT           11 'Value type ARRAY'
+0065    | DEFINE_GLOBAL    NameIdx:12  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0075    | SET_GLOBAL         12 'base_vtable'
+0077    | GET_GLOBAL          0 'c'
+0079    | DUP
+0080    | GET_FIELD_OFFSET    0 (index)
+0082    | GET_GLOBAL_ADDRESS    8 'child_vtable'
+0084    | SET_INDIRECT
+0085    | POP
+0086    4 GET_GLOBAL          0 'c'
+0088    | DUP
+0089    | GET_FIELD_OFFSET    0 (index)
+0091    | GET_INDIRECT
+0092    | CONSTANT            2 '1'
+0094    | SWAP
+0095    | GET_ELEMENT_ADDRESS    1 (dims)
 0097    | GET_INDIRECT
-0098    | CONSTANT            3 '1'
-0100    | SWAP
-0101    | GET_ELEMENT_ADDRESS    1 (dims)
-0103    | GET_INDIRECT
-0104    | PROC_CALL_INDIRECT (args=1)
-0106    0 HALT
+0098    | PROC_CALL_INDIRECT (args=1)
+0100    0 HALT
 == End Disassembly: Tests/rea/super_method.rea ==
 
 Constants (13):\n  0000: STR   "c"
   0001: STR   "Child"
-  0002: STR   "child_vtable"
-  0003: INT   1
-  0004: STR   "base"
-  0005: STR   "write"
-  0006: STR   "Base_Base"
-  0007: STR   "Base_speak"
-  0008: Value type ARRAY
+  0002: INT   1
+  0003: STR   "base"
+  0004: STR   "write"
+  0005: STR   "Base_Base"
+  0006: STR   "Base_speak"
+  0007: Value type ARRAY
+  0008: STR   "child_vtable"
   0009: INT   0
   0010: STR   "integer"
   0011: Value type ARRAY
