@@ -2486,15 +2486,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                  getLine(varNameNode), false);
                     }
                 }
-                if (node->left && node->child_count > 0) {
-                    compileRValue(node->left, chunk, getLine(node->left));
-                    int slot = resolveLocal(current_function_compiler,
-                                            node->children[0]->token->value);
-                    if (slot != -1) {
-                        writeBytecodeChunk(chunk, SET_LOCAL, getLine(node));
-                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(node));
-                    }
-                }
+                /*
+                 * After registering locals, delegate to compileNode so that
+                 * type-specific initialization opcodes (e.g. INIT_LOCAL_ARRAY)
+                 * and per-variable initializers are emitted for each declared
+                 * variable. This restores the previous behavior where every
+                 * local variable receives proper backing storage and zeroing
+                 * before first use.
+                 */
+                compileNode(node, chunk, line);
             }
             break;
         }
