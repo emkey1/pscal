@@ -419,7 +419,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
     }
 
     if (node->type == AST_BLOCK) {
-        node->is_global_scope = (node->parent && node->parent->type == AST_PROGRAM);
+        // Preserve is_global_scope as set during parsing; do not override here.
     }
 
     if (node->left) annotateTypes(node->left, childScopeNode, globalProgramNode);
@@ -431,7 +431,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
          }
     }
 
-    if (node->var_type == TYPE_VOID) {
+    if (node->var_type == TYPE_VOID || node->var_type == TYPE_UNKNOWN) {
         switch(node->type) {
             case AST_ADDR_OF: {
                 // Address-of: ensure left is an identifier referencing a procedure/function
