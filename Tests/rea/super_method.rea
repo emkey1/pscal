@@ -1,0 +1,4 @@
+class Base { void Base() {} void speak() { writeln("base"); } }
+class Child extends Base { void Child() { super(); } void speak() { super.speak(); } }
+Child c = new Child();
+c.speak();

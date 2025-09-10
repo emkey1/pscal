@@ -426,7 +426,20 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
-        if (node->left) {
+        if (node->i_val == 1) {
+            /* super constructor/method call already has implicit 'this' */
+            if (node->token && node->token->value && !strchr(node->token->value, '_')) {
+                const char *pname = node->token->value;
+                size_t ln = strlen(pname) + 1 + strlen(pname) + 1;
+                char *m = (char*)malloc(ln);
+                if (m) {
+                    snprintf(m, ln, "%s_%s", pname, pname);
+                    free(node->token->value);
+                    node->token->value = m;
+                    node->token->length = strlen(m);
+                }
+            }
+        } else if (node->left) {
             const char *cls = resolveExprClass(node->left, clsContext);
             const char *name = node->token ? node->token->value : NULL;
             if (cls && name) {
@@ -487,7 +500,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     node->children[0] = thisVar;
                     thisVar->parent = node;
                     setLeft(node, thisVar);
-                } else if (firstIsThis) {
+                } else if (firstIsThis && node->i_val == 0) {
                     setLeft(node, node->children[0]);
                 }
             }
