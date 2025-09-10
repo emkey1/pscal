@@ -1,0 +1,57 @@
+// This program tests the control flow statements of Rea,
+// including for, while, do...while, and switch.
+
+int main() {
+  // Test a for loop
+  writeln("--- For Loop Test ---");
+  for (int i = 0; i < 3; i = i + 1) {
+    writeln("For loop iteration: ", i);
+  }
+
+  // Test a `while` loop
+  writeln("\n--- While Loop Test ---");
+  int j = 0;
+  while (j < 3) {
+    writeln("While loop iteration: ", j);
+    j = j + 1;
+  }
+
+  // Test a `do...while` loop
+  writeln("\n--- Do-While Loop Test ---");
+  int k = 0;
+  do {
+    writeln("Do-while loop iteration: ", k);
+    k = k + 1;
+  } while (k < 3);
+
+  // Test a `switch` statement
+  writeln("\n--- Switch Statement Test ---");
+  int choice = 2;
+  switch (choice) {
+    case 1:
+        writeln("Choice is 1.");
+        break;
+    case 2:
+        writeln("Choice is 2.");
+        break;
+    default:
+        writeln("Choice is something else.");
+        break;
+  }
+
+  // Test a switch without break to show fall-through
+  writeln("\n--- Switch Fall-through Test ---");
+  choice = 1;
+  switch (choice) {
+    case 1:
+        writeln("Case 1 is executed.");
+    case 2:
+        writeln("Case 2 is also executed.");
+        break;
+    default:
+        writeln("Default case.");
+        break;
+  }
+
+  return 0;
+}
