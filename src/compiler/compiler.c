@@ -3611,8 +3611,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool isCallQualified = false;
 
             if (node->left &&
-                node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
                 isCallQualified = true;
