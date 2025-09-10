@@ -286,6 +286,18 @@ int main(int argc, char **argv) {
 
     initSymbolSystem();
     registerAllBuiltins();
+    /* C-like style cast helpers */
+    registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("float", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("char", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("bool", AST_FUNCTION_DECL, NULL);
+    /* synonyms to avoid keyword collisions */
+    registerBuiltinFunction("toint", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("todouble", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tofloat", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tochar", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
 
     AST *program = parseRea(src);
     if (!program) {
