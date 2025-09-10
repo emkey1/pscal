@@ -3611,8 +3611,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool isCallQualified = false;
 
             if (node->left &&
-                node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
                 isCallQualified = true;
@@ -3854,7 +3852,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
                 if (isCallQualified) {
-                    snprintf(original_display_name, sizeof(original_display_name), "%.*s.%.*s", MAX_SYMBOL_LENGTH - 1, node->left->token->value, MAX_SYMBOL_LENGTH - 1, functionName);
+                    const char *receiver_name = "<expr>";
+                    if (node->left && node->left->token && node->left->token->value) {
+                        receiver_name = node->left->token->value;
+                    }
+                    snprintf(original_display_name, sizeof(original_display_name), "%.*s.%.*s", MAX_SYMBOL_LENGTH - 1, receiver_name, MAX_SYMBOL_LENGTH - 1, functionName);
                 } else {
                     strncpy(original_display_name, functionName, sizeof(original_display_name)-1);
                     original_display_name[sizeof(original_display_name)-1] = '\0';
