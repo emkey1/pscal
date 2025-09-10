@@ -24,7 +24,7 @@ The Rea language is a strongly typed, class-based, object-oriented language.
     * **Data Types:** `int`, `int64`, `int32`, `int16`, `int8`, `float`,
       `float32`, `long double`, `char`, `byte`, `str`, `text`, `mstream`,
       `void`, `bool`.
-    * **Class & Object:** `class`, `new`, `extends`, `this`, `super`.
+    * **Class & Object:** `class`, `new`, `extends`, `my`, `myself`, `super`.
     * **Control Flow:** `if`, `else`, `while`, `for`, `do`, `switch`, `case`,
       `default`, `break`, `continue`, `return`.
     * **Other:** `const`, `#import`.
@@ -69,7 +69,7 @@ floating-point types as the default for new development.
   leveraging the existing VM memory management.
 * **Field and Method Access:** The dot `.` operator is used to access an
   object's fields and methods.
-* **`this` and `super`:** The `this` keyword provides a reference to the
+* **`my`/`myself` and `super`:** The `my` or `myself` keyword provides a reference to the
   current object instance within a method. The `super` keyword provides a
   reference to the parent class's constructor and methods, allowing for proper
   initialization and method overriding.

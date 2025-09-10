@@ -23,14 +23,14 @@ class Rectangle extends Shape {
 
   void Rectangle(float w, float h) {
     super();
-    this.width = w;
-    this.height = h;
+    my.width = w;
+    my.height = h;
   }
 
   // Override the `area` method
   float area() {
     writeln("Calculating Rectangle area...");
-    return this.width * this.height;
+    return my.width * my.height;
   }
 }
 
@@ -40,21 +40,21 @@ class Circle extends Shape {
 
   void Circle(float r) {
     super();
-    this.radius = r;
+    my.radius = r;
   }
 
   // Override the `area` method
   float area() {
       writeln("Calculating Circle area...");
       // Assuming the compiler supports floating point literals
-      return 3.14159 * this.radius * this.radius;
+      return 3.14159 * my.radius * my.radius;
   }
 }
 
 int main() {
   // Declare an array to hold different shapes.
   // Assuming array syntax and that Rea supports arrays of objects.
-  // For a stack-based VM, this might be a pointer array.
+  // For a stack-based VM, my might be a pointer array.
   Shape shapes[2];
 
   // Instantiate a Rectangle and a Circle and assign to the Shape array.

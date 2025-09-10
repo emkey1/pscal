@@ -25,96 +25,96 @@ class MandelbrotApp {
   int prevButtons;
 
   void init() {
-    this.minRe = -2.0;
-    this.maxRe = 1.0;
-    this.minIm = -1.2;
-    this.maxIm = this.minIm + (this.maxRe - this.minRe) * this.Height / this.Width;
-    initgraph(this.Width, this.Height, "Mandelbrot in Rea");
-    this.textureID = createtexture(this.Width, this.Height);
-    if (this.textureID < 0) {
+    my.minRe = -2.0;
+    my.maxRe = 1.0;
+    my.minIm = -1.2;
+    my.maxIm = my.minIm + (my.maxRe - my.minRe) * my.Height / my.Width;
+    initgraph(my.Width, my.Height, "Mandelbrot in Rea");
+    my.textureID = createtexture(my.Width, my.Height);
+    if (my.textureID < 0) {
       printf("Error: unable to create texture.\n");
       halt();
     }
-    this.quit = false;
-    this.prevButtons = 0;
+    my.quit = false;
+    my.prevButtons = 0;
   }
 
   void compute() {
     int row[Width];
-    double reFactor = (this.maxRe - this.minRe) / (this.Width - 1);
-    double imFactor = (this.maxIm - this.minIm) / (this.Height - 1);
+    double reFactor = (my.maxRe - my.minRe) / (my.Width - 1);
+    double imFactor = (my.maxIm - my.minIm) / (my.Height - 1);
     int idx, x, y, n;
     int R, G, B;
     double c_im;
-    for (y = 0; y < this.Height; y = y + 1) {
-      c_im = this.maxIm - y * imFactor;
-      mandelbrotrow(this.minRe, reFactor, c_im, this.MaxIterations, this.Width - 1, row);
-      idx = y * this.Width * this.BytesPerPixel;
-      for (x = 0; x < this.Width; x = x + 1) {
+    for (y = 0; y < my.Height; y = y + 1) {
+      c_im = my.maxIm - y * imFactor;
+      mandelbrotrow(my.minRe, reFactor, c_im, my.MaxIterations, my.Width - 1, row);
+      idx = y * my.Width * my.BytesPerPixel;
+      for (x = 0; x < my.Width; x = x + 1) {
         n = row[x];
-        if (n == this.MaxIterations) { R = G = B = 0; }
+        if (n == my.MaxIterations) { R = G = B = 0; }
         else {
           R = (n * 5) % 256;
           G = (n * 7 + 85) % 256;
           B = (n * 11 + 170) % 256;
         }
-        this.pixels[idx + 0] = char(R);
-        this.pixels[idx + 1] = char(G);
-        this.pixels[idx + 2] = char(B);
-        this.pixels[idx + 3] = char(255);
-        idx = idx + this.BytesPerPixel;
+        my.pixels[idx + 0] = char(R);
+        my.pixels[idx + 1] = char(G);
+        my.pixels[idx + 2] = char(B);
+        my.pixels[idx + 3] = char(255);
+        idx = idx + my.BytesPerPixel;
       }
     }
-    updatetexture(this.textureID, this.pixels);
+    updatetexture(my.textureID, my.pixels);
     cleardevice();
-    rendercopy(this.textureID);
+    rendercopy(my.textureID);
     updatescreen();
   }
 
   void zoom(int px, int py, double factor) {
-    double reFactor = (this.maxRe - this.minRe) / (this.Width - 1);
-    double imFactor = (this.maxIm - this.minIm) / (this.Height - 1);
-    double centerRe = this.minRe + (px + 0.5) * reFactor;
-    double centerIm = this.maxIm - (py + 0.5) * imFactor;
-    double widthRe = (this.maxRe - this.minRe) * factor;
-    double heightIm = (this.maxIm - this.minIm) * factor;
-    this.minRe = centerRe - widthRe / 2.0;
-    this.maxRe = centerRe + widthRe / 2.0;
-    this.minIm = centerIm - heightIm / 2.0;
-    this.maxIm = centerIm + heightIm / 2.0;
+    double reFactor = (my.maxRe - my.minRe) / (my.Width - 1);
+    double imFactor = (my.maxIm - my.minIm) / (my.Height - 1);
+    double centerRe = my.minRe + (px + 0.5) * reFactor;
+    double centerIm = my.maxIm - (py + 0.5) * imFactor;
+    double widthRe = (my.maxRe - my.minRe) * factor;
+    double heightIm = (my.maxIm - my.minIm) * factor;
+    my.minRe = centerRe - widthRe / 2.0;
+    my.maxRe = centerRe + widthRe / 2.0;
+    my.minIm = centerIm - heightIm / 2.0;
+    my.maxIm = centerIm + heightIm / 2.0;
   }
 
   void handleInput() {
     graphloop(1);
     int key = pollkey();
     if (key != 0) {
-      if (key == 'q' || key == 'Q') { this.quit = true; return; }
-      double widthRe = (this.maxRe - this.minRe);
-      double heightIm = (this.maxIm - this.minIm);
+      if (key == 'q' || key == 'Q') { my.quit = true; return; }
+      double widthRe = (my.maxRe - my.minRe);
+      double heightIm = (my.maxIm - my.minIm);
       double dx = widthRe * 0.5;
       double dy = heightIm * 0.5;
-      if (key == this.KEY_LEFT) { this.minRe -= dx; this.maxRe -= dx; }
-      else if (key == this.KEY_RIGHT) { this.minRe += dx; this.maxRe += dx; }
-      else if (key == this.KEY_UP) { this.minIm += dy; this.maxIm += dy; }
-      else if (key == this.KEY_DOWN) { this.minIm -= dy; this.maxIm -= dy; }
+      if (key == my.KEY_LEFT) { my.minRe -= dx; my.maxRe -= dx; }
+      else if (key == my.KEY_RIGHT) { my.minRe += dx; my.maxRe += dx; }
+      else if (key == my.KEY_UP) { my.minIm += dy; my.maxIm += dy; }
+      else if (key == my.KEY_DOWN) { my.minIm -= dy; my.maxIm -= dy; }
     }
     int x = 0, y = 0, b = 0;
     getmousestate(x, y, b);
-    if ((b & this.ButtonLeft) != 0 && (this.prevButtons & this.ButtonLeft) == 0) {
-      this.zoom(x, y, 1.0 / this.ZoomFactor);
-    } else if ((b & this.ButtonRight) != 0 && (this.prevButtons & this.ButtonRight) == 0) {
-      this.zoom(x, y, this.ZoomFactor);
+    if ((b & my.ButtonLeft) != 0 && (my.prevButtons & my.ButtonLeft) == 0) {
+      my.zoom(x, y, 1.0 / my.ZoomFactor);
+    } else if ((b & my.ButtonRight) != 0 && (my.prevButtons & my.ButtonRight) == 0) {
+      my.zoom(x, y, my.ZoomFactor);
     }
-    this.prevButtons = b;
+    my.prevButtons = b;
   }
 
   void run() {
-    this.init();
-    while (!this.quit) {
-      this.compute();
-      this.handleInput();
+    my.init();
+    while (!my.quit) {
+      my.compute();
+      my.handleInput();
     }
-    destroytexture(this.textureID);
+    destroytexture(my.textureID);
     closegraph();
   }
 }

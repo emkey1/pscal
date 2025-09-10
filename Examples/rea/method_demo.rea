@@ -2,8 +2,8 @@
 
 class Counter {
   int n;
-  void inc() { this.n = this.n + 1; }
-  int set(int v) { this.n = v; return this.n; }
+  void inc() { my.n = my.n + 1; }
+  int set(int v) { my.n = v; return my.n; }
 }
 
 Counter c = new Counter();

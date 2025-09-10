@@ -452,16 +452,16 @@ static AST *parseFactor(ReaParser *p) {
                 if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
             }
             if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
-            // Build call to parent constructor alias: ParentName(this, ...)
+            // Build call to parent constructor alias: ParentName(myself, ...)
             Token *ctorTok = newToken(TOKEN_IDENTIFIER, p->currentParentClassName, supTok.line, 0);
             AST *call = newASTNode(AST_PROCEDURE_CALL, ctorTok);
-            // Prepend implicit 'this' and flag the node so semantic analysis
+            // Prepend implicit 'myself' and flag the node so semantic analysis
             // knows it already includes it (for super constructor calls)
-            Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
-            AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-            setTypeAST(thisVar, TYPE_POINTER);
-            addChild(call, thisVar);
-            call->i_val = 1; // mark as super call containing implicit 'this'
+            Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", supTok.line, 0);
+            AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+            setTypeAST(selfVar, TYPE_POINTER);
+            addChild(call, selfVar);
+            call->i_val = 1; // mark as super call containing implicit 'myself'
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
                     addChild(call, args->children[i]);
@@ -504,12 +504,12 @@ static AST *parseFactor(ReaParser *p) {
             Token *nameTok = newToken(TOKEN_IDENTIFIER, mangled, supTok.line, 0);
             free(mangled);
             AST *call = newASTNode(AST_PROCEDURE_CALL, nameTok);
-            // Prepend implicit 'this' and flag node to avoid duplicate insertion
-            Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
-            AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-            setTypeAST(thisVar, TYPE_POINTER);
-            addChild(call, thisVar);
-            call->i_val = 1; // mark as super call containing implicit 'this'
+            // Prepend implicit 'myself' and flag node to avoid duplicate insertion
+            Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", supTok.line, 0);
+            AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+            setTypeAST(selfVar, TYPE_POINTER);
+            addChild(call, selfVar);
+            call->i_val = 1; // mark as super call containing implicit 'myself'
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
                     addChild(call, args->children[i]);
@@ -622,11 +622,11 @@ static AST *parseFactor(ReaParser *p) {
         node->i_val = (tt == TOKEN_TRUE) ? 1 : 0;
         reaAdvance(p);
         return node;
-    } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_THIS) {
+    } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_MYSELF) {
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) return NULL;
-        if (p->current.type == REA_TOKEN_THIS) {
-            strcpy(lex, "this");
+        if (p->current.type == REA_TOKEN_MYSELF) {
+            strcpy(lex, "myself");
         } else {
             memcpy(lex, p->current.start, p->current.length);
             lex[p->current.length] = '\0';
@@ -714,9 +714,9 @@ static AST *parseFactor(ReaParser *p) {
                     }
                     if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
                     // Build call node and prepend receiver as first arg
-                    // Potentially mangle if receiver is 'this' or freshly constructed 'new Class'
+                    // Potentially mangle if receiver is 'myself' or freshly constructed 'new Class'
                     const char* cls = NULL;
-                    if (node->type == AST_VARIABLE && node->token && node->token->value && strcasecmp(node->token->value, "this") == 0) {
+                    if (node->type == AST_VARIABLE && node->token && node->token->value && strcasecmp(node->token->value, "myself") == 0) {
                         cls = p->currentClassName;
                     } else if (node->type == AST_NEW && node->token && node->token->value) {
                         cls = node->token->value;
@@ -1263,7 +1263,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     // Parse parameter list
     reaAdvance(p); // consume '('
     AST *params = newASTNode(AST_COMPOUND, NULL);
-    // Inject implicit 'this' parameter as first parameter when inside a class
+    // Inject implicit 'myself' parameter as first parameter when inside a class
     if (p->currentClassName) {
         Token *ptypeTok = newToken(TOKEN_IDENTIFIER, p->currentClassName, p->current.line, 0);
         AST *refNode = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
@@ -1271,14 +1271,14 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
         setTypeAST(ptrNode, TYPE_POINTER);
         setRight(ptrNode, refNode);
-        Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", p->current.line, 0);
-        AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-        setTypeAST(thisVar, TYPE_POINTER);
-        AST *thisDecl = newASTNode(AST_VAR_DECL, NULL);
-        addChild(thisDecl, thisVar);
-        setRight(thisDecl, ptrNode);
-        setTypeAST(thisDecl, TYPE_POINTER);
-        addChild(params, thisDecl);
+        Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", p->current.line, 0);
+        AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+        setTypeAST(selfVar, TYPE_POINTER);
+        AST *selfDecl = newASTNode(AST_VAR_DECL, NULL);
+        addChild(selfDecl, selfVar);
+        setRight(selfDecl, ptrNode);
+        setTypeAST(selfDecl, TYPE_POINTER);
+        addChild(params, selfDecl);
     }
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
         AST *ptypeNode = NULL;
