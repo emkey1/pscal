@@ -121,6 +121,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "return", 6) == 0) return REA_TOKEN_RETURN;
             if (strncmp(start, "import", 6) == 0) return REA_TOKEN_IMPORT;
             if (strncmp(start, "switch", 6) == 0) return REA_TOKEN_SWITCH;
+            if (strncmp(start, "double", 6) == 0) return REA_TOKEN_FLOAT;
             break;
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;

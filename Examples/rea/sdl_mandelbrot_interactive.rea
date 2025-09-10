@@ -25,96 +25,96 @@ class MandelbrotApp {
   int prevButtons;
 
   void init() {
-    minRe = -2.0;
-    maxRe = 1.0;
-    minIm = -1.2;
-    maxIm = minIm + (maxRe - minRe) * Height / Width;
-    initgraph(Width, Height, "Mandelbrot in Rea");
-    textureID = createtexture(Width, Height);
-    if (textureID < 0) {
+    this.minRe = -2.0;
+    this.maxRe = 1.0;
+    this.minIm = -1.2;
+    this.maxIm = this.minIm + (this.maxRe - this.minRe) * this.Height / this.Width;
+    initgraph(this.Width, this.Height, "Mandelbrot in Rea");
+    this.textureID = createtexture(this.Width, this.Height);
+    if (this.textureID < 0) {
       printf("Error: unable to create texture.\n");
       halt();
     }
-    quit = false;
-    prevButtons = 0;
+    this.quit = false;
+    this.prevButtons = 0;
   }
 
   void compute() {
     int row[Width];
-    double reFactor = (maxRe - minRe) / (Width - 1);
-    double imFactor = (maxIm - minIm) / (Height - 1);
+    double reFactor = (this.maxRe - this.minRe) / (this.Width - 1);
+    double imFactor = (this.maxIm - this.minIm) / (this.Height - 1);
     int idx;
     int x, y, n, R, G, B;
     double c_im;
-    for (y = 0; y < Height; y++) {
-      c_im = maxIm - y * imFactor;
-      mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
-      idx = y * Width * BytesPerPixel;
-      for (x = 0; x < Width; x++) {
+    for (y = 0; y < this.Height; y++) {
+      c_im = this.maxIm - y * imFactor;
+      mandelbrotrow(this.minRe, reFactor, c_im, this.MaxIterations, this.Width - 1, &row);
+      idx = y * this.Width * this.BytesPerPixel;
+      for (x = 0; x < this.Width; x++) {
         n = row[x];
-        if (n == MaxIterations) { R = G = B = 0; }
+        if (n == this.MaxIterations) { R = G = B = 0; }
         else {
           R = (n * 5) % 256;
           G = (n * 7 + 85) % 256;
           B = (n * 11 + 170) % 256;
         }
-        pixels[idx + 0] = R;
-        pixels[idx + 1] = G;
-        pixels[idx + 2] = B;
-        pixels[idx + 3] = 255;
-        idx = idx + BytesPerPixel;
+        this.pixels[idx + 0] = R;
+        this.pixels[idx + 1] = G;
+        this.pixels[idx + 2] = B;
+        this.pixels[idx + 3] = 255;
+        idx = idx + this.BytesPerPixel;
       }
     }
-    updatetexture(textureID, pixels);
+    updatetexture(this.textureID, this.pixels);
     cleardevice();
-    rendercopy(textureID);
+    rendercopy(this.textureID);
     updatescreen();
   }
 
   void zoom(int px, int py, double factor) {
-    double reFactor = (maxRe - minRe) / (Width - 1);
-    double imFactor = (maxIm - minIm) / (Height - 1);
-    double centerRe = minRe + (px + 0.5) * reFactor;
-    double centerIm = maxIm - (py + 0.5) * imFactor;
-    double widthRe = (maxRe - minRe) * factor;
-    double heightIm = (maxIm - minIm) * factor;
-    minRe = centerRe - widthRe / 2.0;
-    maxRe = centerRe + widthRe / 2.0;
-    minIm = centerIm - heightIm / 2.0;
-    maxIm = centerIm + heightIm / 2.0;
+    double reFactor = (this.maxRe - this.minRe) / (this.Width - 1);
+    double imFactor = (this.maxIm - this.minIm) / (this.Height - 1);
+    double centerRe = this.minRe + (px + 0.5) * reFactor;
+    double centerIm = this.maxIm - (py + 0.5) * imFactor;
+    double widthRe = (this.maxRe - this.minRe) * factor;
+    double heightIm = (this.maxIm - this.minIm) * factor;
+    this.minRe = centerRe - widthRe / 2.0;
+    this.maxRe = centerRe + widthRe / 2.0;
+    this.minIm = centerIm - heightIm / 2.0;
+    this.maxIm = centerIm + heightIm / 2.0;
   }
 
   void handleInput() {
     graphloop(1);
     int key = pollkey();
     if (key != 0) {
-      if (key == 'q' || key == 'Q') { quit = true; return; }
-      double widthRe = (maxRe - minRe);
-      double heightIm = (maxIm - minIm);
+      if (key == 'q' || key == 'Q') { this.quit = true; return; }
+      double widthRe = (this.maxRe - this.minRe);
+      double heightIm = (this.maxIm - this.minIm);
       double dx = widthRe * 0.5;
       double dy = heightIm * 0.5;
-      if (key == KEY_LEFT) { minRe -= dx; maxRe -= dx; }
-      else if (key == KEY_RIGHT) { minRe += dx; maxRe += dx; }
-      else if (key == KEY_UP) { minIm += dy; maxIm += dy; }
-      else if (key == KEY_DOWN) { minIm -= dy; maxIm -= dy; }
+      if (key == this.KEY_LEFT) { this.minRe -= dx; this.maxRe -= dx; }
+      else if (key == this.KEY_RIGHT) { this.minRe += dx; this.maxRe += dx; }
+      else if (key == this.KEY_UP) { this.minIm += dy; this.maxIm += dy; }
+      else if (key == this.KEY_DOWN) { this.minIm -= dy; this.maxIm -= dy; }
     }
     int x = 0, y = 0, b = 0;
     getmousestate(&x, &y, &b);
-    if ((b & ButtonLeft) != 0 && (prevButtons & ButtonLeft) == 0) {
-      zoom(x, y, 1.0 / ZoomFactor);
-    } else if ((b & ButtonRight) != 0 && (prevButtons & ButtonRight) == 0) {
-      zoom(x, y, ZoomFactor);
+    if ((b & this.ButtonLeft) != 0 && (this.prevButtons & this.ButtonLeft) == 0) {
+      this.zoom(x, y, 1.0 / this.ZoomFactor);
+    } else if ((b & this.ButtonRight) != 0 && (this.prevButtons & this.ButtonRight) == 0) {
+      this.zoom(x, y, this.ZoomFactor);
     }
-    prevButtons = b;
+    this.prevButtons = b;
   }
 
   void run() {
-    init();
-    while (!quit) {
-      compute();
-      handleInput();
+    this.init();
+    while (!this.quit) {
+      this.compute();
+      this.handleInput();
     }
-    destroytexture(textureID);
+    destroytexture(this.textureID);
     closegraph();
   }
 }

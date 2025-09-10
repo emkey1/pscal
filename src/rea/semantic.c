@@ -396,23 +396,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
-        bool resolved = false;
-        if (clsContext) {
-            const char *vname = node->token->value;
-            Symbol *fs = lookupField(clsContext, vname);
-            if (fs && fs->type_def) {
-                node->var_type = fs->type_def->var_type;
-                node->type_def = copyAST(fs->type_def);
-                resolved = true;
-            }
-        }
-        if (!resolved && gProgramRoot) {
-            AST *decl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
-            if (decl && decl->right) {
-                node->var_type = decl->right->var_type;
-                node->type_def = copyAST(decl->right);
-            }
-        }
+        /* Implicit field access rewriting disabled; rely on explicit 'this'. */
     }
 
     if (node->type == AST_FIELD_ACCESS) {

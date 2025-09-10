@@ -2486,8 +2486,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                  getLine(varNameNode), false);
                     }
                 }
+                if (node->left && node->child_count > 0) {
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    int slot = resolveLocal(current_function_compiler,
+                                            node->children[0]->token->value);
+                    if (slot != -1) {
+                        writeBytecodeChunk(chunk, SET_LOCAL, getLine(node));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(node));
+                    }
+                }
             }
-            compileNode(node, chunk, line);
             break;
         }
         case AST_CONST_DECL: {

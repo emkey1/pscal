@@ -326,15 +326,22 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
                  if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
                      for (int j = 0; j < varDeclGroup->child_count; j++) {
                          AST* varNameNode = varDeclGroup->children[j];
-                          if (varNameNode && varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                              strcasecmp(varNameNode->token->value, varName) == 0) {
-                             return varDeclGroup;
+                         if (varNameNode) {
+                             if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+                                 strcasecmp(varNameNode->token->value, varName) == 0) {
+                                 return varDeclGroup;
+                             } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                                        varNameNode->left->type == AST_VARIABLE &&
+                                        varNameNode->left->token &&
+                                        strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                                 return varDeclGroup;
+                             }
                          }
                      }
                  }
-             }
-         }
-     }
+            }
+        }
+    }
      return NULL;
 }
 
@@ -375,9 +382,17 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
                        if (declGroup && declGroup->type == AST_VAR_DECL) {
                            for (int j = 0; j < declGroup->child_count; j++) {
                                AST* varNameNode = declGroup->children[j];
-                               if (varNameNode && varNameNode->token && strcasecmp(varNameNode->token->value, varName) == 0) {
-                                   foundDecl = declGroup;
-                                   goto found_static_decl;
+                               if (varNameNode) {
+                                   if (varNameNode->token && varNameNode->type == AST_VARIABLE &&
+                                       strcasecmp(varNameNode->token->value, varName) == 0) {
+                                       foundDecl = declGroup;
+                                       goto found_static_decl;
+                                   } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                                              varNameNode->left->type == AST_VARIABLE && varNameNode->left->token &&
+                                              strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                                       foundDecl = declGroup;
+                                       goto found_static_decl;
+                                   }
                                }
                            }
                        }
@@ -386,7 +401,7 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
                                   foundDecl = declGroup;
                                   goto found_static_decl;
                              }
-                        }
+                       }
                    }
               }
           }
@@ -436,6 +451,11 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 break;
             }
             case AST_VARIABLE: {
+                if (node->parent && node->parent->type == AST_VAR_DECL) {
+                    node->var_type = node->parent->var_type;
+                    node->type_def = node->parent->right;
+                    break;
+                }
                 const char* varName = node->token ? node->token->value : NULL;
                 if (!varName) { node->var_type = TYPE_VOID; break; }
 
