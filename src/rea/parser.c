@@ -1092,14 +1092,14 @@ static AST *parseVarDecl(ReaParser *p) {
 
     if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
 
-    AST *baseType = copyAST(typeNode);
+    AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
     AST *compound = newASTNode(AST_COMPOUND, NULL);
     compound->is_global_scope = true;
 
     bool first = true;
     while (1) {
         char *lex = (char *)malloc(p->current.length + 1);
-        if (!lex) { freeAST(compound); freeAST(baseType); return NULL; }
+        if (!lex) { freeAST(compound); /* baseType not freed: shares tokens */ return NULL; }
         memcpy(lex, p->current.start, p->current.length);
         lex[p->current.length] = '\0';
         Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
@@ -1116,7 +1116,6 @@ static AST *parseVarDecl(ReaParser *p) {
         if (first && p->current.type == REA_TOKEN_LEFT_PAREN) {
             int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
             freeAST(compound);
-            freeAST(baseType);
             return parseFunctionDecl(p, nameTok, varType, vtype_local, idx2);
         }
 
@@ -1149,7 +1148,7 @@ static AST *parseVarDecl(ReaParser *p) {
         reaAdvance(p);
     }
 
-    freeAST(baseType);
+    // baseType shares token memory with typeNode; do not free to avoid double free
     if (compound->child_count == 1) {
         AST *only = compound->children[0];
         compound->children[0] = NULL;
