@@ -1092,43 +1092,70 @@ static AST *parseVarDecl(ReaParser *p) {
 
     if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
 
-    char *lex = (char *)malloc(p->current.length + 1);
-    if (!lex) return NULL;
-    memcpy(lex, p->current.start, p->current.length);
-    lex[p->current.length] = '\0';
-    Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
-    free(lex);
+    AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
+    AST *compound = newASTNode(AST_COMPOUND, NULL);
+    compound->is_global_scope = true;
 
-    reaAdvance(p); // consume identifier
+    bool first = true;
+    while (1) {
+        char *lex = (char *)malloc(p->current.length + 1);
+        if (!lex) { freeAST(compound); /* baseType not freed: shares tokens */ return NULL; }
+        memcpy(lex, p->current.start, p->current.length);
+        lex[p->current.length] = '\0';
+        Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+        free(lex);
 
-    if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
-        typeNode = parseArrayType(p, typeNode, &vtype);
-    }
+        reaAdvance(p); // consume identifier
 
-    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
-        int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
-        return parseFunctionDecl(p, nameTok, typeNode, vtype, idx2);
-    }
+        VarType vtype_local = vtype;
+        AST *varType = first ? typeNode : copyAST(baseType);
+        if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+            varType = parseArrayType(p, varType, &vtype_local);
+        }
 
-    AST *var = newASTNode(AST_VARIABLE, nameTok);
-    setTypeAST(var, vtype);
+        if (first && p->current.type == REA_TOKEN_LEFT_PAREN) {
+            int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
+            freeAST(compound);
+            return parseFunctionDecl(p, nameTok, varType, vtype_local, idx2);
+        }
 
-    AST *init = NULL;
-    if (p->current.type == REA_TOKEN_EQUAL) {
-        reaAdvance(p);
-        init = parseExpression(p);
+        AST *var = newASTNode(AST_VARIABLE, nameTok);
+        setTypeAST(var, vtype_local);
+
+        AST *init = NULL;
+        if (p->current.type == REA_TOKEN_EQUAL) {
+            reaAdvance(p);
+            init = parseExpression(p);
+        }
+
+        AST *decl = newASTNode(AST_VAR_DECL, NULL);
+        addChild(decl, var);
+        setLeft(decl, init);
+        setRight(decl, varType);
+        setTypeAST(decl, vtype_local);
+        addChild(compound, decl);
+
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            if (p->current.type != REA_TOKEN_IDENTIFIER) break;
+            first = false;
+            continue;
+        }
+        break;
     }
 
     if (p->current.type == REA_TOKEN_SEMICOLON) {
         reaAdvance(p);
     }
 
-    AST *decl = newASTNode(AST_VAR_DECL, NULL);
-    addChild(decl, var);
-    setLeft(decl, init);
-    setRight(decl, typeNode);
-    setTypeAST(decl, vtype);
-    return decl;
+    // baseType shares token memory with typeNode; do not free to avoid double free
+    if (compound->child_count == 1) {
+        AST *only = compound->children[0];
+        compound->children[0] = NULL;
+        freeAST(compound);
+        return only;
+    }
+    return compound;
 }
 
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex) {
@@ -1756,7 +1783,19 @@ static AST *parseStatement(ReaParser *p) {
                            p->current.type == REA_TOKEN_IDENTIFIER) {
                     AST *decl = parseVarDecl(p);
                     if (decl) {
-                        if (decl->type == AST_FUNCTION_DECL) {
+                        if (decl->type == AST_COMPOUND) {
+                            for (int di = 0; di < decl->child_count; di++) {
+                                AST *d = decl->children[di];
+                                if (!d) continue;
+                                if (d->type == AST_FUNCTION_DECL || d->type == AST_PROCEDURE_DECL) {
+                                    addChild(methods, d);
+                                } else {
+                                    addChild(recordAst, d);
+                                }
+                                decl->children[di] = NULL;
+                            }
+                            freeAST(decl);
+                        } else if (decl->type == AST_FUNCTION_DECL) {
                             addChild(methods, decl);
                         } else if (decl->type == AST_PROCEDURE_DECL) {
                             addChild(methods, decl);
@@ -1927,21 +1966,39 @@ AST *parseRea(const char *source) {
     // top-level statements, insert an implicit call to `main` so the VM
     // executes user code on program start.
     bool has_main = false;
+    bool has_app = false;
     for (int i = 0; i < decls->child_count; i++) {
         AST *d = decls->children[i];
         if (!d || !d->token || !d->token->value) continue;
         if ((d->type == AST_FUNCTION_DECL || d->type == AST_PROCEDURE_DECL) &&
             strcasecmp(d->token->value, "main") == 0) {
             has_main = true;
-            break;
+        }
+        if (d->type == AST_VAR_DECL && d->child_count > 0 &&
+            d->children[0] && d->children[0]->token && d->children[0]->token->value &&
+            strcasecmp(d->children[0]->token->value, "app") == 0) {
+            has_app = true;
         }
     }
-    if (has_main && stmts->child_count == 0) {
-        Token *mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
-        AST *call = newASTNode(AST_PROCEDURE_CALL, mainTok);
-        AST *stmt = newASTNode(AST_EXPR_STMT, call->token);
-        setLeft(stmt, call);
-        addChild(stmts, stmt);
+    if (stmts->child_count == 0) {
+        if (has_main) {
+            Token *mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
+            AST *call = newASTNode(AST_PROCEDURE_CALL, mainTok);
+            AST *stmt = newASTNode(AST_EXPR_STMT, call->token);
+            setLeft(stmt, call);
+            addChild(stmts, stmt);
+        } else if (has_app) {
+            Token *appTok = newToken(TOKEN_IDENTIFIER, "app", 0, 0);
+            AST *appVar = newASTNode(AST_VARIABLE, appTok);
+            setTypeAST(appVar, TYPE_UNKNOWN);
+            Token *runTok = newToken(TOKEN_IDENTIFIER, "run", 0, 0);
+            AST *call = newASTNode(AST_PROCEDURE_CALL, runTok);
+            setLeft(call, appVar);
+            addChild(call, appVar);
+            AST *stmt = newASTNode(AST_EXPR_STMT, runTok);
+            setLeft(stmt, call);
+            addChild(stmts, stmt);
+        }
     }
 
     return program;
