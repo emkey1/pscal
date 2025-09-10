@@ -2764,7 +2764,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
-            bool isVirtualMethod = (node->child_count > 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+            bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
 
 #ifdef FRONTEND_REA
             // Fallback: receiver-aware method call mangle (Rea-only)
@@ -3751,7 +3751,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 func_symbol = func_symbol->real_symbol;
             }
 
-            bool isVirtualMethod = isCallQualified && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+            bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
 
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {

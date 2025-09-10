@@ -1,0 +1,73 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/super_method.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    3 DEFINE_GLOBAL    NameIdx:0   'c' Type:POINTER ('Child')
+0005    | ALLOC_OBJECT        3 (fields)
+0007    | DUP
+0008    | GET_FIELD_OFFSET    0 (index)
+0010    | GET_GLOBAL_ADDRESS    2 'Child_vtable'
+0012    | SET_INDIRECT
+0013    | SET_GLOBAL          0 'c'
+0015    1 JUMP                1 (to 0019)
+
+--- Procedure base_base (at 0018) ---
+0018    | RETURN
+0019    | JUMP                9 (to 0031)
+
+--- Procedure base_speak (at 0022) ---
+0022    | CONSTANT            3 '1'
+0024    | CONSTANT            4 'base'
+0026    | CALL_BUILTIN         5 'write' (2 args)
+0030    | RETURN
+0031    2 JUMP                9 (to 0043)
+
+--- Procedure child_child (at 0034) ---
+0034    | GET_LOCAL           0 (slot)
+0036    | CALL             0018 (Base_Base) (1 args)
+0042    | RETURN
+0043    | JUMP                9 (to 0055)
+
+--- Procedure child_speak (at 0046) ---
+0046    | GET_LOCAL           0 (slot)
+0048    | CALL             0022 (Base_speak) (1 args)
+0054    | RETURN
+0055    0 CONSTANT            8 'Value type ARRAY'
+0057    | DEFINE_GLOBAL    NameIdx:9   'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0067    | SET_GLOBAL          9 'child_vtable'
+0069    | CONSTANT           12 'Value type ARRAY'
+0071    | DEFINE_GLOBAL    NameIdx:13  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0081    | SET_GLOBAL         13 'base_vtable'
+0083    | GET_GLOBAL          0 'c'
+0085    | DUP
+0086    | GET_FIELD_OFFSET    0 (index)
+0088    | GET_GLOBAL_ADDRESS    2 'Child_vtable'
+0090    | SET_INDIRECT
+0091    | POP
+0092    4 GET_GLOBAL          0 'c'
+0094    | DUP
+0095    | GET_FIELD_OFFSET    0 (index)
+0097    | GET_INDIRECT
+0098    | CONSTANT            3 '1'
+0100    | SWAP
+0101    | GET_ELEMENT_ADDRESS    1 (dims)
+0103    | GET_INDIRECT
+0104    | PROC_CALL_INDIRECT (args=1)
+0106    0 HALT
+== End Disassembly: Tests/rea/super_method.rea ==
+
+Constants (14):\n  0000: STR   "c"
+  0001: STR   "Child"
+  0002: STR   "Child_vtable"
+  0003: INT   1
+  0004: STR   "base"
+  0005: STR   "write"
+  0006: STR   "Base_Base"
+  0007: STR   "Base_speak"
+  0008: Value type ARRAY
+  0009: STR   "child_vtable"
+  0010: INT   0
+  0011: STR   "integer"
+  0012: Value type ARRAY
+  0013: STR   "base_vtable"
+
