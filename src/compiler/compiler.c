@@ -2788,7 +2788,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileRValue(rvalue, chunk, getLine(rvalue));
                 if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
                 else writeBytecodeChunk(chunk, SUBTRACT, line);
-                writeBytecodeChunk(chunk, SWAP, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
@@ -3673,16 +3672,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
-                // Compound assignment: evaluate LHS once
-                compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, DUP, line);
-                writeBytecodeChunk(chunk, GET_INDIRECT, line);
-                compileRValue(rvalue, chunk, getLine(rvalue));
+                // Compound assignment: evaluate LHS once and preserve result on the stack
+                compileLValue(lvalue, chunk, getLine(lvalue));            // stack: [addr]
+                writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr]
+                writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr, addr]
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [addr, addr, value]
+                compileRValue(rvalue, chunk, getLine(rvalue));            // [addr, addr, value, rhs]
                 if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
-                else writeBytecodeChunk(chunk, SUBTRACT, line);
-                writeBytecodeChunk(chunk, SWAP, line);
-                writeBytecodeChunk(chunk, DUP, line);
-                writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                else writeBytecodeChunk(chunk, SUBTRACT, line);           // [addr, addr, result]
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);            // [addr]
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
                 writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
