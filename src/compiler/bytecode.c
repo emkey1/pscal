@@ -160,6 +160,15 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 3; // opcode + slot + length
         case INIT_LOCAL_POINTER:
             return 4; // opcode + slot byte + 2-byte type name index
+        case INIT_FIELD_ARRAY: {
+            int current_pos = offset + 1; // after opcode
+            current_pos++; // field index
+            if (current_pos >= chunk->count) return 1;
+            uint8_t dimension_count = chunk->code[current_pos++];
+            current_pos += dimension_count * 4; // bounds indices
+            current_pos += 2; // elem type and elem type name index
+            return current_pos - offset;
+        }
         case INIT_LOCAL_ARRAY: {
             int current_pos = offset + 1; // after opcode
             current_pos++; // slot
@@ -563,6 +572,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             uint8_t slot = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (slot)\n", "GET_UPVALUE_ADDRESS", slot);
             return offset + 2;
+        }
+        case INIT_FIELD_ARRAY: {
+            uint8_t field = chunk->code[offset + 1];
+            uint8_t dim_count = chunk->code[offset + 2];
+            fprintf(stderr, "%-16s Field:%d Dims:%d\n", "INIT_FIELD_ARRAY", field, dim_count);
+            return offset + 5 + dim_count * 4;
         }
         case INIT_LOCAL_ARRAY: {
             uint8_t slot = chunk->code[offset + 1];

@@ -28,6 +28,7 @@ static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
 static void emitConstantIndex16(BytecodeChunk* chunk, int constant_index, int line);
 static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
                               int name_idx, int line);
+static bool recordTypeHasVTable(AST* recordType);
 
 typedef struct {
     char* name;
@@ -406,6 +407,64 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
         }
     }
     return -1;
+}
+
+// Emit initialization code for array fields within a record/class.
+// Assumes the object instance is on top of the VM stack.
+static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, int line, bool hasVTable) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return;
+
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        emitArrayFieldInitializers(parent, chunk, line, recordTypeHasVTable(parent));
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        if (!decl || decl->type != AST_VAR_DECL) continue;
+
+        AST* type_node = decl->right;
+        AST* actual_type = type_node;
+        if (actual_type && actual_type->type == AST_TYPE_REFERENCE) {
+            AST* resolved = lookupType(actual_type->token->value);
+            if (resolved) actual_type = resolved;
+        }
+
+        if (actual_type && actual_type->type == AST_ARRAY_TYPE) {
+            int dim_count = actual_type->child_count;
+            for (int j = 0; j < decl->child_count; j++) {
+                AST* varNode = decl->children[j];
+                if (!varNode || !varNode->token) continue;
+                int offset = getRecordFieldOffset(recordType, varNode->token->value);
+                if (hasVTable) offset++;
+                if (offset < 0) continue;
+                writeBytecodeChunk(chunk, INIT_FIELD_ARRAY, line);
+                writeBytecodeChunk(chunk, (uint8_t)offset, line);
+                writeBytecodeChunk(chunk, (uint8_t)dim_count, line);
+                for (int d = 0; d < dim_count; d++) {
+                    AST* sub = actual_type->children[d];
+                    if (sub && sub->type == AST_SUBRANGE) {
+                        Value low_v = evaluateCompileTimeValue(sub->left);
+                        Value high_v = evaluateCompileTimeValue(sub->right);
+                        int lb = isIntlikeType(low_v.type) ? (int)AS_INTEGER(low_v) : 0;
+                        int ub = isIntlikeType(high_v.type) ? (int)AS_INTEGER(high_v) : -1;
+                        emitConstantIndex16(chunk, addIntConstant(chunk, lb), line);
+                        emitConstantIndex16(chunk, addIntConstant(chunk, ub), line);
+                        freeValue(&low_v); freeValue(&high_v);
+                    } else {
+                        emitShort(chunk, 0, line);
+                        emitShort(chunk, 0, line);
+                    }
+                }
+                AST* elem_type = actual_type->right;
+                VarType elem_var_type = elem_type->var_type;
+                writeBytecodeChunk(chunk, (uint8_t)elem_var_type, line);
+                const char* elem_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_name), line);
+            }
+        }
+    }
 }
 
 // Determine the record type for an expression used as an object base.
@@ -1440,6 +1499,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
+
+            emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
@@ -3234,6 +3295,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
+
+            emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
