@@ -43,7 +43,8 @@ class MandelbrotApp {
     int row[Width];
     double reFactor = (this.maxRe - this.minRe) / (this.Width - 1);
     double imFactor = (this.maxIm - this.minIm) / (this.Height - 1);
-    int idx, x, y, n, R, G, B;
+    int idx, x, y, n;
+    int R, G, B;
     double c_im;
     for (y = 0; y < this.Height; y = y + 1) {
       c_im = this.maxIm - y * imFactor;
@@ -57,10 +58,10 @@ class MandelbrotApp {
           G = (n * 7 + 85) % 256;
           B = (n * 11 + 170) % 256;
         }
-        this.pixels[idx + 0] = R;
-        this.pixels[idx + 1] = G;
-        this.pixels[idx + 2] = B;
-        this.pixels[idx + 3] = 255;
+        this.pixels[idx + 0] = char(R);
+        this.pixels[idx + 1] = char(G);
+        this.pixels[idx + 2] = char(B);
+        this.pixels[idx + 3] = char(255);
         idx = idx + this.BytesPerPixel;
       }
     }
@@ -97,7 +98,9 @@ class MandelbrotApp {
       else if (key == this.KEY_UP) { this.minIm += dy; this.maxIm += dy; }
       else if (key == this.KEY_DOWN) { this.minIm -= dy; this.maxIm -= dy; }
     }
-    int x = 0, y = 0, b = 0;
+    int x = 0;
+    int y = 0;
+    int b = 0;
     getmousestate(x, y, b);
     if ((b & this.ButtonLeft) != 0 && (this.prevButtons & this.ButtonLeft) == 0) {
       this.zoom(x, y, 1.0 / this.ZoomFactor);
