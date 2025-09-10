@@ -373,7 +373,66 @@ static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList) {
     argList->child_capacity = 0;
 }
 
+static int isTypeKeywordToken(ReaTokenType t) {
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64:
+        case REA_TOKEN_INT32:
+        case REA_TOKEN_INT16:
+        case REA_TOKEN_INT8:
+        case REA_TOKEN_FLOAT:
+        case REA_TOKEN_FLOAT32:
+        case REA_TOKEN_LONG_DOUBLE:
+        case REA_TOKEN_CHAR:
+        case REA_TOKEN_BYTE:
+        case REA_TOKEN_BOOL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static VarType tokenTypeToVarType(ReaTokenType t) {
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64: return TYPE_INT64;
+        case REA_TOKEN_INT32: return TYPE_INT32;
+        case REA_TOKEN_INT16: return TYPE_INT16;
+        case REA_TOKEN_INT8:  return TYPE_INT8;
+        case REA_TOKEN_FLOAT: return TYPE_DOUBLE;
+        case REA_TOKEN_FLOAT32: return TYPE_FLOAT;
+        case REA_TOKEN_LONG_DOUBLE: return TYPE_LONG_DOUBLE;
+        case REA_TOKEN_CHAR: return TYPE_CHAR;
+        case REA_TOKEN_BYTE: return TYPE_BYTE;
+        case REA_TOKEN_BOOL: return TYPE_BOOLEAN;
+        default: return TYPE_UNKNOWN;
+    }
+}
+
 static AST *parseFactor(ReaParser *p) {
+    if (isTypeKeywordToken(p->current.type)) {
+        ReaToken t = p->current;
+        char *lex = (char*)malloc(t.length + 1);
+        if (!lex) return NULL;
+        memcpy(lex, t.start, t.length);
+        lex[t.length] = '\0';
+        Token *tok = newToken(TOKEN_IDENTIFIER, lex, t.line, 0);
+        free(lex);
+        reaAdvance(p);
+        if (p->current.type != REA_TOKEN_LEFT_PAREN) {
+            freeToken(tok);
+            return NULL;
+        }
+        reaAdvance(p); // consume '('
+        AST *expr = parseExpression(p);
+        if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+            reaAdvance(p);
+        }
+        AST *call = newASTNode(AST_PROCEDURE_CALL, tok);
+        if (expr) addChild(call, expr);
+        setTypeAST(call, tokenTypeToVarType(t.type));
+        return call;
+    }
     if (p->current.type == REA_TOKEN_SUPER) {
         // super(...) or super.method(...)
         ReaToken supTok = p->current;
