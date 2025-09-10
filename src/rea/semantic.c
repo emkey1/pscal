@@ -2,6 +2,7 @@
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "core/types.h"
+#include "core/utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -437,7 +438,25 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                         snprintf(buf, sizeof(buf), "%Lf", v->real.r_val);
                         tok = newToken(TOKEN_REAL_CONST, strdup(buf), 0, 0);
                         newType = AST_NUMBER;
-                    } else {
+                    } else if (v->type == TYPE_BOOLEAN) {
+                        const char *lex = v->i_val ? "true" : "false";
+                        tok = newToken(v->i_val ? TOKEN_TRUE : TOKEN_FALSE,
+                                       strdup(lex), 0, 0);
+                        newType = AST_BOOLEAN;
+                    } else if (v->type == TYPE_STRING) {
+                        tok = newToken(TOKEN_STRING_CONST,
+                                       v->s_val ? strdup(v->s_val) : strdup(""),
+                                       0, 0);
+                        newType = AST_STRING;
+                    } else if (v->type == TYPE_CHAR) {
+                        char chbuf[2] = {(char)v->c_val, '\0'};
+                        tok = newToken(TOKEN_STRING_CONST, strdup(chbuf), 0, 0);
+                        newType = AST_STRING;
+                    } else if (v->type == TYPE_ENUM && v->enum_val.enum_name) {
+                        tok = newToken(TOKEN_IDENTIFIER,
+                                       strdup(v->enum_val.enum_name), 0, 0);
+                        newType = AST_ENUM_VALUE;
+                    } else if (isIntlikeType(v->type)) {
                         snprintf(buf, sizeof(buf), "%lld", (long long)v->i_val);
                         tok = newToken(TOKEN_INTEGER_CONST, strdup(buf), 0, 0);
                         newType = AST_NUMBER;
@@ -451,6 +470,22 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                         node->token = tok;
                         node->type = newType;
                         setTypeAST(node, v->type);
+                        switch (v->type) {
+                            case TYPE_STRING:
+                                node->i_val = v->s_val ? (int)strlen(v->s_val) : 0;
+                                break;
+                            case TYPE_CHAR:
+                                node->i_val = 1;
+                                break;
+                            case TYPE_BOOLEAN:
+                                node->i_val = v->i_val;
+                                break;
+                            case TYPE_ENUM:
+                                node->i_val = v->enum_val.ordinal;
+                                break;
+                            default:
+                                break;
+                        }
                     }
                 } else if (fs->type_def) {
                     node->var_type = fs->type_def->var_type;
