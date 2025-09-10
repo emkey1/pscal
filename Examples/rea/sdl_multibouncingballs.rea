@@ -79,7 +79,7 @@ class BallsApp {
     randomize();
     this.maxX = getmaxx();
     this.maxY = getmaxy();
-    this.FrameDelay = 1000 / TargetFPS;
+    this.FrameDelay = trunc(1000 / TargetFPS);
     int i = 1;
     while (i <= NumBalls) {
       Ball b = new Ball();
