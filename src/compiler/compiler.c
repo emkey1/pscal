@@ -21,6 +21,7 @@
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
 static AST* gCurrentProgramRoot = NULL;
+static HashTable* current_class_const_table = NULL;
 
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
@@ -1052,6 +1053,12 @@ Value* findCompilerConstant(const char* name_original_case) {
     strncpy(canonical_name, name_original_case, MAX_SYMBOL_LENGTH - 1);
     canonical_name[MAX_SYMBOL_LENGTH - 1] = '\0';
     toLowerString(canonical_name);
+    if (current_class_const_table) {
+        Symbol* sym = hashTableLookup(current_class_const_table, canonical_name);
+        if (sym && sym->value) {
+            return sym->value;
+        }
+    }
     for (int i = 0; i < compilerConstantCount; ++i) {
         if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
             return &compilerConstants[i].value;
@@ -1333,6 +1340,29 @@ static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, in
     return -1;
 }
 
+// Check whether a global variable with the given name has already been declared.
+static bool globalVariableExists(const char* name) {
+    for (int i = 0; i < compilerGlobalCount; i++) {
+        if (compilerGlobals[i].name && strcmp(compilerGlobals[i].name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Returns true if the given const declaration node is nested inside a class
+// definition (represented as a RECORD_TYPE within a TYPE_DECL).
+static bool constIsClassMember(AST* node) {
+    AST* p = node ? node->parent : NULL;
+    while (p) {
+        if (p->type == AST_RECORD_TYPE && p->parent && p->parent->type == AST_TYPE_DECL) {
+            return true;
+        }
+        p = p->parent;
+    }
+    return false;
+}
+
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1381,7 +1411,12 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                     }
                 } else {
-                    int nameIndex =  addStringConstant(chunk, varName);
+                    if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
+                        fprintf(stderr, "L%d: Undefined variable '%s'.\n", line, varName);
+                        compiler_had_error = true;
+                        break;
+                    }
+                    int nameIndex = addStringConstant(chunk, varName);
                     emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16,
                                        nameIndex, line);
                 }
@@ -1572,11 +1607,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
 
             if (declarations && declarations->type == AST_COMPOUND) {
-                // Pass 1: Compile constant and variable declarations from the declaration block.
+                // Pass 1: Compile type, constant, and variable declarations from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (decl_child &&
-                        (decl_child->type == AST_VAR_DECL || decl_child->type == AST_CONST_DECL)) {
+                        (decl_child->type == AST_VAR_DECL || decl_child->type == AST_CONST_DECL || decl_child->type == AST_TYPE_DECL)) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
@@ -2008,23 +2043,52 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     const_val = evaluateCompileTimeValue(node->left);
                 }
 
-                // Insert into global symbol table so subsequent declarations can reference it.
-                insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
-                Symbol* sym = lookupGlobalSymbol(node->token->value);
-                if (sym && sym->value) {
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&const_val);
-                    sym->is_const = true;
-                }
+                if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+                    fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
+                    compiler_had_error = true;
+                } else if (constIsClassMember(node)) {
+                    if (current_class_const_table) {
+                        insertConstSymbolIn(current_class_const_table, node->token->value, const_val);
+                    }
+                } else {
+                    // Insert into global symbol table so subsequent declarations can reference it.
+                    insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
+                    Symbol* sym = lookupGlobalSymbol(node->token->value);
+                    if (sym && sym->value) {
+                        freeValue(sym->value);
+                        *(sym->value) = makeCopyOfValue(&const_val);
+                        sym->is_const = true;
+                    }
 
-                insertConstGlobalSymbol(node->token->value, const_val);
+                    insertConstGlobalSymbol(node->token->value, const_val);
+                }
 
                 // Constants are resolved at compile time, so no bytecode emission is needed.
                 freeValue(&const_val);
             }
             break;
         }
-        case AST_TYPE_DECL:
+        case AST_TYPE_DECL: {
+            if (node->left && node->left->type == AST_RECORD_TYPE) {
+                HashTable* saved_table = current_class_const_table;
+                HashTable* tbl = NULL;
+                if (node->left->symbol_table) {
+                    tbl = (HashTable*)node->left->symbol_table;
+                } else {
+                    tbl = createHashTable();
+                    node->left->symbol_table = (Symbol*)tbl;
+                }
+                current_class_const_table = tbl;
+                for (int i = 0; i < node->left->child_count; i++) {
+                    AST* member = node->left->children[i];
+                    if (member && member->type == AST_CONST_DECL) {
+                        compileNode(member, chunk, getLine(member));
+                    }
+                }
+                current_class_const_table = saved_table;
+            }
+            break;
+        }
         case AST_USES_CLAUSE:
             break;
         case AST_PROCEDURE_DECL:
@@ -2071,6 +2135,22 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     fc.name = func_name;
 
     int func_bytecode_start_address = chunk->count;
+
+    HashTable* saved_class_const_table = current_class_const_table;
+    current_class_const_table = NULL;
+    const char* us_pos = strchr(func_name, '_');
+    if (us_pos) {
+        size_t cls_len = (size_t)(us_pos - func_name);
+        if (cls_len < MAX_SYMBOL_LENGTH) {
+            char cls_name[MAX_SYMBOL_LENGTH];
+            strncpy(cls_name, func_name, cls_len);
+            cls_name[cls_len] = '\0';
+            AST* classType = lookupType(cls_name);
+            if (classType && classType->left && classType->left->type == AST_RECORD_TYPE && classType->left->symbol_table) {
+                current_class_const_table = (HashTable*)classType->left->symbol_table;
+            }
+        }
+    }
 
     // --- FIX: Look up the symbol *before* trying to use it ---
     if (current_compilation_unit_name) {
@@ -2184,6 +2264,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     for(int i = 0; i < fc.local_count; i++) {
         free(fc.locals[i].name);
     }
+    current_class_const_table = saved_class_const_table;
     current_function_compiler = fc.enclosing;
     restoreLocalEnv(&env_snap);
 }

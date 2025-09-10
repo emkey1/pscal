@@ -63,11 +63,12 @@ class BallsApp {
   const int WindowWidth = 1280;
   const int WindowHeight = 1024;
   const int TargetFPS = 60;
-  const int FrameDelay = trunc(1000 / TargetFPS);
   const int NumBalls = 90;
   const float MaxInitialSpeed = 250.0;
   const float MinInitialSpeed = 80.0;
 
+  // Frame delay in milliseconds for the desired frame rate.
+  int FrameDelay;
   Ball balls[NumBalls + 1];
   int maxX;
   int maxY;
@@ -78,6 +79,7 @@ class BallsApp {
     randomize();
     this.maxX = getmaxx();
     this.maxY = getmaxy();
+    this.FrameDelay = 1000 / TargetFPS;
     int i = 1;
     while (i <= NumBalls) {
       Ball b = new Ball();
@@ -166,7 +168,7 @@ class BallsApp {
       }
       this.update();
       this.draw();
-      graphloop(FrameDelay);
+      graphloop(this.FrameDelay);
     }
     closegraph();
     writeln("Demo finished.");
