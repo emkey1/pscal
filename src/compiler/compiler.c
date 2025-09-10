@@ -82,6 +82,11 @@ typedef struct {
 static PendingGlobalVTableInit* pending_global_vtables = NULL;
 static int pending_global_vtable_count = 0;
 
+// Flag indicating we are compiling a global variable initializer. In that
+// situation vtables have not yet been emitted, so NEW expressions should not
+// attempt to resolve their class vtables immediately.
+static bool compiling_global_var_init = false;
+
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
     int index = addConstantToChunk(chunk, &val);
@@ -1418,7 +1423,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable) {
+            if (hasVTable && !compiling_global_var_init) {
                 // Initialise hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
@@ -1705,7 +1710,10 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     compileRValue(node->left, chunk, getLine(node->left));
                                 }
                             } else {
+                                bool prev_global_init = compiling_global_var_init;
+                                if (current_function_compiler == NULL) compiling_global_var_init = true;
                                 compileRValue(node->left, chunk, getLine(node->left));
+                                if (current_function_compiler == NULL) compiling_global_var_init = prev_global_init;
                                 if (current_function_compiler == NULL && node->left->type == AST_NEW &&
                                     node->left->token && node->left->token->value) {
                                     pending_global_vtables = realloc(pending_global_vtables,
@@ -3204,7 +3212,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable) {
+            if (hasVTable && !compiling_global_var_init) {
                 // Store class vtable pointer into hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
