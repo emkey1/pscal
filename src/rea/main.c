@@ -299,6 +299,7 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(EXIT_FAILURE);
     }
     if (dump_ast_json) {
+        annotateTypes(program, NULL, program);
         dumpASTJSON(program, stdout);
         freeAST(program);
         free(src);

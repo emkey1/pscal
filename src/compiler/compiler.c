@@ -622,6 +622,21 @@ static bool compareTypeNodes(AST* a, AST* b) {
     }
 }
 
+// Return true if `sub` record type inherits from `base` record type.
+static bool isSubclassOf(AST* sub, AST* base) {
+    sub = resolveTypeAlias(sub);
+    base = resolveTypeAlias(base);
+    while (sub) {
+        if (compareTypeNodes(sub, base)) return true;
+        if (sub->extra) {
+            sub = resolveTypeAlias(sub->extra);
+        } else {
+            break;
+        }
+    }
+    return false;
+}
+
 // Determine if an argument node's type matches the full parameter type node.
 //
 // Both sides may reference type aliases, so we resolve them before comparison.
@@ -736,7 +751,7 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     if (param_actual->var_type == TYPE_POINTER) {
         if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
         if (!param_actual->right) return true; // Generic pointer accepts any pointer
-        if (!arg_actual) return false;
+        if (!arg_actual) return true;          // Unknown pointer treated as compatible
         if (!compareTypeNodes(param_actual, arg_actual)) {
             AST* pa = resolveTypeAlias(param_actual->right);
             AST* aa = resolveTypeAlias(arg_actual->right);
@@ -745,6 +760,7 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
             if (!pn && pa && pa->token) pn = pa->token->value;
             if (!an && aa && aa->token) an = aa->token->value;
             if (pn && an && strcasecmp(pn, an) == 0) return true;
+            if (isSubclassOf(aa, pa)) return true;
             return false;
         }
         return true;
@@ -2486,16 +2502,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                  getLine(varNameNode), false);
                     }
                 }
-                /*
-                 * After registering locals, delegate to compileNode so that
-                 * type-specific initialization opcodes (e.g. INIT_LOCAL_ARRAY)
-                 * and per-variable initializers are emitted for each declared
-                 * variable. This restores the previous behavior where every
-                 * local variable receives proper backing storage and zeroing
-                 * before first use.
-                 */
-                compileNode(node, chunk, line);
             }
+            /*
+             * After registering locals (if any), delegate to compileNode so that
+             * type-specific initialization opcodes (e.g. INIT_LOCAL_ARRAY) and
+             * per-variable initializers are emitted for each declared variable.
+             * This ensures both global and local variables receive proper
+             * backing storage and zeroing before first use.
+             */
+            compileNode(node, chunk, line);
             break;
         }
         case AST_CONST_DECL: {
