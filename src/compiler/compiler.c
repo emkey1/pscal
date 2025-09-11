@@ -3337,6 +3337,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             break;
         }
+        case AST_USES_CLAUSE:
+            // Uses clauses are processed by the REA front end and don't emit code
+            break;
         default: {
             // This case should now only be hit for unhandled statement types, not expressions.
             fprintf(stderr, "L%d: Compiler WARNING: Unhandled AST node type %s in compileStatement's default case.\n", line, astTypeToString(node->type));
