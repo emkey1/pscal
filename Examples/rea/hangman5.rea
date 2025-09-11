@@ -1,23 +1,5 @@
 #import "crt";
 
-// --- Color constants (CRT colors) ---
-const int Black = 0;
-const int Blue = 1;
-const int Green = 2;
-const int Cyan = 3;
-const int Red = 4;
-const int Magenta = 5;
-const int Brown = 6;
-const int LightGray = 7;
-const int DarkGray = 8;
-const int LightBlue = 9;
-const int LightGreen = 10;
-const int LightCyan = 11;
-const int LightRed = 12;
-const int LightMagenta = 13;
-const int Yellow = 14;
-const int White = 15;
-
 // --- Game configuration ---
 const int MAX_WRONG = 8;
 
