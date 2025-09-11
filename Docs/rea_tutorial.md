@@ -62,7 +62,7 @@ Each `Ball` instance tracks its position, velocity, and appearance:
 #### `init`
 ```rea
 Ball init(int w, int h, float minSpeed, float maxSpeed) {
-  my.radius = 8 + random(13);
+  my.radius = 8 + random(13);                   // Note that 'my' and 'myself' are interchangeable
   my.x = my.radius + random(w - 2 * my.radius);
   my.y = my.radius + random(h - 2 * my.radius);
   int speedRange = trunc(maxSpeed - minSpeed + 1);
