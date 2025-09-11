@@ -15,7 +15,7 @@ const int GUESSED_ROW = 17;
 const int PROMPT_ROW = 19;
 const int MSG_ROW = 21;
 
-const int GAME_HEIGHT = 22;
+const int GAME_HEIGHT = 24;
 const int MAX_ELEMENT_WIDTH = 40;
 const int HANGMAN_WIDTH = 12;
 const int BORDER_PADDING = 2;
