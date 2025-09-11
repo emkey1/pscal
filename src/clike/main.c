@@ -3,7 +3,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <stdint.h>
 #include "clike/parser.h"
 #include "clike/codegen.h"
 #include "clike/builtins.h"
@@ -37,35 +36,6 @@ static const char *CLIKE_USAGE =
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
 "     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n";
-
-static unsigned long hashPathLocal(const char* path) {
-    uint32_t hash = 2166136261u;
-    for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
-        hash ^= *p;
-        hash *= 16777619u;
-    }
-    return (unsigned long)hash;
-}
-
-static char* buildCachePathLocal(const char* source_path) {
-    const char* home = getenv("HOME");
-    if (!home) return NULL;
-    size_t dir_len = strlen(home) + 1 + strlen(".pscal_cache") + 1;
-    char* dir = (char*)malloc(dir_len);
-    if (!dir) return NULL;
-    snprintf(dir, dir_len, "%s/%s", home, ".pscal_cache");
-    mkdir(dir, 0777);
-    char* abs_path = realpath(source_path, NULL);
-    const char* hash_src = abs_path ? abs_path : source_path;
-    unsigned long h = hashPathLocal(hash_src);
-    if (abs_path) free(abs_path);
-    size_t path_len = dir_len + 32;
-    char* full = (char*)malloc(path_len);
-    if (!full) { free(dir); return NULL; }
-    snprintf(full, path_len, "%s/%lu.bc", dir, h);
-    free(dir);
-    return full;
-}
 
 static char* resolveImportPath(const char* orig_path) {
     FILE *f = fopen(orig_path, "rb");
@@ -240,7 +210,7 @@ int main(int argc, char **argv) {
 #else
 #define PSCAL_STAT_SEC(st) ((st).st_mtim.tv_sec)
 #endif
-        char* cache_path = buildCachePathLocal(path);
+        char* cache_path = buildCachePath(path);
         struct stat cache_stat;
         if (!cache_path || stat(cache_path, &cache_stat) != 0) {
             if (cache_path) free(cache_path);
