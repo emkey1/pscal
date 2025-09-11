@@ -46,6 +46,16 @@ static void skipWhitespace(ReaLexer *lexer) {
                 lexer->line++;
                 lexer->pos++;
                 break;
+            case '#':
+                if (lexer->pos == 0 && peekNext(lexer) == '!') {
+                    lexer->pos += 2;
+                    while (peek(lexer) != '\n' && peek(lexer) != '\0') {
+                        lexer->pos++;
+                    }
+                } else {
+                    return;
+                }
+                break;
             case '/':
                 if (peekNext(lexer) == '/') {
                     lexer->pos += 2;
