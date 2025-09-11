@@ -17,18 +17,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0027    | SWAP
 0028    | SET_INDIRECT
 0029    | RETURN
-0030    0 GET_GLOBAL          0 'p'
-0032    | DUP
-0033    | GET_FIELD_OFFSET    0 (index)
-0035    | GET_GLOBAL_ADDRESS    4 'point_vtable'
-0037    | SET_INDIRECT
-0038    | POP
-0039    | HALT
+0030    0 HALT
 == End Disassembly: Tests/rea/constructor_init.rea ==
 
-Constants (5):\n  0000: STR   "p"
+Constants (4):\n  0000: STR   "p"
   0001: STR   "Point"
   0002: INT   5
   0003: STR   "point"
-  0004: STR   "point_vtable"
 
