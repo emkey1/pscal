@@ -2,6 +2,7 @@
 // Requires building Pscal with SDL support.
 
 class Ball {
+  const float WallBoost = 1.05;
   float x;
   float y;
   float dx;
@@ -40,17 +41,17 @@ class Ball {
     myself.y = myself.y + myself.dy;
     if ((myself.x - myself.radius) < 0) {
       myself.x = myself.radius;
-      myself.dx = -myself.dx;
+       myself.dx = -myself.dx * WallBoost;
     } else if ((myself.x + myself.radius) > maxX) {
       myself.x = maxX - myself.radius;
-      myself.dx = -myself.dx;
+      myself.dx = -myself.dx * WallBoost;
     }
     if ((myself.y - myself.radius) < 0) {
       myself.y = myself.radius;
-      myself.dy = -myself.dy;
+      myself.dx = -myself.dx * WallBoost;
     } else if ((myself.y + myself.radius) > maxY) {
       myself.y = maxY - myself.radius;
-      myself.dy = -myself.dy;
+      myself.dx = -myself.dx * WallBoost;
     }
   }
 
