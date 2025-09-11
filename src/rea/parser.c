@@ -623,7 +623,11 @@ static AST *parseFactor(ReaParser *p) {
         reaAdvance(p);
         return node;
     } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_MYSELF) {
-        char *lex = (char *)malloc(p->current.length + 1);
+        size_t alloc_len = p->current.length;
+        if (p->current.type == REA_TOKEN_MYSELF && alloc_len < 7) {
+            alloc_len = 7; // ensure space for canonical "myself" lexeme
+        }
+        char *lex = (char *)malloc(alloc_len + 1);
         if (!lex) return NULL;
         if (p->current.type == REA_TOKEN_MYSELF) {
             strcpy(lex, "myself");
