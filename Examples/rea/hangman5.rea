@@ -294,6 +294,7 @@ class HangmanGame {
 
   void HangmanGame() {
     myself.repo = new WordRepository();
+    myself.repo.WordRepository();
     myself.view = new HangmanView();
     myself.wins = 0;
     myself.losses = 0;
