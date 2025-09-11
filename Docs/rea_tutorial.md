@@ -88,7 +88,9 @@ Ball init(int w, int h, float minSpeed, float maxSpeed) {
 - Ensures a minimum speed so balls do not remain stationary.
 - Picks a bright RGB color and computes mass as area.
 
-**Syntax notes:** The method declaration begins with the return type `Ball` followed by the method name and typed parameters. `my` refers to the current instance. Local variables such as `int speedRange` specify the type before the name, and `if` statements use parentheses around conditions and braces for blocks.
+**Syntax notes:** The method declaration begins with the return type `Ball` followed by the method name and typed parameters. `my` refers to the current instance. You can use `my` and `myself` interchageably.  They are identical in functionality.  
+
+Local variables such as `int speedRange` specify the type before the name, and `if` statements use parentheses around conditions and braces for blocks.
 
 #### `move`
 ```rea
