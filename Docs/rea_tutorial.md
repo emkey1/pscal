@@ -62,24 +62,24 @@ Each `Ball` instance tracks its position, velocity, and appearance:
 #### `init`
 ```rea
 Ball init(int w, int h, float minSpeed, float maxSpeed) {
-  this.radius = 8 + random(13);
-  this.x = this.radius + random(w - 2 * this.radius);
-  this.y = this.radius + random(h - 2 * this.radius);
+  my.radius = 8 + random(13);
+  my.x = my.radius + random(w - 2 * my.radius);
+  my.y = my.radius + random(h - 2 * my.radius);
   int speedRange = trunc(maxSpeed - minSpeed + 1);
   float speed = minSpeed + random(speedRange);
   float angle = random(360) * (3.14159265 / 180.0);
-  this.dx = cos(angle) * speed / 60.0;
-  this.dy = sin(angle) * speed / 60.0;
-  if ((abs(this.dx) < 0.1) && (abs(this.dy) < 0.1)) {
-    this.dx = (minSpeed / 60.0) * 0.707;
-    this.dy = (minSpeed / 60.0) * 0.707;
+  my.dx = cos(angle) * speed / 60.0;
+  my.dy = sin(angle) * speed / 60.0;
+  if ((abs(my.dx) < 0.1) && (abs(my.dy) < 0.1)) {
+    my.dx = (minSpeed / 60.0) * 0.707;
+    my.dy = (minSpeed / 60.0) * 0.707;
   }
-  this.r = random(206) + 50;
-  this.g = random(206) + 50;
-  this.b = random(206) + 50;
-  this.mass = this.radius * this.radius;
-  this.active = true;
-  return this;
+  my.r = random(206) + 50;
+  my.g = random(206) + 50;
+  my.b = random(206) + 50;
+  my.mass = my.radius * my.radius;
+  my.active = true;
+  return my;
 }
 ```
 - Randomizes radius and position so the ball starts fully inside the window.
@@ -88,26 +88,26 @@ Ball init(int w, int h, float minSpeed, float maxSpeed) {
 - Ensures a minimum speed so balls do not remain stationary.
 - Picks a bright RGB color and computes mass as area.
 
-**Syntax notes:** The method declaration begins with the return type `Ball` followed by the method name and typed parameters. `this` refers to the current instance. Local variables such as `int speedRange` specify the type before the name, and `if` statements use parentheses around conditions and braces for blocks.
+**Syntax notes:** The method declaration begins with the return type `Ball` followed by the method name and typed parameters. `my` refers to the current instance. Local variables such as `int speedRange` specify the type before the name, and `if` statements use parentheses around conditions and braces for blocks.
 
 #### `move`
 ```rea
 void move(int maxX, int maxY) {
-  this.x = this.x + this.dx;
-  this.y = this.y + this.dy;
-  if ((this.x - this.radius) < 0) {
-    this.x = this.radius;
-    this.dx = -this.dx;
-  } else if ((this.x + this.radius) > maxX) {
-    this.x = maxX - this.radius;
-    this.dx = -this.dx;
+  my.x = my.x + my.dx;
+  my.y = my.y + my.dy;
+  if ((my.x - my.radius) < 0) {
+    my.x = my.radius;
+    my.dx = -my.dx;
+  } else if ((my.x + my.radius) > maxX) {
+    my.x = maxX - my.radius;
+    my.dx = -my.dx;
   }
-  if ((this.y - this.radius) < 0) {
-    this.y = this.radius;
-    this.dy = -this.dy;
-  } else if ((this.y + this.radius) > maxY) {
-    this.y = maxY - this.radius;
-    this.dy = -this.dy;
+  if ((my.y - my.radius) < 0) {
+    my.y = my.radius;
+    my.dy = -my.dy;
+  } else if ((my.y + my.radius) > maxY) {
+    my.y = maxY - my.radius;
+    my.dy = -my.dy;
   }
 }
 ```
@@ -118,8 +118,8 @@ Updates position and reflects velocity when the ball hits a window edge.
 #### `draw`
 ```rea
 void draw() {
-  setrgbcolor(this.r, this.g, this.b);
-  fillcircle(trunc(this.x), trunc(this.y), this.radius);
+  setrgbcolor(my.r, my.g, my.b);
+  fillcircle(trunc(my.x), trunc(my.y), my.radius);
 }
 ```
 Sets the draw color and renders the circle at the current location.
@@ -157,22 +157,22 @@ bool quit;
 void init() {
   initgraph(WindowWidth, WindowHeight, "Multi Bouncing Balls in Rea");
   randomize();
-  this.maxX = getmaxx();
-  this.maxY = getmaxy();
-  this.FrameDelay = trunc(1000 / TargetFPS);
+  my.maxX = getmaxx();
+  my.maxY = getmaxy();
+  my.FrameDelay = trunc(1000 / TargetFPS);
   int i = 1;
   while (i <= NumBalls) {
     Ball b = new Ball();
-    this.balls[i] = b.init(WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+    my.balls[i] = b.init(WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
     i = i + 1;
   }
-  this.quit = false;
+  my.quit = false;
 }
 ```
 Initializes SDL, determines window bounds, computes the frame delay and
 instantiates each ball with random settings.
 
-**Syntax notes:** Object creation uses `new Type()`. The `while` loop runs while a condition is true, and `this.field` accesses a member of the current object.
+**Syntax notes:** Object creation uses `new Type()`. The `while` loop runs while a condition is true, and `my.field` accesses a member of the current object.
 
 #### `handleCollisions`
 Performs pairwise collision detection and response:
@@ -180,43 +180,43 @@ Performs pairwise collision detection and response:
 void handleCollisions() {
   int i = 1;
   while (i <= NumBalls) {
-    if (this.balls[i].active) {
+    if (my.balls[i].active) {
       int j = i + 1;
       while (j <= NumBalls) {
-        if (this.balls[j].active) {
-          float distSq = (this.balls[i].x - this.balls[j].x) * (this.balls[i].x - this.balls[j].x) +
-                         (this.balls[i].y - this.balls[j].y) * (this.balls[i].y - this.balls[j].y);
-          float sumR = this.balls[i].radius + this.balls[j].radius;
+        if (my.balls[j].active) {
+          float distSq = (my.balls[i].x - my.balls[j].x) * (my.balls[i].x - my.balls[j].x) +
+                         (my.balls[i].y - my.balls[j].y) * (my.balls[i].y - my.balls[j].y);
+          float sumR = my.balls[i].radius + my.balls[j].radius;
           float sumR2 = sumR * sumR;
           if (distSq <= sumR2) {
             float dist = sqrt(distSq);
             if (dist == 0.0) dist = 0.001;
-            float nx = (this.balls[j].x - this.balls[i].x) / dist;
-            float ny = (this.balls[j].y - this.balls[i].y) / dist;
+            float nx = (my.balls[j].x - my.balls[i].x) / dist;
+            float ny = (my.balls[j].y - my.balls[i].y) / dist;
             float tx = -ny;
             float ty = nx;
-            float v1x = this.balls[i].dx;
-            float v1y = this.balls[i].dy;
-            float v2x = this.balls[j].dx;
-            float v2y = this.balls[j].dy;
+            float v1x = my.balls[i].dx;
+            float v1y = my.balls[i].dy;
+            float v2x = my.balls[j].dx;
+            float v2y = my.balls[j].dy;
             float v1n = v1x * nx + v1y * ny;
             float v1t = v1x * tx + v1y * ty;
             float v2n = v2x * nx + v2y * ny;
             float v2t = v2x * tx + v2y * ty;
-            float m1 = this.balls[i].mass;
-            float m2 = this.balls[j].mass;
+            float m1 = my.balls[i].mass;
+            float m2 = my.balls[j].mass;
             float new_v1n = (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
             float new_v2n = (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
-            this.balls[i].dx = new_v1n * nx + v1t * tx;
-            this.balls[i].dy = new_v1n * ny + v1t * ty;
-            this.balls[j].dx = new_v2n * nx + v2t * tx;
-            this.balls[j].dy = new_v2n * ny + v2t * ty;
+            my.balls[i].dx = new_v1n * nx + v1t * tx;
+            my.balls[i].dy = new_v1n * ny + v1t * ty;
+            my.balls[j].dx = new_v2n * nx + v2t * tx;
+            my.balls[j].dy = new_v2n * ny + v2t * ty;
             float overlap = sumR - dist;
             if (overlap > 0.0) {
-              this.balls[i].x = this.balls[i].x - (overlap / 2.0) * nx;
-              this.balls[i].y = this.balls[i].y - (overlap / 2.0) * ny;
-              this.balls[j].x = this.balls[j].x + (overlap / 2.0) * nx;
-              this.balls[j].y = this.balls[j].y + (overlap / 2.0) * ny;
+              my.balls[i].x = my.balls[i].x - (overlap / 2.0) * nx;
+              my.balls[i].y = my.balls[i].y - (overlap / 2.0) * ny;
+              my.balls[j].x = my.balls[j].x + (overlap / 2.0) * nx;
+              my.balls[j].y = my.balls[j].y + (overlap / 2.0) * ny;
             }
           }
         }
@@ -238,15 +238,15 @@ if needed to prevent sticking.
 void update() {
   int i = 1;
   while (i <= NumBalls) {
-    if (this.balls[i].active) this.balls[i].move(this.maxX, this.maxY);
+    if (my.balls[i].active) my.balls[i].move(my.maxX, my.maxY);
     i = i + 1;
   }
-  this.handleCollisions();
+  my.handleCollisions();
 }
 ```
 Moves every active ball and then processes collisions.
 
-**Syntax notes:** The method calls another method on the same class using `this.handleCollisions()` and uses an `if` statement to guard each ball's `move` call.
+**Syntax notes:** The method calls another method on the same class using `my.handleCollisions()` and uses an `if` statement to guard each ball's `move` call.
 
 #### `draw`
 ```rea
@@ -254,7 +254,7 @@ void draw() {
   cleardevice();
   int i = 1;
   while (i <= NumBalls) {
-    if (this.balls[i].active) this.balls[i].draw();
+    if (my.balls[i].active) my.balls[i].draw();
     i = i + 1;
   }
   updatescreen();
@@ -267,16 +267,16 @@ Clears the screen, draws each ball, and presents the new frame.
 #### `run`
 ```rea
 void run() {
-  this.init();
+  my.init();
   writeln("Multi Bouncing Balls... Press Q to quit.");
-  while (!this.quit) {
+  while (!my.quit) {
     if (keypressed()) {
       char c = readkey();
-      if (toupper(c) == 'Q') this.quit = true;
+      if (toupper(c) == 'Q') my.quit = true;
     }
-    this.update();
-    this.draw();
-    graphloop(this.FrameDelay);
+    my.update();
+    my.draw();
+    graphloop(my.FrameDelay);
   }
   closegraph();
   writeln("Demo finished.");
@@ -285,7 +285,7 @@ void run() {
 Initializes the application, enters the main loop, checks for user input, updates
 and draws the scene each frame, and exits when the `Q` key is pressed.
 
-**Syntax notes:** The `while (!this.quit)` loop uses logical negation. Character literals like `'Q'` are enclosed in single quotes, and the method ends with no explicit `return` because its return type is `void`.
+**Syntax notes:** The `while (!my.quit)` loop uses logical negation. Character literals like `'Q'` are enclosed in single quotes, and the method ends with no explicit `return` because its return type is `void`.
 
 ### Program entry point
 ```rea

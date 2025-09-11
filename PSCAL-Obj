@@ -14,7 +14,7 @@ The Pscal-Obj language is a strongly typed, class-based, object-oriented languag
 * **Identifiers:** Identifiers for variables, classes, and methods are case-sensitive. They must begin with a letter or an underscore and can be followed by any number of letters, digits, or underscores.
 * **Keywords:**
     * **Data Types:** `int`, `int64`, `int32`, `int16`, `int8`, `float`, `float32`, `long double`, `char`, `byte`, `str`, `text`, `mstream`, `void`, `bool`.
-    * **Class & Object:** `class`, `new`, `extends`, `this`, `super`.
+    * **Class & Object:** `class`, `new`, `extends`, `my`, `myself`, `super`.
     * **Control Flow:** `if`, `else`, `while`, `for`, `do`, `switch`, `case`, `default`, `break`, `continue`, `return`.
     * **Other:** `const`, `#import`.
 * **Literals:** Integer, floating-point, character, and string literals will follow the C-Like language specification.
@@ -42,7 +42,7 @@ Pscal-Obj uses the VM's primitive types but standardizes on 64-bit integer and f
 * **Constructors:** A special method with the same name as the class will serve as the constructor. It initializes the object's fields. A constructor will not have a return type.
 * **Object Instantiation:** The `new` keyword will allocate memory for a new object on the heap and call the class's constructor. This will translate to a sequence of opcodes that handle memory allocation and initialization, leveraging the existing VM memory management.
 * **Field and Method Access:** The dot `.` operator is used to access an object's fields and methods.
-* **`this` and `super`:** The `this` keyword provides a reference to the current object instance within a method. The `super` keyword provides a reference to the parent class's constructor and methods, allowing for proper initialization and method overriding.
+* **`my`/`myself` and `super`:** The `my` or `myself` keyword provides a reference to the current object instance within a method. The `super` keyword provides a reference to the parent class's constructor and methods, allowing for proper initialization and method overriding.
 * **Inheritance:** The `extends` keyword will be used to create a subclass that inherits fields and methods from a parent class.
 * **Polymorphism:** Method overriding will be supported. To implement this on the PSCAL VM, the compiler will generate a virtual method table (V-table) for each class. This table would be a constant array of function pointers. When a method is called, the bytecode will look up the correct function pointer in the V-table based on the object's dynamic type, enabling polymorphic behavior.
 * **No Overloading:** As specified, method overloading will not be supported. Each method within a class, and each top-level function, must have a unique name.

@@ -414,7 +414,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
-        /* Implicit field access rewriting disabled; rely on explicit 'this'. */
+        /* Implicit field access rewriting disabled; rely on explicit 'myself'. */
     }
 
     if (node->type == AST_FIELD_ACCESS) {
@@ -495,7 +495,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
         if (node->i_val == 1) {
-            /* super constructor/method call already has implicit 'this' */
+            /* super constructor/method call already has implicit 'myself' */
             if (node->token && node->token->value && !strchr(node->token->value, '_')) {
                 const char *pname = node->token->value;
                 size_t ln = strlen(pname) + 1 + strlen(pname) + 1;
@@ -548,27 +548,27 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     node->token->length = ln - 1;
                 }
 
-                bool firstIsThis = false;
+                bool firstIsMyself = false;
                 if (node->child_count > 0 && node->children[0] &&
                     node->children[0]->type == AST_VARIABLE &&
                     node->children[0]->token && node->children[0]->token->value &&
-                    strcasecmp(node->children[0]->token->value, "this") == 0) {
-                    firstIsThis = true;
+                    strcasecmp(node->children[0]->token->value, "myself") == 0) {
+                    firstIsMyself = true;
                 }
 
-                if (!firstIsThis && node->i_val == 0) {
-                    Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", node->token ? node->token->line : 0, 0);
-                    AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-                    thisVar->var_type = TYPE_POINTER;
+                if (!firstIsMyself && node->i_val == 0) {
+                    Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", node->token ? node->token->line : 0, 0);
+                    AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+                    selfVar->var_type = TYPE_POINTER;
                     addChild(node, NULL);
                     for (int i = node->child_count - 1; i > 0; i--) {
                         node->children[i] = node->children[i - 1];
                         if (node->children[i]) node->children[i]->parent = node;
                     }
-                    node->children[0] = thisVar;
-                    thisVar->parent = node;
-                    setLeft(node, thisVar);
-                } else if (firstIsThis && node->i_val == 0) {
+                    node->children[0] = selfVar;
+                    selfVar->parent = node;
+                    setLeft(node, selfVar);
+                } else if (firstIsMyself && node->i_val == 0) {
                     setLeft(node, node->children[0]);
                 }
             }

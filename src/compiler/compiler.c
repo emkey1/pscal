@@ -2975,7 +2975,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     // Prefer explicit type identifier token value
                     if (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE) {
                         cls_name = tdef->token->value;
-                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "this") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
+                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "myself") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
                         // Derive from current function name 'Class_method' if available
                         const char* fname = current_function_compiler->function_symbol->name;
                         const char* us = fname ? strchr(fname, '_') : NULL;

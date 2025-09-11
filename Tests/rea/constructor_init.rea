@@ -1,2 +1,2 @@
-class Point { int x; Point(int v) { this.x = v; } }
+class Point { int x; Point(int v) { my.x = v; } }
 Point p = new Point(5);

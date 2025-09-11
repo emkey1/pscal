@@ -27,7 +27,7 @@ Reserved words may not be used as identifiers.
 
 * **Types:** `int`, `int32`, `int16`, `int8`, `float`, `float32`, `long double`,
   `str`, `bool`, `void`
-* **Classes:** `class`, `new`, `extends`, `this`, `super`
+* **Classes:** `class`, `new`, `extends`, `my`, `myself`, `super`
 * **Control flow:** `if`, `else`, `while`, `for`, `do`, `switch`, `case`,
   `default`, `break`, `continue`, `return`
 * **Other:** `const`, `#import`
@@ -96,7 +96,7 @@ int add(int a, int b) { return a + b; }
 
 * **Definition:** `class Name { field; method() { … } }`
 * **Fields:** declared like variables; each instance holds its own copy.
-* **Methods:** may access instance members through `this`.
+* **Methods:** may access instance members through `my` or `myself`.
 * **Constructors:** a method sharing the class name initializes new objects.
 * **Instantiation:** `new Name(args)` allocates an object and calls the
   constructor.
@@ -116,8 +116,8 @@ string helpers, math functions, and threading primitives such as `spawn`,
 ```rea
 class Counter {
   int n;
-  void inc() { this.n = this.n + 1; }
-  int set(int v) { this.n = v; return this.n; }
+  void inc() { my.n = my.n + 1; }
+  int set(int v) { my.n = v; return my.n; }
 }
 
 Counter c = new Counter();

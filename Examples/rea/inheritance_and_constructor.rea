@@ -10,13 +10,13 @@ class Animal {
 
   // Constructor for the base class
   void Animal(str animalName, int animalAge) {
-      this.name = animalName;
-      this.age = animalAge;
-      writeln("An animal was created with name: ", this.name);
+      myself.name = animalName;
+      myself.age = animalAge;
+      writeln("An animal was created with name: ", myself.name);
   }
 
   void speak() {
-    writeln(this.name, " makes a sound.");
+    writeln(myself.name, " makes a sound.");
   }
 }
 
@@ -28,13 +28,13 @@ class Dog extends Animal {
   void Dog(str dogName, int dogAge, str dogBreed) {
     // Call the parent's constructor using `super`
     super(dogName, dogAge);
-    this.breed = dogBreed;
-    writeln(this.name, " is a dog of breed ", this.breed, ".");
+    myself.breed = dogBreed;
+    writeln(myself.name, " is a dog of breed ", myself.breed, ".");
   }
 
   // Override the `speak` method
   void speak() {
-    writeln(this.name, " barks loudly.");
+    writeln(myself.name, " barks loudly.");
     
     // Call the parent's `speak` method
     super.speak();
