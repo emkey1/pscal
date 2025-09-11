@@ -658,9 +658,6 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
                 fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
                 fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
                 fwrite(&sym->type, sizeof(sym->type), 1, f);
-                int parent_len = (sym->enclosing && sym->enclosing->name) ? (int)strlen(sym->enclosing->name) : 0;
-                fwrite(&parent_len, sizeof(parent_len), 1, f);
-                if (parent_len > 0) fwrite(sym->enclosing->name, 1, parent_len, f);
             }
         }
     }
