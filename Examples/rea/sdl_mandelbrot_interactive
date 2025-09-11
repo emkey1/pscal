@@ -1,0 +1,125 @@
+#!/usr/bin/env rea
+// Interactive Mandelbrot demo for the Rea front end.
+// Left click to zoom in, right click to zoom out, Q to quit.
+// Requires SDL support in the Pscal build.
+
+class MandelbrotApp {
+  const int Width = 1200;
+  const int Height = 900;
+  const int MaxIterations = 200;
+  const int BytesPerPixel = 4;
+  const double ZoomFactor = 2.0;
+  const int ButtonLeft = 1;
+  const int ButtonRight = 4;
+  const int KEY_LEFT = 1073741904;
+  const int KEY_RIGHT = 1073741903;
+  const int KEY_UP = 1073741906;
+  const int KEY_DOWN = 1073741905;
+
+  byte pixels[Width * Height * BytesPerPixel];
+  double minRe;
+  double maxRe;
+  double minIm;
+  double maxIm;
+  int textureID;
+  bool quit;
+  int prevButtons;
+
+  void init() {
+    myself.minRe = -2.0;
+    myself.maxRe = 1.0;
+    myself.minIm = -1.2;
+    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
+    initgraph(myself.Width, myself.Height, "Mandelbrot in Rea");
+    myself.textureID = createtexture(myself.Width, myself.Height);
+    if (myself.textureID < 0) {
+      printf("Error: unable to create texture.\n");
+      halt();
+    }
+    myself.quit = false;
+    myself.prevButtons = 0;
+  }
+
+  void compute() {
+    int row[Width];
+    double reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
+    double imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
+    int idx, x, y, n;
+    int R, G, B;
+    double c_im;
+    for (y = 0; y < myself.Height; y = y + 1) {
+      c_im = myself.maxIm - y * imFactor;
+      mandelbrotrow(myself.minRe, reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
+      idx = y * myself.Width * myself.BytesPerPixel;
+      for (x = 0; x < myself.Width; x = x + 1) {
+        n = row[x];
+        if (n == myself.MaxIterations) { R = G = B = 0; }
+        else {
+          R = (n * 5) % 256;
+          G = (n * 7 + 85) % 256;
+          B = (n * 11 + 170) % 256;
+        }
+        myself.pixels[idx + 0] = char(R);
+        myself.pixels[idx + 1] = char(G);
+        myself.pixels[idx + 2] = char(B);
+        myself.pixels[idx + 3] = char(255);
+        idx = idx + myself.BytesPerPixel;
+      }
+    }
+    updatetexture(myself.textureID, myself.pixels);
+    cleardevice();
+    rendercopy(myself.textureID);
+    updatescreen();
+  }
+
+  void zoom(int px, int py, double factor) {
+    double reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
+    double imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
+    double centerRe = myself.minRe + (px + 0.5) * reFactor;
+    double centerIm = myself.maxIm - (py + 0.5) * imFactor;
+    double widthRe = (myself.maxRe - myself.minRe) * factor;
+    double heightIm = (myself.maxIm - myself.minIm) * factor;
+    myself.minRe = centerRe - widthRe / 2.0;
+    myself.maxRe = centerRe + widthRe / 2.0;
+    myself.minIm = centerIm - heightIm / 2.0;
+    myself.maxIm = centerIm + heightIm / 2.0;
+  }
+
+  void handleInput() {
+    graphloop(1);
+    int key = pollkey();
+    if (key != 0) {
+      if (key == 'q' || key == 'Q') { myself.quit = true; return; }
+      double widthRe = (myself.maxRe - myself.minRe);
+      double heightIm = (myself.maxIm - myself.minIm);
+      double dx = widthRe * 0.5;
+      double dy = heightIm * 0.5;
+      if (key == myself.KEY_LEFT) { myself.minRe -= dx; myself.maxRe -= dx; }
+      else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; }
+      else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; }
+      else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; }
+    }
+    int x = 0, y = 0, b = 0;
+    getmousestate(x, y, b);
+    if ((b & myself.ButtonLeft) != 0 && (myself.prevButtons & myself.ButtonLeft) == 0) {
+      myself.zoom(x, y, 1.0 / myself.ZoomFactor);
+    } else if ((b & myself.ButtonRight) != 0 && (myself.prevButtons & myself.ButtonRight) == 0) {
+      myself.zoom(x, y, myself.ZoomFactor);
+    }
+    myself.prevButtons = b;
+  }
+
+  void run() {
+    myself.init();
+    while (!myself.quit) {
+      myself.compute();
+      myself.handleInput();
+    }
+    destroytexture(myself.textureID);
+    closegraph();
+  }
+}
+
+MandelbrotApp app = new MandelbrotApp();
+app.run();
+

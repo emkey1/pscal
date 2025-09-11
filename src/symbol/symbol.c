@@ -386,6 +386,58 @@ void insertConstGlobalSymbol(const char *name, Value val) {
     hashTableInsert(constGlobalSymbols, new_symbol);
 }
 
+// Insert a constant symbol into the specified hash table.
+// Used for class-scoped constants so they do not pollute the global table.
+void insertConstSymbolIn(HashTable *table, const char *name, Value val) {
+    if (!table || !name || name[0] == '\0') {
+        fprintf(stderr, "[ERROR] Attempted to insert const symbol with invalid name.\n");
+        return;
+    }
+    if (hashTableLookup(table, name)) {
+        return; // Already inserted
+    }
+
+    Symbol *new_symbol = malloc(sizeof(Symbol));
+    if (!new_symbol) {
+        fprintf(stderr, "Memory allocation error in insertConstSymbolIn (Symbol struct)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    new_symbol->name = strdup(name);
+    if (!new_symbol->name) {
+        free(new_symbol);
+        fprintf(stderr, "Memory allocation error (strdup name) in insertConstSymbolIn\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    toLowerString(new_symbol->name);
+
+    new_symbol->type = val.type;
+    new_symbol->is_alias = false;
+    new_symbol->is_const = true;
+    new_symbol->is_local_var = false;
+    new_symbol->is_inline = false;
+    new_symbol->next = NULL;
+    new_symbol->type_def = NULL;
+    new_symbol->enclosing = NULL;
+    new_symbol->real_symbol = NULL;
+    new_symbol->is_defined = false;
+    new_symbol->bytecode_address = 0;
+    new_symbol->arity = 0;
+    new_symbol->locals_count = 0;
+    new_symbol->slot_index = 0;
+    new_symbol->upvalue_count = 0;
+
+    new_symbol->value = malloc(sizeof(Value));
+    if (!new_symbol->value) {
+        free(new_symbol->name);
+        free(new_symbol);
+        fprintf(stderr, "Memory allocation error (malloc Value) in insertConstSymbolIn\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    *(new_symbol->value) = makeCopyOfValue(&val);
+
+    hashTableInsert(table, new_symbol);
+}
+
 
 /**
  * Inserts a new local symbol into the local symbol table (hash table).

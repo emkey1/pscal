@@ -3171,6 +3171,113 @@ comparison_error_label:
                 *target_slot = array_val;
                 break;
             }
+            case INIT_FIELD_ARRAY: {
+                uint8_t field_index = READ_BYTE();
+                uint8_t dimension_count = READ_BYTE();
+                if (dimension_count == 0) {
+                    runtimeError(vm, "VM Error: Array defined with zero dimensions for object field.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                uint16_t *lower_idx = malloc(sizeof(uint16_t) * dimension_count);
+                uint16_t *upper_idx = malloc(sizeof(uint16_t) * dimension_count);
+                if (!lower_idx || !upper_idx) {
+                    runtimeError(vm, "VM Error: Malloc failed for array bound indices.");
+                    if (lower_idx) free(lower_idx);
+                    if (upper_idx) free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    lower_idx[i] = READ_SHORT(vm);
+                    upper_idx[i] = READ_SHORT(vm);
+                }
+
+                VarType elem_var_type = (VarType)READ_BYTE();
+                uint8_t elem_name_idx = READ_BYTE();
+                Value elem_name_val = vm->chunk->constants[elem_name_idx];
+                AST* elem_type_def = NULL;
+                if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+                    elem_type_def = lookupType(elem_name_val.s_val);
+                }
+
+                int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                if (!lower_bounds || !upper_bounds) {
+                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                    free(lower_idx); free(upper_idx);
+                    if (lower_bounds) free(lower_bounds);
+                    if (upper_bounds) free(upper_bounds);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = dimension_count - 1; i >= 0; i--) {
+                    if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
+                        Value size_val = pop(vm);
+                        if (!isIntlikeType(size_val.type)) {
+                            runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
+                            free(lower_bounds); free(upper_bounds);
+                            free(lower_idx); free(upper_idx);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        lower_bounds[i] = 0;
+                        upper_bounds[i] = (int)size_val.i_val - 1;
+                        freeValue(&size_val);
+                    } else {
+                        if (lower_idx[i] >= vm->chunk->constants_count || upper_idx[i] >= vm->chunk->constants_count) {
+                            runtimeError(vm, "VM Error: Array bound constant index out of range.");
+                            free(lower_bounds); free(upper_bounds);
+                            free(lower_idx); free(upper_idx);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        Value lower_val = vm->chunk->constants[lower_idx[i]];
+                        Value upper_val = vm->chunk->constants[upper_idx[i]];
+                        if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
+                            runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
+                            free(lower_bounds); free(upper_bounds);
+                            free(lower_idx); free(upper_idx);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        lower_bounds[i] = (int)lower_val.i_val;
+                        upper_bounds[i] = (int)upper_val.i_val;
+                    }
+                }
+
+                free(lower_idx);
+                free(upper_idx);
+
+                Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+
+                free(lower_bounds);
+                free(upper_bounds);
+
+                Value* base_val_ptr = vm->stackTop - 1;
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    freeValue(&array_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr == NULL || record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer or non-record value.");
+                    freeValue(&array_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                FieldValue* current = record_struct_ptr->record_val;
+                for (uint16_t i = 0; i < field_index && current; i++) {
+                    current = current->next;
+                }
+                if (!current) {
+                    runtimeError(vm, "VM Error: Field index out of range for INIT_FIELD_ARRAY.");
+                    freeValue(&array_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&current->value);
+                current->value = array_val;
+                break;
+            }
             case INIT_LOCAL_FILE: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];

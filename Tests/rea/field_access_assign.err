@@ -4,7 +4,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    2 DEFINE_GLOBAL    NameIdx:0   'p' Type:POINTER ('Point')
 0005    4 CONSTANT            2 '1'
-0007    | GET_GLOBAL_ADDRESS    0 'p'
+0007    | GET_GLOBAL          0 'p'
 0009    | GET_FIELD_OFFSET    1 (index)
 0011    | SWAP
 0012    | SET_INDIRECT

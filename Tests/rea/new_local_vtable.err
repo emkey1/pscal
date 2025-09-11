@@ -1,0 +1,33 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/new_local_vtable.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 JUMP                1 (to 0004)
+
+--- Procedure mixedcase_hi (at 0003) ---
+0003    | RETURN
+0004    2 JUMP               15 (to 0022)
+
+--- Procedure run (at 0007) ---
+0007    3 INIT_LOCAL_POINTER    0 (slot)    0 'MixedCase'
+0011    | ALLOC_OBJECT        2 (fields)
+0013    | DUP
+0014    | GET_FIELD_OFFSET    0 (index)
+0016    | GET_GLOBAL_ADDRESS    1 'mixedcase_vtable'
+0018    | SET_INDIRECT
+0019    | SET_LOCAL           0 (slot)
+0021    2 RETURN
+0022    0 CONSTANT            2 'Value type ARRAY'
+0024    | DEFINE_GLOBAL    NameIdx:1   'mixedcase_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
+0034    | SET_GLOBAL          1 'mixedcase_vtable'
+0036    5 CALL             0007 (run) (0 args)
+0042    0 HALT
+== End Disassembly: Tests/rea/new_local_vtable.rea ==
+
+Constants (6):\n  0000: STR   "MixedCase"
+  0001: STR   "mixedcase_vtable"
+  0002: Value type ARRAY
+  0003: INT   0
+  0004: STR   "integer"
+  0005: STR   "run"
+

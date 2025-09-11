@@ -6,16 +6,20 @@ Offset Line Opcode           Operand  Value / Target (Args)
 
 --- Function point_setx (at 0003) ---
 0003    4 GET_LOCAL           1 (slot)
-0005    | GET_LOCAL_ADDRESS    0 (slot)
-0007    | GET_FIELD_OFFSET    1 (index)
+0005    | GET_LOCAL           0 (slot)
+0007    | GET_FIELD_OFFSET    2 (index)
 0009    | SWAP
 0010    | SET_INDIRECT
 0011    3 GET_LOCAL           2 (slot)
 0013    | RETURN
 0014    0 CONSTANT            0 'Value type ARRAY'
-0016    | DEFINE_GLOBAL    NameIdx:1   'point_vtable' Type:UNKNOWN_VAR_TYPE 
+0016    | DEFINE_GLOBAL    NameIdx:1   'point_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
+0026    | SET_GLOBAL          1 'point_vtable'
+0028    | HALT
 == End Disassembly: Tests/rea/method_this_assign.rea ==
 
-Constants (2):\n  0000: Value type ARRAY
+Constants (4):\n  0000: Value type ARRAY
   0001: STR   "point_vtable"
+  0002: INT   0
+  0003: STR   "integer"
 

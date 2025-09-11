@@ -1,7 +1,7 @@
 class Point {
   int x;
   int setx(int v) {
-    this.x = v;
+    my.x = v;
   }
 }
 

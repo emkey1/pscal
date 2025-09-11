@@ -21,10 +21,15 @@
 static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
 static AST* gCurrentProgramRoot = NULL;
+static HashTable* current_class_const_table = NULL;
 
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
 static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
+static void emitConstantIndex16(BytecodeChunk* chunk, int constant_index, int line);
+static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
+                              int name_idx, int line);
+static bool recordTypeHasVTable(AST* recordType);
 
 typedef struct {
     char* name;
@@ -68,6 +73,25 @@ typedef struct FunctionCompilerState {
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
+
+// Track global objects created with NEW so their hidden
+// vtable fields can be initialised after all vtables are defined.
+typedef struct {
+    char* var_name;
+    char* class_name;
+} PendingGlobalVTableInit;
+
+static PendingGlobalVTableInit* pending_global_vtables = NULL;
+static int pending_global_vtable_count = 0;
+
+// Flag indicating we are compiling a global variable initializer. In that
+// situation vtables have not yet been emitted, so NEW expressions should not
+// attempt to resolve their class vtables immediately.
+static bool compiling_global_var_init = false;
+// Tracks nested NEW expressions when compiling a global initializer so that
+// only the outermost object defers its vtable setup. Nested NEWs must initialize
+// their vtable pointers immediately.
+static int global_init_new_depth = 0;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
@@ -216,6 +240,16 @@ static void emitVTables(BytecodeChunk* chunk) {
         snprintf(gname, sizeof(gname), "%s_vtable", vt->class_name);
         int nameIdx = addStringConstant(chunk, gname);
         emitDefineGlobal(chunk, nameIdx, 0);
+        writeBytecodeChunk(chunk, (uint8_t)TYPE_ARRAY, 0); // variable type
+        writeBytecodeChunk(chunk, 1, 0);                   // dimension count
+        int lbIdx = addIntConstant(chunk, lb);
+        int ubIdx = addIntConstant(chunk, ub);
+        emitConstantIndex16(chunk, lbIdx, 0);              // lower bound
+        emitConstantIndex16(chunk, ubIdx, 0);              // upper bound
+        writeBytecodeChunk(chunk, (uint8_t)TYPE_INT32, 0); // element type
+        int elemNameIdx = addStringConstant(chunk, "integer");
+        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, 0);
+        emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, 0);
         free(vt->class_name);
         free(vt->addrs);
     }
@@ -376,9 +410,90 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
     return -1;
 }
 
+// Emit initialization code for array fields within a record/class.
+// Assumes the object instance is on top of the VM stack.
+static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, int line, bool hasVTable) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return;
+
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        emitArrayFieldInitializers(parent, chunk, line, recordTypeHasVTable(parent));
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        if (!decl || decl->type != AST_VAR_DECL) continue;
+
+        AST* type_node = decl->right;
+        AST* actual_type = type_node;
+        if (actual_type && actual_type->type == AST_TYPE_REFERENCE) {
+            AST* resolved = lookupType(actual_type->token->value);
+            if (resolved) actual_type = resolved;
+        }
+
+        if (actual_type && actual_type->type == AST_ARRAY_TYPE) {
+            int dim_count = actual_type->child_count;
+            for (int j = 0; j < decl->child_count; j++) {
+                AST* varNode = decl->children[j];
+                if (!varNode || !varNode->token) continue;
+                int offset = getRecordFieldOffset(recordType, varNode->token->value);
+                if (hasVTable) offset++;
+                if (offset < 0) continue;
+                writeBytecodeChunk(chunk, INIT_FIELD_ARRAY, line);
+                writeBytecodeChunk(chunk, (uint8_t)offset, line);
+                writeBytecodeChunk(chunk, (uint8_t)dim_count, line);
+                for (int d = 0; d < dim_count; d++) {
+                    AST* sub = actual_type->children[d];
+                    if (sub && sub->type == AST_SUBRANGE) {
+                        Value low_v = evaluateCompileTimeValue(sub->left);
+                        Value high_v = evaluateCompileTimeValue(sub->right);
+                        int lb = isIntlikeType(low_v.type) ? (int)AS_INTEGER(low_v) : 0;
+                        int ub = isIntlikeType(high_v.type) ? (int)AS_INTEGER(high_v) : -1;
+                        emitConstantIndex16(chunk, addIntConstant(chunk, lb), line);
+                        emitConstantIndex16(chunk, addIntConstant(chunk, ub), line);
+                        freeValue(&low_v); freeValue(&high_v);
+                    } else {
+                        emitShort(chunk, 0, line);
+                        emitShort(chunk, 0, line);
+                    }
+                }
+                AST* elem_type = actual_type->right;
+                VarType elem_var_type = elem_type->var_type;
+                writeBytecodeChunk(chunk, (uint8_t)elem_var_type, line);
+                const char* elem_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_name), line);
+            }
+        }
+    }
+}
+
 // Determine the record type for an expression used as an object base.
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
+    if (expr->type == AST_ARRAY_ACCESS) {
+        AST* baseType = getRecordTypeFromExpr(expr->left);
+        if (!baseType) return NULL;
+        baseType = resolveTypeAlias(baseType);
+        if (baseType && baseType->type == AST_ARRAY_TYPE) {
+            AST* elem = resolveTypeAlias(baseType->right);
+            if (elem && elem->type == AST_POINTER_TYPE) {
+                return resolveTypeAlias(elem->right);
+            }
+            return elem;
+        }
+        if (baseType && baseType->type == AST_POINTER_TYPE) {
+            AST* arr = resolveTypeAlias(baseType->right);
+            if (arr && arr->type == AST_ARRAY_TYPE) {
+                AST* elem = resolveTypeAlias(arr->right);
+                if (elem && elem->type == AST_POINTER_TYPE) {
+                    return resolveTypeAlias(elem->right);
+                }
+                return elem;
+            }
+        }
+        return NULL;
+    }
     if (expr->type == AST_DEREFERENCE) {
         AST* ptr_type = resolveTypeAlias(expr->left->type_def);
         if (ptr_type && ptr_type->type == AST_POINTER_TYPE) {
@@ -391,6 +506,32 @@ static AST* getRecordTypeFromExpr(AST* expr) {
         AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
         if (decl && decl->right) {
             t = resolveTypeAlias(decl->right);
+        } else if (current_function_compiler && current_function_compiler->function_symbol &&
+                   current_function_compiler->function_symbol->name) {
+            const char* fname = current_function_compiler->function_symbol->name;
+            const char* us = strchr(fname, '_');
+            if (us) {
+                size_t len = (size_t)(us - fname);
+                char cls[MAX_SYMBOL_LENGTH];
+                if (len >= sizeof(cls)) len = sizeof(cls) - 1;
+                memcpy(cls, fname, len);
+                cls[len] = '\0';
+                AST* classType = lookupType(cls);
+                classType = resolveTypeAlias(classType);
+                if (classType && classType->type == AST_RECORD_TYPE) {
+                    for (int i = 0; i < classType->child_count && !t; i++) {
+                        AST* f = classType->children[i];
+                        if (!f || f->type != AST_VAR_DECL) continue;
+                        for (int j = 0; j < f->child_count; j++) {
+                            AST* v = f->children[j];
+                            if (v && v->token && strcmp(v->token->value, expr->token->value) == 0) {
+                                if (f->right) t = resolveTypeAlias(f->right);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     if (t && t->type == AST_POINTER_TYPE) {
@@ -418,10 +559,20 @@ static bool recordTypeHasVTable(AST* recordType) {
         Symbol* sym = procedure_table->buckets[b];
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
-            if (base && base->name &&
-                strncmp(base->name, name, len) == 0 &&
-                base->name[len] == '_') {
-                return true;
+            if (base && base->name && base->type_def && base->type_def->is_virtual &&
+                strncasecmp(base->name, name, len) == 0 && base->name[len] == '_') {
+                AST* func = base->type_def;
+                if (func->child_count > 0) {
+                    AST* firstParam = func->children[0];
+                    AST* paramType = resolveTypeAlias(firstParam ? firstParam->right : NULL);
+                    if (paramType && paramType->type == AST_POINTER_TYPE) {
+                        AST* target = resolveTypeAlias(paramType->right);
+                        const char* targetName = getTypeNameFromAST(target);
+                        if (targetName && strcasecmp(targetName, name) == 0) {
+                            return true;
+                        }
+                    }
+                }
             }
             sym = sym->next;
         }
@@ -469,6 +620,21 @@ static bool compareTypeNodes(AST* a, AST* b) {
         default:
             return true;
     }
+}
+
+// Return true if `sub` record type inherits from `base` record type.
+static bool isSubclassOf(AST* sub, AST* base) {
+    sub = resolveTypeAlias(sub);
+    base = resolveTypeAlias(base);
+    while (sub) {
+        if (compareTypeNodes(sub, base)) return true;
+        if (sub->extra) {
+            sub = resolveTypeAlias(sub->extra);
+        } else {
+            break;
+        }
+    }
+    return false;
 }
 
 // Determine if an argument node's type matches the full parameter type node.
@@ -585,8 +751,19 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     if (param_actual->var_type == TYPE_POINTER) {
         if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
         if (!param_actual->right) return true; // Generic pointer accepts any pointer
-        if (!arg_actual) return false;
-        return compareTypeNodes(param_actual, arg_actual);
+        if (!arg_actual) return true;          // Unknown pointer treated as compatible
+        if (!compareTypeNodes(param_actual, arg_actual)) {
+            AST* pa = resolveTypeAlias(param_actual->right);
+            AST* aa = resolveTypeAlias(arg_actual->right);
+            const char* pn = getTypeNameFromAST(pa);
+            const char* an = getTypeNameFromAST(aa);
+            if (!pn && pa && pa->token) pn = pa->token->value;
+            if (!an && aa && aa->token) an = aa->token->value;
+            if (pn && an && strcasecmp(pn, an) == 0) return true;
+            if (isSubclassOf(aa, pa)) return true;
+            return false;
+        }
+        return true;
     }
 
     if (param_actual->var_type == TYPE_ENUM && arg_vt == TYPE_ENUM) {
@@ -892,6 +1069,12 @@ Value* findCompilerConstant(const char* name_original_case) {
     strncpy(canonical_name, name_original_case, MAX_SYMBOL_LENGTH - 1);
     canonical_name[MAX_SYMBOL_LENGTH - 1] = '\0';
     toLowerString(canonical_name);
+    if (current_class_const_table) {
+        Symbol* sym = hashTableLookup(current_class_const_table, canonical_name);
+        if (sym && sym->value) {
+            return sym->value;
+        }
+    }
     for (int i = 0; i < compilerConstantCount; ++i) {
         if (compilerConstants[i].name && strcmp(compilerConstants[i].name, canonical_name) == 0) {
             return &compilerConstants[i].value;
@@ -1173,6 +1356,29 @@ static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, in
     return -1;
 }
 
+// Check whether a global variable with the given name has already been declared.
+static bool globalVariableExists(const char* name) {
+    for (int i = 0; i < compilerGlobalCount; i++) {
+        if (compilerGlobals[i].name && strcmp(compilerGlobals[i].name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Returns true if the given const declaration node is nested inside a class
+// definition (represented as a RECORD_TYPE within a TYPE_DECL).
+static bool constIsClassMember(AST* node) {
+    AST* p = node ? node->parent : NULL;
+    while (p) {
+        if (p->type == AST_RECORD_TYPE && p->parent && p->parent->type == AST_TYPE_DECL) {
+            return true;
+        }
+        p = p->parent;
+    }
+    return false;
+}
+
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1221,7 +1427,12 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                     }
                 } else {
-                    int nameIndex =  addStringConstant(chunk, varName);
+                    if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
+                        fprintf(stderr, "L%d: Undefined variable '%s'.\n", line, varName);
+                        compiler_had_error = true;
+                        break;
+                    }
+                    int nameIndex = addStringConstant(chunk, varName);
                     emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16,
                                        nameIndex, line);
                 }
@@ -1308,11 +1519,17 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         }
         case AST_NEW: {
             if (!node || !node->token || !node->token->value) { break; }
+            global_init_new_depth++;
             const char* className = node->token->value;
-            AST* classType = lookupType(className);
+            char lowerClassName[MAX_SYMBOL_LENGTH];
+            strncpy(lowerClassName, className, sizeof(lowerClassName) - 1);
+            lowerClassName[sizeof(lowerClassName) - 1] = '\0';
+            toLowerString(lowerClassName);
+            AST* classType = lookupType(lowerClassName);
 
             bool hasVTable = recordTypeHasVTable(classType);
             int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+            bool defer_vtable = compiling_global_var_init && global_init_new_depth == 1;
 
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, ALLOC_OBJECT, line);
@@ -1322,31 +1539,32 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable) {
+            if (hasVTable && !defer_vtable) {
                 // Initialise hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)0, line);
-                writeBytecodeChunk(chunk, SWAP, line);
                 char vtName[512];
-                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                snprintf(vtName, sizeof(vtName), "%s_vtable", lowerClassName);
                 int vtNameIdx = addStringConstant(chunk, vtName);
-                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, vtNameIdx, line);
-                writeBytecodeChunk(chunk, SWAP, line);
+                emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
+
+            emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                int ctorNameIdx = addStringConstant(chunk, className);
+                int ctorNameIdx = addStringConstant(chunk, lowerClassName);
                 writeBytecodeChunk(chunk, CALL, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
                 emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
+            global_init_new_depth--;
             break;
         }
         case AST_DEREFERENCE: {
@@ -1405,11 +1623,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
 
             if (declarations && declarations->type == AST_COMPOUND) {
-                // Pass 1: Compile constant and variable declarations from the declaration block.
+                // Pass 1: Compile type, constant, and variable declarations from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (decl_child &&
-                        (decl_child->type == AST_VAR_DECL || decl_child->type == AST_CONST_DECL)) {
+                        (decl_child->type == AST_VAR_DECL || decl_child->type == AST_CONST_DECL || decl_child->type == AST_TYPE_DECL)) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
@@ -1424,15 +1642,35 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
             if (node->parent && node->parent->type == AST_PROGRAM) {
                 emitVTables(chunk);
+                for (int pg = 0; pg < pending_global_vtable_count; pg++) {
+                    PendingGlobalVTableInit* p = &pending_global_vtables[pg];
+                    int objNameIdx = addStringConstant(chunk, p->var_name);
+                    emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, objNameIdx, 0);
+                    writeBytecodeChunk(chunk, DUP, 0);
+                    writeBytecodeChunk(chunk, GET_FIELD_OFFSET, 0);
+                    writeBytecodeChunk(chunk, (uint8_t)0, 0);
+                    char vtName[512];
+                    snprintf(vtName, sizeof(vtName), "%s_vtable", p->class_name);
+                    int vtIdx = addStringConstant(chunk, vtName);
+                    emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtIdx, 0);
+                    writeBytecodeChunk(chunk, SET_INDIRECT, 0);
+                    writeBytecodeChunk(chunk, POP, 0);
+                    free(p->var_name);
+                    free(p->class_name);
+                }
+                free(pending_global_vtables);
+                pending_global_vtables = NULL;
+                pending_global_vtable_count = 0;
             }
 
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
-                 for (int i = 0; i < statements->child_count; i++) {
+                for (int i = 0; i < statements->child_count; i++) {
                     if (statements->children[i]) {
-                        compileNode(statements->children[i], chunk, getLine(statements->children[i]));
+                        compileStatement(statements->children[i], chunk,
+                                         getLine(statements->children[i]));
                     }
-                 }
+                }
             }
             break;
         }
@@ -1484,19 +1722,27 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     Value upper_b = evaluateCompileTimeValue(subrange->right);
                                     
                                     // Use the new helper for the lower bound
-                                    if (lower_b.type == TYPE_INTEGER) {
-                                        emitConstantIndex16(chunk, addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                    if (IS_INTLIKE(lower_b)) {
+                                        emitConstantIndex16(chunk,
+                                            addIntConstant(chunk, AS_INTEGER(lower_b)),
+                                            getLine(varNameNode));
                                     } else {
-                                        fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                        fprintf(stderr,
+                                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
+                                            getLine(varNameNode));
                                         compiler_had_error = true;
                                     }
                                     freeValue(&lower_b);
-                                    
+
                                     // Use the new helper for the upper bound
-                                    if (upper_b.type == TYPE_INTEGER) {
-                                        emitConstantIndex16(chunk, addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                    if (IS_INTLIKE(upper_b)) {
+                                        emitConstantIndex16(chunk,
+                                            addIntConstant(chunk, AS_INTEGER(upper_b)),
+                                            getLine(varNameNode));
                                     } else {
-                                        fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                        fprintf(stderr,
+                                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
+                                            getLine(varNameNode));
                                         compiler_had_error = true;
                                     }
                                     freeValue(&upper_b);
@@ -1583,7 +1829,22 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     compileRValue(node->left, chunk, getLine(node->left));
                                 }
                             } else {
+                                bool prev_global_init = compiling_global_var_init;
+                                bool set_global_guard = (current_function_compiler == NULL &&
+                                                          node->left->type == AST_NEW);
+                                if (set_global_guard) compiling_global_var_init = true;
                                 compileRValue(node->left, chunk, getLine(node->left));
+                                if (set_global_guard) compiling_global_var_init = prev_global_init;
+                                if (set_global_guard && node->left->token && node->left->token->value) {
+                                    pending_global_vtables = realloc(pending_global_vtables,
+                                        sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
+                                    pending_global_vtables[pending_global_vtable_count].var_name =
+                                        strdup(varNameNode->token->value);
+                                    char* lower_cls = strdup(node->left->token->value);
+                                    toLowerString(lower_cls);
+                                    pending_global_vtables[pending_global_vtable_count].class_name = lower_cls;
+                                    pending_global_vtable_count++;
+                                }
                             }
                             int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
                             emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, name_idx_set, getLine(varNameNode));
@@ -1640,16 +1901,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 Value lower_b = evaluateCompileTimeValue(subrange->left);
                                 Value upper_b = evaluateCompileTimeValue(subrange->right);
 
-                                if (lower_b.type == TYPE_INTEGER) {
-                                    emitConstantIndex16(chunk, addIntConstant(chunk, lower_b.i_val), getLine(varNameNode));
+                                if (IS_INTLIKE(lower_b)) {
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(lower_b)), getLine(varNameNode));
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                     compiler_had_error = true;
                                 }
                                 freeValue(&lower_b);
 
-                                if (upper_b.type == TYPE_INTEGER) {
-                                    emitConstantIndex16(chunk, addIntConstant(chunk, upper_b.i_val), getLine(varNameNode));
+                                if (IS_INTLIKE(upper_b)) {
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(upper_b)), getLine(varNameNode));
                                 } else {
                                     fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
                                     compiler_had_error = true;
@@ -1798,23 +2059,52 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     const_val = evaluateCompileTimeValue(node->left);
                 }
 
-                // Insert into global symbol table so subsequent declarations can reference it.
-                insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
-                Symbol* sym = lookupGlobalSymbol(node->token->value);
-                if (sym && sym->value) {
-                    freeValue(sym->value);
-                    *(sym->value) = makeCopyOfValue(&const_val);
-                    sym->is_const = true;
-                }
+                if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+                    fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
+                    compiler_had_error = true;
+                } else if (constIsClassMember(node)) {
+                    if (current_class_const_table) {
+                        insertConstSymbolIn(current_class_const_table, node->token->value, const_val);
+                    }
+                } else {
+                    // Insert into global symbol table so subsequent declarations can reference it.
+                    insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
+                    Symbol* sym = lookupGlobalSymbol(node->token->value);
+                    if (sym && sym->value) {
+                        freeValue(sym->value);
+                        *(sym->value) = makeCopyOfValue(&const_val);
+                        sym->is_const = true;
+                    }
 
-                insertConstGlobalSymbol(node->token->value, const_val);
+                    insertConstGlobalSymbol(node->token->value, const_val);
+                }
 
                 // Constants are resolved at compile time, so no bytecode emission is needed.
                 freeValue(&const_val);
             }
             break;
         }
-        case AST_TYPE_DECL:
+        case AST_TYPE_DECL: {
+            if (node->left && node->left->type == AST_RECORD_TYPE) {
+                HashTable* saved_table = current_class_const_table;
+                HashTable* tbl = NULL;
+                if (node->left->symbol_table) {
+                    tbl = (HashTable*)node->left->symbol_table;
+                } else {
+                    tbl = createHashTable();
+                    node->left->symbol_table = (Symbol*)tbl;
+                }
+                current_class_const_table = tbl;
+                for (int i = 0; i < node->left->child_count; i++) {
+                    AST* member = node->left->children[i];
+                    if (member && member->type == AST_CONST_DECL) {
+                        compileNode(member, chunk, getLine(member));
+                    }
+                }
+                current_class_const_table = saved_table;
+            }
+            break;
+        }
         case AST_USES_CLAUSE:
             break;
         case AST_PROCEDURE_DECL:
@@ -1831,7 +2121,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_COMPOUND:
             for (int i = 0; i < node->child_count; i++) {
                 if (node->children[i]) {
-                    compileNode(node->children[i], chunk, getLine(node->children[i]));
+                    compileStatement(node->children[i], chunk,
+                                      getLine(node->children[i]));
                 }
             }
             break;
@@ -1842,6 +2133,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 }
 
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line) {
+    SymbolEnvSnapshot env_snap;
+    saveLocalEnv(&env_snap);
+
     FunctionCompilerState fc;
     initFunctionCompiler(&fc);
     fc.enclosing = current_function_compiler;
@@ -1857,6 +2151,22 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     fc.name = func_name;
 
     int func_bytecode_start_address = chunk->count;
+
+    HashTable* saved_class_const_table = current_class_const_table;
+    current_class_const_table = NULL;
+    const char* us_pos = strchr(func_name, '_');
+    if (us_pos) {
+        size_t cls_len = (size_t)(us_pos - func_name);
+        if (cls_len < MAX_SYMBOL_LENGTH) {
+            char cls_name[MAX_SYMBOL_LENGTH];
+            strncpy(cls_name, func_name, cls_len);
+            cls_name[cls_len] = '\0';
+            AST* classType = lookupType(cls_name);
+            if (classType && classType->left && classType->left->type == AST_RECORD_TYPE && classType->left->symbol_table) {
+                current_class_const_table = (HashTable*)classType->left->symbol_table;
+            }
+        }
+    }
 
     // --- FIX: Look up the symbol *before* trying to use it ---
     if (current_compilation_unit_name) {
@@ -1874,6 +2184,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
         compiler_had_error = true;
         current_function_compiler = NULL;
+        restoreLocalEnv(&env_snap);
         return;
     }
 
@@ -1969,7 +2280,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     for(int i = 0; i < fc.local_count; i++) {
         free(fc.locals[i].name);
     }
+    current_class_const_table = saved_class_const_table;
     current_function_compiler = fc.enclosing;
+    restoreLocalEnv(&env_snap);
 }
 
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result) {
@@ -2190,7 +2503,34 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                 }
             }
+            /*
+             * After registering locals (if any), delegate to compileNode so that
+             * type-specific initialization opcodes (e.g. INIT_LOCAL_ARRAY) and
+             * per-variable initializers are emitted for each declared variable.
+             * This ensures both global and local variables receive proper
+             * backing storage and zeroing before first use.
+             */
             compileNode(node, chunk, line);
+            break;
+        }
+        case AST_CONST_DECL: {
+            // Local constant declarations do not emit bytecode but must be recorded
+            // in the local symbol table so they can be referenced in subsequent
+            // expressions within the same scope.
+            if (current_function_compiler != NULL && node->token) {
+                Value const_val = evaluateCompileTimeValue(node->left);
+                AST *type_node = node->right ? node->right : node->left;
+                Symbol *sym = insertLocalSymbol(node->token->value,
+                                                const_val.type,
+                                                type_node,
+                                                false);
+                if (sym && sym->value) {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&const_val);
+                    sym->is_const = true;
+                }
+                freeValue(&const_val);
+            }
             break;
         }
         case AST_WRITELN: {
@@ -2441,26 +2781,36 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            compileRValue(rvalue, chunk, getLine(rvalue));
-
-            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
-                lvalue->token && lvalue->token->value &&
-                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                 strcasecmp(lvalue->token->value, "result") == 0)) {
-                
-                int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
-                if (return_slot != -1) {
-                    writeBytecodeChunk(chunk, SET_LOCAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                    // The POP instruction that was here has been removed.
-                } else {
-                    fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
-                    compiler_had_error = true;
-                }
-            } else {
+            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
                 compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, SWAP, line);
+                writeBytecodeChunk(chunk, DUP, line);
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                compileRValue(rvalue, chunk, getLine(rvalue));
+                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
+                else writeBytecodeChunk(chunk, SUBTRACT, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
+            } else {
+                compileRValue(rvalue, chunk, getLine(rvalue));
+
+                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                    lvalue->token && lvalue->token->value &&
+                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                     strcasecmp(lvalue->token->value, "result") == 0)) {
+
+                    int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+                    if (return_slot != -1) {
+                        writeBytecodeChunk(chunk, SET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
+                        // The POP instruction that was here has been removed.
+                    } else {
+                        fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
+                        compiler_had_error = true;
+                    }
+                } else {
+                    compileLValue(lvalue, chunk, getLine(lvalue));
+                    writeBytecodeChunk(chunk, SWAP, line);
+                    writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                }
             }
             break;
         }
@@ -2610,7 +2960,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
-            bool isVirtualMethod = (node->child_count > 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+            bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
 
 #ifdef FRONTEND_REA
             // Fallback: receiver-aware method call mangle (Rea-only)
@@ -2625,7 +2975,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     // Prefer explicit type identifier token value
                     if (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE) {
                         cls_name = tdef->token->value;
-                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "this") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
+                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "myself") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
                         // Derive from current function name 'Class_method' if available
                         const char* fname = current_function_compiler->function_symbol->name;
                         const char* us = fname ? strchr(fname, '_') : NULL;
@@ -2740,7 +3090,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
-                        AST* param_type = param_node->type_def ? param_node->type_def : param_node;
+                        AST* param_type = param_node->type_def ? param_node->type_def
+                                                            : (param_node->right ? param_node->right : param_node);
                         bool match = typesMatch(param_type, arg_node, callee_is_builtin);
                         if (!match) {
                             AST* param_actual = resolveTypeAlias(param_type);
@@ -2862,7 +3213,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "dosgetdate") == 0) ||
                     (strcasecmp(calleeName, "dosgettime") == 0) ||
                     (strcasecmp(calleeName, "getdate") == 0) ||
-                    (strcasecmp(calleeName, "gettime") == 0)
+                    (strcasecmp(calleeName, "gettime") == 0) ||
+                    /* MandelbrotRow returns results via the sixth VAR parameter */
+                    (strcasecmp(calleeName, "mandelbrotrow") == 0 && i == 5)
                 )) {
                     is_var_param = true;
                 }
@@ -2984,6 +3337,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             break;
         }
+        case AST_USES_CLAUSE:
+            // Uses clauses are processed by the REA front end and don't emit code
+            break;
         default: {
             // This case should now only be hit for unhandled statement types, not expressions.
             fprintf(stderr, "L%d: Compiler WARNING: Unhandled AST node type %s in compileStatement's default case.\n", line, astTypeToString(node->type));
@@ -3027,10 +3383,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_NEW: {
             if (!node || !node->token || !node->token->value) { break; }
             const char* className = node->token->value;
-            AST* classType = lookupType(className);
+            char lowerClassName[MAX_SYMBOL_LENGTH];
+            strncpy(lowerClassName, className, sizeof(lowerClassName) - 1);
+            lowerClassName[sizeof(lowerClassName) - 1] = '\0';
+            toLowerString(lowerClassName);
+            AST* classType = lookupType(lowerClassName);
 
             bool hasVTable = recordTypeHasVTable(classType);
             int fieldCount = getRecordFieldCount(classType) + (hasVTable ? 1 : 0);
+
+            global_init_new_depth++;
+            bool defer_vtable = compiling_global_var_init && global_init_new_depth == 1;
 
             if (fieldCount <= 0xFF) {
                 writeBytecodeChunk(chunk, ALLOC_OBJECT, line);
@@ -3040,31 +3403,32 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable) {
+            if (hasVTable && !defer_vtable) {
                 // Store class vtable pointer into hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                 writeBytecodeChunk(chunk, (uint8_t)0, line);
-                writeBytecodeChunk(chunk, SWAP, line);
                 char vtName[512];
-                snprintf(vtName, sizeof(vtName), "%s_vtable", className);
+                snprintf(vtName, sizeof(vtName), "%s_vtable", lowerClassName);
                 int vtNameIdx = addStringConstant(chunk, vtName);
-                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, vtNameIdx, line);
-                writeBytecodeChunk(chunk, SWAP, line);
+                emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16, vtNameIdx, line);
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
+
+            emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             if (node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                int ctorNameIdx = addStringConstant(chunk, className);
+                int ctorNameIdx = addStringConstant(chunk, lowerClassName);
                 writeBytecodeChunk(chunk, CALL, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
                 emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
+            global_init_new_depth--;
             break;
         }
         case AST_SET: {
@@ -3245,26 +3609,35 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 }
             } else {
-                int upvalue_slot = -1;
-                if (current_function_compiler) {
-                    upvalue_slot = resolveUpvalue(current_function_compiler, varName);
-                }
-                if (upvalue_slot != -1) {
-                    bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
-                    writeBytecodeChunk(chunk, GET_UPVALUE, line);
-                    writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
-                    if (up_is_ref && node->var_type != TYPE_ARRAY) {
-                        writeBytecodeChunk(chunk, GET_INDIRECT, line);
-                    }
+                // Check if the identifier refers to a local constant recorded in the
+                // symbol table before resolving upvalues or globals. These constants do
+                // not occupy a slot in the function's locals array, so `resolveLocal`
+                // does not detect them.
+                Symbol *local_const_sym = lookupLocalSymbol(varName);
+                if (local_const_sym && local_const_sym->is_const && local_const_sym->value) {
+                    emitConstant(chunk, addConstantToChunk(chunk, local_const_sym->value), line);
                 } else {
-                    // Check if it's a compile-time constant first.
-                    Value* const_val_ptr = findCompilerConstant(varName);
-                    if (const_val_ptr) {
-                        emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                    int upvalue_slot = -1;
+                    if (current_function_compiler) {
+                        upvalue_slot = resolveUpvalue(current_function_compiler, varName);
+                    }
+                    if (upvalue_slot != -1) {
+                        bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
+                        writeBytecodeChunk(chunk, GET_UPVALUE, line);
+                        writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
+                        if (up_is_ref && node->var_type != TYPE_ARRAY) {
+                            writeBytecodeChunk(chunk, GET_INDIRECT, line);
+                        }
                     } else {
-                        int nameIndex = addStringConstant(chunk, varName);
-                        emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
-                                           nameIndex, line);
+                        // Check if it's a compile-time constant first.
+                        Value* const_val_ptr = findCompilerConstant(varName);
+                        if (const_val_ptr) {
+                            emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                        } else {
+                            int nameIndex = addStringConstant(chunk, varName);
+                            emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
+                                               nameIndex, line);
+                        }
                     }
                 }
             }
@@ -3303,34 +3676,47 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            compileRValue(rvalue, chunk, getLine(rvalue));
-            writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
-
-            if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
-                lvalue->token && lvalue->token->value &&
-                (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                 strcasecmp(lvalue->token->value, "result") == 0)) {
-
-                int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
-                if (return_slot != -1) {
-                    writeBytecodeChunk(chunk, SET_LOCAL, line);
-                    writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
-                } else {
-                    fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
-                    compiler_had_error = true;
-                }
+            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
+                // Compound assignment: evaluate LHS once and preserve result on the stack
+                compileLValue(lvalue, chunk, getLine(lvalue));            // stack: [addr]
+                writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr]
+                writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr, addr]
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [addr, addr, value]
+                compileRValue(rvalue, chunk, getLine(rvalue));            // [addr, addr, value, rhs]
+                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
+                else writeBytecodeChunk(chunk, SUBTRACT, line);           // [addr, addr, result]
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);            // [addr]
+                writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {
-                compileLValue(lvalue, chunk, getLine(lvalue));
-                writeBytecodeChunk(chunk, SWAP, line);
-                writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                compileRValue(rvalue, chunk, getLine(rvalue));
+                writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
+
+                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                    lvalue->token && lvalue->token->value &&
+                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
+                     strcasecmp(lvalue->token->value, "result") == 0)) {
+
+                    int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+                    if (return_slot != -1) {
+                        writeBytecodeChunk(chunk, SET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
+                    } else {
+                        fprintf(stderr, "L%d: Compiler internal error: could not resolve slot for function return value '%s'.\n", line, current_function_compiler->name);
+                        compiler_had_error = true;
+                    }
+                } else {
+                    compileLValue(lvalue, chunk, getLine(lvalue));
+                    writeBytecodeChunk(chunk, SWAP, line);
+                    writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                }
             }
             break;
         }
         case AST_BINARY_OP: {
             if (node_token && node_token->type == TOKEN_AND) {
                 // Check annotated type to decide between bitwise and logical AND
-                if (node->left && node->left->var_type == TYPE_INTEGER) {
-                    // Bitwise AND for integers
+                if (node->left && isIntlikeType(node->left->var_type)) {
+                    // Bitwise AND for integer types
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
                     writeBytecodeChunk(chunk, AND, line);
@@ -3356,8 +3742,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             } else if (node_token && node_token->type == TOKEN_OR) {
                 // Check annotated type for bitwise vs. logical OR
-                if (node->left && node->left->var_type == TYPE_INTEGER) {
-                    // Bitwise OR for integers
+                if (node->left && isIntlikeType(node->left->var_type)) {
+                    // Bitwise OR for integer types
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
                     writeBytecodeChunk(chunk, OR, line);
@@ -3449,8 +3835,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool isCallQualified = false;
 
             if (node->left &&
-                node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
                 isCallQualified = true;
@@ -3589,7 +3973,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 func_symbol = func_symbol->real_symbol;
             }
 
-            bool isVirtualMethod = isCallQualified && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+            bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
 
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
@@ -3692,9 +4076,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
                 if (isCallQualified) {
-                    snprintf(original_display_name, sizeof(original_display_name), "%s.%s", node->left->token->value, functionName);
+                    const char *receiver_name = "<expr>";
+                    if (node->left && node->left->token && node->left->token->value) {
+                        receiver_name = node->left->token->value;
+                    }
+                    snprintf(original_display_name, sizeof(original_display_name), "%.*s.%.*s", MAX_SYMBOL_LENGTH - 1, receiver_name, MAX_SYMBOL_LENGTH - 1, functionName);
                 } else {
-                    strncpy(original_display_name, functionName, sizeof(original_display_name)-1); original_display_name[sizeof(original_display_name)-1] = '\0';
+                    strncpy(original_display_name, functionName, sizeof(original_display_name)-1);
+                    original_display_name[sizeof(original_display_name)-1] = '\0';
                 }
                 
                 if (func_symbol) {

@@ -1,0 +1,75 @@
+#!/usr/bin/env rea
+// This program is the critical test for Rea's polymorphism
+// implementation via a virtual method table (V-table).
+// It creates an array of Shape objects that holds different
+// subclasses, and then calls the area() method on each,
+// which should dispatch to the correct subclass's implementation.
+
+// Base class Shape
+class Shape {
+  void Shape() {}
+
+  // This is the virtual method that will be overridden
+  float area() {
+      writeln("Calling Shape's area() method.");
+      return 0.0;
+  }
+
+}
+
+// Subclass Rectangle
+class Rectangle extends Shape {
+  float width;
+  float height;
+
+  void Rectangle(float w, float h) {
+    super();
+    myself.width = w;
+    myself.height = h;
+  }
+
+  // Override the `area` method
+  float area() {
+    writeln("Calculating Rectangle area...");
+    return myself.width * myself.height;
+  }
+}
+
+// Subclass Circle
+class Circle extends Shape {
+  float radius;
+
+  void Circle(float r) {
+    super();
+    myself.radius = r;
+  }
+
+  // Override the `area` method
+  float area() {
+      writeln("Calculating Circle area...");
+      // Assuming the compiler supports floating point literals
+      return 3.14159 * myself.radius * myself.radius;
+  }
+}
+
+int main() {
+  // Declare an array to hold different shapes.
+  // Assuming array syntax and that Rea supports arrays of objects.
+  // For a stack-based VM, myself might be a pointer array.
+  Shape shapes[2];
+
+  // Instantiate a Rectangle and a Circle and assign to the Shape array.
+  // This requires the compiler to correctly handle upcasting.
+  shapes[0] = new Rectangle(5.0, 10.0);
+  shapes[1] = new Circle(7.0);
+
+  // Loop through the array and call the `area` method on each shape.
+  // The V-table mechanism should ensure the correct overridden method
+  // is called for each object's type.
+  writeln("--- Polymorphism Test ---");
+  writeln("Area of first shape is: ", shapes[0].area());
+  writeln("Area of second shape is: ", shapes[1].area());
+  writeln("--- Test Complete ---");
+
+  return 0;
+}

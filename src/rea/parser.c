@@ -2,9 +2,12 @@
 #include "ast/ast.h"
 #include "core/types.h"
 #include "symbol/symbol.h"
+#include "core/utils.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "core/list.h"
 
 // Forward declaration from core/utils.c
@@ -24,7 +27,100 @@ typedef struct {
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
 
-static AST *parseExpression(ReaParser *p);
+
+/* --------------------------------------------------------------------- */
+/*  Helpers for array handling                                           */
+/* --------------------------------------------------------------------- */
+
+// Forward declarations from the compiler and core utilities.  These are
+// needed so the parser can evaluate constant expressions for array bounds
+// without pulling in heavy headers.
+Value evaluateCompileTimeValue(AST *node); // from compiler/compiler.c
+void freeValue(Value *v);                  // from core/utils.c
+void addCompilerConstant(const char* name, const Value* value, int line); // from compiler/compiler.h
+static AST *parseExpression(ReaParser *p); // forward for array helpers
+static AST *parseWriteArgument(ReaParser *p); // forward
+static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList);
+
+// Parse a sequence of bracketed index expressions after an expression and
+// build an AST_ARRAY_ACCESS node.  For multi-dimensional access like
+// `a[1][2]` this gathers both indices into a single AST node.
+static AST *parseArrayAccess(ReaParser *p, AST *base) {
+    AST *access = newASTNode(AST_ARRAY_ACCESS, NULL);
+    setLeft(access, base);
+    /*
+     * Array accesses cannot be typed without semantic information.
+     * Mark the access node's type as unknown so later stages can
+     * refine it based on the array's declared element type.
+     */
+    setTypeAST(access, TYPE_UNKNOWN);
+    while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        reaAdvance(p); // consume '['
+        AST *indexExpr = NULL;
+        if (p->current.type != REA_TOKEN_RIGHT_BRACKET) {
+            indexExpr = parseExpression(p);
+        }
+        if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
+            reaAdvance(p);
+        }
+        addChild(access, indexExpr);
+    }
+    return access;
+}
+
+// Parse array type suffixes after a variable name in a declaration, e.g.
+// `int a[10];`  Returns a new AST_ARRAY_TYPE node wrapping the provided
+// base type.  The resulting node's children are AST_SUBRANGE bounds with
+// 0-based indexing, and *vtype_out is set to TYPE_ARRAY.
+static AST *parseArrayType(ReaParser *p, AST *baseType, VarType *vtype_out) {
+    AST *arrType = newASTNode(AST_ARRAY_TYPE, NULL);
+    setTypeAST(arrType, TYPE_ARRAY);
+    setRight(arrType, baseType);
+    while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        int line = p->current.line;
+        reaAdvance(p); // consume '['
+        AST *dimExpr = NULL;
+        if (p->current.type != REA_TOKEN_RIGHT_BRACKET) {
+            dimExpr = parseExpression(p);
+        }
+        if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
+            reaAdvance(p);
+        }
+        // Evaluate dimension to a constant upper bound
+        int high = -1;
+        if (dimExpr) {
+            Value v = evaluateCompileTimeValue(dimExpr);
+            if (v.type == TYPE_INT64 || v.type == TYPE_INT32 || v.type == TYPE_INT16 || v.type == TYPE_INT8 || v.type == TYPE_UINT64 || v.type == TYPE_UINT32 || v.type == TYPE_UINT16 || v.type == TYPE_UINT8 || v.type == TYPE_WORD || v.type == TYPE_BYTE || v.type == TYPE_INTEGER) {
+                high = (int)v.i_val - 1;
+            } else {
+                fprintf(stderr, "L%d: Array size must be a constant integer.\n", line);
+            }
+            freeValue(&v);
+            freeAST(dimExpr);
+        } else {
+            fprintf(stderr, "L%d: Missing array size.\n", line);
+        }
+
+        Token *lowTok = newToken(TOKEN_INTEGER_CONST, "0", line, 0);
+        AST *lowNode = newASTNode(AST_NUMBER, lowTok);
+        setTypeAST(lowNode, TYPE_INT64);
+        lowNode->i_val = 0;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", high);
+        Token *highTok = newToken(TOKEN_INTEGER_CONST, buf, line, 0);
+        AST *highNode = newASTNode(AST_NUMBER, highTok);
+        setTypeAST(highNode, TYPE_INT64);
+        highNode->i_val = high;
+        AST *range = newASTNode(AST_SUBRANGE, NULL);
+        setLeft(range, lowNode);
+        setRight(range, highNode);
+        setTypeAST(range, TYPE_INT64);
+        addChild(arrType, range);
+    }
+    if (vtype_out) *vtype_out = TYPE_ARRAY;
+    return arrType;
+}
+
 static AST *parseAssignment(ReaParser *p);
 static AST *parseEquality(ReaParser *p);
 static AST *parseComparison(ReaParser *p);
@@ -134,7 +230,209 @@ static char *reaUnescapeString(const char *src, size_t len, size_t *out_len) {
     return buf;
 }
 
+// Parses an expression optionally followed by formatting specifiers.
+static AST *parseWriteArgument(ReaParser *p) {
+    int expr_line = p->current.line;
+    AST *expr = parseExpression(p);
+    if (!expr) return NULL;
+    if (p->current.type == REA_TOKEN_COLON) {
+        reaAdvance(p);
+        if (p->current.type != REA_TOKEN_NUMBER) return expr;
+        char *wlex = (char*)malloc(p->current.length + 1);
+        if (!wlex) return expr;
+        memcpy(wlex, p->current.start, p->current.length);
+        wlex[p->current.length] = '\0';
+        int width = atoi(wlex);
+        free(wlex);
+        reaAdvance(p);
+        int prec = -1;
+        if (p->current.type == REA_TOKEN_COLON) {
+            reaAdvance(p);
+            if (p->current.type == REA_TOKEN_NUMBER) {
+                char *plex = (char*)malloc(p->current.length + 1);
+                if (plex) {
+                    memcpy(plex, p->current.start, p->current.length);
+                    plex[p->current.length] = '\0';
+                    prec = atoi(plex);
+                    free(plex);
+                }
+                reaAdvance(p);
+            }
+        }
+        char fmtbuf[32];
+        snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, prec);
+        Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, expr_line, 0);
+        AST *fmtNode = newASTNode(AST_FORMATTED_EXPR, fmtTok);
+        setLeft(fmtNode, expr);
+        setTypeAST(fmtNode, TYPE_UNKNOWN);
+        return fmtNode;
+    }
+    return expr;
+}
+
+// Transform printf-style calls into a sequence of write arguments.
+static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList) {
+    size_t nextArg = 0;
+    if (!call || !argList) return;
+    if (argList->child_count > 0 && argList->children[0] &&
+        argList->children[0]->type == AST_STRING &&
+        argList->children[0]->token && argList->children[0]->token->value) {
+        AST *fmtNode = argList->children[0];
+        char *fmt = fmtNode->token->value;
+        int line = fmtNode->token->line;
+        size_t flen = strlen(fmt);
+        char *seg = (char*)malloc(flen + 1);
+        size_t seglen = 0;
+        nextArg = 1;
+        for (size_t i = 0; i < flen; ++i) {
+            if (fmt[i] == '%' && i + 1 < flen) {
+                if (fmt[i + 1] == '%') {
+                    seg[seglen++] = '%';
+                    i++;
+                } else {
+                    size_t j = i + 1;
+                    int width = 0;
+                    int precision = -1;
+                    while (j < flen && isdigit((unsigned char)fmt[j])) {
+                        width = width * 10 + (fmt[j] - '0');
+                        j++;
+                    }
+                    if (j < flen && fmt[j] == '.') {
+                        j++;
+                        precision = 0;
+                        while (j < flen && isdigit((unsigned char)fmt[j])) {
+                            precision = precision * 10 + (fmt[j] - '0');
+                            j++;
+                        }
+                    }
+                    const char *length_mods = "hlLjzt";
+                    while (j < flen && strchr(length_mods, fmt[j]) != NULL) {
+                        j++;
+                    }
+                    const char *specifiers = "cdiuoxXfFeEgGaAspn";
+                    if (j < flen && strchr(specifiers, fmt[j]) != NULL) {
+                        char spec = fmt[j];
+                        const char *supported = "cdiufFeEgGaAsc";
+                        if (!strchr(supported, spec)) {
+                            fprintf(stderr, "L%d: Unsupported printf format specifier '%c'.\n", line, spec);
+                            if (p) p->hadError = true;
+                            for (size_t k = i; k <= j && k < flen; ++k) {
+                                seg[seglen++] = fmt[k];
+                            }
+                            i = j; // skip specifier
+                        } else if (nextArg < (size_t)argList->child_count) {
+                            if (seglen > 0) {
+                                seg[seglen] = '\0';
+                                Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
+                                AST *segNode = newASTNode(AST_STRING, segTok);
+                                segNode->i_val = (int)seglen;
+                                setTypeAST(segNode, TYPE_STRING);
+                                addChild(call, segNode);
+                                seglen = 0;
+                            }
+                            AST *expr = argList->children[nextArg++];
+                            if (width > 0 || precision >= 0) {
+                                char fmtbuf[32];
+                                snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, precision);
+                                Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, line, 0);
+                                AST *fmtExpr = newASTNode(AST_FORMATTED_EXPR, fmtTok);
+                                setLeft(fmtExpr, expr);
+                                setTypeAST(fmtExpr, TYPE_UNKNOWN);
+                                addChild(call, fmtExpr);
+                            } else {
+                                addChild(call, expr);
+                            }
+                            i = j; // skip specifier
+                        } else {
+                            seg[seglen++] = '%';
+                        }
+                    } else {
+                        seg[seglen++] = '%';
+                    }
+                }
+            } else {
+                seg[seglen++] = fmt[i];
+            }
+        }
+        if (seglen > 0) {
+            seg[seglen] = '\0';
+            Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
+            AST *segNode = newASTNode(AST_STRING, segTok);
+            segNode->i_val = (int)seglen;
+            setTypeAST(segNode, TYPE_STRING);
+            addChild(call, segNode);
+        }
+        free(seg);
+        freeAST(fmtNode);
+    }
+    for (; nextArg < (size_t)argList->child_count; ++nextArg) {
+        if (argList->children[nextArg]) addChild(call, argList->children[nextArg]);
+    }
+    argList->children = NULL;
+    argList->child_count = 0;
+    argList->child_capacity = 0;
+}
+
+static int isTypeKeywordToken(ReaTokenType t) {
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64:
+        case REA_TOKEN_INT32:
+        case REA_TOKEN_INT16:
+        case REA_TOKEN_INT8:
+        case REA_TOKEN_FLOAT:
+        case REA_TOKEN_FLOAT32:
+        case REA_TOKEN_LONG_DOUBLE:
+        case REA_TOKEN_CHAR:
+        case REA_TOKEN_BYTE:
+        case REA_TOKEN_BOOL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static VarType tokenTypeToVarType(ReaTokenType t) {
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64: return TYPE_INT64;
+        case REA_TOKEN_INT32: return TYPE_INT32;
+        case REA_TOKEN_INT16: return TYPE_INT16;
+        case REA_TOKEN_INT8:  return TYPE_INT8;
+        case REA_TOKEN_FLOAT: return TYPE_DOUBLE;
+        case REA_TOKEN_FLOAT32: return TYPE_FLOAT;
+        case REA_TOKEN_LONG_DOUBLE: return TYPE_LONG_DOUBLE;
+        case REA_TOKEN_CHAR: return TYPE_CHAR;
+        case REA_TOKEN_BYTE: return TYPE_BYTE;
+        case REA_TOKEN_BOOL: return TYPE_BOOLEAN;
+        default: return TYPE_UNKNOWN;
+    }
+}
+
 static AST *parseFactor(ReaParser *p) {
+    if (isTypeKeywordToken(p->current.type)) {
+        ReaToken t = p->current;
+        char *lex = (char*)malloc(t.length + 1);
+        if (!lex) return NULL;
+        memcpy(lex, t.start, t.length);
+        lex[t.length] = '\0';
+        Token *tok = newToken(TOKEN_IDENTIFIER, lex, t.line, 0);
+        free(lex);
+        reaAdvance(p);
+        if (p->current.type != REA_TOKEN_LEFT_PAREN) {
+            freeToken(tok);
+            return NULL;
+        }
+        reaAdvance(p); // consume '('
+        AST *expr = parseExpression(p);
+        if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+            reaAdvance(p);
+        }
+        AST *call = newASTNode(AST_PROCEDURE_CALL, tok);
+        if (expr) addChild(call, expr);
+        setTypeAST(call, tokenTypeToVarType(t.type));
+        return call;
+    }
     if (p->current.type == REA_TOKEN_SUPER) {
         // super(...) or super.method(...)
         ReaToken supTok = p->current;
@@ -154,14 +452,16 @@ static AST *parseFactor(ReaParser *p) {
                 if (p->current.type == REA_TOKEN_COMMA) reaAdvance(p); else break;
             }
             if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
-            // Build call to parent constructor alias: ParentName(this, ...)
+            // Build call to parent constructor alias: ParentName(myself, ...)
             Token *ctorTok = newToken(TOKEN_IDENTIFIER, p->currentParentClassName, supTok.line, 0);
             AST *call = newASTNode(AST_PROCEDURE_CALL, ctorTok);
-            // Prepend implicit 'this'
-            Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
-            AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-            setTypeAST(thisVar, TYPE_POINTER);
-            addChild(call, thisVar);
+            // Prepend implicit 'myself' and flag the node so semantic analysis
+            // knows it already includes it (for super constructor calls)
+            Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", supTok.line, 0);
+            AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+            setTypeAST(selfVar, TYPE_POINTER);
+            addChild(call, selfVar);
+            call->i_val = 1; // mark as super call containing implicit 'myself'
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
                     addChild(call, args->children[i]);
@@ -204,11 +504,12 @@ static AST *parseFactor(ReaParser *p) {
             Token *nameTok = newToken(TOKEN_IDENTIFIER, mangled, supTok.line, 0);
             free(mangled);
             AST *call = newASTNode(AST_PROCEDURE_CALL, nameTok);
-            // Prepend implicit 'this'
-            Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", supTok.line, 0);
-            AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-            setTypeAST(thisVar, TYPE_POINTER);
-            addChild(call, thisVar);
+            // Prepend implicit 'myself' and flag node to avoid duplicate insertion
+            Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", supTok.line, 0);
+            AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+            setTypeAST(selfVar, TYPE_POINTER);
+            addChild(call, selfVar);
+            call->i_val = 1; // mark as super call containing implicit 'myself'
             if (args && args->child_count > 0) {
                 for (int i = 0; i < args->child_count; i++) {
                     addChild(call, args->children[i]);
@@ -321,15 +622,21 @@ static AST *parseFactor(ReaParser *p) {
         node->i_val = (tt == TOKEN_TRUE) ? 1 : 0;
         reaAdvance(p);
         return node;
-    } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_THIS) {
-        char *lex = (char *)malloc(p->current.length + 1);
+    } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_MYSELF) {
+        size_t alloc_len = p->current.length;
+        if (p->current.type == REA_TOKEN_MYSELF && alloc_len < 7) {
+            alloc_len = 7; // ensure space for canonical "myself" lexeme
+        }
+        char *lex = (char *)malloc(alloc_len + 1);
         if (!lex) return NULL;
-        if (p->current.type == REA_TOKEN_THIS) {
-            strcpy(lex, "this");
+        if (p->current.type == REA_TOKEN_MYSELF) {
+            strcpy(lex, "myself");
         } else {
             memcpy(lex, p->current.start, p->current.length);
             lex[p->current.length] = '\0';
         }
+        bool isWriteBuiltin = (strcasecmp(lex, "writeln") == 0 || strcasecmp(lex, "write") == 0);
+        bool isPrintf = (strcasecmp(lex, "printf") == 0);
         Token *tok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
         reaAdvance(p); // consume identifier
@@ -339,7 +646,7 @@ static AST *parseFactor(ReaParser *p) {
             reaAdvance(p); // consume '('
             call_args = newASTNode(AST_COMPOUND, NULL);
             while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
-                AST *arg = parseExpression(p);
+                AST *arg = isWriteBuiltin ? parseWriteArgument(p) : parseExpression(p);
                 if (!arg) break;
                 addChild(call_args, arg);
                 if (p->current.type == REA_TOKEN_COMMA) {
@@ -351,31 +658,43 @@ static AST *parseFactor(ReaParser *p) {
             if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
                 reaAdvance(p);
             }
-            // Syntactic sugar: map writeln/write to dedicated AST nodes for direct builtin handling
             AST *call = NULL;
-            if (tok && tok->value && strcasecmp(tok->value, "writeln") == 0) {
-                call = newASTNode(AST_WRITELN, NULL);
-            } else if (tok && tok->value && strcasecmp(tok->value, "write") == 0) {
+            if (isPrintf) {
                 call = newASTNode(AST_WRITE, NULL);
+                transformPrintfArgs(p, call, call_args);
+                if (call_args) freeAST(call_args);
+                freeToken(tok);
             } else {
-                call = newASTNode(AST_PROCEDURE_CALL, tok);
-            }
-            if (call_args && call_args->child_count > 0) {
-                call->children = call_args->children;
-                call->child_count = call_args->child_count;
-                call->child_capacity = call_args->child_capacity;
-                for (int i = 0; i < call->child_count; i++) {
-                    if (call->children[i]) call->children[i]->parent = call;
+                if (tok && tok->value && strcasecmp(tok->value, "writeln") == 0) {
+                    call = newASTNode(AST_WRITELN, NULL);
+                    freeToken(tok);
+                } else if (tok && tok->value && strcasecmp(tok->value, "write") == 0) {
+                    call = newASTNode(AST_WRITE, NULL);
+                    freeToken(tok);
+                } else {
+                    call = newASTNode(AST_PROCEDURE_CALL, tok);
                 }
-                call_args->children = NULL;
-                call_args->child_count = 0;
-                call_args->child_capacity = 0;
+                if (call_args && call_args->child_count > 0) {
+                    call->children = call_args->children;
+                    call->child_count = call_args->child_count;
+                    call->child_capacity = call_args->child_capacity;
+                    for (int i = 0; i < call->child_count; i++) {
+                        if (call->children[i]) call->children[i]->parent = call;
+                    }
+                    call_args->children = NULL;
+                    call_args->child_count = 0;
+                    call_args->child_capacity = 0;
+                }
+                if (call_args) freeAST(call_args);
             }
-            if (call_args) freeAST(call_args);
             setTypeAST(call, TYPE_UNKNOWN);
-            // Support member access chaining after call
+            // Support member access chaining after call (dots or brackets)
             AST *node = call;
-            while (p->current.type == REA_TOKEN_DOT) {
+            while (p->current.type == REA_TOKEN_DOT || p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                    node = parseArrayAccess(p, node);
+                    continue;
+                }
                 reaAdvance(p);
                 if (p->current.type != REA_TOKEN_IDENTIFIER) break;
                 // Capture method/field name
@@ -399,9 +718,9 @@ static AST *parseFactor(ReaParser *p) {
                     }
                     if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
                     // Build call node and prepend receiver as first arg
-                    // Potentially mangle if receiver is 'this' or freshly constructed 'new Class'
+                    // Potentially mangle if receiver is 'myself' or freshly constructed 'new Class'
                     const char* cls = NULL;
-                    if (node->type == AST_VARIABLE && node->token && node->token->value && strcasecmp(node->token->value, "this") == 0) {
+                    if (node->type == AST_VARIABLE && node->token && node->token->value && strcasecmp(node->token->value, "myself") == 0) {
                         cls = p->currentClassName;
                     } else if (node->type == AST_NEW && node->token && node->token->value) {
                         cls = node->token->value;
@@ -441,7 +760,11 @@ static AST *parseFactor(ReaParser *p) {
         } else {
             AST *node = newASTNode(AST_VARIABLE, tok);
             setTypeAST(node, TYPE_UNKNOWN);
-            while (p->current.type == REA_TOKEN_DOT) {
+            while (p->current.type == REA_TOKEN_DOT || p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+                    node = parseArrayAccess(p, node);
+                    continue;
+                }
                 reaAdvance(p);
                 if (p->current.type != REA_TOKEN_IDENTIFIER) break;
                 char *f = (char*)malloc(p->current.length + 1);
@@ -545,6 +868,7 @@ static const char *opLexeme(TokenType t) {
         case TOKEN_GREATER_EQUAL: return ">=";
         case TOKEN_LESS: return "<";
         case TOKEN_LESS_EQUAL: return "<=";
+        case TOKEN_ASSIGN: return "=";
         default: return "";
     }
 }
@@ -648,21 +972,47 @@ static AST *parseEquality(ReaParser *p) {
     return node;
 }
 
+static AST *parseBitwiseAnd(ReaParser *p) {
+    AST *node = parseEquality(p);
+    if (!node) return NULL;
+    while (p->current.type == REA_TOKEN_AND) {
+        ReaToken op = p->current;
+        reaAdvance(p);
+        AST *right = parseEquality(p);
+        if (!right) return NULL;
+        Token *tok = newToken(TOKEN_AND, "&", op.line, 0);
+        AST *bin = newASTNode(AST_BINARY_OP, tok);
+        setLeft(bin, node);
+        setRight(bin, right);
+        VarType lt = node->var_type;
+        VarType rt = right->var_type;
+        VarType res = (lt == TYPE_INT64 || rt == TYPE_INT64) ? TYPE_INT64 : TYPE_INT32;
+        setTypeAST(bin, res);
+        node = bin;
+    }
+    return node;
+}
+
 static AST *parseAssignment(ReaParser *p) {
     // Highest precedence: handle assignment right-associatively
     AST *left = parseLogicalOr(p);
     if (!left) return NULL;
-    if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS) && p->current.type == REA_TOKEN_EQUAL) {
+    if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS || left->type == AST_ARRAY_ACCESS) &&
+        (p->current.type == REA_TOKEN_EQUAL || p->current.type == REA_TOKEN_PLUS_EQUAL || p->current.type == REA_TOKEN_MINUS_EQUAL)) {
         ReaToken op = p->current;
         reaAdvance(p);
         AST *value = parseAssignment(p);
         if (!value) return NULL;
-        Token *tok = newToken(TOKEN_ASSIGN, "=", op.line, 0);
-            AST *node = newASTNode(AST_ASSIGN, tok);
-            setLeft(node, left);
-            setRight(node, value);
-            setTypeAST(node, left->var_type);
-            return node;
+        TokenType assignType = TOKEN_ASSIGN;
+        if (op.type == REA_TOKEN_PLUS_EQUAL) assignType = TOKEN_PLUS;
+        else if (op.type == REA_TOKEN_MINUS_EQUAL) assignType = TOKEN_MINUS;
+
+        Token *assignTok = newToken(assignType, opLexeme(assignType), op.line, 0);
+        AST *node = newASTNode(AST_ASSIGN, assignTok);
+        setLeft(node, left);
+        setRight(node, value);
+        setTypeAST(node, left->var_type);
+        return node;
     }
     return left;
 }
@@ -672,12 +1022,12 @@ static AST *parseExpression(ReaParser *p) {
 }
 
 static AST *parseLogicalAnd(ReaParser *p) {
-    AST *node = parseEquality(p);
+    AST *node = parseBitwiseAnd(p);
     if (!node) return NULL;
     while (p->current.type == REA_TOKEN_AND_AND) {
         ReaToken op = p->current;
         reaAdvance(p);
-        AST *right = parseEquality(p);
+        AST *right = parseBitwiseAnd(p);
         if (!right) return NULL;
         Token *tok = newToken(TOKEN_AND, "&&", op.line, 0);
         AST *bin = newASTNode(AST_BINARY_OP, tok);
@@ -818,8 +1168,12 @@ static AST *parseVarDecl(ReaParser *p) {
         lex[p->current.length] = '\0';
         Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
-        typeNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
-        setTypeAST(typeNode, TYPE_RECORD);
+        AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+        setTypeAST(refNode, TYPE_RECORD);
+        AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+        setTypeAST(ptrNode, TYPE_POINTER);
+        setRight(ptrNode, refNode);
+        typeNode = ptrNode;
         vtype = TYPE_POINTER; // store pointers to class instances by default
         reaAdvance(p); // consume type identifier
     } else {
@@ -828,39 +1182,70 @@ static AST *parseVarDecl(ReaParser *p) {
 
     if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
 
-    char *lex = (char *)malloc(p->current.length + 1);
-    if (!lex) return NULL;
-    memcpy(lex, p->current.start, p->current.length);
-    lex[p->current.length] = '\0';
-    Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
-    free(lex);
+    AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
+    AST *compound = newASTNode(AST_COMPOUND, NULL);
+    compound->is_global_scope = true;
 
-    reaAdvance(p); // consume identifier
+    bool first = true;
+    while (1) {
+        char *lex = (char *)malloc(p->current.length + 1);
+        if (!lex) { freeAST(compound); /* baseType not freed: shares tokens */ return NULL; }
+        memcpy(lex, p->current.start, p->current.length);
+        lex[p->current.length] = '\0';
+        Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+        free(lex);
 
-    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
-        int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
-        return parseFunctionDecl(p, nameTok, typeNode, vtype, idx2);
-    }
+        reaAdvance(p); // consume identifier
 
-    AST *var = newASTNode(AST_VARIABLE, nameTok);
-    setTypeAST(var, vtype);
+        VarType vtype_local = vtype;
+        AST *varType = first ? typeNode : copyAST(baseType);
+        if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+            varType = parseArrayType(p, varType, &vtype_local);
+        }
 
-    AST *init = NULL;
-    if (p->current.type == REA_TOKEN_EQUAL) {
-        reaAdvance(p);
-        init = parseExpression(p);
+        if (first && p->current.type == REA_TOKEN_LEFT_PAREN) {
+            int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
+            freeAST(compound);
+            return parseFunctionDecl(p, nameTok, varType, vtype_local, idx2);
+        }
+
+        AST *var = newASTNode(AST_VARIABLE, nameTok);
+        setTypeAST(var, vtype_local);
+
+        AST *init = NULL;
+        if (p->current.type == REA_TOKEN_EQUAL) {
+            reaAdvance(p);
+            init = parseExpression(p);
+        }
+
+        AST *decl = newASTNode(AST_VAR_DECL, NULL);
+        addChild(decl, var);
+        setLeft(decl, init);
+        setRight(decl, varType);
+        setTypeAST(decl, vtype_local);
+        addChild(compound, decl);
+
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            if (p->current.type != REA_TOKEN_IDENTIFIER) break;
+            first = false;
+            continue;
+        }
+        break;
     }
 
     if (p->current.type == REA_TOKEN_SEMICOLON) {
         reaAdvance(p);
     }
 
-    AST *decl = newASTNode(AST_VAR_DECL, NULL);
-    addChild(decl, var);
-    setLeft(decl, init);
-    setRight(decl, typeNode);
-    setTypeAST(decl, vtype);
-    return decl;
+    // baseType shares token memory with typeNode; do not free to avoid double free
+    if (compound->child_count == 1) {
+        AST *only = compound->children[0];
+        compound->children[0] = NULL;
+        freeAST(compound);
+        return only;
+    }
+    return compound;
 }
 
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex) {
@@ -882,28 +1267,50 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     // Parse parameter list
     reaAdvance(p); // consume '('
     AST *params = newASTNode(AST_COMPOUND, NULL);
-    // Inject implicit 'this' parameter as first parameter when inside a class
+    // Inject implicit 'myself' parameter as first parameter when inside a class
     if (p->currentClassName) {
         Token *ptypeTok = newToken(TOKEN_IDENTIFIER, p->currentClassName, p->current.line, 0);
-        AST *ptypeNode = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
-        setTypeAST(ptypeNode, TYPE_RECORD);
-        Token *thisTok = newToken(TOKEN_IDENTIFIER, "this", p->current.line, 0);
-        AST *thisVar = newASTNode(AST_VARIABLE, thisTok);
-        setTypeAST(thisVar, TYPE_POINTER);
-        AST *thisDecl = newASTNode(AST_VAR_DECL, NULL);
-        addChild(thisDecl, thisVar);
-        setRight(thisDecl, ptypeNode);
-        setTypeAST(thisDecl, TYPE_POINTER);
-        addChild(params, thisDecl);
+        AST *refNode = newASTNode(AST_TYPE_REFERENCE, ptypeTok);
+        setTypeAST(refNode, TYPE_RECORD);
+        AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+        setTypeAST(ptrNode, TYPE_POINTER);
+        setRight(ptrNode, refNode);
+        Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", p->current.line, 0);
+        AST *selfVar = newASTNode(AST_VARIABLE, selfTok);
+        setTypeAST(selfVar, TYPE_POINTER);
+        AST *selfDecl = newASTNode(AST_VAR_DECL, NULL);
+        addChild(selfDecl, selfVar);
+        setRight(selfDecl, ptrNode);
+        setTypeAST(selfDecl, TYPE_POINTER);
+        addChild(params, selfDecl);
     }
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
-        ReaTokenType paramTypeTok = p->current.type;
-        VarType pvtype = mapType(paramTypeTok);
-        const char *ptname = typeName(paramTypeTok);
-        Token *ptypeTok = newToken(TOKEN_IDENTIFIER, ptname, p->current.line, 0);
-        AST *ptypeNode = newASTNode(AST_TYPE_IDENTIFIER, ptypeTok);
-        setTypeAST(ptypeNode, pvtype);
-        reaAdvance(p); // consume param type
+        AST *ptypeNode = NULL;
+        VarType pvtype = TYPE_VOID;
+        if (p->current.type == REA_TOKEN_IDENTIFIER) {
+            char *lex = (char *)malloc(p->current.length + 1);
+            if (!lex) break;
+            memcpy(lex, p->current.start, p->current.length);
+            lex[p->current.length] = '\0';
+            Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+            free(lex);
+            AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+            setTypeAST(refNode, TYPE_RECORD);
+            AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+            setTypeAST(ptrNode, TYPE_POINTER);
+            setRight(ptrNode, refNode);
+            ptypeNode = ptrNode;
+            pvtype = TYPE_POINTER;
+            reaAdvance(p); // consume type identifier
+        } else {
+            ReaTokenType paramTypeTok = p->current.type;
+            pvtype = mapType(paramTypeTok);
+            const char *ptname = typeName(paramTypeTok);
+            Token *ptypeTok = newToken(TOKEN_IDENTIFIER, ptname, p->current.line, 0);
+            ptypeNode = newASTNode(AST_TYPE_IDENTIFIER, ptypeTok);
+            setTypeAST(ptypeNode, pvtype);
+            reaAdvance(p); // consume param type
+        }
 
         if (p->current.type != REA_TOKEN_IDENTIFIER) break;
         char *lex = (char *)malloc(p->current.length + 1);
@@ -943,6 +1350,18 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
             if (!stmt) break;
             if (stmt->type == AST_VAR_DECL) {
                 addChild(decls, stmt);
+            } else if (stmt->type == AST_COMPOUND) {
+                for (int si = 0; si < stmt->child_count; si++) {
+                    AST *child = stmt->children[si];
+                    if (!child) continue;
+                    if (child->type == AST_VAR_DECL) {
+                        addChild(decls, child);
+                    } else {
+                        addChild(stmts, child);
+                    }
+                    stmt->children[si] = NULL;
+                }
+                freeAST(stmt);
             } else {
                 addChild(stmts, stmt);
             }
@@ -1315,6 +1734,17 @@ static AST *parseSwitch(ReaParser *p) {
 
 static AST *parseConstDecl(ReaParser *p) {
     reaAdvance(p); // consume 'const'
+    AST *typeNode = NULL;
+    VarType vtype = TYPE_UNKNOWN;
+    if (p->current.type != REA_TOKEN_IDENTIFIER) {
+        ReaTokenType typeTok = p->current.type;
+        vtype = mapType(typeTok);
+        const char *tname = typeName(typeTok);
+        Token *ttok = newToken(TOKEN_IDENTIFIER, tname, p->current.line, 0);
+        typeNode = newASTNode(AST_TYPE_IDENTIFIER, ttok);
+        setTypeAST(typeNode, vtype);
+        reaAdvance(p); // consume type keyword
+    }
     if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
     char *lex = (char *)malloc(p->current.length + 1);
     if (!lex) return NULL;
@@ -1322,14 +1752,23 @@ static AST *parseConstDecl(ReaParser *p) {
     lex[p->current.length] = '\0';
     Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
     free(lex);
-    reaAdvance(p);
+    reaAdvance(p); // consume name
     if (p->current.type != REA_TOKEN_EQUAL) return NULL;
     reaAdvance(p);
     AST *value = parseExpression(p);
     if (p->current.type == REA_TOKEN_SEMICOLON) reaAdvance(p);
     AST *node = newASTNode(AST_CONST_DECL, nameTok);
     setLeft(node, value);
+    if (typeNode) setRight(node, typeNode);
     if (value) setTypeAST(node, value->var_type);
+    if (value) {
+        Value v = evaluateCompileTimeValue(value);
+        if (v.type != TYPE_VOID && v.type != TYPE_UNKNOWN) {
+            addCompilerConstant(nameTok->value, &v, nameTok->line);
+            if (!typeNode) setTypeAST(node, v.type);
+        }
+        freeValue(&v);
+    }
     return node;
 }
 
@@ -1428,21 +1867,37 @@ static AST *parseStatement(ReaParser *p) {
         if (p->current.type == REA_TOKEN_LEFT_BRACE) {
             reaAdvance(p); // consume '{'
             while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
-                // Field or method: both start with a type keyword
-                if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
-                    p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
-                    p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
-                    p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
-                    p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
-                    p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-                    p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
-                    p->current.type == REA_TOKEN_VOID ||
-                    p->current.type == REA_TOKEN_IDENTIFIER) {
-                    // Consume type and identifier into a fake varDecl to reuse existing parser
-                    // Consume type and identifier into a fake varDecl to reuse existing parser
+                if (p->current.type == REA_TOKEN_CONST) {
+                    AST *c = parseConstDecl(p);
+                    if (c) {
+                        addChild(recordAst, c);
+                    } else {
+                        reaAdvance(p);
+                    }
+                } else if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
+                           p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
+                           p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
+                           p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
+                           p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
+                           p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
+                           p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
+                           p->current.type == REA_TOKEN_VOID ||
+                           p->current.type == REA_TOKEN_IDENTIFIER) {
                     AST *decl = parseVarDecl(p);
                     if (decl) {
-                        if (decl->type == AST_FUNCTION_DECL) {
+                        if (decl->type == AST_COMPOUND) {
+                            for (int di = 0; di < decl->child_count; di++) {
+                                AST *d = decl->children[di];
+                                if (!d) continue;
+                                if (d->type == AST_FUNCTION_DECL || d->type == AST_PROCEDURE_DECL) {
+                                    addChild(methods, d);
+                                } else {
+                                    addChild(recordAst, d);
+                                }
+                                decl->children[di] = NULL;
+                            }
+                            freeAST(decl);
+                        } else if (decl->type == AST_FUNCTION_DECL) {
                             addChild(methods, decl);
                         } else if (decl->type == AST_PROCEDURE_DECL) {
                             addChild(methods, decl);
@@ -1450,11 +1905,9 @@ static AST *parseStatement(ReaParser *p) {
                             addChild(recordAst, decl);
                         }
                     } else {
-                        // Recovery: advance one token to avoid infinite loop
                         reaAdvance(p);
                     }
                 } else {
-                    // Skip unsupported constructs for now
                     reaAdvance(p);
                 }
                 // optional semicolons are consumed by parseVarDecl; any extras will be skipped
@@ -1609,6 +2062,48 @@ AST *parseRea(const char *source) {
     if (p.hadError) {
         freeAST(program);
         return NULL;
+    }
+
+    // If a function or procedure named 'main' is declared and there are no
+    // top-level statements, insert an implicit call to `main` so the VM
+    // executes user code on program start.
+    bool has_main = false;
+    bool has_app = false;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *d = decls->children[i];
+        if (!d) continue;
+
+        if ((d->type == AST_FUNCTION_DECL || d->type == AST_PROCEDURE_DECL) &&
+            d->token && d->token->value &&
+            strcasecmp(d->token->value, "main") == 0) {
+            has_main = true;
+        }
+
+        if (d->type == AST_VAR_DECL && d->child_count > 0 &&
+            d->children[0] && d->children[0]->token && d->children[0]->token->value &&
+            strcasecmp(d->children[0]->token->value, "app") == 0) {
+            has_app = true;
+        }
+    }
+    if (stmts->child_count == 0) {
+        if (has_main) {
+            Token *mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
+            AST *call = newASTNode(AST_PROCEDURE_CALL, mainTok);
+            AST *stmt = newASTNode(AST_EXPR_STMT, call->token);
+            setLeft(stmt, call);
+            addChild(stmts, stmt);
+        } else if (has_app) {
+            Token *appTok = newToken(TOKEN_IDENTIFIER, "app", 0, 0);
+            AST *appVar = newASTNode(AST_VARIABLE, appTok);
+            setTypeAST(appVar, TYPE_UNKNOWN);
+            Token *runTok = newToken(TOKEN_IDENTIFIER, "run", 0, 0);
+            AST *call = newASTNode(AST_PROCEDURE_CALL, runTok);
+            setLeft(call, appVar);
+            addChild(call, appVar);
+            AST *stmt = newASTNode(AST_EXPR_STMT, runTok);
+            setLeft(stmt, call);
+            addChild(stmts, stmt);
+        }
     }
 
     return program;

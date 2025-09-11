@@ -1,0 +1,96 @@
+#!/usr/bin/env rea
+// Hangman game 
+
+class WordList {
+  str words[64];
+  int count;
+  void add(str w) {
+    myself.count = myself.count + 1;
+    myself.words[myself.count] = w;
+  }
+  str randomWord() {
+    return myself.words[random(myself.count) + 1];
+  }
+}
+
+bool contains(str s, char c) {
+  int i = 1;
+  while (i <= length(s)) {
+    if (s[i] == c) return true;
+    i = i + 1;
+  }
+  return false;
+}
+
+class HangmanGame {
+  WordList list;
+  str chosen;
+  str display;
+  str guessed;
+  int wrong;
+  const int maxWrong = 8;
+
+  void init() {
+    myself.list = new WordList();
+    myself.list.count = 0;
+    myself.list.add("APPLE");
+    myself.list.add("BANANA");
+    myself.list.add("ORANGE");
+    myself.list.add("GRAPES");
+    myself.list.add("PEACH");
+    randomize();
+    myself.chosen = myself.list.randomWord();
+    myself.display = "";
+    int i = 1;
+    while (i <= length(myself.chosen)) {
+      myself.display = myself.display + "_";
+      i = i + 1;
+    }
+    myself.guessed = "";
+    myself.wrong = 0;
+  }
+
+  void show() {
+    writeln("Word: ", myself.display);
+    writeln("Guessed: ", myself.guessed);
+    writeln("Wrong: ", myself.wrong, " / ", myself.maxWrong);
+  }
+
+  bool applyGuess(char c) {
+    bool hit = false;
+    int i = 1;
+    while (i <= length(myself.chosen)) {
+      if (myself.chosen[i] == c) {
+        myself.display[i] = c;
+        hit = true;
+      }
+      i = i + 1;
+    }
+    if (!hit) myself.wrong = myself.wrong + 1;
+    myself.guessed = myself.guessed + c;
+    return myself.display == myself.chosen;
+  }
+
+  void play() {
+    myself.init();
+    writeln("Hangman Game - Rea version\n");
+    while (myself.wrong < myself.maxWrong) {
+      myself.show();
+      write("Guess a letter: ");
+      str line;
+      readln(line);
+      if (length(line) == 0) continue;
+      char g = toupper(line[1]);
+      if (contains(myself.guessed, g)) continue;
+      if (myself.applyGuess(g)) {
+        writeln("You win! The word was ", myself.chosen);
+        return;
+      }
+    }
+    writeln("You lose! The word was ", myself.chosen);
+  }
+}
+
+HangmanGame game = new HangmanGame();
+game.play();
+

@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 class Main {}
 
 writeln("Hello World!");

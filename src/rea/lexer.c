@@ -46,6 +46,16 @@ static void skipWhitespace(ReaLexer *lexer) {
                 lexer->line++;
                 lexer->pos++;
                 break;
+            case '#':
+                if (lexer->pos == 0 && peekNext(lexer) == '!') {
+                    lexer->pos += 2;
+                    while (peek(lexer) != '\n' && peek(lexer) != '\0') {
+                        lexer->pos++;
+                    }
+                } else {
+                    return;
+                }
+                break;
             case '/':
                 if (peekNext(lexer) == '/') {
                     lexer->pos += 2;
@@ -86,6 +96,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
         case 2:
             if (strncmp(start, "if", 2) == 0) return REA_TOKEN_IF;
             if (strncmp(start, "do", 2) == 0) return REA_TOKEN_DO;
+            if (strncmp(start, "my", 2) == 0) return REA_TOKEN_MYSELF;
             break;
         case 3:
             if (strncmp(start, "for", 3) == 0) return REA_TOKEN_FOR;
@@ -95,7 +106,6 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             break;
         case 4:
             if (strncmp(start, "else", 4) == 0) return REA_TOKEN_ELSE;
-            if (strncmp(start, "this", 4) == 0) return REA_TOKEN_THIS;
             if (strncmp(start, "true", 4) == 0) return REA_TOKEN_TRUE;
             if (strncmp(start, "void", 4) == 0) return REA_TOKEN_VOID;
             if (strncmp(start, "bool", 4) == 0) return REA_TOKEN_BOOL;
@@ -121,6 +131,8 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "return", 6) == 0) return REA_TOKEN_RETURN;
             if (strncmp(start, "import", 6) == 0) return REA_TOKEN_IMPORT;
             if (strncmp(start, "switch", 6) == 0) return REA_TOKEN_SWITCH;
+            if (strncmp(start, "double", 6) == 0) return REA_TOKEN_FLOAT;
+            if (strncmp(start, "myself", 6) == 0) return REA_TOKEN_MYSELF;
             break;
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;
@@ -158,6 +170,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_LEFT_BRACE, start);
         case '}':
             return makeToken(lexer, REA_TOKEN_RIGHT_BRACE, start);
+        case '[':
+            return makeToken(lexer, REA_TOKEN_LEFT_BRACKET, start);
+        case ']':
+            return makeToken(lexer, REA_TOKEN_RIGHT_BRACKET, start);
         case ',':
             return makeToken(lexer, REA_TOKEN_COMMA, start);
         case '.':
@@ -167,9 +183,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case ':':
             return makeToken(lexer, REA_TOKEN_COLON, start);
         case '+':
-            return makeToken(lexer, REA_TOKEN_PLUS, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PLUS_EQUAL : REA_TOKEN_PLUS, start);
         case '-':
-            return makeToken(lexer, REA_TOKEN_MINUS, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_MINUS_EQUAL : REA_TOKEN_MINUS, start);
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
@@ -180,10 +196,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_BANG_EQUAL : REA_TOKEN_BANG, start);
         case '&':
             if (match(lexer, '&')) return makeToken(lexer, REA_TOKEN_AND_AND, start);
-            break;
+            return makeToken(lexer, REA_TOKEN_AND, start);
         case '|':
             if (match(lexer, '|')) return makeToken(lexer, REA_TOKEN_OR_OR, start);
-            break;
+            return makeToken(lexer, REA_TOKEN_OR, start);
         case '=':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_EQUAL_EQUAL : REA_TOKEN_EQUAL, start);
         case '<':

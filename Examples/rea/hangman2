@@ -1,0 +1,450 @@
+#!/usr/bin/env rea
+// CRT routines like GotoXY and TextColor are available as built-ins,
+// but color constants come from the CRT unit.
+#import "crt";
+
+// --- Game configuration ---
+const int MAX_WRONG = 8;
+
+// Layout rows relative to the top margin
+const int HEADER_ROW = 1;
+const int SUBTITLE_ROW = 2;
+const int WORD_ROW = 4;
+const int HANGMAN_ROW = 6;
+const int GUESSBAR_ROW = 15;
+const int GUESSED_ROW = 17;
+const int PROMPT_ROW = 19;
+const int MSG_ROW = 21;
+
+const int GAME_HEIGHT = 24;
+const int MAX_ELEMENT_WIDTH = 40;
+const int HANGMAN_WIDTH = 12;
+const int BORDER_PADDING = 2;
+
+const char CornerTL = '╔';
+const char CornerTR = '╗';
+const char CornerBL = '╚';
+const char CornerBR = '╝';
+const char LineH = '═';
+const char LineV = '║';
+
+bool contains(str s, char c) {
+  int i = 1;
+  while (i <= length(s)) {
+    if (s[i] == c) return true;
+    i = i + 1;
+  }
+  return false;
+}
+
+str sortString(str s) {
+  int i = 1;
+  while (i <= length(s)) {
+    int j = i + 1;
+    while (j <= length(s)) {
+      if (s[i] > s[j]) {
+        char t = s[i];
+        s[i] = s[j];
+        s[j] = t;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  return s;
+}
+
+// --- Word repository ---
+class WordRepository {
+  // store up to 2048 words loaded from the system dictionary
+  str words[2048];
+  int count;
+
+  void WordRepository() {
+    my.count = 0;
+
+    bool ok = false;
+    if (paramcount() > 0) {
+      ok = my.load(paramstr(1));
+    }
+    if (!ok) {
+      ok = my.load("/usr/local/pscal/etc/words");
+    }
+    if (!ok) {
+      ok = my.load("etc/words");
+    }
+    if (!ok) {
+      ok = my.load("../etc/words");
+    }
+    if (!ok) {
+      my.load("../../etc/words");
+    }
+  }
+
+  bool load(str path) {
+    if (!fileexists(path)) {
+      return false;
+    }
+    text f;
+    assign(f, path);
+    reset(f);
+    str line;
+    while (!eof(f) && my.count < 2048) {
+      readln(f, line);
+      int wordLen = length(line);
+      if (wordLen >= 6 && wordLen <= 9) {
+        bool valid = true;
+        str w = "";
+        setlength(w, wordLen);
+        int j = 1;
+        while (j <= wordLen) {
+          char ch = line[j];
+          if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+            w[j] = toupper(ch);
+          } else {
+            valid = false;
+          }
+          j = j + 1;
+        }
+        if (valid) {
+          my.count = my.count + 1;
+          my.words[my.count] = w;
+        }
+      }
+    }
+    close(f);
+    return my.count > 0;
+  }
+
+  str randomWord() {
+    int cnt = my.count;
+    if (cnt == 0) return "";
+    int idx = random(cnt) + 1;
+    return my.words[idx];
+  }
+}
+
+// --- View class handles all rendering ---
+class HangmanView {
+  int vHeaderRow, vSubtitleRow, vWordRow, vHangmanRow, vGuessBarRow, vGuessedRow, vPromptRow, vMsgRow;
+  int borderTop, borderBottom, borderLeft, borderRight;
+  int centerCol, hangmanCol, effectiveWidth;
+
+  void HangmanView() {
+    int cols = screencols();
+    int rows = screenrows();
+    int topMargin = int((rows - GAME_HEIGHT) / 2);
+
+    my.vHeaderRow = topMargin + HEADER_ROW;
+    my.vSubtitleRow = topMargin + SUBTITLE_ROW;
+    my.vWordRow = topMargin + WORD_ROW;
+    my.vHangmanRow = topMargin + HANGMAN_ROW;
+    my.vGuessBarRow = topMargin + GUESSBAR_ROW;
+    my.vGuessedRow = topMargin + GUESSED_ROW;
+    my.vPromptRow = topMargin + PROMPT_ROW;
+    my.vMsgRow = topMargin + MSG_ROW;
+
+    my.borderTop = topMargin;
+    my.borderBottom = topMargin + GAME_HEIGHT;
+    my.centerCol = int(cols / 2);
+    my.hangmanCol = my.centerCol - int(HANGMAN_WIDTH / 2);
+    my.borderLeft = my.centerCol - int(MAX_ELEMENT_WIDTH / 2) - BORDER_PADDING;
+    my.borderRight = my.centerCol + int(MAX_ELEMENT_WIDTH / 2) + BORDER_PADDING;
+    my.effectiveWidth = my.borderRight - my.borderLeft - 1;
+  }
+
+  int centerPadding(str s) {
+    int pad = int((my.effectiveWidth - length(s)) / 2);
+    if (pad < 0) pad = 0;
+    return pad;
+  }
+
+  void drawBorder() {
+    TextColor(LightGreen);
+    GotoXY(my.borderLeft, my.borderTop); write(CornerTL);
+    GotoXY(my.borderRight, my.borderTop); write(CornerTR);
+    GotoXY(my.borderLeft, my.borderBottom); write(CornerBL);
+    GotoXY(my.borderRight, my.borderBottom); write(CornerBR);
+
+    int x = my.borderLeft + 1;
+    while (x < my.borderRight) {
+      GotoXY(x, my.borderTop); write(LineH);
+      GotoXY(x, my.borderBottom); write(LineH);
+      x = x + 1;
+    }
+
+    int y = my.borderTop + 1;
+    while (y < my.borderBottom) {
+      GotoXY(my.borderLeft, y); write(LineV);
+      GotoXY(my.borderRight, y); write(LineV);
+      y = y + 1;
+    }
+    TextColor(White);
+  }
+
+  void drawHangman(int wrong) {
+    int r = my.vHangmanRow;
+    int c = my.hangmanCol + 2;
+    GotoXY(c, r); write(" +---+  ");
+    r = r + 1;
+    GotoXY(c, r); write(" |   |  ");
+    r = r + 1;
+    switch (wrong) {
+      case 0:
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 1:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 2:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write(" |   |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 3:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|   |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 4:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|\\  |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 5:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|\\  |  "); r = r + 1;
+        GotoXY(c, r); write("/    |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 6:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|\\  |  "); r = r + 1;
+        GotoXY(c, r); write("/ \\  |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 7:
+        GotoXY(c, r); write(" O   |"); r = r + 1;
+        GotoXY(c, r); write("/|\\  |"); r = r + 1;
+        GotoXY(c - 1, r); write("_/ \\  |"); r = r + 1;
+        GotoXY(c, r); write("     |"); r = r + 1;
+        break;
+      default:
+        GotoXY(c, r); write(" O   |"); r = r + 1;
+        GotoXY(c, r); write("/|\\  |"); r = r + 1;
+        GotoXY(c - 1, r); write("_/ \\_ |"); r = r + 1;
+        GotoXY(c, r); write("     |"); r = r + 1;
+        break;
+    }
+    GotoXY(c, r); write("=========");
+  }
+
+  void drawGuessesBar(int wrong) {
+    int remaining = MAX_WRONG - wrong;
+    int padding = int((my.effectiveWidth - (14 + MAX_WRONG + 6)) / 2);
+    if (padding < 0) padding = 0;
+    GotoXY(my.borderLeft + 1 + padding, my.vGuessBarRow);
+    int i = 1;
+    write("Guesses Left: ");
+    TextColor(LightGreen);
+    while (i <= remaining) { write("#"); i = i + 1; }
+    TextColor(LightRed);
+    i = 1;
+    while (i <= wrong) { write("#"); i = i + 1; }
+    TextColor(White);
+    write(" ["); write(remaining); write("/"); write(MAX_WRONG); write("]");
+  }
+
+  void render(str display, str guessed, int wrong) {
+    ClrScr();
+    my.drawBorder();
+    int pad;
+    pad = my.centerPadding("Welcome to Hangman!");
+    GotoXY(my.borderLeft + 1 + pad, my.vHeaderRow); TextColor(LightGreen); writeln("Welcome to Hangman!"); TextColor(White);
+    pad = my.centerPadding("(Guess a letter or ? for hint)");
+    GotoXY(my.borderLeft + 1 + pad, my.vSubtitleRow); writeln("(Guess a letter or ? for hint)");
+    pad = my.centerPadding(display);
+    GotoXY(my.borderLeft + 1 + pad, my.vWordRow); writeln(display);
+    my.drawHangman(wrong);
+    my.drawGuessesBar(wrong);
+    if (length(guessed) > 0) {
+      str g = sortString(guessed);
+      str msg = "Letters chosen so far: " + g;
+      pad = my.centerPadding(msg);
+      GotoXY(my.borderLeft + 1 + pad, my.vGuessedRow); writeln(msg);
+    }
+  }
+
+  bool showHint(str word, str display, bool hintUsed) {
+    int pad;
+    if (hintUsed) {
+      pad = my.centerPadding("Hint used already.");
+      GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln("Hint used already.");
+    } else {
+      int hintIndex = -1;
+      int attempts = 0;
+      while (attempts < length(word) * 2 && hintIndex == -1) {
+        int i = random(length(word)) + 1;
+        if (display[i] == '_') hintIndex = i;
+        attempts = attempts + 1;
+      }
+      if (hintIndex == -1) {
+        pad = my.centerPadding("No more hints available.");
+        GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln("No more hints available.");
+      } else {
+        str hintMsg = "Hint: letter at position " + inttostr(hintIndex) + " is '" + word[hintIndex] + "'";
+        pad = my.centerPadding(hintMsg);
+        GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln(hintMsg);
+        hintUsed = true;
+      }
+    }
+    HideCursor();
+    pad = my.centerPadding("Press Enter to continue...");
+    GotoXY(my.borderLeft + 1 + pad, my.vMsgRow + 1); writeln("Press Enter to continue...");
+    str pause; readln(pause);
+    ShowCursor();
+    return hintUsed;
+  }
+
+  void showMessage(str msg) {
+    int pad = my.centerPadding(msg);
+    GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln(msg);
+  }
+
+  void showMessageAt(str msg, int row) {
+    int pad = my.centerPadding(msg);
+    GotoXY(my.borderLeft + 1 + pad, row); writeln(msg);
+  }
+}
+
+// --- Game logic ---
+class HangmanGame {
+  WordRepository repo;
+  HangmanView view;
+  str chosen;
+  str display;
+  str guessed;
+  int wrong;
+  bool hintUsed;
+  int wins;
+  int losses;
+
+  void HangmanGame() {
+    my.repo = new WordRepository();
+    my.repo.WordRepository();
+    my.view = new HangmanView();
+    my.view.HangmanView();
+    my.chosen = "";
+    my.display = "";
+    my.guessed = "";
+    my.wins = 0;
+    my.losses = 0;
+  }
+
+  void startRound() {
+    randomize();
+    my.chosen = my.repo.randomWord();
+    my.display = "";
+    int i = 1;
+    while (i <= length(my.chosen)) {
+      my.display = my.display + "_";
+      i = i + 1;
+    }
+    my.guessed = "";
+    my.wrong = 0;
+    my.hintUsed = false;
+  }
+
+  bool handleGuess(char c) {
+    bool hit = false;
+    int i = 1;
+    while (i <= length(my.chosen)) {
+      if (my.chosen[i] == c) {
+        my.display[i] = c;
+        hit = true;
+      }
+      i = i + 1;
+    }
+    if (!hit) my.wrong = my.wrong + 1;
+    my.guessed = my.guessed + c;
+    return my.display == my.chosen;
+  }
+
+  void playRound() {
+    bool win = false;
+    str msg;
+    while (my.wrong < MAX_WRONG && my.display != my.chosen) {
+      my.view.render(my.display, my.guessed, my.wrong);
+      int pad = my.view.centerPadding("Enter a letter: ");
+      GotoXY(my.view.borderLeft + 1 + pad, my.view.vPromptRow);
+      write("Enter a letter: ");
+      str line; readln(line);
+      if (length(line) == 0) continue;
+      char g = toupper(line[1]);
+      if (g == '?') {
+        my.hintUsed = my.view.showHint(my.chosen, my.display, my.hintUsed);
+        continue;
+      }
+      if (contains(my.guessed, g)) {
+        my.view.showMessage("Already guessed.");
+        continue;
+      }
+      win = my.handleGuess(g);
+    }
+
+    my.view.render(my.display, my.guessed, my.wrong);
+    if (my.display == my.chosen) {
+      TextColor(Green);
+      my.view.showMessage("You guessed the word!");
+      TextColor(White);
+      my.wins = my.wins + 1;
+    } else {
+      TextColor(LightRed);
+      msg = "Sorry, the word was " + my.chosen;
+      my.view.showMessage(msg);
+      TextColor(White);
+      my.losses = my.losses + 1;
+    }
+    str scoreMsg = "Score: " + inttostr(my.wins) + " wins / " + inttostr(my.losses) + " losses";
+    my.view.showMessageAt(scoreMsg, my.view.vMsgRow + 1);
+    HideCursor();
+    my.view.showMessageAt("Press Enter...", my.view.vMsgRow + 2);
+    str pause; readln(pause);
+    ShowCursor();
+  }
+
+  void play() {
+    bool again = true;
+    while (again) {
+      my.startRound();
+      my.playRound();
+      // Clear previous prompt line and ask inside border
+      GotoXY(my.view.borderLeft + 1, my.view.vMsgRow + 2);
+      int i = 1;
+      while (i <= my.view.effectiveWidth) { write(" "); i = i + 1; }
+      int pad = my.view.centerPadding("Play again? (Y/N): ");
+      GotoXY(my.view.borderLeft + 1 + pad, my.view.vMsgRow + 2);
+      write("Play again? (Y/N): ");
+      str ans; readln(ans);
+      if (length(ans) == 0) { again = true; }
+      else {
+        char r = toupper(ans[1]);
+        if (r == 'Y') again = true; else again = false;
+      }
+    }
+    writeln(); // Move curser down a line to look nicer
+  }
+}
+
+HangmanGame game = new HangmanGame();
+game.HangmanGame();
+game.play();

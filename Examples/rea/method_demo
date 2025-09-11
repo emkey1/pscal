@@ -1,9 +1,10 @@
+#!/usr/bin/env rea
 // Rea method-call sugar demo
 
 class Counter {
   int n;
-  void inc() { this.n = this.n + 1; }
-  int set(int v) { this.n = v; return this.n; }
+  void inc() { myself.n = myself.n + 1; }
+  int set(int v) { myself.n = v; return myself.n; }
 }
 
 Counter c = new Counter();

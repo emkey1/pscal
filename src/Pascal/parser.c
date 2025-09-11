@@ -1397,7 +1397,11 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         if (isFunction) {
             if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
                 errorParser(parser, "Expected ':' and return type for function type");
-                if (kwTok) freeToken(kwTok); freeAST(paramsList); return NULL;
+                if (kwTok) {
+                    freeToken(kwTok);
+                }
+                freeAST(paramsList);
+                return NULL;
             }
             eat(parser, TOKEN_COLON);
             retType = typeSpecifier(parser, 0);

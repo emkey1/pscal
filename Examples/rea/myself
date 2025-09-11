@@ -1,0 +1,47 @@
+#!/usr/bin/env rea
+// This program tests the use of the myself keyword to access
+// instance members within a class method.  Note that myself/my 
+// are interchangeable and identical in all ways
+
+class Point {
+int x;
+int y;
+
+  // Constructor to initialize fields
+  void Point(int initialX, int initialY) {
+    myself.x = initialX;
+    myself.y = initialY;
+    writeln("New Point created at (", myself.x, ", ", myself.y, ")");
+  }
+
+  // Method to set new coordinates using `myself`
+  void set(int newX, int newY) {
+    myself.x = newX;
+    myself.y = newY;
+  }
+  
+  // Method to get the sum of coordinates
+  int getSum() {
+    return myself.x + myself.y;
+  }
+
+  // Method to print the coordinates using `myself`
+  void print() {
+    writeln("Point coordinates are: (", myself.x, ", ", myself.y, ")");
+  }
+}
+
+int main() {
+// Instantiate a Point object
+Point p = new Point(10, 20);
+
+// Call a method that modifies fields using `myself`
+p.set(30, 40);
+
+// Call methods that access fields using `myself`
+p.print();
+writeln("The sum of coordinates is: ", p.getSum());
+
+return 0;
+
+}

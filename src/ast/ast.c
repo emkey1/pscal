@@ -61,6 +61,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->symbol_table = NULL; // Initialize symbol_table
     node->unit_list = NULL; // Initialize unit_list
     node->type_def = NULL; // Initialize type definition link
+    node->freed = false; // Guard flag must start false
 
     return node;
 }
@@ -119,27 +120,27 @@ void debugAST(AST *node, int indent) {
 #endif // DEBUG
 
 void addChild(AST *parent, AST *child) {
-    if (!parent || !child) {
-        #ifdef DEBUG
-        fprintf(stderr, "[addChild Warning] Attempted to add %s to %s parent.\n",
-                child ? "child" : "NULL child", parent ? "valid" : "NULL");
-        #endif
+    if (!parent) {
         return;
     }
+
     if (parent->child_capacity == 0) {
         parent->child_capacity = 4;
         parent->children = malloc(sizeof(AST*) * parent->child_capacity);
         if (!parent->children) { fprintf(stderr, "Memory allocation error in addChild\n"); EXIT_FAILURE_HANDLER(); }
-        for(int i=0; i < parent->child_capacity; ++i) parent->children[i] = NULL;
+        for (int i = 0; i < parent->child_capacity; ++i) parent->children[i] = NULL;
     } else if (parent->child_count >= parent->child_capacity) {
         int old_capacity = parent->child_capacity;
         parent->child_capacity *= 2;
         parent->children = realloc(parent->children, sizeof(AST*) * parent->child_capacity);
         if (!parent->children) { fprintf(stderr, "Memory allocation error in addChild (realloc)\n"); EXIT_FAILURE_HANDLER(); }
-        for(int i=old_capacity; i < parent->child_capacity; ++i) parent->children[i] = NULL;
+        for (int i = old_capacity; i < parent->child_capacity; ++i) parent->children[i] = NULL;
     }
+
     parent->children[parent->child_count++] = child;
-    child->parent = parent;
+    if (child) {
+        child->parent = parent;
+    }
 }
 
 void setLeft(AST *parent, AST *child) {
@@ -179,6 +180,8 @@ void setExtra(AST *parent, AST *child) {
 
 void freeAST(AST *node) {
     if (!node) return;
+    if (node->freed) return;
+    node->freed = true;
 
     if (isNodeInTypeTable(node)) {
         return;
@@ -323,15 +326,22 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
                  if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
                      for (int j = 0; j < varDeclGroup->child_count; j++) {
                          AST* varNameNode = varDeclGroup->children[j];
-                          if (varNameNode && varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                              strcasecmp(varNameNode->token->value, varName) == 0) {
-                             return varDeclGroup;
+                         if (varNameNode) {
+                             if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+                                 strcasecmp(varNameNode->token->value, varName) == 0) {
+                                 return varDeclGroup;
+                             } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                                        varNameNode->left->type == AST_VARIABLE &&
+                                        varNameNode->left->token &&
+                                        strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                                 return varDeclGroup;
+                             }
                          }
                      }
                  }
-             }
-         }
-     }
+            }
+        }
+    }
      return NULL;
 }
 
@@ -372,9 +382,17 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
                        if (declGroup && declGroup->type == AST_VAR_DECL) {
                            for (int j = 0; j < declGroup->child_count; j++) {
                                AST* varNameNode = declGroup->children[j];
-                               if (varNameNode && varNameNode->token && strcasecmp(varNameNode->token->value, varName) == 0) {
-                                   foundDecl = declGroup;
-                                   goto found_static_decl;
+                               if (varNameNode) {
+                                   if (varNameNode->token && varNameNode->type == AST_VARIABLE &&
+                                       strcasecmp(varNameNode->token->value, varName) == 0) {
+                                       foundDecl = declGroup;
+                                       goto found_static_decl;
+                                   } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                                              varNameNode->left->type == AST_VARIABLE && varNameNode->left->token &&
+                                              strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                                       foundDecl = declGroup;
+                                       goto found_static_decl;
+                                   }
                                }
                            }
                        }
@@ -383,7 +401,7 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
                                   foundDecl = declGroup;
                                   goto found_static_decl;
                              }
-                        }
+                       }
                    }
               }
           }
@@ -401,7 +419,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
     }
 
     if (node->type == AST_BLOCK) {
-        node->is_global_scope = (node->parent && node->parent->type == AST_PROGRAM);
+        // Preserve is_global_scope as set during parsing; do not override here.
     }
 
     if (node->left) annotateTypes(node->left, childScopeNode, globalProgramNode);
@@ -413,7 +431,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
          }
     }
 
-    if (node->var_type == TYPE_VOID) {
+    if (node->var_type == TYPE_VOID || node->var_type == TYPE_UNKNOWN) {
         switch(node->type) {
             case AST_ADDR_OF: {
                 // Address-of: ensure left is an identifier referencing a procedure/function
@@ -433,6 +451,11 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 break;
             }
             case AST_VARIABLE: {
+                if (node->parent && node->parent->type == AST_VAR_DECL) {
+                    node->var_type = node->parent->var_type;
+                    node->type_def = node->parent->right;
+                    break;
+                }
                 const char* varName = node->token ? node->token->value : NULL;
                 if (!varName) { node->var_type = TYPE_VOID; break; }
 
@@ -446,12 +469,6 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                     AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
                     if (declNode) {
                         if (declNode->type == AST_ENUM_TYPE) {
-                            /*
-                             * Enumeration literals (e.g., cRed) are inserted into the
-                             * global symbol table with their enum type definition as
-                             * the declaration node. Recognise this and propagate the
-                             * enum type to the identifier.
-                             */
                             node->var_type = TYPE_ENUM;
                             node->type_def = declNode;
                         } else if (declNode->type == AST_VAR_DECL) {
@@ -470,21 +487,58 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                             node->var_type = TYPE_VOID;
                         }
                     } else {
-                        AST* typeDef = lookupType(varName);
-                        if (typeDef) {
-                            node->var_type = typeDef->var_type;
-                            node->type_def = typeDef;
-                            #ifdef DEBUG
-                            fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
-                            #endif
-                        } else {
-                            #ifdef DEBUG
-                            if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
-                                fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
-                            }
-                            #endif
-                            node->var_type = TYPE_VOID;
+                        // Attempt to resolve as a field of the enclosing class
+                        AST* scope = childScopeNode;
+                        while (scope && scope->type != AST_FUNCTION_DECL && scope->type != AST_PROCEDURE_DECL) {
+                            scope = scope->parent;
                         }
+                        const char* clsName = NULL;
+                        if (scope && scope->token && scope->token->value) {
+                            const char* fn = scope->token->value;
+                            const char* us = strchr(fn, '_');
+                            if (us) {
+                                size_t len = (size_t)(us - fn);
+                                char tmp[MAX_SYMBOL_LENGTH];
+                                if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
+                                memcpy(tmp, fn, len);
+                                tmp[len] = '\0';
+                                clsName = tmp;
+                                AST* ctype = lookupType(clsName);
+                                ctype = resolveTypeAlias(ctype);
+                                if (ctype && ctype->type == AST_RECORD_TYPE) {
+                                    for (int i = 0; i < ctype->child_count; i++) {
+                                        AST* f = ctype->children[i];
+                                        if (!f || f->type != AST_VAR_DECL) continue;
+                                        for (int j = 0; j < f->child_count; j++) {
+                                            AST* v = f->children[j];
+                                            if (v && v->token && strcmp(v->token->value, varName) == 0) {
+                                                node->var_type = f->var_type;
+                                                node->type_def = f->right;
+                                                goto resolved_field;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        {
+                            AST* typeDef = lookupType(varName);
+                            if (typeDef) {
+                                node->var_type = typeDef->var_type;
+                                node->type_def = typeDef;
+                                #ifdef DEBUG
+                                fprintf(stderr, "[Annotate Warning] Type identifier '%s' used directly in expression?\n", varName);
+                                #endif
+                            } else {
+                                #ifdef DEBUG
+                                if (currentScopeNode != globalProgramNode || (globalProgramNode && globalProgramNode->left != node)) {
+                                    fprintf(stderr, "[Annotate Warning] Undeclared identifier '%s' used in expression.\n", varName);
+                                }
+                                #endif
+                                node->var_type = TYPE_VOID;
+                            }
+                        }
+resolved_field: ;
                     }
                 }
                 if (strcasecmp(varName, "result") == 0 && childScopeNode && childScopeNode->type == AST_FUNCTION_DECL) {
@@ -738,26 +792,16 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 node->var_type = TYPE_VOID;
                 node->type_def = NULL;
                 if (node->left) {
-                    // Start from the type definition of the array expression on the left
-                    AST *arrayType = node->left->type_def;
-
-                    // Resolve any type references (aliases) to get to the actual type node
-                    while (arrayType && arrayType->type == AST_TYPE_REFERENCE) {
-                        arrayType = arrayType->right;
-                    }
-
-                    // If we're indexing into an array, pull out its element type
+                    AST *arrayType = resolveTypeAlias(node->left->type_def);
                     if (arrayType && arrayType->type == AST_ARRAY_TYPE) {
-                        AST *elemType = arrayType->right;
-
-                        // Again resolve any aliases on the element type
-                        while (elemType && elemType->type == AST_TYPE_REFERENCE) {
-                            elemType = elemType->right;
-                        }
-
+                        AST *elemType = resolveTypeAlias(arrayType->right);
                         if (elemType) {
-                            node->var_type = elemType->var_type;
                             node->type_def = elemType;
+                            if (elemType->type == AST_POINTER_TYPE) {
+                                node->var_type = TYPE_POINTER;
+                            } else {
+                                node->var_type = elemType->var_type;
+                            }
                         }
                     } else if (node->left->var_type == TYPE_STRING) {
                         // Special case: indexing into a string yields a char
@@ -871,6 +915,13 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
     if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
+    /* CLike-style cast helpers */
+    if (strcasecmp(name, "int") == 0 || strcasecmp(name, "toint") == 0) return TYPE_INT64;
+    if (strcasecmp(name, "double") == 0 || strcasecmp(name, "todouble") == 0) return TYPE_DOUBLE;
+    if (strcasecmp(name, "float") == 0 || strcasecmp(name, "tofloat") == 0) return TYPE_FLOAT;
+    if (strcasecmp(name, "char") == 0 || strcasecmp(name, "tochar") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "bool") == 0 || strcasecmp(name, "tobool") == 0) return TYPE_BOOLEAN;
+
     /* Math routines returning REAL */
     if (strcasecmp(name, "cos")   == 0 ||
         strcasecmp(name, "sin")   == 0 ||
@@ -965,7 +1016,9 @@ AST *copyAST(AST *node) {
     if (!node) return NULL;
     AST *newNode = newASTNode(node->type, node->token);
     if (!newNode) return NULL;
-    
+    // Ensure fresh node isn't marked as freed
+    newNode->freed = false;
+
     // Copy all scalar fields
     newNode->var_type = node->var_type;
     newNode->by_ref = node->by_ref;
@@ -1201,12 +1254,6 @@ static void dumpASTJSONRecursive(AST *node, FILE *outFile, int indentLevel, bool
         PRINT_JSON_FIELD_SEPARATOR();
         printJSONIndent(outFile, nextIndent);
         fprintf(outFile, "\"i_val\": %d", node->i_val);
-    }
-
-    if (node->type_def) {
-        PRINT_JSON_FIELD_SEPARATOR();
-        printJSONIndent(outFile, nextIndent);
-        fprintf(outFile, "\"type_definition_link\": \"%s (details not expanded)\"", astTypeToString(node->type_def->type));
     }
     if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
         PRINT_JSON_FIELD_SEPARATOR();
