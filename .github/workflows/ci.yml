@@ -64,3 +64,24 @@ jobs:
               build/bin/pascal --dump-bytecode-only "$f" >/dev/null
             fi
           done
+      - name: Compile Rea examples (dump-only)
+        run: |
+          set -e
+          export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+          export REA_LIB_DIR="$GITHUB_WORKSPACE/lib/rea"
+          export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
+          SDL_ENABLED=$(grep -q '^SDL:BOOL=ON$' build/CMakeCache.txt && echo 1 || echo 0)
+          for f in Examples/rea/*.rea; do
+            bn=$(basename "$f")
+            if [ -f "$f" ]; then
+              # Skip SDL-dependent examples when SDL is not enabled in the build
+              if [ "$SDL_ENABLED" -ne 1 ]; then
+                if echo "$bn" | grep -qiE '^sdl'; then
+                  echo "Skipping SDL example (SDL disabled): $bn"
+                  continue
+                fi
+              fi
+              echo "Rea example: $bn"
+              build/bin/rea --dump-bytecode-only "$f" >/dev/null
+            fi
+          done
