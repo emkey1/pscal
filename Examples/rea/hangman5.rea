@@ -64,28 +64,34 @@ class WordRepository {
   void WordRepository() {
     myself.count = 0;
 
-    // Determine path to the word list: first command line parameter or default
-    str path;
+    bool ok = false;
     if (paramcount() > 0) {
-      path = paramstr(1);
-    } else {
-      path = "/usr/local/pscal/etc/words";
+      ok = myself.load(paramstr(1));
     }
-
-    // If loading fails, try relative repository path as fallback
-    if (!myself.load(path)) {
-      myself.load("etc/words");
+    if (!ok) {
+      ok = myself.load("/usr/local/pscal/etc/words");
+    }
+    if (!ok) {
+      ok = myself.load("etc/words");
+    }
+    if (!ok) {
+      ok = myself.load("../etc/words");
+    }
+    if (!ok) {
+      myself.load("../../etc/words");
     }
   }
 
   bool load(str path) {
-    mstream ms;
-    ms = mstreamcreate();
+    mstream ms = mstreamcreate();
     if (!fileexists(path)) {
       mstreamfree(ms);
       return false;
     }
-    mstreamloadfromfile(ms, path);
+    if (!mstreamloadfromfile(ms, path)) {
+      mstreamfree(ms);
+      return false;
+    }
     str buf = mstreambuffer(ms);
     buf = buf + "\n"; // ensure trailing newline for parsing
     mstreamfree(ms);
@@ -122,8 +128,8 @@ class WordRepository {
 
   str randomWord() {
     int cnt = myself.count;
-    float r = random();
-    int idx = int(r * cnt) + 1;
+    if (cnt == 0) return "";
+    int idx = random(cnt) + 1;
     return myself.words[idx];
   }
 }
