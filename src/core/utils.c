@@ -1354,9 +1354,27 @@ char *findUnitFile(const char *unit_name) {
         strncpy(lib_path, env_path, PATH_MAX - 1);
         lib_path[PATH_MAX - 1] = '\0'; // Ensure null-termination
     } else {
-        // Fall back to the default hard-coded path.
-        strncpy(lib_path, "/usr/local/pscal/pascal/lib", PATH_MAX - 1);
-        lib_path[PATH_MAX - 1] = '\0';
+        // Try common relative locations before falling back to the hard-coded path.
+        const char *candidates[] = {
+            "lib/pascal",
+            "../lib/pascal",
+            "../../lib/pascal",
+            "/usr/local/pscal/pascal/lib"
+        };
+        bool found = false;
+        struct stat dir_info;
+        for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); i++) {
+            if (stat(candidates[i], &dir_info) == 0 && S_ISDIR(dir_info.st_mode)) {
+                strncpy(lib_path, candidates[i], PATH_MAX - 1);
+                lib_path[PATH_MAX - 1] = '\0';
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            fprintf(stderr, "Error: Pascal library directory not found. Checked default locations.\n");
+            EXIT_FAILURE_HANDLER();
+        }
     }
 
     // 2. Check if the resolved library directory actually exists.
