@@ -398,7 +398,6 @@ bool loadBytecodeFromCache(const char* source_path,
                                             if (fread(&idx, sizeof(idx), 1, f) != 1 ||
                                                 fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
                                                 fread(&isRef, sizeof(isRef), 1, f) != 1) {
-                                                free(name);
                                                 ok = false;
                                                 break;
                                             }
@@ -568,7 +567,6 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                         if (fread(&idx, sizeof(idx), 1, f) != 1 ||
                                             fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
                                             fread(&isRef, sizeof(isRef), 1, f) != 1) {
-                                            free(name);
                                             ok = false;
                                             break;
                                         }
