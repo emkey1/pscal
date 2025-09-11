@@ -11,4 +11,8 @@ bool loadBytecodeFromCache(const char* source_path,
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk);
 bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk);
 
+// Build the canonical path for the cache file corresponding to a source path.
+// Caller is responsible for freeing the returned string.
+char* buildCachePath(const char* source_path);
+
 #endif // PSCAL_CACHE_H

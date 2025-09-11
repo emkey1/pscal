@@ -121,16 +121,13 @@ void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value) {
 // Corrected helper function to find procedure/function name by its bytecode address
 static const char* findProcedureNameByAddress(HashTable* procedureTable, uint16_t address) {
     if (!procedureTable) return NULL;
-    for (int i = 0; i < HASHTABLE_SIZE; i++) { // Using HASHTABLE_SIZE from symbol.h
-        Symbol* symbol = procedureTable->buckets[i]; // Using 'buckets' from symbol.h
-        while (symbol != NULL) {
-            if (symbol->type_def &&
-                (symbol->type_def->type == AST_PROCEDURE_DECL || symbol->type_def->type == AST_FUNCTION_DECL) &&
-                symbol->is_defined &&
-                symbol->bytecode_address == address) {
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        Symbol* symbol = procedureTable->buckets[i];
+        while (symbol) {
+            if (symbol->is_defined && symbol->bytecode_address == address) {
                 return symbol->name;
             }
-            symbol = symbol->next; // Using 'next' from symbol.h
+            symbol = symbol->next;
         }
     }
     return NULL;

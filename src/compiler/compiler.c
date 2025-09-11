@@ -1836,14 +1836,21 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 compileRValue(node->left, chunk, getLine(node->left));
                                 if (set_global_guard) compiling_global_var_init = prev_global_init;
                                 if (set_global_guard && node->left->token && node->left->token->value) {
-                                    pending_global_vtables = realloc(pending_global_vtables,
-                                        sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
-                                    pending_global_vtables[pending_global_vtable_count].var_name =
-                                        strdup(varNameNode->token->value);
                                     char* lower_cls = strdup(node->left->token->value);
                                     toLowerString(lower_cls);
-                                    pending_global_vtables[pending_global_vtable_count].class_name = lower_cls;
-                                    pending_global_vtable_count++;
+                                    AST* clsType = lookupType(lower_cls);
+                                    if (recordTypeHasVTable(clsType)) {
+                                        pending_global_vtables = realloc(
+                                            pending_global_vtables,
+                                            sizeof(PendingGlobalVTableInit) *
+                                                (pending_global_vtable_count + 1));
+                                        pending_global_vtables[pending_global_vtable_count].var_name =
+                                            strdup(varNameNode->token->value);
+                                        pending_global_vtables[pending_global_vtable_count].class_name = lower_cls;
+                                        pending_global_vtable_count++;
+                                    } else {
+                                        free(lower_cls);
+                                    }
                                 }
                             }
                             int name_idx_set = addStringConstant(chunk, varNameNode->token->value);

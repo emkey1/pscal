@@ -10,8 +10,9 @@ FNV_PRIME = 16777619
 
 def hashPath(path: str) -> int:
     """Replicate the hash function used by Pscal's cache."""
+    real = os.path.realpath(path)
     h = FNV_OFFSET
-    for b in path.encode("utf-8"):
+    for b in real.encode("utf-8"):
         h ^= b
         h = (h * FNV_PRIME) & 0xFFFFFFFF
     return h
@@ -45,10 +46,9 @@ def main() -> None:
         for file_path in base.rglob("*"):
             if not file_path.is_file():
                 continue
-            rel_str = file_path.relative_to(base).as_posix()
-            abs_str = str(file_path.resolve())
-            if hashPath(rel_str) == target_hash or hashPath(abs_str) == target_hash:
-                matches.append(str(file_path))
+            abs_str = os.path.realpath(file_path)
+            if hashPath(abs_str) == target_hash:
+                matches.append(abs_str)
 
     if matches:
         for m in matches:

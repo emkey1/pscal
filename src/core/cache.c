@@ -19,15 +19,18 @@
 
 
 static unsigned long hashPath(const char* path) {
+    char* abs_path = realpath(path, NULL);
+    const unsigned char* p = (const unsigned char*)(abs_path ? abs_path : path);
     uint32_t hash = 2166136261u;
-    for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
+    for (; *p; ++p) {
         hash ^= *p;
         hash *= 16777619u;
     }
+    if (abs_path) free(abs_path);
     return (unsigned long)hash;
 }
 
-static char* buildCachePath(const char* source_path) {
+char* buildCachePath(const char* source_path) {
     const char* home = getenv("HOME");
     if (!home) return NULL;
     size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
@@ -36,16 +39,64 @@ static char* buildCachePath(const char* source_path) {
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
     mkdir(dir, 0777); // ensure directory exists
 
-    char* abs_path = realpath(source_path, NULL);
-    const char* hash_src = abs_path ? abs_path : source_path;
-    unsigned long h = hashPath(hash_src);
-    if (abs_path) free(abs_path);
+    unsigned long h = hashPath(source_path);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
     snprintf(full, path_len, "%s/%lu.bc", dir, h);
     free(dir);
     return full;
+}
+
+static bool writeSourcePath(FILE* f, const char* source_path) {
+    char* abs = realpath(source_path, NULL);
+    const char* src = abs ? abs : source_path;
+    int len = (int)strlen(src);
+    int stored = -len; /* negative signals presence of path */
+    if (fwrite(&stored, sizeof(stored), 1, f) != 1) {
+        if (abs) free(abs);
+        return false;
+    }
+    bool ok = fwrite(src, 1, len, f) == (size_t)len;
+    if (abs) free(abs);
+    return ok;
+}
+
+static bool verifySourcePath(FILE* f, const char* source_path) {
+    long pos = ftell(f);
+    int stored = 0;
+    if (fread(&stored, sizeof(stored), 1, f) != 1) return false;
+    if (stored >= 0) {
+        /* old cache without embedded path */
+        fseek(f, pos, SEEK_SET);
+        return true;
+    }
+    int len = -stored;
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return false;
+    if (fread(buf, 1, len, f) != (size_t)len) { free(buf); return false; }
+    buf[len] = '\0';
+    char* abs = realpath(source_path, NULL);
+    const char* src = abs ? abs : source_path;
+    bool match = (strcmp(buf, src) == 0);
+    if (abs) free(abs);
+    free(buf);
+    return match;
+}
+
+static void skipSourcePath(FILE* f) {
+    long pos = ftell(f);
+    int stored = 0;
+    if (fread(&stored, sizeof(stored), 1, f) != 1) {
+        fseek(f, pos, SEEK_SET);
+        return;
+    }
+    if (stored >= 0) {
+        fseek(f, pos, SEEK_SET);
+        return;
+    }
+    int len = -stored;
+    fseek(f, len, SEEK_CUR);
 }
 
 static bool isCacheFresh(const char* cache_path, const char* source_path) {
@@ -195,6 +246,31 @@ static bool writeValue(FILE* f, const Value* v) {
             }
             break;
         }
+        case TYPE_ARRAY: {
+            int dims = v->dimensions;
+            fwrite(&dims, sizeof(dims), 1, f);
+            fwrite(&v->element_type, sizeof(v->element_type), 1, f);
+            for (int i = 0; i < dims; i++) {
+                int lb = v->lower_bounds ? v->lower_bounds[i] : 0;
+                int ub = v->upper_bounds ? v->upper_bounds[i] : -1;
+                fwrite(&lb, sizeof(lb), 1, f);
+                fwrite(&ub, sizeof(ub), 1, f);
+            }
+            int total = 1;
+            if (!v->lower_bounds || !v->upper_bounds) {
+                total = 0;
+            } else {
+                for (int i = 0; i < dims; i++) {
+                    int span = (v->upper_bounds[i] - v->lower_bounds[i] + 1);
+                    if (span <= 0) { total = 0; break; }
+                    total *= span;
+                }
+            }
+            for (int i = 0; i < total; i++) {
+                if (!writeValue(f, &v->array_val[i])) return false;
+            }
+            break;
+        }
         default:
             return false;
     }
@@ -271,6 +347,41 @@ static bool readValue(FILE* f, Value* out) {
             }
             break;
         }
+        case TYPE_ARRAY: {
+            int dims = 0;
+            if (fread(&dims, sizeof(dims), 1, f) != 1) return false;
+            out->dimensions = dims;
+            if (fread(&out->element_type, sizeof(out->element_type), 1, f) != 1) return false;
+            if (dims > 0) {
+                out->lower_bounds = (int*)malloc(sizeof(int) * dims);
+                out->upper_bounds = (int*)malloc(sizeof(int) * dims);
+                if (!out->lower_bounds || !out->upper_bounds) return false;
+                for (int i = 0; i < dims; i++) {
+                    if (fread(&out->lower_bounds[i], sizeof(int), 1, f) != 1) return false;
+                    if (fread(&out->upper_bounds[i], sizeof(int), 1, f) != 1) return false;
+                }
+                out->lower_bound = out->lower_bounds[0];
+                out->upper_bound = out->upper_bounds[0];
+            } else {
+                out->lower_bounds = out->upper_bounds = NULL;
+                out->lower_bound = out->upper_bound = 0;
+            }
+            int total = 1;
+            for (int i = 0; i < dims; i++) {
+                int span = (out->upper_bounds[i] - out->lower_bounds[i] + 1);
+                if (span <= 0) { total = 0; break; }
+                total *= span;
+            }
+            out->array_val = NULL;
+            if (total > 0) {
+                out->array_val = (Value*)calloc((size_t)total, sizeof(Value));
+                if (!out->array_val) return false;
+                for (int i = 0; i < total; i++) {
+                    if (!readValue(f, &out->array_val[i])) return false;
+                }
+            }
+            break;
+        }
         default:
             return false;
     }
@@ -326,6 +437,11 @@ bool loadBytecodeFromCache(const char* source_path,
                     }
                 }
                 chunk->version = ver;
+                if (!verifySourcePath(f, source_path)) {
+                    fclose(f);
+                    free(cache_path);
+                    return false;
+                }
                 int count = 0;
                 if (fread(&count, sizeof(count), 1, f) == 1 &&
                     fread(&const_count, sizeof(const_count), 1, f) == 1) {
@@ -392,7 +508,21 @@ bool loadBytecodeFromCache(const char* source_path,
                                             sym->real_symbol = NULL;
                                             hashTableInsert(procedure_table, sym);
                                         }
+
+                                        for (int uv = 0; uv < upvals; uv++) {
+                                            uint8_t idx = 0, isLocal = 0, isRef = 0;
+                                            if (fread(&idx, sizeof(idx), 1, f) != 1 ||
+                                                fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
+                                                fread(&isRef, sizeof(isRef), 1, f) != 1) {
+                                                ok = false;
+                                                break;
+                                            }
+                                            sym->upvalues[uv].index = idx;
+                                            sym->upvalues[uv].isLocal = (bool)isLocal;
+                                            sym->upvalues[uv].is_ref = (bool)isRef;
+                                        }
                                         free(name);
+                                        if (!ok) break;
                                     }
 
                                     if (ok) {
@@ -478,6 +608,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                 }
             }
             chunk->version = ver;
+            skipSourcePath(f);
             int count = 0;
             if (fread(&count, sizeof(count), 1, f) == 1 &&
                 fread(&const_count, sizeof(const_count), 1, f) == 1) {
@@ -547,7 +678,21 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                                         sym->real_symbol = NULL;
                                         hashTableInsert(procedure_table, sym);
                                     }
+
+                                    for (int uv = 0; uv < upvals; uv++) {
+                                        uint8_t idx = 0, isLocal = 0, isRef = 0;
+                                        if (fread(&idx, sizeof(idx), 1, f) != 1 ||
+                                            fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
+                                            fread(&isRef, sizeof(isRef), 1, f) != 1) {
+                                            ok = false;
+                                            break;
+                                        }
+                                        sym->upvalues[uv].index = idx;
+                                        sym->upvalues[uv].isLocal = (bool)isLocal;
+                                        sym->upvalues[uv].is_ref = (bool)isRef;
+                                    }
                                     free(name);
+                                    if (!ok) break;
                                 }
 
                                 if (ok) {
@@ -632,6 +777,11 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     uint32_t magic = CACHE_MAGIC, ver = chunk->version;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
+    if (!writeSourcePath(f, source_path)) {
+        fclose(f);
+        free(cache_path);
+        return;
+    }
     fwrite(&chunk->count, sizeof(chunk->count), 1, f);
     fwrite(&chunk->constants_count, sizeof(chunk->constants_count), 1, f);
     fwrite(chunk->code, 1, chunk->count, f);
@@ -651,13 +801,21 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     if (procedure_table) {
         for (int i = 0; i < HASHTABLE_SIZE; i++) {
             for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
+                Symbol* actual = sym->is_alias && sym->real_symbol ? sym->real_symbol : sym;
                 int name_len = (int)strlen(sym->name);
                 fwrite(&name_len, sizeof(name_len), 1, f);
                 fwrite(sym->name, 1, name_len, f);
-                fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f);
-                fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
-                fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
-                fwrite(&sym->type, sizeof(sym->type), 1, f);
+                fwrite(&actual->bytecode_address, sizeof(actual->bytecode_address), 1, f);
+                fwrite(&actual->locals_count, sizeof(actual->locals_count), 1, f);
+                fwrite(&actual->upvalue_count, sizeof(actual->upvalue_count), 1, f);
+                fwrite(&actual->type, sizeof(actual->type), 1, f);
+                for (int uv = 0; uv < actual->upvalue_count; uv++) {
+                    fwrite(&actual->upvalues[uv].index, sizeof(uint8_t), 1, f);
+                    uint8_t isLocal = actual->upvalues[uv].isLocal ? 1 : 0;
+                    uint8_t isRef = actual->upvalues[uv].is_ref ? 1 : 0;
+                    fwrite(&isLocal, sizeof(uint8_t), 1, f);
+                    fwrite(&isRef, sizeof(uint8_t), 1, f);
+                }
             }
         }
     }
