@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // This program tests class inheritance, object instantiation,
 // and the use of the super keyword to call a parent's
 // constructor and methods.

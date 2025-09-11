@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // This program tests string literals, concatenation, and I/O
 // operations using writeln and printf.
 

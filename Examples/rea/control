@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 int x = 0;
 int y = (x = 5);
 if (y > 3) {

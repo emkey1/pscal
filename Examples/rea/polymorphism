@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // This program is the critical test for Rea's polymorphism
 // implementation via a virtual method table (V-table).
 // It creates an array of Shape objects that holds different

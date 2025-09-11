@@ -1,4 +1,5 @@
-// Hangman game ported to Rea front end using OOP.
+#!/usr/bin/env rea
+// Hangman game 
 
 class WordList {
   str words[64];

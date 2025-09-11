@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // Interactive Mandelbrot demo for the Rea front end.
 // Left click to zoom in, right click to zoom out, Q to quit.
 // Requires SDL support in the Pscal build.

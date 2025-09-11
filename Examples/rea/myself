@@ -1,5 +1,7 @@
+#!/usr/bin/env rea
 // This program tests the use of the myself keyword to access
-// instance members within a class method.
+// instance members within a class method.  Note that myself/my 
+// are interchangeable and identical in all ways
 
 class Point {
 int x;

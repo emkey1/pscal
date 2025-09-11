@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // SDL Multi Bouncing Balls demo ported to Rea using classes.
 // Requires building Pscal with SDL support.
 

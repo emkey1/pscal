@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // CRT routines like GotoXY and TextColor are available as built-ins,
 // but color constants come from the CRT unit.
 #import "crt";
@@ -440,6 +441,7 @@ class HangmanGame {
         if (r == 'Y') again = true; else again = false;
       }
     }
+    writeln(); // Move curser down a line to look nicer
   }
 }
 

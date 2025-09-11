@@ -1,4 +1,4 @@
-// Rea + #import CRT demo (executes with VM)
+#!/usr/bin/env rea
 #import "crt";
 
 writeln("Hello from Rea before clear...");

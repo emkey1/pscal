@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // Rea method-call sugar demo
 
 class Counter {

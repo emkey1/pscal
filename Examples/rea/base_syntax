@@ -1,3 +1,4 @@
+#!/usr/bin/env rea
 // This program tests the basic syntax of Rea,
 // including variable declarations, constants, arithmetic,
 // and simple control flow. It should compile and run
