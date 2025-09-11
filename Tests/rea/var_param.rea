@@ -1,0 +1,18 @@
+void swap(var int a, var int b) {
+  int t = a;
+  a = b;
+  b = t;
+}
+
+void setTo42(out int x) {
+  x = 42;
+}
+
+int x = 1;
+int y = 2;
+swap(x, y);
+writeln(x);
+writeln(y);
+setTo42(x);
+writeln(x);
+

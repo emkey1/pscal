@@ -1285,6 +1285,14 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         addChild(params, selfDecl);
     }
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+        bool byRef = false;
+        if (p->current.type == REA_TOKEN_VAR || p->current.type == REA_TOKEN_OUT || p->current.type == REA_TOKEN_CONST) {
+            if (p->current.type == REA_TOKEN_VAR || p->current.type == REA_TOKEN_OUT) {
+                byRef = true;
+            }
+            reaAdvance(p);
+        }
+
         AST *ptypeNode = NULL;
         VarType pvtype = TYPE_VOID;
         if (p->current.type == REA_TOKEN_IDENTIFIER) {
@@ -1327,6 +1335,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         addChild(paramDecl, paramVar);
         setRight(paramDecl, ptypeNode);
         setTypeAST(paramDecl, pvtype);
+        paramDecl->by_ref = byRef ? 1 : 0;
         addChild(params, paramDecl);
 
         if (p->current.type == REA_TOKEN_COMMA) {

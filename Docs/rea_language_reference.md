@@ -30,7 +30,7 @@ Reserved words may not be used as identifiers.
 * **Classes:** `class`, `new`, `extends`, `my`, `myself`, `super`
 * **Control flow:** `if`, `else`, `while`, `for`, `do`, `switch`, `case`,
   `default`, `break`, `continue`, `return`
-* **Other:** `const`, `#import`
+* **Other:** `const`, `var`, `out`, `#import`
 
 #### **Literals**
 
@@ -90,6 +90,16 @@ follow the same pattern but are nested inside classes.
 
 ```rea
 int add(int a, int b) { return a + b; }
+```
+
+Parameters are passed by value by default.  Prefix a parameter with `var` or
+`out` to pass it by reference so the callee can modify the caller's variable.
+`out` indicates the initial value is ignored.  
+
+```rea
+void swap(var int a, var int b) {
+  int t = a; a = b; b = t;
+}
 ```
 
 ### **Classes and Objects**

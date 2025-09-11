@@ -93,6 +93,8 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "int", 3) == 0) return REA_TOKEN_INT;
             if (strncmp(start, "str", 3) == 0) return REA_TOKEN_STR;
             if (strncmp(start, "new", 3) == 0) return REA_TOKEN_NEW;
+            if (strncmp(start, "var", 3) == 0) return REA_TOKEN_VAR;
+            if (strncmp(start, "out", 3) == 0) return REA_TOKEN_OUT;
             break;
         case 4:
             if (strncmp(start, "else", 4) == 0) return REA_TOKEN_ELSE;
