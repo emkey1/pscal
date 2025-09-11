@@ -503,7 +503,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                                 memcpy(tmp, fn, len);
                                 tmp[len] = '\0';
                                 clsName = tmp;
-                                AST* ctype = lookupType(tmp);
+                                AST* ctype = lookupType(clsName);
                                 ctype = resolveTypeAlias(ctype);
                                 if (ctype && ctype->type == AST_RECORD_TYPE) {
                                     for (int i = 0; i < ctype->child_count; i++) {
