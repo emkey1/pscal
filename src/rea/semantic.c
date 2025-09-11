@@ -92,7 +92,10 @@ static void freeClassTable(void) {
             Symbol *next = s->next;
             ClassInfo *ci = s->value ? (ClassInfo *)s->value->ptr_val : NULL;
             if (ci) {
-                if (ci->fields) freeSymbolTable(ci->fields, true);
+                if (ci->fields) {
+                    /* Field type_defs reference the original AST; do not free them here */
+                    freeSymbolTable(ci->fields, false);
+                }
                 if (ci->methods) freeSymbolTable(ci->methods, false);
                 free(ci->parent_name);
                 free(ci->name);
@@ -154,7 +157,13 @@ static void collectClasses(AST *node) {
             Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
             if (!sym) { free(lname); continue; }
             sym->name = lname;
-            sym->type_def = ftype ? copyAST(ftype) : NULL;
+            /*
+             * Store a reference to the original AST node rather than a deep copy.
+             * copyAST would duplicate pointers to tokens, and freeing the copied
+             * tree would free those tokens while the original AST still needs
+             * them, leading to double-free or use-after-free errors.
+             */
+            sym->type_def = ftype;
             if (field->type == AST_CONST_DECL) {
                 sym->is_const = true;
                 if (field->left) {
