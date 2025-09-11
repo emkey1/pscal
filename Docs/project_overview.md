@@ -68,15 +68,15 @@ The project follows a classic compiler and virtual machine design:
 ## Building
 
 ```sh
-mkdir build && cd build
-cmake ..          # add -DSDL=ON to enable SDL support
-make
+cmake -B build          # add -DSDL=ON to enable SDL support
+cmake --build build
 ```
 
 To explicitly disable SDL support:
 
 ```sh
-cmake -DSDL=OFF ..
+cmake -B build -DSDL=OFF
+cmake --build build
 ```
 
 ---
