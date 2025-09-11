@@ -19,7 +19,8 @@ class Ball {
     myself.y = myself.radius + random(h - 2 * myself.radius);
     int speedRange = trunc(maxSpeed - minSpeed + 1);
     float speed = minSpeed + random(speedRange);
-    float angle = random(360) * (3.14159265 / 180.0);
+    // Rea's trig functions operate in degrees, so do not convert.
+    float angle = random(360);
     myself.dx = cos(angle) * speed / 60.0;
     myself.dy = sin(angle) * speed / 60.0;
     if ((abs(myself.dx) < 0.1) && (abs(myself.dy) < 0.1)) {
