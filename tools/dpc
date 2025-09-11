@@ -9,8 +9,9 @@ FNV_OFFSET = 2166136261
 FNV_PRIME = 16777619
 
 def hash_path(path: str) -> int:
+    real = os.path.realpath(path)
     h = FNV_OFFSET
-    for b in os.fsencode(path):
+    for b in os.fsencode(real):
         h ^= b
         h = (h * FNV_PRIME) & 0xFFFFFFFF
     return h
@@ -24,11 +25,9 @@ def build_hash_map(search_dirs: list[str]) -> dict[int, list[str]]:
         for file_path in base.rglob("*"):
             if not file_path.is_file():
                 continue
-            rel_str = file_path.relative_to(base).as_posix()
-            abs_str = str(file_path.resolve())
-            for candidate in (rel_str, abs_str):
-                h = hash_path(candidate)
-                mapping.setdefault(h, []).append(str(file_path))
+            abs_str = os.path.realpath(file_path)
+            h = hash_path(abs_str)
+            mapping.setdefault(h, []).append(abs_str)
     return mapping
 
 def main() -> None:

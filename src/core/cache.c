@@ -19,15 +19,18 @@
 
 
 static unsigned long hashPath(const char* path) {
+    char* abs_path = realpath(path, NULL);
+    const unsigned char* p = (const unsigned char*)(abs_path ? abs_path : path);
     uint32_t hash = 2166136261u;
-    for (const unsigned char* p = (const unsigned char*)path; *p; ++p) {
+    for (; *p; ++p) {
         hash ^= *p;
         hash *= 16777619u;
     }
+    if (abs_path) free(abs_path);
     return (unsigned long)hash;
 }
 
-static char* buildCachePath(const char* source_path) {
+char* buildCachePath(const char* source_path) {
     const char* home = getenv("HOME");
     if (!home) return NULL;
     size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
@@ -36,10 +39,7 @@ static char* buildCachePath(const char* source_path) {
     snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
     mkdir(dir, 0777); // ensure directory exists
 
-    char* abs_path = realpath(source_path, NULL);
-    const char* hash_src = abs_path ? abs_path : source_path;
-    unsigned long h = hashPath(hash_src);
-    if (abs_path) free(abs_path);
+    unsigned long h = hashPath(source_path);
     size_t path_len = dir_len + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
