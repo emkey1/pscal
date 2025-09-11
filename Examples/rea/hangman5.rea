@@ -80,13 +80,13 @@ class WordRepository {
   bool load(str path) {
     mstream ms;
     ms = mstreamcreate();
-    mstreamloadfromfile(ms, path);
-    if (ioresult() != 0) {
+    if (!mstreamloadfromfile(ms, path)) {
       mstreamfree(ms);
       return false;
     }
 
-    str buf = mstreambuffer(ms) + "\n"; // ensure trailing newline
+    str buf = mstreambuffer(ms);
+    buf = buf + "\n"; // ensure trailing newline for parsing
     mstreamfree(ms);
 
     int len = length(buf);
