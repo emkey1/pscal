@@ -218,28 +218,29 @@ class HangmanView {
     }
   }
 
-  void showHint(str word, str display, bool &hintUsed) {
+  bool showHint(str word, str display, bool hintUsed) {
     GotoXY(BORDER_LEFT + 2, MSG_ROW);
     if (hintUsed) {
       writeln("Hint used already.");
-      return;
-    }
-    int hintIndex = -1;
-    int attempts = 0;
-    while (attempts < length(word) * 2 && hintIndex == -1) {
-      int i = random(length(word)) + 1;
-      if (display[i] == '_') hintIndex = i;
-      attempts = attempts + 1;
-    }
-    if (hintIndex == -1) {
-      writeln("No more hints available.");
     } else {
-      write("Hint: letter at position "); write(hintIndex); write(" is '");
-      write(word[hintIndex]); writeln("'");
-      hintUsed = true;
+      int hintIndex = -1;
+      int attempts = 0;
+      while (attempts < length(word) * 2 && hintIndex == -1) {
+        int i = random(length(word)) + 1;
+        if (display[i] == '_') hintIndex = i;
+        attempts = attempts + 1;
+      }
+      if (hintIndex == -1) {
+        writeln("No more hints available.");
+      } else {
+        write("Hint: letter at position "); write(hintIndex); write(" is '");
+        write(word[hintIndex]); writeln("'");
+        hintUsed = true;
+      }
     }
     writeln("Press Enter to continue...");
     str pause; readln(pause);
+    return hintUsed;
   }
 
   void showMessage(str msg) {
@@ -298,6 +299,7 @@ class HangmanGame {
 
   void playRound() {
     bool win = false;
+    str msg;
     while (myself.wrong < MAX_WRONG && myself.display != myself.chosen) {
       myself.view.render(myself.display, myself.guessed, myself.wrong);
       GotoXY(BORDER_LEFT + 2, PROMPT_ROW);
@@ -306,7 +308,7 @@ class HangmanGame {
       if (length(line) == 0) continue;
       char g = toupper(line[1]);
       if (g == '?') {
-        myself.view.showHint(myself.chosen, myself.display, myself.hintUsed);
+        myself.hintUsed = myself.view.showHint(myself.chosen, myself.display, myself.hintUsed);
         continue;
       }
       if (contains(myself.guessed, g)) {
@@ -318,10 +320,15 @@ class HangmanGame {
 
     myself.view.render(myself.display, myself.guessed, myself.wrong);
     if (myself.display == myself.chosen) {
-      TextColor(Green); myself.view.showMessage("You guessed the word!"); TextColor(White);
+      TextColor(Green);
+      myself.view.showMessage("You guessed the word!");
+      TextColor(White);
       myself.wins = myself.wins + 1;
     } else {
-      TextColor(LightRed); myself.view.showMessage("Sorry, the word was " + myself.chosen); TextColor(White);
+      TextColor(LightRed);
+      msg = "Sorry, the word was " + myself.chosen;
+      myself.view.showMessage(msg);
+      TextColor(White);
       myself.losses = myself.losses + 1;
     }
     GotoXY(BORDER_LEFT + 2, MSG_ROW + 1);
