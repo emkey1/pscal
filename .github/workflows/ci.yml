@@ -69,6 +69,7 @@ jobs:
           set -e
           export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
           export REA_LIB_DIR="$GITHUB_WORKSPACE/lib/rea"
+          export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
           SDL_ENABLED=$(grep -q '^SDL:BOOL=ON$' build/CMakeCache.txt && echo 1 || echo 0)
           for f in Examples/rea/*.rea; do
             bn=$(basename "$f")
