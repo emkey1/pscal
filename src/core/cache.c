@@ -257,10 +257,14 @@ static bool writeValue(FILE* f, const Value* v) {
                 fwrite(&ub, sizeof(ub), 1, f);
             }
             int total = 1;
-            for (int i = 0; i < dims; i++) {
-                int span = (v->upper_bounds[i] - v->lower_bounds[i] + 1);
-                if (span <= 0) { total = 0; break; }
-                total *= span;
+            if (!v->lower_bounds || !v->upper_bounds) {
+                total = 0;
+            } else {
+                for (int i = 0; i < dims; i++) {
+                    int span = (v->upper_bounds[i] - v->lower_bounds[i] + 1);
+                    if (span <= 0) { total = 0; break; }
+                    total *= span;
+                }
             }
             for (int i = 0; i < total; i++) {
                 if (!writeValue(f, &v->array_val[i])) return false;
