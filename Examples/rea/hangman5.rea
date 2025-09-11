@@ -1,4 +1,5 @@
-#import "crt";
+// CRT routines like GotoXY and TextColor are available as built-ins,
+// so no explicit unit import is required.
 
 // --- Game configuration ---
 const int MAX_WRONG = 8;
@@ -80,11 +81,11 @@ class WordRepository {
   bool load(str path) {
     mstream ms;
     ms = mstreamcreate();
-    if (!mstreamloadfromfile(ms, path)) {
+    if (!fileexists(path)) {
       mstreamfree(ms);
       return false;
     }
-
+    mstreamloadfromfile(ms, path);
     str buf = mstreambuffer(ms);
     buf = buf + "\n"; // ensure trailing newline for parsing
     mstreamfree(ms);
