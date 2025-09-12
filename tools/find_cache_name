@@ -23,7 +23,7 @@ def main() -> None:
     )
     parser.add_argument("cache_file", help="Path to a file in ~/.pscal_cache")
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = str(Path(__file__).resolve().parents[1])
     parser.add_argument(
         "search_dirs",
         nargs="*",
