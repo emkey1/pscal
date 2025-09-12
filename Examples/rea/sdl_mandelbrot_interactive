@@ -4,9 +4,9 @@
 // Requires SDL support in the Pscal build.
 
 class MandelbrotApp {
-  const int Width = 1200;
-  const int Height = 900;
-  const int MaxIterations = 200;
+  const int Width = 640;
+  const int Height = 480;
+  const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
   const double ZoomFactor = 2.0;
@@ -31,7 +31,7 @@ class MandelbrotApp {
     myself.maxRe = 1.0;
     myself.minIm = -1.2;
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
-    initgraph(myself.Width, myself.Height, "Mandelbrot in Rea");
+    initgraph(myself.Width, myself.Height, "Rea Mandelbrot");
     myself.textureID = createtexture(myself.Width, myself.Height);
     if (myself.textureID < 0) {
       printf("Error: unable to create texture.\n");
