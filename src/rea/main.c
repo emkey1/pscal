@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <ctype.h>
+#include <unistd.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -339,7 +340,9 @@ int main(int argc, char **argv) {
             if (dump_bytecode_flag) {
                 fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
                 disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-                if (!dump_bytecode_only_flag) {
+                if (dump_bytecode_only_flag) {
+                    _exit(EXIT_SUCCESS);
+                } else {
                     fprintf(stderr, "\n--- executing Program with VM ---\n");
                 }
             }
@@ -351,7 +354,9 @@ int main(int argc, char **argv) {
                 chunk.count, chunk.constants_count);
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-            if (!dump_bytecode_only_flag) {
+            if (dump_bytecode_only_flag) {
+                _exit(EXIT_SUCCESS);
+            } else {
                 fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
             }
         }

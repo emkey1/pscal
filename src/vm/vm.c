@@ -717,11 +717,8 @@ static Value vmHostCreateThreadAddr(VM* vm) {
 
     int id = createThreadWithArg(vm, entry, argVal);
     // createThreadWithArg takes ownership of argVal copy via struct assignment; do not free argVal here
-    Value v;
-    memset(&v, 0, sizeof(Value));
-    v.type = TYPE_THREAD;
-    SET_INT_VALUE(&v, id < 0 ? -1 : id);
-    return v;
+    // Return an integer thread id for compatibility with 'join' instruction
+    return makeInt(id < 0 ? -1 : id);
 }
 
 static Value vmHostWaitThread(VM* vm) {
@@ -3869,13 +3866,21 @@ comparison_error_label:
             }
             case THREAD_JOIN: {
                 Value tidVal = peek(vm, 0);
-                if (!IS_INTLIKE(tidVal)) {
+                int tid_ok = 0;
+                int tid = 0;
+                if (tidVal.type == TYPE_THREAD) {
+                    tid = (int)AS_INTEGER(tidVal);
+                    tid_ok = 1;
+                } else if (IS_INTLIKE(tidVal)) {
+                    tid = (int)AS_INTEGER(tidVal);
+                    tid_ok = 1;
+                }
+                if (!tid_ok) {
                     runtimeError(vm, "Thread id must be integer.");
                     Value popped_tid = pop(vm);
                     freeValue(&popped_tid);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                int tid = (int)tidVal.i_val;
                 joinThread(vm, tid);
                 Value popped_tid = pop(vm);
                 freeValue(&popped_tid);

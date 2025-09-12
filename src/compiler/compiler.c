@@ -654,12 +654,36 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
     VarType arg_vt = arg_actual ? arg_actual->var_type : arg_node->var_type;
 
+    // If the argument still has no concrete type (VOID), attempt to resolve it
+    // via a static declaration lookup rooted at the current program AST. This
+    // helps when declarations and statements are interleaved (e.g., Rea) and
+    // the annotation pass has not yet attributed the identifier use.
+    if ((arg_vt == TYPE_VOID || arg_vt == TYPE_UNKNOWN) && arg_node->type == AST_VARIABLE && arg_node->token && arg_node->token->value) {
+        if (gCurrentProgramRoot) {
+            AST* decl = findStaticDeclarationInAST(arg_node->token->value, arg_node, gCurrentProgramRoot);
+            if (decl) {
+                AST* t = decl->right ? resolveTypeAlias(decl->right) : NULL;
+                if (t) {
+                    arg_actual = t;
+                    arg_vt = t->var_type;
+                }
+            }
+        }
+    }
+
     // When coercion is not allowed, require an exact match of the base types
     // before proceeding with any structural comparisons. Allow NIL for pointer
     // parameters as a special case.
     if (!allow_coercion) {
         if (param_actual->var_type != arg_vt) {
             if (param_actual->var_type == TYPE_POINTER && arg_vt == TYPE_NIL) {
+                return true;
+            }
+            // Treat unresolved identifiers (VOID) as compatible when the
+            // parameter expects an integer. This aligns with frontends where
+            // declaration attribution may occur later in the pipeline.
+            if ((param_actual->var_type == TYPE_INT64 || param_actual->var_type == TYPE_INT32) &&
+                (arg_vt == TYPE_VOID || arg_vt == TYPE_UNKNOWN)) {
                 return true;
             }
             // Treat CHAR and STRING as interchangeable without requiring
@@ -1405,6 +1429,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (local_slot != -1) {
+                // For by-ref locals, the slot holds an address already.
                 if (is_ref) {
                     writeBytecodeChunk(chunk, GET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);

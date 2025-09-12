@@ -1,0 +1,38 @@
+#!/usr/bin/env rea
+/* This is a multi-line comment.
+   It can span across multiple lines.
+*/
+
+// The Main class contains the entry point for the program.
+class Main {
+  // A simple method to demonstrate variable declaration and operations.
+  void main() {
+    // Variable declarations with different data types
+    int int_var = 10;
+    float float_var = 5.5;
+    bool bool_var = true;
+    str string_var = "Rea Language";
+
+    // Arithmetic operations
+    int result_int = int_var + 5;
+    float result_float = float_var * 2.0;
+
+    // String concatenation
+    str full_string = string_var + " Demo";
+
+    // Boolean logic
+    bool comparison = int_var > float_var;
+
+    // Output results using built-in writeln
+    writeln("Integer result: ", result_int);
+    writeln("Float result: ", result_float:0:2);
+    writeln("Boolean comparison (10 > 5.5): ", comparison);
+    writeln("Concatenated string: ", full_string);
+  }
+}
+
+int main() {
+    Main m = new Main();  // allocate the object
+    m.main();
+    return 0;
+}
