@@ -41,12 +41,12 @@ def main() -> None:
         default="~/.pscal_cache",
         help="Cache directory (default: ~/.pscal_cache)",
     )
-    repo_root = str(Path(__file__).resolve().parents[1])
+    root_dir = str(Path("/").resolve())
     parser.add_argument(
         "search_dirs",
         nargs="*",
-        default=[repo_root],
-        help=f"Directories to recursively search for source files (default: {repo_root})",
+        default=[root_dir],
+        help=f"Directories to recursively search for source files (default: {root_dir})",
     )
     args = parser.parse_args()
 
