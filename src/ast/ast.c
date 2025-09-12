@@ -295,7 +295,8 @@ void setTypeAST(AST *node, VarType type) {
     node->var_type = type;
 }
 
-static AST* findDeclInCompound(AST* compound, const char* varName);
+static bool isAncestor(AST* ancestor, AST* node);
+static AST* findDeclInCompound(AST* compound, const char* varName, AST* referenceNode);
 
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
      if (!currentScopeNode || !varName) return NULL;
