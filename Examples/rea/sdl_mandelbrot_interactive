@@ -12,6 +12,7 @@ class MandelbrotApp {
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
+  const int ThreadCount = 4;
   const int KEY_LEFT = 1073741904;
   const int KEY_RIGHT = 1073741903;
   const int KEY_UP = 1073741906;
@@ -22,9 +23,16 @@ class MandelbrotApp {
   double maxRe;
   double minIm;
   double maxIm;
+  double reFactor;
+  double imFactor;
   int textureID;
   bool quit;
   int prevButtons;
+  bool rowDone[Height];
+  int threadStart[ThreadCount];
+  int threadEnd[ThreadCount];
+  int rowMutex;
+  int quitMutex;
 
   void init() {
     myself.minRe = -2.0;
@@ -39,24 +47,33 @@ class MandelbrotApp {
     }
     myself.quit = false;
     myself.prevButtons = 0;
+    myself.rowMutex = mutex();
+    myself.quitMutex = mutex();
   }
 
-  bool compute() {
+  int getQuit() {
+    bool q;
+    lock(myself.quitMutex);
+    q = myself.quit;
+    unlock(myself.quitMutex);
+    return q;
+  }
+
+  void setQuit(bool v) {
+    lock(myself.quitMutex);
+    myself.quit = v;
+    unlock(myself.quitMutex);
+  }
+
+  void computeRows(int startY, int endY) {
     int row[Width];
-    int i;
-    for (i = 0; i < myself.Width * myself.Height * myself.BytesPerPixel; i = i + 1) {
-      myself.pixels[i] = char(0);
-    }
-    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
-    double reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
-    double imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
-    int idx, x, y, n;
-    int R, G, B;
+    int x, y, n, R, G, B, idx;
     double c_im;
-    for (y = 0; y < myself.Height && !myself.quit; y = y + 1) {
-      c_im = myself.maxIm - y * imFactor;
-      mandelbrotrow(myself.minRe, reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
+    for (y = startY; y <= endY && !myself.getQuit(); y = y + 1) {
+      c_im = myself.maxIm - y * myself.imFactor;
+      mandelbrotrow(myself.minRe, myself.reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
       idx = y * myself.Width * myself.BytesPerPixel;
+      lock(myself.rowMutex);
       for (x = 0; x < myself.Width; x = x + 1) {
         n = row[x];
         if (n == myself.MaxIterations) { R = G = B = 0; }
@@ -71,15 +88,74 @@ class MandelbrotApp {
         myself.pixels[idx + 3] = char(255);
         idx = idx + myself.BytesPerPixel;
       }
-      if (((y + 1) % myself.ScreenUpdateInterval) == 0 || y == myself.Height - 1) {
+      myself.rowDone[y] = true;
+      unlock(myself.rowMutex);
+    }
+  }
+
+  void computeRowsThread0() { myself.computeRows(myself.threadStart[0], myself.threadEnd[0]); }
+  void computeRowsThread1() { myself.computeRows(myself.threadStart[1], myself.threadEnd[1]); }
+  void computeRowsThread2() { myself.computeRows(myself.threadStart[2], myself.threadEnd[2]); }
+  void computeRowsThread3() { myself.computeRows(myself.threadStart[3], myself.threadEnd[3]); }
+
+  bool compute() {
+    int tid[ThreadCount];
+    int i, y;
+    for (i = 0; i < myself.Width * myself.Height * myself.BytesPerPixel; i = i + 1) {
+      myself.pixels[i] = char(0);
+    }
+    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
+    myself.reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
+    myself.imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
+    for (i = 0; i < myself.Height; i = i + 1) { myself.rowDone[i] = false; }
+
+    int rowsPerThread = myself.Height / myself.ThreadCount;
+    int extra = myself.Height % myself.ThreadCount;
+    int startY = 0;
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      int endY = startY + rowsPerThread - 1;
+      if (extra > 0) { endY = endY + 1; extra = extra - 1; }
+      myself.threadStart[i] = startY;
+      myself.threadEnd[i] = endY;
+      startY = endY + 1;
+    }
+
+    tid[0] = spawn myself.computeRowsThread0();
+    tid[1] = spawn myself.computeRowsThread1();
+    tid[2] = spawn myself.computeRowsThread2();
+    tid[3] = spawn myself.computeRowsThread3();
+
+    y = 0;
+    while (y < myself.Height && !myself.getQuit()) {
+      bool done;
+      bool update;
+      lock(myself.rowMutex);
+      done = myself.rowDone[y];
+      update = false;
+      if (done && (((y + 1) % myself.ScreenUpdateInterval) == 0 || y == myself.Height - 1)) {
         updatetexture(myself.textureID, myself.pixels);
+        update = true;
+      }
+      if (done) { y = y + 1; }
+      unlock(myself.rowMutex);
+      if (update) {
         cleardevice();
         rendercopy(myself.textureID);
         updatescreen();
       }
-      if (myself.handleInput()) {
-        return true;
-      }
+      int key = pollkey();
+      if (key == 'q' || key == 'Q') { myself.setQuit(true); }
+    }
+
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      join tid[i];
+    }
+
+    if (!myself.getQuit()) {
+      updatetexture(myself.textureID, myself.pixels);
+      cleardevice();
+      rendercopy(myself.textureID);
+      updatescreen();
     }
     return false;
   }
@@ -102,7 +178,7 @@ class MandelbrotApp {
     bool changed = false;
     int key = pollkey();
     if (key != 0) {
-      if (key == 'q' || key == 'Q') { myself.quit = true; return false; }
+      if (key == 'q' || key == 'Q') { myself.setQuit(true); return false; }
       double widthRe = (myself.maxRe - myself.minRe);
       double heightIm = (myself.maxIm - myself.minIm);
       double dx = widthRe * 0.5;
@@ -135,8 +211,14 @@ class MandelbrotApp {
 
   void run() {
     myself.init();
-    while (!myself.quit) {
-      myself.compute();
+    bool needRender = true;
+    while (!myself.getQuit()) {
+      if (needRender) {
+        myself.compute();
+        needRender = false;
+      } else {
+        needRender = myself.handleInput();
+      }
     }
     destroytexture(myself.textureID);
     closegraph();
