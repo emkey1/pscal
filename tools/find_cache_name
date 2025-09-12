@@ -5,12 +5,13 @@ import argparse
 import os
 import struct
 from pathlib import Path
+from typing import Optional
 
 FNV_OFFSET = 2166136261
 FNV_PRIME = 16777619
 
 
-def _read_source_path(cache_path: Path) -> str | None:
+def _read_source_path(cache_path: Path) -> Optional[str]:
     try:
         with cache_path.open("rb") as f:
             # Skip magic and version
