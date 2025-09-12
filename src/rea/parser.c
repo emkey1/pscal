@@ -1347,39 +1347,17 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         reaAdvance(p);
     }
 
-    // Parse function body
+    // Parse function body. Previously the parser split variable declarations
+    // from executable statements and wrapped them into an `AST_BLOCK` with two
+    // children (declarations and statements).  This caused any variable
+    // initializer with side effects—such as `spawn worker()`—to be emitted
+    // before preceding statements when compiled, leading to confusing behavior
+    // and runtime errors.  Instead, parse the body as a simple compound block
+    // preserving the original statement order so initializers execute where
+    // they appear in source.
     AST *block = NULL;
     if (p->current.type == REA_TOKEN_LEFT_BRACE) {
-        reaAdvance(p); // consume '{'
-        AST *decls = newASTNode(AST_COMPOUND, NULL);
-        AST *stmts = newASTNode(AST_COMPOUND, NULL);
-        while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
-            AST *stmt = parseStatement(p);
-            if (!stmt) break;
-            if (stmt->type == AST_VAR_DECL) {
-                addChild(decls, stmt);
-            } else if (stmt->type == AST_COMPOUND) {
-                for (int si = 0; si < stmt->child_count; si++) {
-                    AST *child = stmt->children[si];
-                    if (!child) continue;
-                    if (child->type == AST_VAR_DECL) {
-                        addChild(decls, child);
-                    } else {
-                        addChild(stmts, child);
-                    }
-                    stmt->children[si] = NULL;
-                }
-                freeAST(stmt);
-            } else {
-                addChild(stmts, stmt);
-            }
-        }
-        if (p->current.type == REA_TOKEN_RIGHT_BRACE) {
-            reaAdvance(p);
-        }
-        block = newASTNode(AST_BLOCK, NULL);
-        addChild(block, decls);
-        addChild(block, stmts);
+        block = parseBlock(p);  // consumes braces and returns AST_COMPOUND
     }
 
     AST *func = (vtype == TYPE_VOID) ? newASTNode(AST_PROCEDURE_DECL, nameTok)

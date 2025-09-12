@@ -2125,14 +2125,29 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
             break;
         }
-        case AST_COMPOUND:
+        case AST_COMPOUND: {
+            // Pass 1: compile nested routine declarations so they are available
+            // regardless of where they appear in the block.
             for (int i = 0; i < node->child_count; i++) {
-                if (node->children[i]) {
-                    compileStatement(node->children[i], chunk,
-                                      getLine(node->children[i]));
+                AST *child = node->children[i];
+                if (child && (child->type == AST_PROCEDURE_DECL ||
+                              child->type == AST_FUNCTION_DECL)) {
+                    compileNode(child, chunk, getLine(child));
                 }
             }
+
+            // Pass 2: compile executable statements in their original order,
+            // skipping nested routine declarations which were already handled.
+            for (int i = 0; i < node->child_count; i++) {
+                AST *child = node->children[i];
+                if (!child || child->type == AST_PROCEDURE_DECL ||
+                    child->type == AST_FUNCTION_DECL) {
+                    continue;
+                }
+                compileStatement(child, chunk, getLine(child));
+            }
             break;
+        }
         default:
             compileStatement(node, chunk, line);
             break;
@@ -2239,15 +2254,30 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     
     // Step 3: Add all other local variables.
     blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
-    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0 && blockNode->children[0]->type == AST_COMPOUND) {
-        AST* decls = blockNode->children[0];
-        for (int i = 0; i < decls->child_count; i++) {
-            if (decls->children[i] && decls->children[i]->type == AST_VAR_DECL) {
-                AST* var_decl_group = decls->children[i];
-                for (int j = 0; j < var_decl_group->child_count; j++) {
-                    AST* var_name_node = var_decl_group->children[j];
-                    if (var_name_node && var_name_node->token) {
-                        addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+    if (blockNode) {
+        if (blockNode->type == AST_BLOCK && blockNode->child_count > 0 &&
+            blockNode->children[0]->type == AST_COMPOUND) {
+            AST* decls = blockNode->children[0];
+            for (int i = 0; i < decls->child_count; i++) {
+                if (decls->children[i] && decls->children[i]->type == AST_VAR_DECL) {
+                    AST* var_decl_group = decls->children[i];
+                    for (int j = 0; j < var_decl_group->child_count; j++) {
+                        AST* var_name_node = var_decl_group->children[j];
+                        if (var_name_node && var_name_node->token) {
+                            addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+                        }
+                    }
+                }
+            }
+        } else if (blockNode->type == AST_COMPOUND) {
+            for (int i = 0; i < blockNode->child_count; i++) {
+                AST* child = blockNode->children[i];
+                if (child && child->type == AST_VAR_DECL) {
+                    for (int j = 0; j < child->child_count; j++) {
+                        AST* var_name_node = child->children[j];
+                        if (var_name_node && var_name_node->token) {
+                            addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+                        }
                     }
                 }
             }
@@ -2504,9 +2534,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 for (int i = 0; i < node->child_count; i++) {
                     AST *varNameNode = node->children[i];
                     if (varNameNode && varNameNode->token) {
-                        addLocal(current_function_compiler,
-                                 varNameNode->token->value,
-                                 getLine(varNameNode), false);
+                        int slot = resolveLocal(current_function_compiler,
+                                                varNameNode->token->value);
+                        if (slot == -1) {
+                            addLocal(current_function_compiler,
+                                     varNameNode->token->value,
+                                     getLine(varNameNode), false);
+                        }
                     }
                 }
             }
