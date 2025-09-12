@@ -597,7 +597,28 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 // expect a receiver of pointer type type-check correctly.
                 if (strcasecmp(varName, "myself") == 0) {
                     node->var_type = TYPE_POINTER;
-                    node->type_def = NULL; // Unknown specific pointee is acceptable for matching
+                    // Try to infer the class type from the current scope's name: Class_Method
+                    AST* clsType = NULL;
+                    if (childScopeNode && childScopeNode->token && childScopeNode->token->value) {
+                        const char* fn = childScopeNode->token->value;
+                        const char* us = strchr(fn, '_');
+                        if (us && us != fn) {
+                            size_t len = (size_t)(us - fn);
+                            char cname[MAX_SYMBOL_LENGTH];
+                            if (len >= sizeof(cname)) len = sizeof(cname) - 1;
+                            memcpy(cname, fn, len);
+                            cname[len] = '\0';
+                            clsType = lookupType(cname);
+                        }
+                    }
+                    // Build a pointer type node that points at the class record type if we found it.
+                    if (clsType) {
+                        AST* ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+                        if (ptrNode) {
+                            setRight(ptrNode, clsType);
+                            node->type_def = ptrNode;
+                        }
+                    }
                     break;
                 }
 
