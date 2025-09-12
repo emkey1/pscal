@@ -22,11 +22,13 @@ def main() -> None:
         description="Find source file(s) matching a Pscal cache file."
     )
     parser.add_argument("cache_file", help="Path to a file in ~/.pscal_cache")
+
+    root_dir = str(Path("/").resolve())
     parser.add_argument(
         "search_dirs",
         nargs="*",
-        default=["."],
-        help="Directories to recursively search for source files",
+        default=[root_dir],
+        help=f"Directories to recursively search for source files (default: {root_dir})",
     )
     args = parser.parse_args()
 
@@ -43,12 +45,14 @@ def main() -> None:
         base = Path(directory)
         if not base.is_dir():
             continue
-        for file_path in base.rglob("*"):
-            if not file_path.is_file():
-                continue
-            abs_str = os.path.realpath(file_path)
-            if hashPath(abs_str) == target_hash:
-                matches.append(abs_str)
+        for root, dirs, files in os.walk(base, followlinks=False):
+            if ".git" in dirs:
+                dirs.remove(".git")
+            for name in files:
+                file_path = Path(root) / name
+                abs_str = os.path.realpath(file_path)
+                if hashPath(abs_str) == target_hash:
+                    matches.append(abs_str)
 
     if matches:
         for m in matches:
