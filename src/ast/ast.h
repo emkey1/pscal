@@ -42,7 +42,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode);
 AST *copyAST(AST *node);
 bool verifyASTLinks(AST *node, AST *expectedParent);
 void freeTypeTableASTNodes(void);
-AST* findDeclarationInScope(const char* varName, AST* currentScopeNode);
+AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode);
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode);
 VarType getBuiltinReturnType(const char* name);
 void dumpASTJSON(AST *node, FILE *outFile);

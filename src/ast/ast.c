@@ -297,10 +297,10 @@ void setTypeAST(AST *node, VarType type) {
 
 static AST* findDeclInCompound(AST* compound, const char* varName);
 
-AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
+AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
      if (!currentScopeNode || !varName) return NULL;
      if (currentScopeNode->type == AST_COMPOUND) {
-         return findDeclInCompound(currentScopeNode, varName);
+         return findDeclInCompound(currentScopeNode, varName, referenceNode);
      }
      if (currentScopeNode->type != AST_PROCEDURE_DECL && currentScopeNode->type != AST_FUNCTION_DECL) return NULL;
 
@@ -349,15 +349,29 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
                     }
                 }
             }
+            if (blockNode->child_count > 1) {
+                AST* statementsNode = blockNode->children[1];
+                if (statementsNode && statementsNode->type == AST_COMPOUND && isAncestor(statementsNode, referenceNode)) {
+                    AST* found = findDeclInCompound(statementsNode, varName, referenceNode);
+                    if (found) return found;
+                }
+            }
         } else if (blockNode->type == AST_COMPOUND) {
-            AST* found = findDeclInCompound(blockNode, varName);
+            AST* found = findDeclInCompound(blockNode, varName, referenceNode);
             if (found) return found;
         }
     }
     return NULL;
 }
 
-static AST* findDeclInCompound(AST* compound, const char* varName) {
+static bool isAncestor(AST* ancestor, AST* node) {
+    for (AST* p = node; p; p = p->parent) {
+        if (p == ancestor) return true;
+    }
+    return false;
+}
+
+static AST* findDeclInCompound(AST* compound, const char* varName, AST* referenceNode) {
     if (!compound || compound->type != AST_COMPOUND) return NULL;
     for (int i = 0; i < compound->child_count; i++) {
         AST* child = compound->children[i];
@@ -376,10 +390,12 @@ static AST* findDeclInCompound(AST* compound, const char* varName) {
                     return child;
                 }
             }
-        } else if (child->type == AST_COMPOUND) {
-            AST* nested = findDeclInCompound(child, varName);
+        } else if (child->type == AST_COMPOUND && isAncestor(child, referenceNode)) {
+            AST* nested = findDeclInCompound(child, varName, referenceNode);
             if (nested) return nested;
+            break;
         }
+        if (child == referenceNode) break;
     }
     return NULL;
 }
@@ -396,17 +412,12 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
          return sym->type_def;
      }
 
-    if (currentScopeNode && currentScopeNode != globalProgramNode) {
-        foundDecl = findDeclarationInScope(varName, currentScopeNode);
-    }
-
-    // If not found in the immediate scope, walk up parent scopes to
-    // support nested routines accessing variables from enclosing
-    // procedures/functions (upvalues).
     AST* parentScope = currentScopeNode ? currentScopeNode->parent : NULL;
     while (!foundDecl && parentScope) {
-        if (parentScope->type == AST_PROCEDURE_DECL || parentScope->type == AST_FUNCTION_DECL) {
-            foundDecl = findDeclarationInScope(varName, parentScope);
+        if (parentScope->type == AST_COMPOUND ||
+            parentScope->type == AST_PROCEDURE_DECL ||
+            parentScope->type == AST_FUNCTION_DECL) {
+            foundDecl = findDeclarationInScope(varName, parentScope, currentScopeNode);
             if (foundDecl) break;
         }
         parentScope = parentScope->parent;
