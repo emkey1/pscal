@@ -49,10 +49,10 @@ class Ball {
     }
     if ((myself.y - myself.radius) < 0) {
       myself.y = myself.radius;
-      myself.dx = -myself.dx * WallBoost;
+      myself.dy = -myself.dy * WallBoost;
     } else if ((myself.y + myself.radius) > maxY) {
       myself.y = maxY - myself.radius;
-      myself.dx = -myself.dx * WallBoost;
+      myself.dy = -myself.dy * WallBoost;
     }
   }
 
