@@ -9,7 +9,7 @@ class MandelbrotApp {
   const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
-  const int UpdateQuantum = 24;
+  const int UpdateQuantum = 8;
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
@@ -128,13 +128,20 @@ class MandelbrotApp {
       unlock(myself.rowMutex);
       if (done) doneCount = doneCount + 1;
     }
-    if (doneCount - myself.lastUpdatedRows >= myself.UpdateQuantum || doneCount == myself.Height) {
+    if ((doneCount > 0 && myself.lastUpdatedRows == 0) ||
+        (doneCount - myself.lastUpdatedRows >= myself.UpdateQuantum) ||
+        (doneCount == myself.Height)) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
       myself.lastUpdatedRows = doneCount;
     }
     bool allDone = (doneCount == myself.Height);
     if (allDone || myself.getCancel()) {
+      if (doneCount > myself.lastUpdatedRows) {
+        updatetexture(myself.textureID, myself.pixels);
+        cleardevice(); rendercopy(myself.textureID); updatescreen();
+        myself.lastUpdatedRows = doneCount;
+      }
       int i;
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
       myself.computing = false;
@@ -187,6 +194,7 @@ class MandelbrotApp {
     while (!myself.getQuit()) {
       if (needRender && !myself.computing) { myself.startCompute(); needRender = false; }
       myself.pollCompute();
+      delay(1);
       if (myself.handleInput()) {
         myself.setCancel(true);
         if (myself.computing) { int i; for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } } myself.computing = false; }

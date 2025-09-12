@@ -9,7 +9,8 @@ class MandelbrotApp {
   const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
-  const int UpdateQuantum = 24; // Update texture every N rows completed
+  // Update texture every N rows completed. Smaller value improves perceived progress.
+  const int UpdateQuantum = 8;
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
@@ -160,7 +161,10 @@ class MandelbrotApp {
       unlock(myself.rowMutex);
       if (done) doneCount = doneCount + 1;
     }
-    if (doneCount - myself.lastUpdatedRows >= myself.UpdateQuantum || doneCount == myself.Height) {
+    // Update when enough rows progressed, for first visible line, and on completion.
+    if ((doneCount > 0 && myself.lastUpdatedRows == 0) ||
+        (doneCount - myself.lastUpdatedRows >= myself.UpdateQuantum) ||
+        (doneCount == myself.Height)) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
       myself.lastUpdatedRows = doneCount;
@@ -169,6 +173,12 @@ class MandelbrotApp {
     bool allDone = true;
     for (y = 0; y < myself.Height; y = y + 1) { if (!myself.rowDone[y]) { allDone = false; break; } }
     if (allDone || myself.getCancel()) {
+      // Ensure final frame is displayed before we join threads.
+      if (doneCount > myself.lastUpdatedRows) {
+        updatetexture(myself.textureID, myself.pixels);
+        cleardevice(); rendercopy(myself.textureID); updatescreen();
+        myself.lastUpdatedRows = doneCount;
+      }
       int i;
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
       myself.computing = false;
@@ -235,6 +245,8 @@ class MandelbrotApp {
       }
       // Poll ongoing compute to keep UI responsive
       myself.pollCompute();
+      // Small yield to avoid a tight loop hogging CPU and to give SDL a chance to paint
+      delay(1);
       // Handle input and restart compute on changes
       if (myself.handleInput()) {
         // Cancel any ongoing compute and restart
