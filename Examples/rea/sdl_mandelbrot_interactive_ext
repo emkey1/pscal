@@ -38,6 +38,15 @@ class MandelbrotApp {
   int quitMutex;
   int tids[ThreadCount];
   int lastUpdatedRows;
+  int lastUpdateMs;
+  const int UpdateIntervalMs = 33;
+
+  int nowMs() {
+    int hh, mm, ss, hs;
+    gettime(hh, mm, ss, hs);
+    int ms = (((hh * 60) + mm) * 60 + ss) * 1000 + (hs * 10);
+    return ms;
+  }
 
   void init() {
     myself.minRe = -2.0;
@@ -56,6 +65,7 @@ class MandelbrotApp {
     int i;
     for (i = 0; i < myself.ThreadCount; i = i + 1) { myself.tids[i] = -1; }
     myself.lastUpdatedRows = 0;
+    myself.lastUpdateMs = 0;
   }
 
   int getQuit() { bool q; lock(myself.quitMutex); q = myself.quit; unlock(myself.quitMutex); return q; }
@@ -130,12 +140,18 @@ class MandelbrotApp {
     }
     int adaptiveQuantum = (myself.Height / (myself.ThreadCount * 8));
     if (adaptiveQuantum < myself.UpdateQuantum) adaptiveQuantum = myself.UpdateQuantum;
-    if ((doneCount > 0 && myself.lastUpdatedRows == 0) ||
-        (doneCount - myself.lastUpdatedRows >= adaptiveQuantum) ||
-        (doneCount == myself.Height)) {
+    int now = myself.nowMs();
+    int delta = now - myself.lastUpdateMs;
+    if (delta < 0) delta = delta + 86400000;
+
+    bool initialFrame = (doneCount > 0 && myself.lastUpdatedRows == 0);
+    bool enoughProgress = (doneCount - myself.lastUpdatedRows >= adaptiveQuantum);
+    bool timeElapsed = (delta >= myself.UpdateIntervalMs);
+    if (initialFrame || (timeElapsed && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height)) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
       myself.lastUpdatedRows = doneCount;
+      myself.lastUpdateMs = now;
     }
     bool allDone = (doneCount == myself.Height);
     if (allDone || myself.getCancel()) {
@@ -143,6 +159,7 @@ class MandelbrotApp {
         updatetexture(myself.textureID, myself.pixels);
         cleardevice(); rendercopy(myself.textureID); updatescreen();
         myself.lastUpdatedRows = doneCount;
+        myself.lastUpdateMs = myself.nowMs();
       }
       int i;
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
