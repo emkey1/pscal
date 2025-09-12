@@ -793,6 +793,7 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     if (procedure_table) {
         for (int i = 0; i < HASHTABLE_SIZE; i++) {
             for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
+                if (sym->is_alias) continue; // Skip alias entries
                 proc_count++;
             }
         }
@@ -801,18 +802,18 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
     if (procedure_table) {
         for (int i = 0; i < HASHTABLE_SIZE; i++) {
             for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
-                Symbol* actual = sym->is_alias && sym->real_symbol ? sym->real_symbol : sym;
+                if (sym->is_alias) continue; // Only serialize real procedures
                 int name_len = (int)strlen(sym->name);
                 fwrite(&name_len, sizeof(name_len), 1, f);
                 fwrite(sym->name, 1, name_len, f);
-                fwrite(&actual->bytecode_address, sizeof(actual->bytecode_address), 1, f);
-                fwrite(&actual->locals_count, sizeof(actual->locals_count), 1, f);
-                fwrite(&actual->upvalue_count, sizeof(actual->upvalue_count), 1, f);
-                fwrite(&actual->type, sizeof(actual->type), 1, f);
-                for (int uv = 0; uv < actual->upvalue_count; uv++) {
-                    fwrite(&actual->upvalues[uv].index, sizeof(uint8_t), 1, f);
-                    uint8_t isLocal = actual->upvalues[uv].isLocal ? 1 : 0;
-                    uint8_t isRef = actual->upvalues[uv].is_ref ? 1 : 0;
+                fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f);
+                fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
+                fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
+                fwrite(&sym->type, sizeof(sym->type), 1, f);
+                for (int uv = 0; uv < sym->upvalue_count; uv++) {
+                    fwrite(&sym->upvalues[uv].index, sizeof(uint8_t), 1, f);
+                    uint8_t isLocal = sym->upvalues[uv].isLocal ? 1 : 0;
+                    uint8_t isRef = sym->upvalues[uv].is_ref ? 1 : 0;
                     fwrite(&isLocal, sizeof(uint8_t), 1, f);
                     fwrite(&isRef, sizeof(uint8_t), 1, f);
                 }
