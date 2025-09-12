@@ -295,8 +295,13 @@ void setTypeAST(AST *node, VarType type) {
     node->var_type = type;
 }
 
+static AST* findDeclInCompound(AST* compound, const char* varName);
+
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
      if (!currentScopeNode || !varName) return NULL;
+     if (currentScopeNode->type == AST_COMPOUND) {
+         return findDeclInCompound(currentScopeNode, varName);
+     }
      if (currentScopeNode->type != AST_PROCEDURE_DECL && currentScopeNode->type != AST_FUNCTION_DECL) return NULL;
 
      for (int i = 0; i < currentScopeNode->child_count; i++) {
@@ -317,32 +322,66 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
            }
       }
 
-     AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL) ? currentScopeNode->right : currentScopeNode->extra;
-     if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
-         AST* declarationsNode = blockNode->children[0];
-         if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
-             for (int i = 0; i < declarationsNode->child_count; i++) {
-                 AST* varDeclGroup = declarationsNode->children[i];
-                 if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
-                     for (int j = 0; j < varDeclGroup->child_count; j++) {
-                         AST* varNameNode = varDeclGroup->children[j];
-                         if (varNameNode) {
-                             if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                                 strcasecmp(varNameNode->token->value, varName) == 0) {
-                                 return varDeclGroup;
-                             } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
-                                        varNameNode->left->type == AST_VARIABLE &&
-                                        varNameNode->left->token &&
-                                        strcasecmp(varNameNode->left->token->value, varName) == 0) {
-                                 return varDeclGroup;
-                             }
-                         }
-                     }
-                 }
+    AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL)
+                         ? currentScopeNode->right
+                         : currentScopeNode->extra;
+    if (blockNode) {
+        if (blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+            AST* declarationsNode = blockNode->children[0];
+            if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
+                for (int i = 0; i < declarationsNode->child_count; i++) {
+                    AST* varDeclGroup = declarationsNode->children[i];
+                    if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                        for (int j = 0; j < varDeclGroup->child_count; j++) {
+                            AST* varNameNode = varDeclGroup->children[j];
+                            if (varNameNode) {
+                                if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+                                    strcasecmp(varNameNode->token->value, varName) == 0) {
+                                    return varDeclGroup;
+                                } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                                           varNameNode->left->type == AST_VARIABLE &&
+                                           varNameNode->left->token &&
+                                           strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                                    return varDeclGroup;
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        } else if (blockNode->type == AST_COMPOUND) {
+            AST* found = findDeclInCompound(blockNode, varName);
+            if (found) return found;
         }
     }
-     return NULL;
+    return NULL;
+}
+
+static AST* findDeclInCompound(AST* compound, const char* varName) {
+    if (!compound || compound->type != AST_COMPOUND) return NULL;
+    for (int i = 0; i < compound->child_count; i++) {
+        AST* child = compound->children[i];
+        if (!child) continue;
+        if (child->type == AST_VAR_DECL) {
+            for (int j = 0; j < child->child_count; j++) {
+                AST* varNameNode = child->children[j];
+                if (!varNameNode) continue;
+                if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+                    strcasecmp(varNameNode->token->value, varName) == 0) {
+                    return child;
+                } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                           varNameNode->left->type == AST_VARIABLE &&
+                           varNameNode->left->token &&
+                           strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                    return child;
+                }
+            }
+        } else if (child->type == AST_COMPOUND) {
+            AST* nested = findDeclInCompound(child, varName);
+            if (nested) return nested;
+        }
+    }
+    return NULL;
 }
 
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode) {
