@@ -3,9 +3,9 @@
 // Requires building Pscal with SDL support.
 
 class Ball {
-  const float WallBoost = 1.05;
-  const float MinSpeed = 0.1;
-  const float MaxSpeed = 10.0;
+  const float WallBoost = 1.15;
+  const float MinSpeed = 0.9;
+  const float MaxSpeed = 12.0;
   float x;
   float y;
   float dx;
