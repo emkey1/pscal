@@ -22,12 +22,14 @@ def build_hash_map(search_dirs: list[str]) -> dict[int, list[str]]:
         base = Path(directory)
         if not base.is_dir():
             continue
-        for file_path in base.rglob("*"):
-            if not file_path.is_file():
-                continue
-            abs_str = os.path.realpath(file_path)
-            h = hash_path(abs_str)
-            mapping.setdefault(h, []).append(abs_str)
+        for root, dirs, files in os.walk(base, followlinks=False):
+            if ".git" in dirs:
+                dirs.remove(".git")
+            for name in files:
+                file_path = Path(root) / name
+                abs_str = os.path.realpath(file_path)
+                h = hash_path(abs_str)
+                mapping.setdefault(h, []).append(abs_str)
     return mapping
 
 def main() -> None:
@@ -39,11 +41,12 @@ def main() -> None:
         default="~/.pscal_cache",
         help="Cache directory (default: ~/.pscal_cache)",
     )
+    repo_root = str(Path(__file__).resolve().parents[1])
     parser.add_argument(
         "search_dirs",
         nargs="*",
-        default=["."],
-        help="Directories to recursively search for source files",
+        default=[repo_root],
+        help=f"Directories to recursively search for source files (default: {repo_root})",
     )
     args = parser.parse_args()
 
