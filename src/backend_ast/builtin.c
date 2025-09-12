@@ -3891,6 +3891,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("printf", AST_FUNCTION_DECL, NULL); // special-case handled by compiler
+    registerBuiltinFunction("CreateThread", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("WaitForThread", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("lock", AST_PROCEDURE_DECL, NULL);
