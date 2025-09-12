@@ -114,6 +114,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "byte", 4) == 0) return REA_TOKEN_BYTE;
             if (strncmp(start, "text", 4) == 0) return REA_TOKEN_TEXT;
             if (strncmp(start, "int8", 4) == 0) return REA_TOKEN_INT8;
+            if (strncmp(start, "join", 4) == 0) return REA_TOKEN_JOIN;
             break;
         case 5:
             if (strncmp(start, "class", 5) == 0) return REA_TOKEN_CLASS;
@@ -126,6 +127,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "int16", 5) == 0) return REA_TOKEN_INT16;
             if (strncmp(start, "int32", 5) == 0) return REA_TOKEN_INT32;
             if (strncmp(start, "int64", 5) == 0) return REA_TOKEN_INT64;
+            if (strncmp(start, "spawn", 5) == 0) return REA_TOKEN_SPAWN;
             break;
         case 6:
             if (strncmp(start, "return", 6) == 0) return REA_TOKEN_RETURN;

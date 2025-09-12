@@ -1,0 +1,9 @@
+void worker() {
+  writeln("child");
+}
+
+writeln("start");
+int tid;
+tid = spawn worker();
+join tid;
+writeln("end");

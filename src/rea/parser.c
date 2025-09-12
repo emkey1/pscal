@@ -133,9 +133,9 @@ static AST *parseStatement(ReaParser *p);
 static AST *parseVarDecl(ReaParser *p);
 static AST *parseReturn(ReaParser *p);
 static AST *parseBreak(ReaParser *p);
+static AST *parseJoin(ReaParser *p);
 static AST *parseIf(ReaParser *p);
 static AST *parseWhile(ReaParser *p);
-static AST *parseBreak(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex);
 static AST *parseWhile(ReaParser *p);
@@ -410,6 +410,14 @@ static VarType tokenTypeToVarType(ReaTokenType t) {
 }
 
 static AST *parseFactor(ReaParser *p) {
+    if (p->current.type == REA_TOKEN_SPAWN) {
+        reaAdvance(p); // consume 'spawn'
+        AST *call = parseFactor(p);
+        if (!call) return NULL;
+        AST *node = newThreadSpawn(call);
+        setTypeAST(node, TYPE_INT64);
+        return node;
+    }
     if (isTypeKeywordToken(p->current.type)) {
         ReaToken t = p->current;
         char *lex = (char*)malloc(t.length + 1);
@@ -1511,6 +1519,16 @@ static AST *parseBreak(ReaParser *p) {
     return newASTNode(AST_BREAK, NULL);
 }
 
+static AST *parseJoin(ReaParser *p) {
+    reaAdvance(p); // consume 'join'
+    AST *expr = parseExpression(p);
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+    AST *node = newThreadJoin(expr);
+    return node;
+}
+
 static AST *parseIf(ReaParser *p) {
     reaAdvance(p); // consume 'if'
     if (p->current.type == REA_TOKEN_LEFT_PAREN) {
@@ -1978,6 +1996,9 @@ static AST *parseStatement(ReaParser *p) {
     }
     if (p->current.type == REA_TOKEN_IMPORT) {
         return parseImport(p);
+    }
+    if (p->current.type == REA_TOKEN_JOIN) {
+        return parseJoin(p);
     }
     if (p->current.type == REA_TOKEN_RETURN) {
         return parseReturn(p);
