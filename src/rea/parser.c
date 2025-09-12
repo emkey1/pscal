@@ -1192,7 +1192,8 @@ static AST *parseVarDecl(ReaParser *p) {
 
     AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
     AST *compound = newASTNode(AST_COMPOUND, NULL);
-    compound->is_global_scope = true;
+    // Mark as global scope only when parsing at the top level
+    compound->is_global_scope = (p->currentFunctionType == TYPE_VOID && p->currentClassName == NULL);
 
     bool first = true;
     while (1) {

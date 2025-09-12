@@ -3601,11 +3601,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compiler_had_error = true;
                 break;
             }
-            if (call->child_count > 0) {
-                fprintf(stderr, "L%d: Compiler warning: Arguments to '%s' ignored in spawn.\n", line, calleeName);
+            if (call->child_count == 0) {
+                writeBytecodeChunk(chunk, THREAD_CREATE, line);
+                emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
+            } else if (call->child_count == 1) {
+                emitConstant(chunk, addIntConstant(chunk, proc_symbol->bytecode_address), line);
+                compileRValue(call->children[0], chunk, getLine(call->children[0]));
+                writeBytecodeChunk(chunk, CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_THREAD_ADDR, line);
+            } else {
+                fprintf(stderr, "L%d: Compiler error: spawn supports at most one argument.\n", line);
+                compiler_had_error = true;
             }
-            writeBytecodeChunk(chunk, THREAD_CREATE, line);
-            emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
             break;
         }
         case AST_DEREFERENCE: {
