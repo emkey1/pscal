@@ -213,4 +213,39 @@ fi
 rm -rf "$tmp_home" "$src_dir"
 echo
 
+# Cache invalidation test when the Pascal binary is newer than the cache
+echo "---- CacheBinaryStalenessTest ----"
+tmp_home=$(mktemp -d)
+src_dir=$(mktemp -d)
+cat > "$src_dir/BinaryTest" <<'EOF'
+program BinaryTest;
+begin
+  writeln('first');
+end.
+EOF
+
+# Ensure cache timestamp precedes binary update
+sleep 1
+set +e
+(cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out1" 2> "$tmp_home/err1")
+status1=$?
+set -e
+if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
+  sleep 2
+  touch "$PASCAL_BIN"
+  set +e
+  (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out2" 2> "$tmp_home/err2")
+  status2=$?
+  set -e
+  if [ $status2 -ne 0 ] || grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
+    echo "Cache binary staleness test failed: expected cache invalidation" >&2
+    EXIT_CODE=1
+  fi
+else
+  echo "Cache binary staleness test failed to run" >&2
+  EXIT_CODE=1
+fi
+rm -rf "$tmp_home" "$src_dir"
+echo
+
 exit $EXIT_CODE

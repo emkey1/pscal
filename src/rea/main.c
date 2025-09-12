@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, dep_array, dep_count, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, argv[0], dep_array, dep_count, &chunk);
     if (dep_array) free(dep_array);
     if (used_cache) {
 #if defined(__APPLE__)
