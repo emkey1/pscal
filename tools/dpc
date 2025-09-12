@@ -3,10 +3,35 @@
 
 import argparse
 import os
+import struct
 from pathlib import Path
 
 FNV_OFFSET = 2166136261
 FNV_PRIME = 16777619
+
+
+def _read_source_path(cache_file: Path) -> str | None:
+    """Read the embedded source path from a cache file if present."""
+    try:
+        with cache_file.open("rb") as f:
+            # Skip magic and version
+            header = f.read(8)
+            if len(header) < 8:
+                return None
+            data = f.read(4)
+            if len(data) != 4:
+                return None
+            stored = struct.unpack("<i", data)[0]
+            if stored >= 0:
+                # Older cache without path info
+                return None
+            path_bytes = f.read(-stored)
+            if len(path_bytes) != -stored:
+                return None
+            return path_bytes.decode("utf-8")
+    except OSError:
+        return None
+
 
 def hash_path(path: str) -> int:
     real = os.path.realpath(path)
@@ -15,6 +40,7 @@ def hash_path(path: str) -> int:
         h ^= b
         h = (h * FNV_PRIME) & 0xFFFFFFFF
     return h
+
 
 def build_hash_map(search_dirs: list[str]) -> dict[int, list[str]]:
     mapping: dict[int, list[str]] = {}
@@ -32,6 +58,7 @@ def build_hash_map(search_dirs: list[str]) -> dict[int, list[str]]:
                 mapping.setdefault(h, []).append(abs_str)
     return mapping
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Display original file paths for cached Pscal bytecode files."
@@ -46,7 +73,10 @@ def main() -> None:
         "search_dirs",
         nargs="*",
         default=[root_dir],
-        help=f"Directories to recursively search for source files (default: {root_dir})",
+        help=(
+            "Directories to recursively search for source files when no path is "
+            f"embedded (default: {root_dir})"
+        ),
     )
     args = parser.parse_args()
 
@@ -54,20 +84,29 @@ def main() -> None:
     if not cache_dir.is_dir():
         raise SystemExit(f"Cache directory not found: {cache_dir}")
 
-    hash_map = build_hash_map(args.search_dirs)
+    hash_map: dict[int, list[str]] | None = None
 
     for cache_file in sorted(cache_dir.glob("*.bc")):
+        src = _read_source_path(cache_file)
+        if src:
+            print(f"{cache_file.name}: {src}")
+            continue
+
+        # Fallback for caches without embedded path information
+        if hash_map is None:
+            hash_map = build_hash_map(args.search_dirs)
         try:
             target_hash = int(cache_file.stem)
         except ValueError:
             print(f"{cache_file.name}: (invalid cache filename)")
             continue
-        matches = hash_map.get(target_hash, [])
+        matches = hash_map.get(target_hash, []) if hash_map else []
         if matches:
             for m in matches:
                 print(f"{cache_file.name}: {m}")
         else:
             print(f"{cache_file.name}: (no match)")
+
 
 if __name__ == "__main__":
     main()

@@ -3,12 +3,35 @@
 
 import argparse
 import os
+import struct
 from pathlib import Path
 
 FNV_OFFSET = 2166136261
 FNV_PRIME = 16777619
 
-def hashPath(path: str) -> int:
+
+def _read_source_path(cache_path: Path) -> str | None:
+    try:
+        with cache_path.open("rb") as f:
+            # Skip magic and version
+            header = f.read(8)
+            if len(header) < 8:
+                return None
+            data = f.read(4)
+            if len(data) != 4:
+                return None
+            stored = struct.unpack("<i", data)[0]
+            if stored >= 0:
+                return None
+            path_bytes = f.read(-stored)
+            if len(path_bytes) != -stored:
+                return None
+            return path_bytes.decode("utf-8")
+    except OSError:
+        return None
+
+
+def hash_path(path: str) -> int:
     """Replicate the hash function used by Pscal's cache."""
     real = os.path.realpath(path)
     h = FNV_OFFSET
@@ -16,6 +39,7 @@ def hashPath(path: str) -> int:
         h ^= b
         h = (h * FNV_PRIME) & 0xFFFFFFFF
     return h
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -28,11 +52,22 @@ def main() -> None:
         "search_dirs",
         nargs="*",
         default=[root_dir],
-        help=f"Directories to recursively search for source files (default: {root_dir})",
+        help=(
+            "Directories to recursively search for source files when no path is "
+            f"embedded (default: {root_dir})"
+        ),
     )
     args = parser.parse_args()
 
     cache_path = Path(args.cache_file).expanduser()
+    if not cache_path.exists():
+        raise SystemExit(f"Cache file not found: {cache_path}")
+
+    src = _read_source_path(cache_path)
+    if src:
+        print(src)
+        return
+
     if not cache_path.name.endswith(".bc"):
         raise SystemExit("Cache file should have a .bc extension")
     try:
@@ -51,7 +86,7 @@ def main() -> None:
             for name in files:
                 file_path = Path(root) / name
                 abs_str = os.path.realpath(file_path)
-                if hashPath(abs_str) == target_hash:
+                if hash_path(abs_str) == target_hash:
                     matches.append(abs_str)
 
     if matches:
@@ -59,6 +94,7 @@ def main() -> None:
             print(m)
     else:
         print("No matching source files found.")
+
 
 if __name__ == "__main__":
     main()
