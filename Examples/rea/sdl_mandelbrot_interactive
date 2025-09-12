@@ -9,8 +9,8 @@ class MandelbrotApp {
   const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
-  // Update texture every N rows completed. Smaller value improves perceived progress.
-  const int UpdateQuantum = 8;
+  // Minimum rows between UI texture updates; actual threshold adapts to image size and thread count.
+  const int UpdateQuantum = 4;
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
@@ -161,9 +161,12 @@ class MandelbrotApp {
       unlock(myself.rowMutex);
       if (done) doneCount = doneCount + 1;
     }
+    // Adaptive quantum: smaller batches when more threads/rows, never below UpdateQuantum
+    int adaptiveQuantum = (myself.Height / (myself.ThreadCount * 8));
+    if (adaptiveQuantum < myself.UpdateQuantum) adaptiveQuantum = myself.UpdateQuantum;
     // Update when enough rows progressed, for first visible line, and on completion.
     if ((doneCount > 0 && myself.lastUpdatedRows == 0) ||
-        (doneCount - myself.lastUpdatedRows >= myself.UpdateQuantum) ||
+        (doneCount - myself.lastUpdatedRows >= adaptiveQuantum) ||
         (doneCount == myself.Height)) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
