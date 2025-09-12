@@ -295,54 +295,85 @@ void setTypeAST(AST *node, VarType type) {
     node->var_type = type;
 }
 
-AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
-     if (!currentScopeNode || !varName) return NULL;
-     if (currentScopeNode->type != AST_PROCEDURE_DECL && currentScopeNode->type != AST_FUNCTION_DECL) return NULL;
+static AST* matchVarDecl(AST* varDeclGroup, const char* varName);
 
-     for (int i = 0; i < currentScopeNode->child_count; i++) {
-         AST* paramDeclGroup = currentScopeNode->children[i];
-         if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
-              for (int j = 0; j < paramDeclGroup->child_count; j++) {
-                  AST* paramNameNode = paramDeclGroup->children[j];
-                  if (paramNameNode && paramNameNode->type == AST_VARIABLE && paramNameNode->token &&
-                      strcasecmp(paramNameNode->token->value, varName) == 0) {
-                      return paramDeclGroup;
-                  }
-              }
-         }
-     }
-      if (currentScopeNode->type == AST_FUNCTION_DECL) {
-           if (strcasecmp(currentScopeNode->token->value, varName) == 0 || strcasecmp("result", varName) == 0) {
-                return currentScopeNode;
-           }
-      }
+AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
+    if (!currentScopeNode || !varName || !referenceNode) return NULL;
 
-     AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL) ? currentScopeNode->right : currentScopeNode->extra;
-     if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
-         AST* declarationsNode = blockNode->children[0];
-         if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
-             for (int i = 0; i < declarationsNode->child_count; i++) {
-                 AST* varDeclGroup = declarationsNode->children[i];
-                 if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
-                     for (int j = 0; j < varDeclGroup->child_count; j++) {
-                         AST* varNameNode = varDeclGroup->children[j];
-                         if (varNameNode) {
-                             if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                                 strcasecmp(varNameNode->token->value, varName) == 0) {
-                                 return varDeclGroup;
-                             } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
-                                        varNameNode->left->type == AST_VARIABLE &&
-                                        varNameNode->left->token &&
-                                        strcasecmp(varNameNode->left->token->value, varName) == 0) {
-                                 return varDeclGroup;
-                             }
-                         }
-                     }
-                 }
+    AST* node = referenceNode;
+    while (node && node != currentScopeNode) {
+        AST* parent = node->parent;
+        if (parent && parent->type == AST_COMPOUND) {
+            for (int i = 0; i < parent->child_count; i++) {
+                AST* sibling = parent->children[i];
+                if (sibling == node) break;
+                if (sibling && sibling->type == AST_VAR_DECL) {
+                    AST* found = matchVarDecl(sibling, varName);
+                    if (found) return found;
+                }
+            }
+        }
+        node = parent;
+    }
+
+    if (currentScopeNode->type == AST_COMPOUND) {
+        return NULL;
+    }
+
+    if (currentScopeNode->type != AST_PROCEDURE_DECL &&
+        currentScopeNode->type != AST_FUNCTION_DECL) {
+        return NULL;
+    }
+
+    for (int i = 0; i < currentScopeNode->child_count; i++) {
+        AST* paramDeclGroup = currentScopeNode->children[i];
+        if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
+            AST* found = matchVarDecl(paramDeclGroup, varName);
+            if (found) return paramDeclGroup;
+        }
+    }
+
+    if (currentScopeNode->type == AST_FUNCTION_DECL) {
+        if (strcasecmp(currentScopeNode->token->value, varName) == 0 ||
+            strcasecmp("result", varName) == 0) {
+            return currentScopeNode;
+        }
+    }
+
+    AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL)
+                         ? currentScopeNode->right
+                         : currentScopeNode->extra;
+    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+        AST* declarationsNode = blockNode->children[0];
+        if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
+            for (int i = 0; i < declarationsNode->child_count; i++) {
+                AST* varDeclGroup = declarationsNode->children[i];
+                if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                    AST* found = matchVarDecl(varDeclGroup, varName);
+                    if (found) return varDeclGroup;
+                }
             }
         }
     }
-     return NULL;
+
+    return NULL;
+}
+
+static AST* matchVarDecl(AST* varDeclGroup, const char* varName) {
+    for (int j = 0; j < varDeclGroup->child_count; j++) {
+        AST* varNameNode = varDeclGroup->children[j];
+        if (!varNameNode) continue;
+        if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+            strcasecmp(varNameNode->token->value, varName) == 0) {
+            return varDeclGroup;
+        } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                   varNameNode->left->type == AST_VARIABLE &&
+                   varNameNode->left->token &&
+                   strcasecmp(varNameNode->left->token->value, varName) == 0) {
+            return varDeclGroup;
+        }
+    }
+    return NULL;
 }
 
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode) {
@@ -357,17 +388,12 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
          return sym->type_def;
      }
 
-    if (currentScopeNode && currentScopeNode != globalProgramNode) {
-        foundDecl = findDeclarationInScope(varName, currentScopeNode);
-    }
-
-    // If not found in the immediate scope, walk up parent scopes to
-    // support nested routines accessing variables from enclosing
-    // procedures/functions (upvalues).
     AST* parentScope = currentScopeNode ? currentScopeNode->parent : NULL;
     while (!foundDecl && parentScope) {
-        if (parentScope->type == AST_PROCEDURE_DECL || parentScope->type == AST_FUNCTION_DECL) {
-            foundDecl = findDeclarationInScope(varName, parentScope);
+        if (parentScope->type == AST_COMPOUND ||
+            parentScope->type == AST_PROCEDURE_DECL ||
+            parentScope->type == AST_FUNCTION_DECL) {
+            foundDecl = findDeclarationInScope(varName, parentScope, currentScopeNode);
             if (foundDecl) break;
         }
         parentScope = parentScope->parent;
