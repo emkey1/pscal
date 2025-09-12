@@ -5,6 +5,7 @@
 #include "compiler/bytecode.h"
 
 bool loadBytecodeFromCache(const char* source_path,
+                           const char* frontend_path,
                            const char** dependencies,
                            int dep_count,
                            BytecodeChunk* chunk);

@@ -70,7 +70,7 @@ void initSymbolSystem(void) {
 #endif
 }
 
-int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
+int runProgram(const char *source, const char *programName, const char *frontend_path, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -111,7 +111,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             overall_success_status = true;
         } else {
             GlobalAST = optimizePascalAST(GlobalAST);
-            used_cache = loadBytecodeFromCache(programName, NULL, 0, &chunk);
+            used_cache = loadBytecodeFromCache(programName, frontend_path, NULL, 0, &chunk);
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
                 if (dump_bytecode_flag) {
@@ -310,7 +310,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
+    int result = runProgram(source_buffer, programName, argv[0], dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
     free(source_buffer); // Free the source code buffer
     return vmExitWithCleanup(result);
 }
