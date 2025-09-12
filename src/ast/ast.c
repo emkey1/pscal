@@ -295,108 +295,83 @@ void setTypeAST(AST *node, VarType type) {
     node->var_type = type;
 }
 
-static bool isAncestor(AST* ancestor, AST* node);
-static AST* findDeclInCompound(AST* compound, const char* varName, AST* referenceNode);
+static AST* matchVarDecl(AST* varDeclGroup, const char* varName);
 
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
-     if (!currentScopeNode || !varName) return NULL;
-     if (currentScopeNode->type == AST_COMPOUND) {
-         return findDeclInCompound(currentScopeNode, varName, referenceNode);
-     }
-     if (currentScopeNode->type != AST_PROCEDURE_DECL && currentScopeNode->type != AST_FUNCTION_DECL) return NULL;
+    if (!currentScopeNode || !varName || !referenceNode) return NULL;
 
-     for (int i = 0; i < currentScopeNode->child_count; i++) {
-         AST* paramDeclGroup = currentScopeNode->children[i];
-         if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
-              for (int j = 0; j < paramDeclGroup->child_count; j++) {
-                  AST* paramNameNode = paramDeclGroup->children[j];
-                  if (paramNameNode && paramNameNode->type == AST_VARIABLE && paramNameNode->token &&
-                      strcasecmp(paramNameNode->token->value, varName) == 0) {
-                      return paramDeclGroup;
-                  }
-              }
-         }
-     }
-      if (currentScopeNode->type == AST_FUNCTION_DECL) {
-           if (strcasecmp(currentScopeNode->token->value, varName) == 0 || strcasecmp("result", varName) == 0) {
-                return currentScopeNode;
-           }
-      }
+    AST* node = referenceNode;
+    while (node && node != currentScopeNode) {
+        AST* parent = node->parent;
+        if (parent && parent->type == AST_COMPOUND) {
+            for (int i = 0; i < parent->child_count; i++) {
+                AST* sibling = parent->children[i];
+                if (sibling == node) break;
+                if (sibling && sibling->type == AST_VAR_DECL) {
+                    AST* found = matchVarDecl(sibling, varName);
+                    if (found) return found;
+                }
+            }
+        }
+        node = parent;
+    }
+
+    if (currentScopeNode->type == AST_COMPOUND) {
+        return NULL;
+    }
+
+    if (currentScopeNode->type != AST_PROCEDURE_DECL &&
+        currentScopeNode->type != AST_FUNCTION_DECL) {
+        return NULL;
+    }
+
+    for (int i = 0; i < currentScopeNode->child_count; i++) {
+        AST* paramDeclGroup = currentScopeNode->children[i];
+        if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
+            AST* found = matchVarDecl(paramDeclGroup, varName);
+            if (found) return paramDeclGroup;
+        }
+    }
+
+    if (currentScopeNode->type == AST_FUNCTION_DECL) {
+        if (strcasecmp(currentScopeNode->token->value, varName) == 0 ||
+            strcasecmp("result", varName) == 0) {
+            return currentScopeNode;
+        }
+    }
 
     AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL)
                          ? currentScopeNode->right
                          : currentScopeNode->extra;
-    if (blockNode) {
-        if (blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
-            AST* declarationsNode = blockNode->children[0];
-            if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
-                for (int i = 0; i < declarationsNode->child_count; i++) {
-                    AST* varDeclGroup = declarationsNode->children[i];
-                    if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
-                        for (int j = 0; j < varDeclGroup->child_count; j++) {
-                            AST* varNameNode = varDeclGroup->children[j];
-                            if (varNameNode) {
-                                if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                                    strcasecmp(varNameNode->token->value, varName) == 0) {
-                                    return varDeclGroup;
-                                } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
-                                           varNameNode->left->type == AST_VARIABLE &&
-                                           varNameNode->left->token &&
-                                           strcasecmp(varNameNode->left->token->value, varName) == 0) {
-                                    return varDeclGroup;
-                                }
-                            }
-                        }
-                    }
+    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+        AST* declarationsNode = blockNode->children[0];
+        if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
+            for (int i = 0; i < declarationsNode->child_count; i++) {
+                AST* varDeclGroup = declarationsNode->children[i];
+                if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                    AST* found = matchVarDecl(varDeclGroup, varName);
+                    if (found) return varDeclGroup;
                 }
             }
-            if (blockNode->child_count > 1) {
-                AST* statementsNode = blockNode->children[1];
-                if (statementsNode && statementsNode->type == AST_COMPOUND && isAncestor(statementsNode, referenceNode)) {
-                    AST* found = findDeclInCompound(statementsNode, varName, referenceNode);
-                    if (found) return found;
-                }
-            }
-        } else if (blockNode->type == AST_COMPOUND) {
-            AST* found = findDeclInCompound(blockNode, varName, referenceNode);
-            if (found) return found;
         }
     }
+
     return NULL;
 }
 
-static bool isAncestor(AST* ancestor, AST* node) {
-    for (AST* p = node; p; p = p->parent) {
-        if (p == ancestor) return true;
-    }
-    return false;
-}
-
-static AST* findDeclInCompound(AST* compound, const char* varName, AST* referenceNode) {
-    if (!compound || compound->type != AST_COMPOUND) return NULL;
-    for (int i = 0; i < compound->child_count; i++) {
-        AST* child = compound->children[i];
-        if (!child) continue;
-        if (child->type == AST_VAR_DECL) {
-            for (int j = 0; j < child->child_count; j++) {
-                AST* varNameNode = child->children[j];
-                if (!varNameNode) continue;
-                if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                    strcasecmp(varNameNode->token->value, varName) == 0) {
-                    return child;
-                } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
-                           varNameNode->left->type == AST_VARIABLE &&
-                           varNameNode->left->token &&
-                           strcasecmp(varNameNode->left->token->value, varName) == 0) {
-                    return child;
-                }
-            }
-        } else if (child->type == AST_COMPOUND && isAncestor(child, referenceNode)) {
-            AST* nested = findDeclInCompound(child, varName, referenceNode);
-            if (nested) return nested;
-            break;
+static AST* matchVarDecl(AST* varDeclGroup, const char* varName) {
+    for (int j = 0; j < varDeclGroup->child_count; j++) {
+        AST* varNameNode = varDeclGroup->children[j];
+        if (!varNameNode) continue;
+        if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+            strcasecmp(varNameNode->token->value, varName) == 0) {
+            return varDeclGroup;
+        } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                   varNameNode->left->type == AST_VARIABLE &&
+                   varNameNode->left->token &&
+                   strcasecmp(varNameNode->left->token->value, varName) == 0) {
+            return varDeclGroup;
         }
-        if (child == referenceNode) break;
     }
     return NULL;
 }
