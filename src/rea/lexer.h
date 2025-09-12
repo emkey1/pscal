@@ -70,6 +70,8 @@ typedef enum {
     REA_TOKEN_FALSE,
     REA_TOKEN_CONST,
     REA_TOKEN_IMPORT,
+    REA_TOKEN_SPAWN,
+    REA_TOKEN_JOIN,
 
     // Type keywords
     REA_TOKEN_INT,
