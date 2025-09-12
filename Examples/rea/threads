@@ -1,0 +1,24 @@
+#!/usr/bin/env rea
+// thread_demo.rea — demonstrate spawn/join and mutex usage
+
+int counter = 0;
+int m = mutex();                 // create a mutex
+
+void worker() {
+  for (int i = 0; i < 5; i = i + 1) {
+    lock(m);                     // enter critical section
+    counter = counter + 1;
+    writeln("counter=", counter);
+    unlock(m);                   // leave critical section
+  }
+}
+
+int main() {
+  writeln("spawning threads");
+  int t1 = spawn worker();       // launch two worker threads
+  int t2 = spawn worker();
+  join t1;                       // wait for both to finish
+  join t2;
+  writeln("final counter=", counter);
+  return 0;
+}
