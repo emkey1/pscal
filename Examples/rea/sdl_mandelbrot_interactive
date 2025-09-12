@@ -8,6 +8,7 @@ class MandelbrotApp {
   const int Height = 900;
   const int MaxIterations = 200;
   const int BytesPerPixel = 4;
+  const int ScreenUpdateInterval = 1;
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
@@ -40,14 +41,19 @@ class MandelbrotApp {
     myself.prevButtons = 0;
   }
 
-  void compute() {
+  bool compute() {
     int row[Width];
+    int i;
+    for (i = 0; i < myself.Width * myself.Height * myself.BytesPerPixel; i = i + 1) {
+      myself.pixels[i] = char(0);
+    }
+    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     double reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
     double imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
     int idx, x, y, n;
     int R, G, B;
     double c_im;
-    for (y = 0; y < myself.Height; y = y + 1) {
+    for (y = 0; y < myself.Height && !myself.quit; y = y + 1) {
       c_im = myself.maxIm - y * imFactor;
       mandelbrotrow(myself.minRe, reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
       idx = y * myself.Width * myself.BytesPerPixel;
@@ -65,11 +71,17 @@ class MandelbrotApp {
         myself.pixels[idx + 3] = char(255);
         idx = idx + myself.BytesPerPixel;
       }
+      if (((y + 1) % myself.ScreenUpdateInterval) == 0 || y == myself.Height - 1) {
+        updatetexture(myself.textureID, myself.pixels);
+        cleardevice();
+        rendercopy(myself.textureID);
+        updatescreen();
+      }
+      if (myself.handleInput()) {
+        return true;
+      }
     }
-    updatetexture(myself.textureID, myself.pixels);
-    cleardevice();
-    rendercopy(myself.textureID);
-    updatescreen();
+    return false;
   }
 
   void zoom(int px, int py, double factor) {
@@ -85,35 +97,46 @@ class MandelbrotApp {
     myself.maxIm = centerIm + heightIm / 2.0;
   }
 
-  void handleInput() {
-    graphloop(1);
+  bool handleInput() {
+    graphloop(0);
+    bool changed = false;
     int key = pollkey();
     if (key != 0) {
-      if (key == 'q' || key == 'Q') { myself.quit = true; return; }
+      if (key == 'q' || key == 'Q') { myself.quit = true; return false; }
       double widthRe = (myself.maxRe - myself.minRe);
       double heightIm = (myself.maxIm - myself.minIm);
       double dx = widthRe * 0.5;
       double dy = heightIm * 0.5;
-      if (key == myself.KEY_LEFT) { myself.minRe -= dx; myself.maxRe -= dx; }
-      else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; }
-      else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; }
-      else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; }
+      if (key == myself.KEY_LEFT) { myself.minRe -= dx; myself.maxRe -= dx; changed = true; }
+      else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; changed = true; }
+      else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; changed = true; }
+      else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; changed = true; }
     }
     int x = 0, y = 0, b = 0;
     getmousestate(x, y, b);
+    int winW = getmaxx() + 1;
+    int winH = getmaxy() + 1;
+    if (winW > 0 && winH > 0) {
+      if (x >= winW) x = winW - 1;
+      if (y >= winH) y = winH - 1;
+      if (winW != myself.Width) { x = (x * myself.Width) / winW; if (x >= myself.Width) x = myself.Width - 1; }
+      if (winH != myself.Height) { y = (y * myself.Height) / winH; if (y >= myself.Height) y = myself.Height - 1; }
+    }
     if ((b & myself.ButtonLeft) != 0 && (myself.prevButtons & myself.ButtonLeft) == 0) {
       myself.zoom(x, y, 1.0 / myself.ZoomFactor);
+      changed = true;
     } else if ((b & myself.ButtonRight) != 0 && (myself.prevButtons & myself.ButtonRight) == 0) {
       myself.zoom(x, y, myself.ZoomFactor);
+      changed = true;
     }
     myself.prevButtons = b;
+    return changed;
   }
 
   void run() {
     myself.init();
     while (!myself.quit) {
       myself.compute();
-      myself.handleInput();
     }
     destroytexture(myself.textureID);
     closegraph();
