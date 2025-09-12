@@ -117,10 +117,10 @@ class MandelbrotApp {
     }
   }
 
-  void computeRowsThread0() { myself.computeRows(myself.threadStart[0], myself.threadEnd[0]); }
-  void computeRowsThread1() { myself.computeRows(myself.threadStart[1], myself.threadEnd[1]); }
-  void computeRowsThread2() { myself.computeRows(myself.threadStart[2], myself.threadEnd[2]); }
-  void computeRowsThread3() { myself.computeRows(myself.threadStart[3], myself.threadEnd[3]); }
+  void computeRowsWorker(int idx) {
+    if (idx < 0 || idx >= myself.ThreadCount) return;
+    myself.computeRows(myself.threadStart[idx], myself.threadEnd[idx]);
+  }
 
   void startCompute() {
     int tid[ThreadCount];
@@ -142,10 +142,9 @@ class MandelbrotApp {
       startY = endY + 1;
     }
 
-    myself.tids[0] = spawn myself.computeRowsThread0();
-    myself.tids[1] = spawn myself.computeRowsThread1();
-    myself.tids[2] = spawn myself.computeRowsThread2();
-    myself.tids[3] = spawn myself.computeRowsThread3();
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      myself.tids[i] = spawn myself.computeRowsWorker(i);
+    }
     myself.computing = true;
   }
 

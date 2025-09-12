@@ -4,8 +4,8 @@
 // Uses the extended builtin MandelbrotRow. Requires SDL support.
 
 class MandelbrotApp {
-  const int Width = 640;
-  const int Height = 480;
+  const int Width = 1024;
+  const int Height = 768;
   const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
@@ -13,7 +13,7 @@ class MandelbrotApp {
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
-  const int ThreadCount = 4;
+  const int ThreadCount = 8;
   const int KEY_LEFT = 1073741904;
   const int KEY_RIGHT = 1073741903;
   const int KEY_UP = 1073741906;
@@ -88,10 +88,10 @@ class MandelbrotApp {
     }
   }
 
-  void computeRowsThread0() { myself.computeRows(myself.threadStart[0], myself.threadEnd[0]); }
-  void computeRowsThread1() { myself.computeRows(myself.threadStart[1], myself.threadEnd[1]); }
-  void computeRowsThread2() { myself.computeRows(myself.threadStart[2], myself.threadEnd[2]); }
-  void computeRowsThread3() { myself.computeRows(myself.threadStart[3], myself.threadEnd[3]); }
+  void computeRowsWorker(int idx) {
+    if (idx < 0 || idx >= myself.ThreadCount) return;
+    myself.computeRows(myself.threadStart[idx], myself.threadEnd[idx]);
+  }
 
   void startCompute() {
     int i;
@@ -110,10 +110,9 @@ class MandelbrotApp {
       myself.threadEnd[i] = endY;
       startY = endY + 1;
     }
-    myself.tids[0] = spawn myself.computeRowsThread0();
-    myself.tids[1] = spawn myself.computeRowsThread1();
-    myself.tids[2] = spawn myself.computeRowsThread2();
-    myself.tids[3] = spawn myself.computeRowsThread3();
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      myself.tids[i] = spawn myself.computeRowsWorker(i);
+    }
     myself.computing = true;
     myself.lastUpdatedRows = 0;
   }
@@ -203,4 +202,3 @@ class MandelbrotApp {
 
 MandelbrotApp app = new MandelbrotApp();
 app.run();
-
