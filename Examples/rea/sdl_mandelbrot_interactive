@@ -9,6 +9,7 @@ class MandelbrotApp {
   const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
+  const int UpdateQuantum = 24; // Update texture every N rows completed
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
@@ -36,6 +37,7 @@ class MandelbrotApp {
   int rowMutex;
   int quitMutex;
   int tids[ThreadCount];
+  int lastUpdatedRows;
 
   void init() {
     myself.minRe = -2.0;
@@ -56,6 +58,7 @@ class MandelbrotApp {
     myself.quitMutex = mutex();
     int i;
     for (i = 0; i < myself.ThreadCount; i = i + 1) { myself.tids[i] = -1; }
+    myself.lastUpdatedRows = 0;
   }
 
   int getQuit() {
@@ -149,18 +152,19 @@ class MandelbrotApp {
   void pollCompute() {
     if (!myself.computing) return;
     int y;
-    bool anyUpdate = false;
+    int doneCount = 0;
     for (y = 0; y < myself.Height; y = y + 1) {
       bool done;
       lock(myself.rowMutex);
       done = myself.rowDone[y];
       unlock(myself.rowMutex);
-      if (done && ((y + 1) % myself.ScreenUpdateInterval == 0 || y == myself.Height - 1)) {
-        updatetexture(myself.textureID, myself.pixels);
-        anyUpdate = true;
-      }
+      if (done) doneCount = doneCount + 1;
     }
-    if (anyUpdate) { cleardevice(); rendercopy(myself.textureID); updatescreen(); }
+    if (doneCount - myself.lastUpdatedRows >= myself.UpdateQuantum || doneCount == myself.Height) {
+      updatetexture(myself.textureID, myself.pixels);
+      cleardevice(); rendercopy(myself.textureID); updatescreen();
+      myself.lastUpdatedRows = doneCount;
+    }
     // Check completion
     bool allDone = true;
     for (y = 0; y < myself.Height; y = y + 1) { if (!myself.rowDone[y]) { allDone = false; break; } }
@@ -168,6 +172,7 @@ class MandelbrotApp {
       int i;
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
       myself.computing = false;
+      myself.lastUpdatedRows = 0;
     }
   }
 
