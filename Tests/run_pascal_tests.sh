@@ -165,6 +165,26 @@ if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
 
   cache_file=$(find "$tmp_home/.pscal_cache" -name '*.bc' | head -n 1)
 
+  src_real=$(realpath "$src_file")
+  if ! python3 - "$cache_file" "$src_real" <<'PY'
+import sys, struct, os
+cf, expected = sys.argv[1], sys.argv[2]
+with open(cf, "rb") as f:
+    f.read(8)
+    data = f.read(4)
+    if len(data) != 4:
+        sys.exit(1)
+    stored = struct.unpack("<i", data)[0]
+    if stored >= 0:
+        sys.exit(1)
+    path = f.read(-stored).decode("utf-8")
+    sys.exit(0 if os.path.realpath(path) == os.path.realpath(expected) else 1)
+PY
+  then
+    echo "Cache file does not embed source path" >&2
+    EXIT_CODE=1
+  fi
+
   cat > "$src_file" <<'EOF'
 program CacheStalenessTest;
 begin
