@@ -117,6 +117,7 @@ class MandelbrotApp {
     }
   }
 
+  // Generic worker entrypoint that receives its slice index.
   void computeRowsWorker(int idx) {
     if (idx < 0 || idx >= myself.ThreadCount) return;
     myself.computeRows(myself.threadStart[idx], myself.threadEnd[idx]);
