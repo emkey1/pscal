@@ -34,9 +34,10 @@ static const char *REA_USAGE =
     "   Options:\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
-"     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
-"     --no-cache             Compile fresh (ignore cached bytecode).\n"
-"     --strict               Enable strict parser checks for top-level structure.\n";
+    "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
+    "     --no-cache             Compile fresh (ignore cached bytecode).\n"
+    "     --strict               Enable strict parser checks for top-level structure.\n"
+    "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
 
 static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
     if (!unit_list) return true;
