@@ -1,3 +1,24 @@
+emkey1
+emkey1
+Online
+
+
+
+Welcome, 
+MyRepoBot
+. We hope you brought pizza. — 9/2/25, 22:21
+emkey1 — 11:26
+﻿
+escape to cancel • enter to save
+# PSCAL and Its Educational Applications
+
+If **PSCAL** has any real-world application, it is most likely in the area of education. The way the PSCAL suite works is very much analogous to the way the GNU compilers work. Both systems follow a multi-stage compilation process.
+
+In the **PSCAL suite**, the front ends (like Pascal) translate source code into an intermediate representation, specifically an **Abstract Syntax Tree (AST)**. The AST is a structured, platform-independent form of the program. This is similar to how a GNU compiler first translates source code into its own intermediate format.
+Expand
+message.md
+8 KB
+﻿
 # PSCAL and Its Educational Applications
 
 If **PSCAL** has any real-world application, it is most likely in the area of education. The way the PSCAL suite works is very much analogous to the way the GNU compilers work. Both systems follow a multi-stage compilation process.
@@ -190,6 +211,8 @@ This transparent workflow lets learners trace a program from source code through
 PSCAL’s code base is intentionally small and written in C, making it easy to extend. New language front ends or VM built-ins can be added with minimal scaffolding, providing a practical playground for exploring language and runtime design. Because the modules are loosely coupled, a single change—such as adding a new opcode or a parser rule—can be studied in isolation before being reintroduced into the whole system. This modularity encourages experimentation and helps learners see how individual compiler pieces cooperate to form a complete toolchain.
 
 The project’s simplicity also invites collaboration. A class might divide into teams, each implementing a feature, and then merge their contributions to extend the platform. Since every front end targets the same VM, work on one language benefits the others, reinforcing how shared abstractions make language design more efficient.
+message.md
+8 KB
 
 ---
 
