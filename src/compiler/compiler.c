@@ -153,6 +153,7 @@ static bool isGlobalScopeNode(AST* node) {
     // If we couldn't find a program node, err on the side of "local"
     // to avoid misclassifying routine locals as globals.
     return false;
+
 }
 
 typedef struct {
@@ -1828,6 +1829,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_VAR_DECL: {
             bool global_ctx = (current_function_compiler == NULL) &&
                               isGlobalScopeNode(node);
+
             if (global_ctx) { // Global variables
                 AST* type_specifier_node = node->right;
 
