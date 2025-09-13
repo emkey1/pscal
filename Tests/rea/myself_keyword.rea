@@ -1,0 +1,9 @@
+class Dummy {
+  int x;
+  void test() {
+    bool allDone = (myself.x == 0);
+    if (allDone) { myself.x = 1; }
+  }
+}
+Dummy d = new Dummy();
+d.test();
