@@ -230,5 +230,3 @@ void main() {
   app.run();
 }
 
-// Ensure execution even if the front end does not inject an implicit call
-main();

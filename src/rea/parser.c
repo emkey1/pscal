@@ -2041,7 +2041,16 @@ AST *parseRea(const char *source) {
 
     while (p.current.type != REA_TOKEN_EOF && !p.hadError) {
         AST *stmt = parseStatement(&p);
-        if (!stmt) break;
+        if (!stmt) {
+            fprintf(stderr,
+                    "Unexpected token %s '%.*s' at line %d\n",
+                    reaTokenTypeToString(p.current.type),
+                    (int)p.current.length,
+                    p.current.start,
+                    p.current.line);
+            p.hadError = true;
+            break;
+        }
 
         if (stmt->type == AST_COMPOUND && stmt->is_global_scope) {
             for (int i = 0; i < stmt->child_count; i++) {

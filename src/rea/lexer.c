@@ -288,3 +288,80 @@ ReaToken reaNextToken(ReaLexer *lexer) {
 
     return makeToken(lexer, REA_TOKEN_UNKNOWN, start);
 }
+
+const char* reaTokenTypeToString(ReaTokenType type) {
+    switch (type) {
+        case REA_TOKEN_EOF: return "EOF";
+        case REA_TOKEN_UNKNOWN: return "UNKNOWN";
+        case REA_TOKEN_IDENTIFIER: return "IDENTIFIER";
+        case REA_TOKEN_NUMBER: return "NUMBER";
+        case REA_TOKEN_STRING: return "STRING";
+        case REA_TOKEN_LEFT_PAREN: return "LEFT_PAREN";
+        case REA_TOKEN_RIGHT_PAREN: return "RIGHT_PAREN";
+        case REA_TOKEN_LEFT_BRACE: return "LEFT_BRACE";
+        case REA_TOKEN_RIGHT_BRACE: return "RIGHT_BRACE";
+        case REA_TOKEN_LEFT_BRACKET: return "LEFT_BRACKET";
+        case REA_TOKEN_RIGHT_BRACKET: return "RIGHT_BRACKET";
+        case REA_TOKEN_COMMA: return "COMMA";
+        case REA_TOKEN_DOT: return "DOT";
+        case REA_TOKEN_SEMICOLON: return "SEMICOLON";
+        case REA_TOKEN_COLON: return "COLON";
+        case REA_TOKEN_PLUS: return "PLUS";
+        case REA_TOKEN_PLUS_EQUAL: return "PLUS_EQUAL";
+        case REA_TOKEN_MINUS: return "MINUS";
+        case REA_TOKEN_MINUS_EQUAL: return "MINUS_EQUAL";
+        case REA_TOKEN_STAR: return "STAR";
+        case REA_TOKEN_SLASH: return "SLASH";
+        case REA_TOKEN_PERCENT: return "PERCENT";
+        case REA_TOKEN_EQUAL: return "EQUAL";
+        case REA_TOKEN_EQUAL_EQUAL: return "EQUAL_EQUAL";
+        case REA_TOKEN_BANG: return "BANG";
+        case REA_TOKEN_BANG_EQUAL: return "BANG_EQUAL";
+        case REA_TOKEN_AND: return "AND";
+        case REA_TOKEN_AND_AND: return "AND_AND";
+        case REA_TOKEN_OR: return "OR";
+        case REA_TOKEN_OR_OR: return "OR_OR";
+        case REA_TOKEN_GREATER: return "GREATER";
+        case REA_TOKEN_GREATER_EQUAL: return "GREATER_EQUAL";
+        case REA_TOKEN_LESS: return "LESS";
+        case REA_TOKEN_LESS_EQUAL: return "LESS_EQUAL";
+        case REA_TOKEN_CLASS: return "CLASS";
+        case REA_TOKEN_EXTENDS: return "EXTENDS";
+        case REA_TOKEN_NEW: return "NEW";
+        case REA_TOKEN_MYSELF: return "MYSELF";
+        case REA_TOKEN_SUPER: return "SUPER";
+        case REA_TOKEN_IF: return "IF";
+        case REA_TOKEN_ELSE: return "ELSE";
+        case REA_TOKEN_WHILE: return "WHILE";
+        case REA_TOKEN_FOR: return "FOR";
+        case REA_TOKEN_DO: return "DO";
+        case REA_TOKEN_SWITCH: return "SWITCH";
+        case REA_TOKEN_CASE: return "CASE";
+        case REA_TOKEN_DEFAULT: return "DEFAULT";
+        case REA_TOKEN_BREAK: return "BREAK";
+        case REA_TOKEN_CONTINUE: return "CONTINUE";
+        case REA_TOKEN_RETURN: return "RETURN";
+        case REA_TOKEN_TRUE: return "TRUE";
+        case REA_TOKEN_FALSE: return "FALSE";
+        case REA_TOKEN_CONST: return "CONST";
+        case REA_TOKEN_IMPORT: return "IMPORT";
+        case REA_TOKEN_SPAWN: return "SPAWN";
+        case REA_TOKEN_JOIN: return "JOIN";
+        case REA_TOKEN_INT: return "INT";
+        case REA_TOKEN_INT64: return "INT64";
+        case REA_TOKEN_INT32: return "INT32";
+        case REA_TOKEN_INT16: return "INT16";
+        case REA_TOKEN_INT8: return "INT8";
+        case REA_TOKEN_FLOAT: return "FLOAT";
+        case REA_TOKEN_FLOAT32: return "FLOAT32";
+        case REA_TOKEN_LONG_DOUBLE: return "LONG_DOUBLE";
+        case REA_TOKEN_CHAR: return "CHAR";
+        case REA_TOKEN_BYTE: return "BYTE";
+        case REA_TOKEN_STR: return "STR";
+        case REA_TOKEN_TEXT: return "TEXT";
+        case REA_TOKEN_MSTREAM: return "MSTREAM";
+        case REA_TOKEN_VOID: return "VOID";
+        case REA_TOKEN_BOOL: return "BOOL";
+        default: return "UNKNOWN";
+    }
+}
