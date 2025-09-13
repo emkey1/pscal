@@ -5,6 +5,6 @@
 #include "ast/ast.h"
 
 AST *parseRea(const char *source);
+void reaSetStrictMode(int enable);
 
 #endif
-

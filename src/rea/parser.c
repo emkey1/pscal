@@ -28,6 +28,26 @@ typedef struct {
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
 
+// Strict mode control
+static int g_rea_strict_mode = 0;
+void reaSetStrictMode(int enable) { g_rea_strict_mode = enable ? 1 : 0; }
+
+// Strict scan for forbidden top-level constructs
+static bool strictScanTop(AST* n) {
+    if (!n) return false;
+    if ((n->type == AST_VARIABLE && n->token && n->token->value && strcasecmp(n->token->value, "myself") == 0) ||
+        n->type == AST_RETURN) {
+        return true;
+    }
+    if (strictScanTop(n->left)) return true;
+    if (strictScanTop(n->right)) return true;
+    if (strictScanTop(n->extra)) return true;
+    for (int i = 0; i < n->child_count; i++) {
+        if (strictScanTop(n->children[i])) return true;
+    }
+    return false;
+}
+
 
 /* --------------------------------------------------------------------- */
 /*  Helpers for array handling                                           */
@@ -421,6 +441,11 @@ static AST *parseFactor(ReaParser *p) {
         reaAdvance(p);
         AST *target = parseFactor(p);
         if (!target) return NULL;
+        if (!(target->type == AST_VARIABLE || target->type == AST_FIELD_ACCESS || target->type == AST_ARRAY_ACCESS || target->type == AST_DEREFERENCE)) {
+            fprintf(stderr, "L%d: Parse error: increment/decrement requires a variable (lvalue).\n", line);
+            p->hadError = true;
+            return NULL;
+        }
         // Build 'target += 1' or 'target -= 1'
         Token *oneTok = newToken(TOKEN_INTEGER_CONST, "1", line, 0);
         AST *oneNode = newASTNode(AST_NUMBER, oneTok);
@@ -2190,7 +2215,18 @@ AST *parseRea(const char *source) {
         }
     }
 
-    // Final validation removed; parser now robust enough without it.
+    // Optional strict validation for top-level structure issues (e.g., accidental use of 'myself' at top level).
+    if (!p.hadError && g_rea_strict_mode) {
+        for (int i = 0; i < stmts->child_count && !p.hadError; i++) {
+            AST* s = stmts->children[i];
+            if (strictScanTop(s)) {
+                int l = s && s->token ? s->token->line : 0;
+                fprintf(stderr, "L%d: Strict mode error: disallowed construct at top level (e.g., 'myself' or 'return').\n", l);
+                p.hadError = true;
+                break;
+            }
+        }
+    }
 
     if (p.hadError) {
         freeAST(program);
