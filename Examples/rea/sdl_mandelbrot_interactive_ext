@@ -3,6 +3,8 @@
 // Left click to zoom in, right click to zoom out, Q to quit.
 // Uses the extended builtin MandelbrotRow. Requires SDL support.
 
+int doneCount;
+
 class MandelbrotApp {
   const int Width = 1024;
   const int Height = 768;
@@ -120,9 +122,9 @@ class MandelbrotApp {
   }
 
   void pollCompute() {
-    if (!myself.computing) return;
     int y;
-    int doneCount = 0;
+    if (!myself.computing) return;
+    doneCount = 0;
     for (y = 0; y < myself.Height; y = y + 1) {
       bool done;
       lock(myself.rowMutex);
