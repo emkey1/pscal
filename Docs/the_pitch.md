@@ -46,7 +46,7 @@ Here is an example **C-like program** to illustrate the steps from source code â
 ### Source Program
 
 ```c
-mke@MacBookPro ~ % cat example2
+mke@MacBookPro ~ % cat example
 int main() {
   int a = 5;
   printf("a = %d\n", a);
@@ -189,5 +189,4 @@ a = 5
 
 ---
 
-Do you want me to take this one step further and make it **slide/lecture ready** (shorter sentences, bullet points under each heading), or keep it as a more **textbook-style narrative**?
 
