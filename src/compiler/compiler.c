@@ -28,6 +28,11 @@ static const char* current_compilation_unit_name = NULL;
 static AST* gCurrentProgramRoot = NULL;
 static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
+static int compiler_dynamic_locals = 0;
+
+void compilerEnableDynamicLocals(int enable) {
+    compiler_dynamic_locals = enable ? 1 : 0;
+}
 
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
@@ -1488,7 +1493,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 // function's body but wasn't added to the locals table yet (e.g., due to
                 // interleaved declarations/statements or frontend nuances), discover it
                 // and register it now so we address it as a local rather than a global.
-                if (local_slot == -1 && current_function_compiler->function_symbol &&
+                if (compiler_dynamic_locals && local_slot == -1 && current_function_compiler->function_symbol &&
                     current_function_compiler->function_symbol->type_def) {
                     AST* func_decl = current_function_compiler->function_symbol->type_def;
                     AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
@@ -1656,40 +1661,16 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
                 break; // We are done with this case
             } else {
-                // Standard array access: push index expressions first so the
-                // array base address ends up on top of the stack.  This order
-                // matches GET_ELEMENT_ADDRESS's expectation (it pops the base
-                // first, then each index).
+                // Standard array access: push the array base address first, followed by
+                // each index expression in declaration order. GET_ELEMENT_ADDRESS expects
+                // to pop the base first, then each index in order.
 
-                // Compile all index expressions. Their values will be on the stack
-                // below the array base.
+                // Push indices first
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-
-                // Finally, push the address of the array variable (Value*).
+                // Push address of the array variable (Value*) last so base is on top.
                 compileLValue(node->left, chunk, getLine(node->left));
-
-                // If the base resolves to an upvalue, ensure no extra temporary
-                // values remain above the array pointer.  We want the stack to be
-                // [..., index, array] before emitting GET_ELEMENT_ADDRESS.
-                if (current_function_compiler && node->left &&
-                    node->left->type == AST_VARIABLE && node->left->token) {
-                    const char* base_name = node->left->token->value;
-                    int base_local = resolveLocal(current_function_compiler, base_name);
-                    if (base_local == -1) {
-                        int base_up = resolveUpvalue(current_function_compiler, base_name);
-                        if (base_up != -1) {
-                            bool up_is_ref = current_function_compiler->upvalues[base_up].is_ref;
-                            if (!up_is_ref) {
-                                // Drop any temporary left behind when accessing the upvalue
-                                // so only the index and the array pointer remain.
-                                writeBytecodeChunk(chunk, SWAP, line);
-                                writeBytecodeChunk(chunk, POP, line);
-                            }
-                        }
-                    }
-                }
 
                 // Now, get the address of the specific element.
                 writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS, line);
@@ -2478,7 +2459,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
                     }
                 }
             }
-        } else if (blockNode->type == AST_COMPOUND) {
+        } else if (compiler_dynamic_locals && blockNode->type == AST_COMPOUND) {
             for (int i = 0; i < blockNode->child_count; i++) {
                 AST* child = blockNode->children[i];
                 if (child && child->type == AST_VAR_DECL) {
@@ -3082,14 +3063,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             if (var_slot == -1) {
                 DBG_PRINTF("[dbg] FOR var '%s' not local; treating as global. Locals: ", var_node && var_node->token ? var_node->token->value : "<nil>");
+#ifdef DEBUG
                 if (current_function_compiler) {
                     for (int li = 0; li < current_function_compiler->local_count; li++) {
                         const char* lname = current_function_compiler->locals[li].name;
                         if (!lname) continue;
                         fprintf(stderr, "%s%s", li==0?"":" ,", lname);
                     }
+                    fprintf(stderr, "\n");
                 }
-                fprintf(stderr, "\n");
+#endif
                 var_name_idx = addStringConstant(chunk, var_node->token->value);
             }
 
@@ -3863,7 +3846,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     is_ref = current_function_compiler->locals[local_slot].is_ref;
                 }
                 // Robust fallback for locals not yet registered in the function state.
-                if (local_slot == -1 && current_function_compiler->function_symbol &&
+                if (compiler_dynamic_locals && local_slot == -1 && current_function_compiler->function_symbol &&
                     current_function_compiler->function_symbol->type_def) {
                     AST* func_decl = current_function_compiler->function_symbol->type_def;
                     AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);

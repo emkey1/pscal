@@ -644,6 +644,7 @@ void errorParser(Parser *parser, const char *msg) {
     fprintf(stderr, "Parser error at line %d, column %d: %s (found token: %s)\n",
             parser->lexer->line, parser->lexer->column, msg,
             tokenTypeToString(parser->current_token->type));
+    pascal_parser_error_count++;
     EXIT_FAILURE_HANDLER();
 }
 
