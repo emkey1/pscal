@@ -22,6 +22,7 @@ static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
 static AST* gCurrentProgramRoot = NULL;
 static HashTable* current_class_const_table = NULL;
+static AST* current_class_record_type = NULL;
 
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
@@ -133,6 +134,25 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     int index = addConstantToChunk(chunk, &val);
     // No freeValue needed for simple boolean types.
     return index;
+}
+
+// Determine if a variable declaration node resides in the true global scope.
+// Walks up the AST parent chain and reports "global" only if no enclosing
+// function or procedure is encountered before reaching the program root.
+static bool isGlobalScopeNode(AST* node) {
+    AST* p = node;
+    while (p) {
+        if (p->type == AST_FUNCTION_DECL || p->type == AST_PROCEDURE_DECL) {
+            return false; // inside routine -> not global
+        }
+        if (p->type == AST_PROGRAM) {
+            return true; // reached program root with no routine -> global
+        }
+        p = p->parent;
+    }
+    // If we couldn't find a program node, err on the side of "local"
+    // to avoid misclassifying routine locals as globals.
+    return false;
 }
 
 typedef struct {
@@ -410,6 +430,33 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
     return -1;
 }
 
+// Find a record type in the global type table that defines the given field.
+static AST* findRecordTypeByFieldName(const char* fieldName) {
+    if (!fieldName) return NULL;
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        AST* rec = resolveTypeAlias(entry->typeAST);
+        if (!rec || rec->type != AST_RECORD_TYPE) continue;
+        int offset = getRecordFieldOffset(rec, fieldName);
+        if (offset >= 0) return rec;
+        // Case-insensitive scan
+        for (int i = 0; i < rec->child_count; i++) {
+            AST* decl = rec->children[i];
+            if (!decl) continue;
+            if (decl->type == AST_VAR_DECL) {
+                for (int j = 0; j < decl->child_count; j++) {
+                    AST* var = decl->children[j];
+                    if (var && var->token && strcasecmp(var->token->value, fieldName) == 0) {
+                        return rec;
+                    }
+                }
+            } else if (decl->token) {
+                if (strcasecmp(decl->token->value, fieldName) == 0) return rec;
+            }
+        }
+    }
+    return NULL;
+}
+
 // Emit initialization code for array fields within a record/class.
 // Assumes the object instance is on top of the VM stack.
 static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, int line, bool hasVTable) {
@@ -471,6 +518,11 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
 // Determine the record type for an expression used as an object base.
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
+    if (expr->type == AST_VARIABLE && expr->token && expr->token->value &&
+        strcasecmp(expr->token->value, "myself") == 0 &&
+        current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
+        return current_class_record_type;
+    }
     if (expr->type == AST_ARRAY_ACCESS) {
         AST* baseType = getRecordTypeFromExpr(expr->left);
         if (!baseType) return NULL;
@@ -1465,6 +1517,18 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
+            // Constants defined in a record cannot have their address taken.
+            if (node->token && node->token->value) {
+                Value* const_ptr = findCompilerConstant(node->token->value);
+                if (const_ptr) {
+                    fprintf(stderr,
+                            "L%d: Compiler error: Cannot take address of constant field '%s'.\n",
+                            line, node->token->value);
+                    compiler_had_error = true;
+                    break;
+                }
+            }
+
             // Base expression might be a record value or a pointer to a record.
             if (node->left && node->left->var_type == TYPE_POINTER) {
                 compileRValue(node->left, chunk, getLine(node->left));
@@ -1473,7 +1537,69 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             AST* recType = getRecordTypeFromExpr(node->left);
+            if ((!recType || recType->type != AST_RECORD_TYPE) &&
+                node->left && node->left->type == AST_VARIABLE &&
+                node->left->token && node->left->token->value &&
+                strcasecmp(node->left->token->value, "myself") == 0) {
+                if (!recType && current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
+                    recType = current_class_record_type;
+                }
+                if ((!recType || recType->type != AST_RECORD_TYPE) &&
+                    current_function_compiler && current_function_compiler->function_symbol &&
+                    current_function_compiler->function_symbol->name) {
+                    const char* fname = current_function_compiler->function_symbol->name;
+                    const char* us = strchr(fname, '_');
+                    if (us) {
+                        size_t len = (size_t)(us - fname);
+                        char cls[MAX_SYMBOL_LENGTH];
+                        if (len >= sizeof(cls)) len = sizeof(cls) - 1;
+                        memcpy(cls, fname, len);
+                        cls[len] = '\0';
+                        for (size_t i = 0; i < len; i++) cls[i] = (char)tolower(cls[i]);
+                        recType = lookupType(cls);
+                        recType = resolveTypeAlias(recType);
+                        if (recType && recType->type == AST_TYPE_DECL && recType->left) {
+                            recType = recType->left;
+                        }
+                    }
+                }
+                if (!recType || recType->type != AST_RECORD_TYPE) {
+                    recType = findRecordTypeByFieldName(node->token ? node->token->value : NULL);
+                }
+            }
             int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
+            if (fieldOffset < 0 && recType && node->left && node->left->type == AST_VARIABLE &&
+                node->left->token && node->left->token->value &&
+                strcasecmp(node->left->token->value, "myself") == 0) {
+                // Fallback: case-insensitive search through class fields
+                int offset = 0;
+                if (recType->extra && recType->extra->token && recType->extra->token->value) {
+                    AST* parent = lookupType(recType->extra->token->value);
+                    offset = getRecordFieldCount(parent);
+                }
+                for (int i = 0; fieldOffset < 0 && i < recType->child_count; i++) {
+                    AST* decl = recType->children[i];
+                    if (!decl) continue;
+                    if (decl->type == AST_VAR_DECL) {
+                        for (int j = 0; j < decl->child_count; j++) {
+                            AST* var = decl->children[j];
+                            if (var && var->token && node->token && node->token->value &&
+                                strcasecmp(var->token->value, node->token->value) == 0) {
+                                fieldOffset = offset;
+                                break;
+                            }
+                            offset++;
+                        }
+                    } else if (decl->token) {
+                        if (node->token && node->token->value &&
+                            strcasecmp(decl->token->value, node->token->value) == 0) {
+                            fieldOffset = offset;
+                            break;
+                        }
+                        offset++;
+                    }
+                }
+            }
             if (recordTypeHasVTable(recType)) fieldOffset++;
             if (fieldOffset < 0) {
                 fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
@@ -1700,7 +1826,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         case AST_VAR_DECL: {
-            if (current_function_compiler == NULL) { // Global variables
+            bool global_ctx = (current_function_compiler == NULL) &&
+                              isGlobalScopeNode(node);
+            if (global_ctx) { // Global variables
                 AST* type_specifier_node = node->right;
 
                 // First, resolve the type alias if one exists.
@@ -2200,7 +2328,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     int func_bytecode_start_address = chunk->count;
 
     HashTable* saved_class_const_table = current_class_const_table;
+    AST* saved_class_record_type = current_class_record_type;
     current_class_const_table = NULL;
+    current_class_record_type = NULL;
     const char* us_pos = strchr(func_name, '_');
     if (us_pos) {
         size_t cls_len = (size_t)(us_pos - func_name);
@@ -2209,8 +2339,17 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             strncpy(cls_name, func_name, cls_len);
             cls_name[cls_len] = '\0';
             AST* classType = lookupType(cls_name);
-            if (classType && classType->left && classType->left->type == AST_RECORD_TYPE && classType->left->symbol_table) {
-                current_class_const_table = (HashTable*)classType->left->symbol_table;
+            if (classType) {
+                AST* rec = NULL;
+                if (classType->left && classType->left->type == AST_RECORD_TYPE) {
+                    rec = classType->left;
+                } else if (classType->type == AST_RECORD_TYPE) {
+                    rec = classType;
+                }
+                if (rec) {
+                    if (rec->symbol_table) current_class_const_table = (HashTable*)rec->symbol_table;
+                    current_class_record_type = rec;
+                }
             }
         }
     }
@@ -2230,6 +2369,8 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (!proc_symbol) {
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
         compiler_had_error = true;
+        current_class_const_table = saved_class_const_table;
+        current_class_record_type = saved_class_record_type;
         current_function_compiler = NULL;
         restoreLocalEnv(&env_snap);
         return;
@@ -2343,6 +2484,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         free(fc.locals[i].name);
     }
     current_class_const_table = saved_class_const_table;
+    current_class_record_type = saved_class_record_type;
     current_function_compiler = fc.enclosing;
     restoreLocalEnv(&env_snap);
 }
@@ -3720,7 +3862,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Get the address of the field, then get the value at that address.
+            // If this field is a compile-time constant, embed its value directly.
+            if (node->token && node->token->value) {
+                Value* const_ptr = findCompilerConstant(node->token->value);
+                if (const_ptr) {
+                    emitConstant(chunk, addConstantToChunk(chunk, const_ptr), line);
+                    break;
+                }
+            }
+            // Otherwise, load the field address and then fetch its value.
             compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, GET_INDIRECT, line);
             break;
