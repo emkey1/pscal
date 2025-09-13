@@ -34,7 +34,8 @@ static const char *REA_USAGE =
     "   Options:\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
-"     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
+"     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
+"     --no-cache             Compile fresh (ignore cached bytecode).\n";
 
 static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
     if (!unit_list) return true;
@@ -209,6 +210,7 @@ int main(int argc, char **argv) {
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
     int vm_trace_head = 0;
+    int no_cache = 0;
     int argi = 1;
     while (argc > argi && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "--dump-ast-json") == 0) {
@@ -218,6 +220,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[argi], "--no-cache") == 0) {
+            no_cache = 1;
         } else if (strncmp(argv[argi], "--vm-trace-head=", 16) == 0) {
             vm_trace_head = atoi(argv[argi] + 16);
         } else {
@@ -300,7 +304,8 @@ int main(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, argv[0], dep_array, dep_count, &chunk);
+    bool used_cache = 0;
+    if (!no_cache) used_cache = loadBytecodeFromCache(path, argv[0], dep_array, dep_count, &chunk);
     if (dep_array) free(dep_array);
     if (used_cache) {
 #if defined(__APPLE__)

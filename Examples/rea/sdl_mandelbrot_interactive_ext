@@ -3,8 +3,6 @@
 // Left click to zoom in, right click to zoom out, Q to quit.
 // Uses the extended builtin MandelbrotRow. Requires SDL support.
 
-int doneCount;
-
 class MandelbrotApp {
   const int Width = 1024;
   const int Height = 768;
@@ -43,13 +41,16 @@ class MandelbrotApp {
   int pollCounter;
 
   void init() {
+    printf("[ext] init: begin\n");
     myself.minRe = -2.0;
     myself.maxRe = 1.0;
     myself.minIm = -1.2;
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot (ext)");
+    printf("[ext] init: initgraph done (%dx%d)\n", myself.Width, myself.Height);
     myself.textureID = createtexture(myself.Width, myself.Height);
-    if (myself.textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
+    if (myself.textureID < 0) { printf("[ext] Error: unable to create texture.\n"); halt(); }
+    printf("[ext] init: texture created id=%d\n", myself.textureID);
     myself.quit = false;
     myself.cancel = false;
     myself.computing = false;
@@ -123,8 +124,9 @@ class MandelbrotApp {
 
   void pollCompute() {
     int y;
+    int i;
+    int doneCount = 0;
     if (!myself.computing) return;
-    doneCount = 0;
     for (y = 0; y < myself.Height; y = y + 1) {
       bool done;
       lock(myself.rowMutex);
@@ -137,22 +139,25 @@ class MandelbrotApp {
     bool initialFrame = (doneCount > 0 && myself.lastUpdatedRows == 0);
     bool enoughProgress = (doneCount - myself.lastUpdatedRows >= adaptiveQuantum);
     bool periodicTick = ((myself.pollCounter++ & 3) == 0);
-    if (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height)) {
+    if (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height) || myself.getCancel()) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
       myself.lastUpdatedRows = doneCount;
-    }
-    bool allDone = (doneCount == myself.Height);
-    if (allDone || myself.getCancel()) {
-      if (doneCount > myself.lastUpdatedRows) {
-        updatetexture(myself.textureID, myself.pixels);
-        cleardevice(); rendercopy(myself.textureID); updatescreen();
-        myself.lastUpdatedRows = doneCount;
+      if ((doneCount == myself.Height) || myself.getCancel()) {
+        myself.joinAndResetThreads();
+        myself.computing = false;
+        myself.lastUpdatedRows = 0;
       }
-      int i;
-      for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
-      myself.computing = false;
-      myself.lastUpdatedRows = 0;
+    }
+  }
+
+  void joinAndResetThreads() {
+    int i;
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      if (myself.tids[i] >= 0) {
+        join myself.tids[i];
+        myself.tids[i] = -1;
+      }
     }
   }
 
@@ -196,13 +201,16 @@ class MandelbrotApp {
   }
 
   void run() {
+    printf("[ext] run: start\n");
     myself.init();
+    printf("[ext] run: after init\n");
     bool needRender = true;
     while (!myself.getQuit()) {
       if (needRender && !myself.computing) { myself.startCompute(); needRender = false; }
       myself.pollCompute();
       delay(1);
       if (myself.handleInput()) {
+        printf("[ext] run: input -> restart compute\n");
         myself.setCancel(true);
         if (myself.computing) { int i; for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } } myself.computing = false; }
         myself.setCancel(false);
@@ -210,10 +218,17 @@ class MandelbrotApp {
         updatetexture(myself.textureID, myself.pixels); cleardevice(); rendercopy(myself.textureID); updatescreen();
       }
     }
+    printf("[ext] run: exiting loop\n");
     if (myself.computing) { int i; for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } } }
     destroytexture(myself.textureID); closegraph();
   }
 }
 
-MandelbrotApp app = new MandelbrotApp();
-app.run();
+void main() {
+  printf("[ext] main: entry\n");
+  MandelbrotApp app = new MandelbrotApp();
+  app.run();
+}
+
+// Ensure execution even if the front end does not inject an implicit call
+main();

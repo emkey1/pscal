@@ -14,6 +14,11 @@
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID
 #include "compiler/bytecode.h"
+#include <stdlib.h>
+
+// Debug printing gate
+static int compiler_debug = 0;
+#define DBG_PRINTF(...) do { if (compiler_debug) fprintf(stderr, __VA_ARGS__); } while(0)
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
 #define NO_VTABLE_ENTRY -1
@@ -1507,6 +1512,15 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
                         fprintf(stderr, "L%d: Undefined variable '%s'.\n", line, varName);
+                        if (current_function_compiler && current_function_compiler->name) {
+                            DBG_PRINTF("[dbg] in function '%s', locals=", current_function_compiler->name);
+                            for (int li = 0; li < current_function_compiler->local_count; li++) {
+                                const char* lname = current_function_compiler->locals[li].name;
+                                if (!lname) continue;
+                                fprintf(stderr, "%s%s", li==0?"":" ,", lname);
+                            }
+                            fprintf(stderr, "\n");
+                        }
                         compiler_had_error = true;
                         break;
                     }
@@ -1735,6 +1749,11 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    // Initialize debug flag from environment (REA_DEBUG=1 to enable)
+    if (!compiler_debug) {
+        const char* d = getenv("REA_DEBUG");
+        if (d && *d && *d != '0') compiler_debug = 1;
+    }
     gCurrentProgramRoot = rootNode;
     // Do NOT re-initialize the chunk here, it's already populated with unit code.
     // initBytecodeChunk(outputChunk);
@@ -1829,6 +1848,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_VAR_DECL: {
             bool global_ctx = (current_function_compiler == NULL) &&
                               isGlobalScopeNode(node);
+            if (node->child_count > 0 && node->children[0] && node->children[0]->token) {
+                DBG_PRINTF("[dbg] VAR_DECL name=%s line=%d ctx=%s\n",
+                        node->children[0]->token->value,
+                        line,
+                        global_ctx ? "global" : (current_function_compiler ? "local" : "unknown"));
+            }
 
             if (global_ctx) { // Global variables
                 AST* type_specifier_node = node->right;
@@ -2179,6 +2204,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         }
         case AST_CONST_DECL: {
             if (current_function_compiler == NULL && node->token) {
+                DBG_PRINTF("[dbg] CONST_DECL name=%s line=%d ctx=global\n", node->token->value, line);
                 Value const_val = makeVoid();
                 AST* type_specifier_node = node->right;
                 AST* actual_type_def_node = type_specifier_node;
@@ -2272,6 +2298,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
             if (!node->token || !node->token->value) break;
+            DBG_PRINTF("[dbg] compile decl %s\n", node->token->value);
             writeBytecodeChunk(chunk, JUMP, line);
             int jump_over_body_operand_offset = chunk->count;
             emitShort(chunk, 0xFFFF, line);
@@ -3040,6 +3067,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             if (var_slot == -1) {
+                DBG_PRINTF("[dbg] FOR var '%s' not local; treating as global. Locals: ", var_node && var_node->token ? var_node->token->value : "<nil>");
+                if (current_function_compiler) {
+                    for (int li = 0; li < current_function_compiler->local_count; li++) {
+                        const char* lname = current_function_compiler->locals[li].name;
+                        if (!lname) continue;
+                        fprintf(stderr, "%s%s", li==0?"":" ,", lname);
+                    }
+                }
+                fprintf(stderr, "\n");
                 var_name_idx = addStringConstant(chunk, var_node->token->value);
             }
 
@@ -3823,6 +3859,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
             
             if (local_slot != -1) {
+                DBG_PRINTF("[dbg] RV %s -> local[%d] line=%d\n", varName, local_slot, line);
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 if (is_ref && node->var_type != TYPE_ARRAY) {
@@ -3854,6 +3891,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (const_val_ptr) {
                             emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
                         } else {
+                            DBG_PRINTF("[dbg] RV %s -> global line=%d\n", varName, line);
                             int nameIndex = addStringConstant(chunk, varName);
                             emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
                                                nameIndex, line);

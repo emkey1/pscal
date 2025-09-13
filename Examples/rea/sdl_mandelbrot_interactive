@@ -3,8 +3,6 @@
 // Left click to zoom in, right click to zoom out, Q to quit.
 // Requires SDL support in the Pscal build.
 
-int doneCount;
-
 class MandelbrotApp {
   const int Width = 640;
   const int Height = 480;
@@ -44,16 +42,19 @@ class MandelbrotApp {
   int pollCounter;
 
   void init() {
+    printf("[int] init: begin\n");
     myself.minRe = -2.0;
     myself.maxRe = 1.0;
     myself.minIm = -1.2;
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot");
+    printf("[int] init: initgraph done (%dx%d)\n", myself.Width, myself.Height);
     myself.textureID = createtexture(myself.Width, myself.Height);
     if (myself.textureID < 0) {
-      printf("Error: unable to create texture.\n");
+      printf("[int] Error: unable to create texture.\n");
       halt();
     }
+    printf("[int] init: texture created id=%d\n", myself.textureID);
     myself.quit = false;
     myself.cancel = false;
     myself.computing = false;
@@ -157,7 +158,7 @@ class MandelbrotApp {
   void pollCompute() {
     int y;
     if (!myself.computing) return;
-    doneCount = 0;
+    int doneCount = 0;
     for (y = 0; y < myself.Height; y = y + 1) {
       bool done;
       lock(myself.rowMutex);
@@ -165,34 +166,30 @@ class MandelbrotApp {
       unlock(myself.rowMutex);
       if (done) doneCount = doneCount + 1;
     }
-    // Adaptive quantum: smaller batches when more threads/rows, never below UpdateQuantum
     int adaptiveQuantum = (myself.Height / (myself.ThreadCount * 8));
     if (adaptiveQuantum < myself.UpdateQuantum) adaptiveQuantum = myself.UpdateQuantum;
-    // Time-based update throttle as primary driver; still ensure initial and final frames.
     bool initialFrame = (doneCount > 0 && myself.lastUpdatedRows == 0);
     bool enoughProgress = (doneCount - myself.lastUpdatedRows >= adaptiveQuantum);
-    bool periodicTick = ((myself.pollCounter++ & 3) == 0); // update roughly every 4 polls
-    bool shouldUpdate = (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height));
-
-    if (shouldUpdate) {
+    bool periodicTick = ((myself.pollCounter++ & 3) == 0);
+    if (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height) || myself.getCancel()) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
       myself.lastUpdatedRows = doneCount;
-    }
-    // Check completion
-    bool allDone = true;
-    for (y = 0; y < myself.Height; y = y + 1) { if (!myself.rowDone[y]) { allDone = false; break; } }
-    if (allDone || myself.getCancel()) {
-      // Ensure final frame is displayed before we join threads.
-      if (doneCount > myself.lastUpdatedRows) {
-        updatetexture(myself.textureID, myself.pixels);
-        cleardevice(); rendercopy(myself.textureID); updatescreen();
-        myself.lastUpdatedRows = doneCount;
+      if ((doneCount == myself.Height) || myself.getCancel()) {
+        myself.joinAndResetThreads();
+        myself.computing = false;
+        myself.lastUpdatedRows = 0;
       }
-      int i;
-      for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
-      myself.computing = false;
-      myself.lastUpdatedRows = 0;
+    }
+  }
+
+  void joinAndResetThreads() {
+    int i;
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      if (myself.tids[i] >= 0) {
+        join myself.tids[i];
+        myself.tids[i] = -1;
+      }
     }
   }
 
@@ -246,7 +243,9 @@ class MandelbrotApp {
   }
 
   void run() {
+    printf("[int] run: start\n");
     myself.init();
+    printf("[int] run: after init\n");
     bool needRender = true;
     while (!myself.getQuit()) {
       if (needRender && !myself.computing) {
@@ -259,6 +258,7 @@ class MandelbrotApp {
       delay(1);
       // Handle input and restart compute on changes
       if (myself.handleInput()) {
+        printf("[int] run: input -> restart compute\n");
         // Cancel any ongoing compute and restart
         myself.setCancel(true);
         if (myself.computing) {
@@ -274,6 +274,7 @@ class MandelbrotApp {
       }
     }
     // Cleanup
+    printf("[int] run: exiting loop\n");
     if (myself.computing) {
       int i;
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
@@ -283,5 +284,11 @@ class MandelbrotApp {
   }
 }
 
-MandelbrotApp app = new MandelbrotApp();
-app.run();
+void main() {
+  printf("[int] main: entry\n");
+  MandelbrotApp app = new MandelbrotApp();
+  app.run();
+}
+
+// Ensure execution even if the front end does not inject an implicit call
+main();
