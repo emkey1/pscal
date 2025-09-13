@@ -187,6 +187,14 @@ Finally, the compiled program runs on the Pscal virtual machine:
 a = 5
 ```
 
+This transparent workflow lets learners trace a program from source code through compilation to execution and inspect each intermediate form. Instructors can dissect the AST to explain parsing decisions, show how each bytecode instruction manipulates the VM stack, and connect those operations to the printed result. By stepping through each representation, students build an intuition for how high-level constructs translate into runtime behaviour.
+
+## Extensibility
+
+Pscal’s code base is intentionally small and written in C, making it easy to extend. New language front ends or VM built-ins can be added with minimal scaffolding, providing a practical playground for exploring language and runtime design. Because the modules are loosely coupled, a single change—such as adding a new opcode or a parser rule—can be studied in isolation before being reintroduced into the whole system. This modularity encourages experimentation and helps learners see how individual compiler pieces cooperate to form a complete toolchain.
+
+The project’s simplicity also invites collaboration. A class might divide into teams, each implementing a feature, and then merge their contributions to extend the platform. Since every front end targets the same VM, work on one language benefits the others, reinforcing how shared abstractions make language design more efficient.
+
 ---
 
 
