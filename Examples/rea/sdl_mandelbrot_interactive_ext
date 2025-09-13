@@ -223,12 +223,6 @@ class MandelbrotApp {
     destroytexture(myself.textureID); closegraph();
   }
 }
-
-void main() {
-  printf("[ext] main: entry\n");
-  MandelbrotApp app = new MandelbrotApp();
-  app.run();
-}
-
-// Ensure execution even if the front end does not inject an implicit call
-main();
+//trace on
+MandelbrotApp app = new MandelbrotApp();
+app.run();
