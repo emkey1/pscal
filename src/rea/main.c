@@ -259,27 +259,8 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
-    // Heuristic bootstrapper: if the program declares MandelbrotApp, append a
-    // minimal startup to construct and run it. This ensures execution even if
-    // top-level statements were stripped by the parser or absent in the source.
-    if (strstr(src, "class MandelbrotApp") && !strstr(src, "void main")) {
-        const char *bootstrap =
-            "\n// bootstrapped entry for MandelbrotApp\n"
-            "void main() {\n"
-            "  MandelbrotApp app = new MandelbrotApp();\n"
-            "  app.run();\n"
-            "}\n";
-        size_t blen = strlen(bootstrap);
-        char *aug = (char*)malloc(len + blen + 1);
-        if (aug) {
-            memcpy(aug, src, len);
-            memcpy(aug + len, bootstrap, blen);
-            aug[len + blen] = '\0';
-            free(src);
-            src = aug;
-            len = len + blen;
-        }
-    }
+    // Note: Bootstrap of entrypoint is disabled; rely on source top-level or
+    // future bytecode-level CALL injection.
 
     initSymbolSystem();
     registerAllBuiltins();

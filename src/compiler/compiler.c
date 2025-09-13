@@ -1484,6 +1484,20 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (local_slot != -1) {
                     is_ref = current_function_compiler->locals[local_slot].is_ref;
                 }
+                // Robust fallback: if the variable is declared somewhere in the current
+                // function's body but wasn't added to the locals table yet (e.g., due to
+                // interleaved declarations/statements or frontend nuances), discover it
+                // and register it now so we address it as a local rather than a global.
+                if (local_slot == -1 && current_function_compiler->function_symbol &&
+                    current_function_compiler->function_symbol->type_def) {
+                    AST* func_decl = current_function_compiler->function_symbol->type_def;
+                    AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
+                    if (decl_in_scope) {
+                        addLocal(current_function_compiler, varName, line, false);
+                        local_slot = current_function_compiler->local_count - 1;
+                        is_ref = false;
+                    }
+                }
             }
 
             if (local_slot != -1) {
@@ -3847,6 +3861,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                 if (local_slot != -1) {
                     is_ref = current_function_compiler->locals[local_slot].is_ref;
+                }
+                // Robust fallback for locals not yet registered in the function state.
+                if (local_slot == -1 && current_function_compiler->function_symbol &&
+                    current_function_compiler->function_symbol->type_def) {
+                    AST* func_decl = current_function_compiler->function_symbol->type_def;
+                    AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
+                    if (decl_in_scope) {
+                        addLocal(current_function_compiler, varName, line, false);
+                        local_slot = current_function_compiler->local_count - 1;
+                        is_ref = false;
+                    }
                 }
             }
             

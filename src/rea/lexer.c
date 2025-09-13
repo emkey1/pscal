@@ -185,8 +185,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case ':':
             return makeToken(lexer, REA_TOKEN_COLON, start);
         case '+':
+            if (match(lexer, '+')) return makeToken(lexer, REA_TOKEN_PLUS_PLUS, start);
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PLUS_EQUAL : REA_TOKEN_PLUS, start);
         case '-':
+            if (match(lexer, '-')) return makeToken(lexer, REA_TOKEN_MINUS_MINUS, start);
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_MINUS_EQUAL : REA_TOKEN_MINUS, start);
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
@@ -307,8 +309,10 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_SEMICOLON: return "SEMICOLON";
         case REA_TOKEN_COLON: return "COLON";
         case REA_TOKEN_PLUS: return "PLUS";
+        case REA_TOKEN_PLUS_PLUS: return "PLUS_PLUS";
         case REA_TOKEN_PLUS_EQUAL: return "PLUS_EQUAL";
         case REA_TOKEN_MINUS: return "MINUS";
+        case REA_TOKEN_MINUS_MINUS: return "MINUS_MINUS";
         case REA_TOKEN_MINUS_EQUAL: return "MINUS_EQUAL";
         case REA_TOKEN_STAR: return "STAR";
         case REA_TOKEN_SLASH: return "SLASH";

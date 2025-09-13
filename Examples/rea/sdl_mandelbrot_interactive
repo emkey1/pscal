@@ -150,36 +150,50 @@ class MandelbrotApp {
     }
 
     for (i = 0; i < myself.ThreadCount; i = i + 1) {
-      myself.tids[i] = spawn myself.computeRowsWorker(i);
+      myself.tids[i] = spawn MandelbrotApp_computeRowsWorker(myself, i);
     }
     myself.computing = true;
   }
 
   void pollCompute() {
     int y;
+    int doneCount;
+    bool done;
+    int adaptiveQuantum;
+    bool initialFrame;
+    bool periodicTick;
+    bool shouldUpdate;
     if (!myself.computing) return;
-    int doneCount = 0;
-    for (y = 0; y < myself.Height; y = y + 1) {
-      bool done;
+    y = 0;
+    doneCount = 0;
+    while (y < myself.Height) {
       lock(myself.rowMutex);
       done = myself.rowDone[y];
       unlock(myself.rowMutex);
       if (done) doneCount = doneCount + 1;
+      y = y + 1;
     }
-    int adaptiveQuantum = (myself.Height / (myself.ThreadCount * 8));
+    adaptiveQuantum = (myself.Height / (myself.ThreadCount * 8));
     if (adaptiveQuantum < myself.UpdateQuantum) adaptiveQuantum = myself.UpdateQuantum;
-    bool initialFrame = (doneCount > 0 && myself.lastUpdatedRows == 0);
-    bool enoughProgress = (doneCount - myself.lastUpdatedRows >= adaptiveQuantum);
-    bool periodicTick = ((myself.pollCounter++ & 3) == 0);
-    if (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height) || myself.getCancel()) {
+    initialFrame = (doneCount > 0 && myself.lastUpdatedRows == 0);
+    myself.pollCounter = myself.pollCounter + 1;
+    periodicTick = ((myself.pollCounter & 3) == 0);
+    shouldUpdate = (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height));
+    if (shouldUpdate) {
       updatetexture(myself.textureID, myself.pixels);
       cleardevice(); rendercopy(myself.textureID); updatescreen();
       myself.lastUpdatedRows = doneCount;
-      if ((doneCount == myself.Height) || myself.getCancel()) {
-        myself.joinAndResetThreads();
-        myself.computing = false;
-        myself.lastUpdatedRows = 0;
+    }
+    // Finalize when all rows are done or cancelled
+    if ((doneCount == myself.Height) || myself.getCancel()) {
+      if (doneCount > myself.lastUpdatedRows) {
+        updatetexture(myself.textureID, myself.pixels);
+        cleardevice(); rendercopy(myself.textureID); updatescreen();
+        myself.lastUpdatedRows = doneCount;
       }
+      MandelbrotApp_joinAndResetThreads(myself);
+      myself.computing = false;
+      myself.lastUpdatedRows = 0;
     }
   }
 
@@ -211,7 +225,7 @@ class MandelbrotApp {
     bool changed = false;
     int key = pollkey();
     if (key != 0) {
-      if (key == 'q' || key == 'Q') { myself.setQuit(true); return false; }
+      if (key == 'q' || key == 'Q') { MandelbrotApp_setQuit(myself, true); return false; }
       double widthRe = (myself.maxRe - myself.minRe);
       double heightIm = (myself.maxIm - myself.minIm);
       double dx = widthRe * 0.5;
@@ -221,7 +235,9 @@ class MandelbrotApp {
       else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; changed = true; }
       else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; changed = true; }
     }
-    int x = 0, y = 0, b = 0;
+    int x = 0;
+    int y = 0;
+    int b = 0;
     getmousestate(x, y, b);
     int winW = getmaxx() + 1;
     int winH = getmaxy() + 1;
@@ -232,10 +248,10 @@ class MandelbrotApp {
       if (winH != myself.Height) { y = (y * myself.Height) / winH; if (y >= myself.Height) y = myself.Height - 1; }
     }
     if ((b & myself.ButtonLeft) != 0 && (myself.prevButtons & myself.ButtonLeft) == 0) {
-      myself.zoom(x, y, 1.0 / myself.ZoomFactor);
+      MandelbrotApp_zoom(myself, x, y, 1.0 / myself.ZoomFactor);
       changed = true;
     } else if ((b & myself.ButtonRight) != 0 && (myself.prevButtons & myself.ButtonRight) == 0) {
-      myself.zoom(x, y, myself.ZoomFactor);
+      MandelbrotApp_zoom(myself, x, y, myself.ZoomFactor);
       changed = true;
     }
     myself.prevButtons = b;
@@ -243,30 +259,27 @@ class MandelbrotApp {
   }
 
   void run() {
-    printf("[int] run: start\n");
-    myself.init();
-    printf("[int] run: after init\n");
+    MandelbrotApp_init(myself);
     bool needRender = true;
     while (!myself.getQuit()) {
       if (needRender && !myself.computing) {
-        myself.startCompute();
+        MandelbrotApp_startCompute(myself);
         needRender = false;
       }
       // Poll ongoing compute to keep UI responsive
-      myself.pollCompute();
+      MandelbrotApp_pollCompute(myself);
       // Small yield to avoid a tight loop hogging CPU and to give SDL a chance to paint
       delay(1);
       // Handle input and restart compute on changes
-      if (myself.handleInput()) {
-        printf("[int] run: input -> restart compute\n");
+      if (MandelbrotApp_handleInput(myself)) {
         // Cancel any ongoing compute and restart
-        myself.setCancel(true);
+        MandelbrotApp_setCancel(myself, true);
         if (myself.computing) {
           int i;
           for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
           myself.computing = false;
         }
-        myself.setCancel(false);
+        MandelbrotApp_setCancel(myself, false);
         needRender = true;
         // Immediate visual feedback
         updatetexture(myself.textureID, myself.pixels);
@@ -274,7 +287,6 @@ class MandelbrotApp {
       }
     }
     // Cleanup
-    printf("[int] run: exiting loop\n");
     if (myself.computing) {
       int i;
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
@@ -285,4 +297,4 @@ class MandelbrotApp {
 }
 
 MandelbrotApp app = new MandelbrotApp();
-app.run();
+MandelbrotApp_run(app);
