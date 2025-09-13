@@ -135,6 +135,23 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     return index;
 }
 
+// Determine if a variable declaration node resides in the true global scope.
+// Walks up the AST parent chain and reports "global" only if no enclosing
+// function or procedure is encountered before reaching the program root.
+static bool isGlobalScopeNode(AST* node) {
+    AST* p = node;
+    while (p) {
+        if (p->type == AST_FUNCTION_DECL || p->type == AST_PROCEDURE_DECL) {
+            return false; // inside routine -> not global
+        }
+        if (p->type == AST_PROGRAM) {
+            return true; // reached program root with no routine -> global
+        }
+        p = p->parent;
+    }
+    return true;
+}
+
 typedef struct {
     char* class_name;
     int method_count;
@@ -1700,7 +1717,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         case AST_VAR_DECL: {
-            if (current_function_compiler == NULL) { // Global variables
+            bool global_ctx = (current_function_compiler == NULL) && isGlobalScopeNode(node);
+            if (global_ctx) { // Global variables
                 AST* type_specifier_node = node->right;
 
                 // First, resolve the type alias if one exists.
