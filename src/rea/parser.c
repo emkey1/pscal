@@ -23,6 +23,7 @@ typedef struct {
     const char* currentClassName; // non-owning pointer to current class name while parsing class body
     const char* currentParentClassName; // non-owning pointer to current parent class name while in class body
     int currentMethodIndex; // index of next method in current class for vtable
+    int functionDepth; // nesting level of function/procedure declarations
 } ReaParser;
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
@@ -1193,7 +1194,7 @@ static AST *parseVarDecl(ReaParser *p) {
     AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
     AST *compound = newASTNode(AST_COMPOUND, NULL);
     // Mark as global scope only when parsing at the top level
-    compound->is_global_scope = (p->currentFunctionType == TYPE_VOID && p->currentClassName == NULL);
+    compound->is_global_scope = (p->functionDepth == 0 && p->currentClassName == NULL);
 
     bool first = true;
     while (1) {
@@ -1259,7 +1260,9 @@ static AST *parseVarDecl(ReaParser *p) {
 
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex) {
     VarType prevType = p->currentFunctionType;
+    int prevDepth = p->functionDepth;
     p->currentFunctionType = vtype;
+    p->functionDepth++;
 
     // If inside a class, mangle function name to ClassName_method
     if (p->currentClassName && nameTok && nameTok->value) {
@@ -1451,6 +1454,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     }
 
     p->currentFunctionType = prevType;
+    p->functionDepth = prevDepth;
     return func;
 }
 
@@ -2023,6 +2027,7 @@ AST *parseRea(const char *source) {
     p.currentClassName = NULL;
     p.currentParentClassName = NULL;
     p.currentMethodIndex = 0;
+    p.functionDepth = 0;
     reaAdvance(&p);
 
     AST *program = newASTNode(AST_PROGRAM, NULL);
