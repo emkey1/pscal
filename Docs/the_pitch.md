@@ -1,15 +1,3 @@
-emkey1
-emkey1
-Online
-
-
-
-Welcome, 
-MyRepoBot
-. We hope you brought pizza. — 9/2/25, 22:21
-emkey1 — 11:26
-﻿
-escape to cancel • enter to save
 # PSCAL and Its Educational Applications
 
 If **PSCAL** has any real-world application, it is most likely in the area of education. The way the PSCAL suite works is very much analogous to the way the GNU compilers work. Both systems follow a multi-stage compilation process.
