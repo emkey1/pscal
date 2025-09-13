@@ -3866,6 +3866,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);
                 if (const_ptr) {
+                    if (node->left) {
+                        compileRValue(node->left, chunk, getLine(node->left));
+                        writeBytecodeChunk(chunk, POP, line);
+                    }
                     emitConstant(chunk, addConstantToChunk(chunk, const_ptr), line);
                     break;
                 }
