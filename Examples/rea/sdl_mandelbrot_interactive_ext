@@ -223,6 +223,10 @@ class MandelbrotApp {
     destroytexture(myself.textureID); closegraph();
   }
 }
-//trace on
-MandelbrotApp app = new MandelbrotApp();
-app.run();
+
+void main() {
+  printf("[ext] main: entry\n");
+  MandelbrotApp app = new MandelbrotApp();
+  app.run();
+}
+

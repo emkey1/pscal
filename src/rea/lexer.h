@@ -106,5 +106,6 @@ typedef struct {
 
 void reaInitLexer(ReaLexer *lexer, const char *source);
 ReaToken reaNextToken(ReaLexer *lexer);
+const char* reaTokenTypeToString(ReaTokenType type);
 
 #endif
