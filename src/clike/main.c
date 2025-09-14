@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     }
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, (const char**)dep_paths, clike_import_count, &chunk);
+    bool used_cache = loadBytecodeFromCache(path, argv[0], (const char**)dep_paths, clike_import_count, &chunk);
     if (dep_paths) {
         for (int i = 0; i < clike_import_count; ++i) free(dep_paths[i]);
         free(dep_paths);

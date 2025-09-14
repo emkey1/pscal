@@ -302,3 +302,46 @@ Creates the `BallsApp` instance and invokes its `run` method.
 
 Experiment by changing constants like `NumBalls` or adding new behavior in the
 update loop. The same workflow can be used for other Rea programs.
+## Tracing and inspecting execution
+
+When diagnosing control flow, two tools are handy: VM instruction tracing and
+bytecode disassembly.
+
+- Enable a short instruction trace (first N instructions):
+
+  ```sh
+  build/bin/rea --vm-trace-head=64 Examples/rea/sdl_multibouncingballs
+  ```
+
+  The VM prints lines like:
+
+  ```
+  [VM-TRACE] IP=0000 OPC=22 STACK=0
+  [VM-TRACE] IP=0032 OPC=25 STACK=1
+  ```
+
+  Where:
+  - `IP` is the current instruction pointer (byte offset within the chunk)
+  - `OPC` is the numeric opcode (use disassembly to see mnemonics)
+  - `STACK` is the current stack depth
+
+  Tip: you can also drop a `trace on` comment anywhere in your source to enable
+  a short default trace (equivalent to `--vm-trace-head=16`).
+
+- Disassemble the compiled bytecode to human‑readable mnemonics:
+
+  ```sh
+  build/bin/rea --no-cache --dump-bytecode Examples/rea/sdl_multibouncingballs
+  ```
+
+  This prints the bytecode and any procedures discovered. It is useful to
+  confirm that top‑level calls (e.g., to a `main` routine) are being emitted.
+
+- Bypass cached bytecode to ensure you execute the latest compile:
+
+  ```sh
+  build/bin/rea --no-cache Examples/rea/sdl_multibouncingballs
+  ```
+
+  The Rea front end caches compiled chunks under `~/.pscal_cache`. Use `--no-cache`
+  during iteration or delete the cache directory to force a fresh compile.

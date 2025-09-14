@@ -3,7 +3,9 @@
 // Requires building Pscal with SDL support.
 
 class Ball {
-  const float WallBoost = 1.05;
+  const float WallBoost = 1.15;
+  const float MinSpeed = 0.9;
+  const float MaxSpeed = 12.0;
   float x;
   float y;
   float dx;
@@ -37,22 +39,37 @@ class Ball {
     return myself;
   }
 
+  void clampSpeed() {
+    if (myself.dx > MaxSpeed) myself.dx = MaxSpeed;
+    if (myself.dx < -MaxSpeed) myself.dx = -MaxSpeed;
+    if (myself.dy > MaxSpeed) myself.dy = MaxSpeed;
+    if (myself.dy < -MaxSpeed) myself.dy = -MaxSpeed;
+  }
+
   void move(int maxX, int maxY) {
     myself.x = myself.x + myself.dx;
     myself.y = myself.y + myself.dy;
     if ((myself.x - myself.radius) < 0) {
       myself.x = myself.radius;
-       myself.dx = -myself.dx * WallBoost;
+      myself.dx = -myself.dx * WallBoost;
+      if (myself.dx <= 0.0) myself.dx = MinSpeed;
+      myself.clampSpeed();
     } else if ((myself.x + myself.radius) > maxX) {
       myself.x = maxX - myself.radius;
       myself.dx = -myself.dx * WallBoost;
+      if (myself.dx >= 0.0) myself.dx = -MinSpeed;
+      myself.clampSpeed();
     }
     if ((myself.y - myself.radius) < 0) {
       myself.y = myself.radius;
-      myself.dx = -myself.dx * WallBoost;
+      myself.dy = -myself.dy * WallBoost;
+      if (myself.dy <= 0.0) myself.dy = MinSpeed;
+      myself.clampSpeed();
     } else if ((myself.y + myself.radius) > maxY) {
       myself.y = maxY - myself.radius;
-      myself.dx = -myself.dx * WallBoost;
+      myself.dy = -myself.dy * WallBoost;
+      if (myself.dy >= 0.0) myself.dy = -MinSpeed;
+      myself.clampSpeed();
     }
   }
 
@@ -126,6 +143,8 @@ class BallsApp {
               myself.balls[i].dy = new_v1n * ny + v1t * ty;
               myself.balls[j].dx = new_v2n * nx + v2t * tx;
               myself.balls[j].dy = new_v2n * ny + v2t * ty;
+              myself.balls[i].clampSpeed();
+              myself.balls[j].clampSpeed();
               float overlap = sumR - dist;
               if (overlap > 0.0) {
                 myself.balls[i].x = myself.balls[i].x - (overlap / 2.0) * nx;

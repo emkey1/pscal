@@ -17,6 +17,14 @@ The `rea` front end supports a few diagnostic options:
 --dump-ast-json        Dump the parsed AST as JSON and exit.
 --dump-bytecode        Dump the compiled bytecode before execution.
 --dump-bytecode-only   Dump the compiled bytecode and exit without executing.
+--vm-trace-head=N      Print the first N VM instructions executed (e.g. 64).
+--no-cache             Ignore cached bytecode and compile fresh.
+
+You can also drop a `trace on` comment anywhere in the source to enable a short
+default instruction trace without adding CLI flags. The VM prints lines like
+`[VM-TRACE] IP=0000 OPC=22 STACK=0` where `IP` is the instruction pointer,
+`OPC` is the opcode (numeric; use `--dump-bytecode` to view mnemonics), and
+`STACK` is the current stack depth.
 ```
 
 ## Roadmap
@@ -31,4 +39,3 @@ The `rea` front end supports a few diagnostic options:
   infrastructure.
 
 See `LANGUAGE_SPEC.md` for the complete language specification.
-

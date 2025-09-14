@@ -79,7 +79,8 @@ Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex) {
 typedef struct {
     Thread* thread;
     uint16_t entry;
-    Value arg; // optional argument passed to the routine
+    int argc;
+    Value args[8]; // up to 8 arguments supported
 } ThreadStartArgs;
 
 // Forward declarations for helpers used by threadStart.
@@ -91,7 +92,9 @@ static void* threadStart(void* arg) {
     Thread* thread = args->thread;
     VM* vm = thread->vm;
     uint16_t entry = args->entry;
-    Value start_arg = args->arg; // take ownership copy
+    int argc = args->argc;
+    Value local_args[8];
+    for (int i = 0; i < argc && i < 8; i++) local_args[i] = args->args[i];
     free(args);
 
     Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, entry);
@@ -117,25 +120,21 @@ static void* threadStart(void* arg) {
     }
 
     // If the callee expects parameters, push the provided start_arg as the first argument.
-    if (proc_symbol && proc_symbol->type_def) {
-        int param_count = proc_symbol->type_def->child_count;
-        if (param_count > 0) {
-            // Coerce int->real if needed for the first param, mirroring CALL behavior.
-            AST* param_ast = proc_symbol->type_def->children[0];
-            Value coerced = start_arg;
-            if (param_ast && isRealType(param_ast->var_type) && isIntlikeType(start_arg.type)) {
-                long double tmp = asLd(start_arg);
-                setTypeValue(&coerced, param_ast->var_type);
-                SET_REAL_VALUE(&coerced, tmp);
+    // Push up to the number of expected parameters; coerce basic types as needed.
+    int expected = proc_symbol && proc_symbol->type_def ? proc_symbol->type_def->child_count : argc;
+    for (int i = 0; i < expected && i < argc && i < 8; i++) {
+        Value v = local_args[i];
+        if (proc_symbol && proc_symbol->type_def) {
+            AST* param_ast = proc_symbol->type_def->children[i];
+            if (param_ast) {
+                if (isRealType(param_ast->var_type) && isIntlikeType(v.type)) {
+                    long double tmp = asLd(v);
+                    setTypeValue(&v, param_ast->var_type);
+                    SET_REAL_VALUE(&v, tmp);
+                }
             }
-            push(vm, coerced);
-        } else {
-            // No params expected; discard passed arg if it carries managed data
-            freeValue(&start_arg);
         }
-    } else {
-        // Unknown signature; pass the arg conservatively
-        push(vm, start_arg);
+        push(vm, v);
     }
 
     for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
@@ -147,7 +146,7 @@ static void* threadStart(void* arg) {
     return NULL;
 }
 
-static int createThreadWithArg(VM* vm, uint16_t entry, Value arg) {
+static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, Value* argv) {
     int id = -1;
     for (int i = 1; i < VM_MAX_THREADS; i++) {
         if (!vm->threads[i].active && vm->threads[i].vm == NULL) {
@@ -179,7 +178,8 @@ static int createThreadWithArg(VM* vm, uint16_t entry, Value arg) {
     }
     args->thread = t;
     args->entry = entry;
-    args->arg = arg; // copy struct contents; strings/arrays share buffers; caller should not free after
+    args->argc = (argc > 8) ? 8 : argc;
+    for (int i = 0; i < args->argc; i++) args->args[i] = argv[i];
     t->active = true;
     if (pthread_create(&t->handle, NULL, threadStart, args) != 0) {
         free(args);
@@ -197,7 +197,7 @@ static int createThreadWithArg(VM* vm, uint16_t entry, Value arg) {
 
 // Backward-compatible helper: no argument provided, pass NIL
 static int createThread(VM* vm, uint16_t entry) {
-    return createThreadWithArg(vm, entry, makeNil());
+    return createThreadWithArgs(vm, entry, 0, NULL);
 }
 
 static void joinThread(VM* vm, int id) {
@@ -705,23 +705,38 @@ static Value vmHostQuitRequested(VM* vm) {
 }
 
 static Value vmHostCreateThreadAddr(VM* vm) {
-    // Expects: proc address and arg value on stack (address below arg). For backward compat we always push arg (nil) in compiler.
-    Value argVal = pop(vm);
-    Value addrVal = pop(vm);
-
-    uint16_t entry = 0;
-    if (IS_INTLIKE(addrVal)) {
-        entry = (uint16_t)AS_INTEGER(addrVal);
+    // New layout: [addr, arg0, arg1, ..., argc] — argc on top.
+    Value argcVal = pop(vm);
+    if (IS_INTLIKE(argcVal)) {
+        int argc = (int)AS_INTEGER(argcVal);
+        if (argc < 0) argc = 0;
+        int totalArgs = argc;
+        Value args[8];
+        if (argc > 8) argc = 8;
+        for (int i = totalArgs - 1; i >= 0; i--) {
+            Value v = pop(vm);
+            if (i < 8) {
+                args[i] = v;
+            } else {
+                freeValue(&v);
+            }
+        }
+        Value addrVal = pop(vm);
+        uint16_t entry = 0;
+        if (IS_INTLIKE(addrVal)) entry = (uint16_t)AS_INTEGER(addrVal);
+        freeValue(&addrVal);
+        int id = createThreadWithArgs(vm, entry, argc, args);
+        return makeInt(id < 0 ? -1 : id);
+    } else {
+        // Backwards-compatible path: [addr, arg]
+        Value argVal = argcVal; // already popped
+        Value addrVal = pop(vm);
+        uint16_t entry = 0;
+        if (IS_INTLIKE(addrVal)) entry = (uint16_t)AS_INTEGER(addrVal);
+        freeValue(&addrVal);
+        int id = createThreadWithArgs(vm, entry, 1, &argVal);
+        return makeInt(id < 0 ? -1 : id);
     }
-    freeValue(&addrVal);
-
-    int id = createThreadWithArg(vm, entry, argVal);
-    // createThreadWithArg takes ownership of argVal copy via struct assignment; do not free argVal here
-    Value v;
-    memset(&v, 0, sizeof(Value));
-    v.type = TYPE_THREAD;
-    SET_INT_VALUE(&v, id < 0 ? -1 : id);
-    return v;
 }
 
 static Value vmHostWaitThread(VM* vm) {
@@ -3869,13 +3884,21 @@ comparison_error_label:
             }
             case THREAD_JOIN: {
                 Value tidVal = peek(vm, 0);
-                if (!IS_INTLIKE(tidVal)) {
+                int tid_ok = 0;
+                int tid = 0;
+                if (tidVal.type == TYPE_THREAD) {
+                    tid = (int)AS_INTEGER(tidVal);
+                    tid_ok = 1;
+                } else if (IS_INTLIKE(tidVal)) {
+                    tid = (int)AS_INTEGER(tidVal);
+                    tid_ok = 1;
+                }
+                if (!tid_ok) {
                     runtimeError(vm, "Thread id must be integer.");
                     Value popped_tid = pop(vm);
                     freeValue(&popped_tid);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                int tid = (int)tidVal.i_val;
                 joinThread(vm, tid);
                 Value popped_tid = pop(vm);
                 freeValue(&popped_tid);

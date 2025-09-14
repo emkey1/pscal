@@ -295,57 +295,115 @@ void setTypeAST(AST *node, VarType type) {
     node->var_type = type;
 }
 
-AST* findDeclarationInScope(const char* varName, AST* currentScopeNode) {
-     if (!currentScopeNode || !varName) return NULL;
-     if (currentScopeNode->type != AST_PROCEDURE_DECL && currentScopeNode->type != AST_FUNCTION_DECL) return NULL;
+static AST* matchVarDecl(AST* varDeclGroup, const char* varName);
 
-     for (int i = 0; i < currentScopeNode->child_count; i++) {
-         AST* paramDeclGroup = currentScopeNode->children[i];
-         if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
-              for (int j = 0; j < paramDeclGroup->child_count; j++) {
-                  AST* paramNameNode = paramDeclGroup->children[j];
-                  if (paramNameNode && paramNameNode->type == AST_VARIABLE && paramNameNode->token &&
-                      strcasecmp(paramNameNode->token->value, varName) == 0) {
-                      return paramDeclGroup;
-                  }
-              }
-         }
-     }
-      if (currentScopeNode->type == AST_FUNCTION_DECL) {
-           if (strcasecmp(currentScopeNode->token->value, varName) == 0 || strcasecmp("result", varName) == 0) {
-                return currentScopeNode;
-           }
-      }
+AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
+    if (!currentScopeNode || !varName || !referenceNode) return NULL;
 
-     AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL) ? currentScopeNode->right : currentScopeNode->extra;
-     if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
-         AST* declarationsNode = blockNode->children[0];
-         if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
-             for (int i = 0; i < declarationsNode->child_count; i++) {
-                 AST* varDeclGroup = declarationsNode->children[i];
-                 if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
-                     for (int j = 0; j < varDeclGroup->child_count; j++) {
-                         AST* varNameNode = varDeclGroup->children[j];
-                         if (varNameNode) {
-                             if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
-                                 strcasecmp(varNameNode->token->value, varName) == 0) {
-                                 return varDeclGroup;
-                             } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
-                                        varNameNode->left->type == AST_VARIABLE &&
-                                        varNameNode->left->token &&
-                                        strcasecmp(varNameNode->left->token->value, varName) == 0) {
-                                 return varDeclGroup;
-                             }
-                         }
-                     }
-                 }
+    AST* node = referenceNode;
+    while (node && node != currentScopeNode) {
+        AST* parent = node->parent;
+        if (parent && parent->type == AST_COMPOUND) {
+            for (int i = 0; i < parent->child_count; i++) {
+                AST* sibling = parent->children[i];
+                if (sibling == node) break;
+                if (sibling && sibling->type == AST_VAR_DECL) {
+                    AST* found = matchVarDecl(sibling, varName);
+                    if (found) return found;
+                }
+            }
+        }
+        node = parent;
+    }
+
+    if (currentScopeNode->type == AST_COMPOUND) {
+        return NULL;
+    }
+
+    if (currentScopeNode->type != AST_PROCEDURE_DECL &&
+        currentScopeNode->type != AST_FUNCTION_DECL) {
+        return NULL;
+    }
+
+    for (int i = 0; i < currentScopeNode->child_count; i++) {
+        AST* paramDeclGroup = currentScopeNode->children[i];
+        if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
+            AST* found = matchVarDecl(paramDeclGroup, varName);
+            if (found) return paramDeclGroup;
+        }
+    }
+
+    if (currentScopeNode->type == AST_FUNCTION_DECL) {
+        if (strcasecmp(currentScopeNode->token->value, varName) == 0 ||
+            strcasecmp("result", varName) == 0) {
+            return currentScopeNode;
+        }
+    }
+
+    AST* blockNode = (currentScopeNode->type == AST_PROCEDURE_DECL)
+                         ? currentScopeNode->right
+                         : currentScopeNode->extra;
+    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0) {
+        AST* declarationsNode = blockNode->children[0];
+        if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
+            for (int i = 0; i < declarationsNode->child_count; i++) {
+                AST* varDeclGroup = declarationsNode->children[i];
+                if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                    AST* found = matchVarDecl(varDeclGroup, varName);
+                    if (found) return varDeclGroup;
+                }
             }
         }
     }
-     return NULL;
+
+    return NULL;
 }
 
-AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode) {
+static AST* matchVarDecl(AST* varDeclGroup, const char* varName) {
+    for (int j = 0; j < varDeclGroup->child_count; j++) {
+        AST* varNameNode = varDeclGroup->children[j];
+        if (!varNameNode) continue;
+        if (varNameNode->type == AST_VARIABLE && varNameNode->token &&
+            strcasecmp(varNameNode->token->value, varName) == 0) {
+            return varDeclGroup;
+        } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                   varNameNode->left->type == AST_VARIABLE &&
+                   varNameNode->left->token &&
+                   strcasecmp(varNameNode->left->token->value, varName) == 0) {
+            return varDeclGroup;
+        }
+    }
+    return NULL;
+}
+
+static AST* findVarDeclInSubtree(AST* root, const char* varName) {
+    if (!root) return NULL;
+    if (root->type == AST_VAR_DECL) {
+        AST* m = matchVarDecl(root, varName);
+        if (m) return root;
+    }
+    if (root->left) {
+        AST* r = findVarDeclInSubtree(root->left, varName);
+        if (r) return r;
+    }
+    if (root->right) {
+        AST* r = findVarDeclInSubtree(root->right, varName);
+        if (r) return r;
+    }
+    if (root->extra) {
+        AST* r = findVarDeclInSubtree(root->extra, varName);
+        if (r) return r;
+    }
+    for (int i = 0; i < root->child_count; i++) {
+        AST* c = root->children ? root->children[i] : NULL;
+        if (!c) continue;
+        AST* r = findVarDeclInSubtree(c, varName);
+        if (r) return r;
+    }
+    return NULL;
+}
+
+static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentScopeNode, AST* referenceNode, AST* globalProgramNode) {
      if (!varName) return NULL;
      AST* foundDecl = NULL;
 
@@ -357,20 +415,90 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
          return sym->type_def;
      }
 
-    if (currentScopeNode && currentScopeNode != globalProgramNode) {
-        foundDecl = findDeclarationInScope(varName, currentScopeNode);
+    // First, search within the current scope (procedure/function) where the
+    // reference occurs. This finds parameters and locals declared in the
+    // scope's declarations block.
+    if (currentScopeNode) {
+        // Quick path: directly scan the current scope's local declarations.
+        if ((currentScopeNode->type == AST_PROCEDURE_DECL || currentScopeNode->type == AST_FUNCTION_DECL) &&
+            currentScopeNode->right && currentScopeNode->right->type == AST_BLOCK &&
+            currentScopeNode->right->child_count > 0) {
+            AST* declarationsNode = currentScopeNode->right->children[0];
+            if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
+                for (int i = 0; i < declarationsNode->child_count && !foundDecl; i++) {
+                    AST* varDeclGroup = declarationsNode->children[i];
+                    if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                        for (int j = 0; j < varDeclGroup->child_count; j++) {
+                            AST* nameNode = varDeclGroup->children[j];
+                            if (!nameNode) continue;
+                            if ((nameNode->type == AST_VARIABLE && nameNode->token && nameNode->token->value &&
+                                 strcasecmp(nameNode->token->value, varName) == 0) ||
+                                (nameNode->type == AST_ASSIGN && nameNode->left && nameNode->left->type == AST_VARIABLE &&
+                                 nameNode->left->token && nameNode->left->token->value &&
+                                 strcasecmp(nameNode->left->token->value, varName) == 0)) {
+                                foundDecl = varDeclGroup;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback to the general-purpose scope walk if still not found.
+        if (!foundDecl) {
+            foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
+        }
+
+        // As an additional fallback (handles languages where declarations and
+        // statements are interleaved inside a single COMPOUND), walk up to the
+        // nearest COMPOUND ancestor of the reference node and scan all earlier
+        // and later siblings for a matching VAR_DECL.
+        if (!foundDecl && referenceNode) {
+            AST* ancestor = referenceNode->parent;
+            while (ancestor && ancestor != currentScopeNode) {
+                if (ancestor->type == AST_COMPOUND) {
+                    for (int i = 0; i < ancestor->child_count && !foundDecl; i++) {
+                        AST* sibling = ancestor->children[i];
+                        if (sibling && sibling->type == AST_VAR_DECL) {
+                            AST* m = matchVarDecl(sibling, varName);
+                            if (m) { foundDecl = sibling; break; }
+                        }
+                    }
+                }
+                if (foundDecl) break;
+                ancestor = ancestor->parent;
+            }
+        }
+
+        // Final fallback: search the entire body of the current scope for a
+        // matching VAR_DECL (handles interleaved block structures found in Rea).
+        if (!foundDecl && (currentScopeNode->type == AST_PROCEDURE_DECL || currentScopeNode->type == AST_FUNCTION_DECL)) {
+            AST* body = (currentScopeNode->right && currentScopeNode->right->type != AST_BLOCK)
+                          ? currentScopeNode->right
+                          : currentScopeNode->extra;
+            if (!body || body->type != AST_COMPOUND) {
+                // For Pascal-style, body is an AST_BLOCK whose first child is declarations
+                body = currentScopeNode->right;
+            }
+            if (body) {
+                AST* anyDecl = findVarDeclInSubtree(body, varName);
+                if (anyDecl) foundDecl = anyDecl;
+            }
+        }
     }
 
-    // If not found in the immediate scope, walk up parent scopes to
-    // support nested routines accessing variables from enclosing
-    // procedures/functions (upvalues).
-    AST* parentScope = currentScopeNode ? currentScopeNode->parent : NULL;
-    while (!foundDecl && parentScope) {
-        if (parentScope->type == AST_PROCEDURE_DECL || parentScope->type == AST_FUNCTION_DECL) {
-            foundDecl = findDeclarationInScope(varName, parentScope);
-            if (foundDecl) break;
+    // If not found, walk outward and search enclosing procedure/function scopes.
+    if (!foundDecl) {
+        AST* parentScope = currentScopeNode ? currentScopeNode->parent : NULL;
+        while (!foundDecl && parentScope) {
+            if (parentScope->type == AST_PROCEDURE_DECL ||
+                parentScope->type == AST_FUNCTION_DECL) {
+                foundDecl = findDeclarationInScope(varName, parentScope, parentScope);
+                if (foundDecl) break;
+            }
+            parentScope = parentScope->parent;
         }
-        parentScope = parentScope->parent;
     }
 
     if (!foundDecl && globalProgramNode && globalProgramNode->type == AST_PROGRAM) {
@@ -408,6 +536,11 @@ AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST*
      }
  found_static_decl:;
      return foundDecl;
+}
+
+// Backwards-compatible wrapper retained for existing call sites.
+AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode) {
+    return findStaticDeclarationInASTWithRef(varName, currentScopeNode, currentScopeNode, globalProgramNode);
 }
 
 void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
@@ -459,6 +592,36 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 const char* varName = node->token ? node->token->value : NULL;
                 if (!varName) { node->var_type = TYPE_VOID; break; }
 
+                // Rea: inside a class method, 'myself' refers to the implicit
+                // receiver pointer. Type it as a POINTER so method calls that
+                // expect a receiver of pointer type type-check correctly.
+                if (strcasecmp(varName, "myself") == 0) {
+                    node->var_type = TYPE_POINTER;
+                    // Try to infer the class type from the current scope's name: Class_Method
+                    AST* clsType = NULL;
+                    if (childScopeNode && childScopeNode->token && childScopeNode->token->value) {
+                        const char* fn = childScopeNode->token->value;
+                        const char* us = strchr(fn, '_');
+                        if (us && us != fn) {
+                            size_t len = (size_t)(us - fn);
+                            char cname[MAX_SYMBOL_LENGTH];
+                            if (len >= sizeof(cname)) len = sizeof(cname) - 1;
+                            memcpy(cname, fn, len);
+                            cname[len] = '\0';
+                            clsType = lookupType(cname);
+                        }
+                    }
+                    // Build a pointer type node that points at the class record type if we found it.
+                    if (clsType) {
+                        AST* ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+                        if (ptrNode) {
+                            setRight(ptrNode, clsType);
+                            node->type_def = ptrNode;
+                        }
+                    }
+                    break;
+                }
+
                 // First, consult the global symbol table.  This handles variables
                 // and constants imported from units via linkUnit.
                 Symbol* sym = lookupGlobalSymbol(varName);
@@ -466,7 +629,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                     node->var_type = sym->type;
                     node->type_def = sym->type_def;
                 } else {
-                    AST* declNode = findStaticDeclarationInAST(varName, childScopeNode, globalProgramNode);
+                    AST* declNode = findStaticDeclarationInASTWithRef(varName, childScopeNode, node, globalProgramNode);
                     if (declNode) {
                         if (declNode->type == AST_ENUM_TYPE) {
                             node->var_type = TYPE_ENUM;

@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #ifdef SDL
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
@@ -70,7 +71,7 @@ void initSymbolSystem(void) {
 #endif
 }
 
-int runProgram(const char *source, const char *programName, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
+int runProgram(const char *source, const char *programName, const char *frontend_path, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -91,6 +92,9 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
     bool overall_success_status = false;
     bool used_cache = false;
 
+    // Note: stderr capture is handled at the top-level in main() only.
+    // Avoid nested capture here to ensure early exits flush through main's handler.
+
     Lexer lexer;
     initLexer(&lexer, source);
     Parser parser;
@@ -101,7 +105,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
         annotateTypes(GlobalAST, NULL, GlobalAST);
-        if (pascal_semantic_error_count > 0 && !dump_ast_json_flag) {
+        if ((pascal_semantic_error_count > 0 || pascal_parser_error_count > 0) && !dump_ast_json_flag) {
             fprintf(stderr, "Compilation failed with errors.\n");
             overall_success_status = false;
         } else if (dump_ast_json_flag) {
@@ -111,7 +115,7 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
             overall_success_status = true;
         } else {
             GlobalAST = optimizePascalAST(GlobalAST);
-            used_cache = loadBytecodeFromCache(programName, NULL, 0, &chunk);
+            used_cache = loadBytecodeFromCache(programName, frontend_path, NULL, 0, &chunk);
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
                 if (dump_bytecode_flag) {
@@ -121,7 +125,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                 if (compilation_ok_for_vm) {
                     finalizeBytecode(&chunk);
                     saveBytecodeToCache(programName, &chunk);
-                    fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    // Silence successful compilation message for cleaner test stderr.
+                    // fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                         if (!dump_bytecode_only_flag) {
@@ -130,6 +135,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
                     }
                 }
             } else {
+                // Always emit the cache message so callers can detect cache reuse;
+                // the top-level stderr capture in main() will decide whether to replay.
                 fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
@@ -172,6 +179,8 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
         overall_success_status = false;
     }
 
+    // No local stderr capture/restore here.
+
     freeBytecodeChunk(&chunk);
     freeProcedureTable();
     freeTypeTableASTNodes();
@@ -201,8 +210,36 @@ int runProgram(const char *source, const char *programName, int dump_ast_json_fl
 }
 
 // Consistent main function structure for argument parsing
+// Top-level stderr capture state for clean-success suppression
+static FILE* s_stderr_tmp = NULL;
+static int s_saved_stderr_fd = -1;
+static int s_capture_active = 0;
+
+static void flushCapturedStderrAtExit(void) {
+    if (!s_capture_active) return;
+    fflush(stderr);
+    int saved = s_saved_stderr_fd;
+    FILE* tmp = s_stderr_tmp;
+    s_capture_active = 0;
+    s_saved_stderr_fd = -1;
+    s_stderr_tmp = NULL;
+    if (saved != -1) {
+        dup2(saved, STDERR_FILENO);
+        close(saved);
+    }
+    if (tmp) {
+        rewind(tmp);
+        char buf[4096]; size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) {
+            (void)write(STDERR_FILENO, buf, n);
+        }
+        fclose(tmp);
+    }
+}
+
 int main(int argc, char *argv[]) {
-    vmInitTerminalState();
+    const char* initTerm = getenv("PSCAL_INIT_TERM");
+    if (initTerm && *initTerm && *initTerm != '0') vmInitTerminalState();
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
@@ -309,8 +346,53 @@ int main(int argc, char *argv[]) {
         gParamValues = NULL;
     }
 
+    // Strict success mode capture (default ON; disable with PSCAL_STRICT_SUCCESS=0)
+    int capture_stderr = 0;
+    {
+        int strict_success = 1; const char* strict_env = getenv("PSCAL_STRICT_SUCCESS");
+        if (strict_env && *strict_env == '0') strict_success = 0;
+        if (strict_success && !dump_ast_json_flag && !dump_bytecode_flag && !dump_bytecode_only_flag) {
+            s_saved_stderr_fd = dup(STDERR_FILENO);
+            s_stderr_tmp = tmpfile();
+            if (s_stderr_tmp) { dup2(fileno(s_stderr_tmp), STDERR_FILENO); capture_stderr = 1; s_capture_active = 1; }
+            atexit(flushCapturedStderrAtExit);
+        }
+    }
+
     // Call runProgram
-    int result = runProgram(source_buffer, programName, dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
+    int result = runProgram(source_buffer, programName, argv[0], dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
+
+    // Restore stderr and conditionally replay
+    if (capture_stderr) {
+        fflush(stderr);
+        if (s_saved_stderr_fd != -1) { dup2(s_saved_stderr_fd, STDERR_FILENO); close(s_saved_stderr_fd); s_saved_stderr_fd = -1; }
+        if (s_stderr_tmp) {
+            rewind(s_stderr_tmp);
+            // Scan buffer for non-whitespace or cached message
+            int has_non_ws = 0, has_cached = 0; char buf[4096]; size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
+                for (size_t i = 0; i < n; i++) {
+                    char c = buf[i];
+                    if (!(c == ' ' || c == '\t' || c == '\r' || c == '\n')) { has_non_ws = 1; break; }
+                }
+                if (!has_cached) {
+                    if (memmem(buf, n, "Loaded cached byte code", 24) != NULL) has_cached = 1;
+                }
+                if (has_non_ws && has_cached) break;
+            }
+            // Decide replay: nonzero exit or cached or non-whitespace
+            if (result != EXIT_SUCCESS || has_cached || has_non_ws) {
+                rewind(s_stderr_tmp);
+                while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
+                    (void)write(STDERR_FILENO, buf, n);
+                }
+            }
+            fclose(s_stderr_tmp);
+            s_stderr_tmp = NULL;
+        }
+        s_capture_active = 0; // disable atexit replay; we've handled it
+    }
+
     free(source_buffer); // Free the source code buffer
     return vmExitWithCleanup(result);
 }

@@ -14,6 +14,11 @@
                            // though for bytecode compilation, we often build our own tables/mappings.
 #include "vm/vm.h"         // For HostFunctionID
 #include "compiler/bytecode.h"
+#include <stdlib.h>
+
+// Debug printing gate
+static int compiler_debug = 0;
+#define DBG_PRINTF(...) do { if (compiler_debug) fprintf(stderr, __VA_ARGS__); } while(0)
 
 #define MAX_GLOBALS 256 // Define a reasonable limit for global variables for now
 #define NO_VTABLE_ENTRY -1
@@ -22,6 +27,12 @@ static bool compiler_had_error = false;
 static const char* current_compilation_unit_name = NULL;
 static AST* gCurrentProgramRoot = NULL;
 static HashTable* current_class_const_table = NULL;
+static AST* current_class_record_type = NULL;
+static int compiler_dynamic_locals = 0;
+
+void compilerEnableDynamicLocals(int enable) {
+    compiler_dynamic_locals = enable ? 1 : 0;
+}
 
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
@@ -133,6 +144,26 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     int index = addConstantToChunk(chunk, &val);
     // No freeValue needed for simple boolean types.
     return index;
+}
+
+// Determine if a variable declaration node resides in the true global scope.
+// Walks up the AST parent chain and reports "global" only if no enclosing
+// function or procedure is encountered before reaching the program root.
+static bool isGlobalScopeNode(AST* node) {
+    AST* p = node;
+    while (p) {
+        if (p->type == AST_FUNCTION_DECL || p->type == AST_PROCEDURE_DECL) {
+            return false; // inside routine -> not global
+        }
+        if (p->type == AST_PROGRAM) {
+            return true; // reached program root with no routine -> global
+        }
+        p = p->parent;
+    }
+    // If we couldn't find a program node, err on the side of "local"
+    // to avoid misclassifying routine locals as globals.
+    return false;
+
 }
 
 typedef struct {
@@ -410,6 +441,33 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
     return -1;
 }
 
+// Find a record type in the global type table that defines the given field.
+static AST* findRecordTypeByFieldName(const char* fieldName) {
+    if (!fieldName) return NULL;
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        AST* rec = resolveTypeAlias(entry->typeAST);
+        if (!rec || rec->type != AST_RECORD_TYPE) continue;
+        int offset = getRecordFieldOffset(rec, fieldName);
+        if (offset >= 0) return rec;
+        // Case-insensitive scan
+        for (int i = 0; i < rec->child_count; i++) {
+            AST* decl = rec->children[i];
+            if (!decl) continue;
+            if (decl->type == AST_VAR_DECL) {
+                for (int j = 0; j < decl->child_count; j++) {
+                    AST* var = decl->children[j];
+                    if (var && var->token && strcasecmp(var->token->value, fieldName) == 0) {
+                        return rec;
+                    }
+                }
+            } else if (decl->token) {
+                if (strcasecmp(decl->token->value, fieldName) == 0) return rec;
+            }
+        }
+    }
+    return NULL;
+}
+
 // Emit initialization code for array fields within a record/class.
 // Assumes the object instance is on top of the VM stack.
 static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, int line, bool hasVTable) {
@@ -471,6 +529,11 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
 // Determine the record type for an expression used as an object base.
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
+    if (expr->type == AST_VARIABLE && expr->token && expr->token->value &&
+        strcasecmp(expr->token->value, "myself") == 0 &&
+        current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
+        return current_class_record_type;
+    }
     if (expr->type == AST_ARRAY_ACCESS) {
         AST* baseType = getRecordTypeFromExpr(expr->left);
         if (!baseType) return NULL;
@@ -654,12 +717,36 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
     VarType arg_vt = arg_actual ? arg_actual->var_type : arg_node->var_type;
 
+    // If the argument still has no concrete type (VOID), attempt to resolve it
+    // via a static declaration lookup rooted at the current program AST. This
+    // helps when declarations and statements are interleaved (e.g., Rea) and
+    // the annotation pass has not yet attributed the identifier use.
+    if ((arg_vt == TYPE_VOID || arg_vt == TYPE_UNKNOWN) && arg_node->type == AST_VARIABLE && arg_node->token && arg_node->token->value) {
+        if (gCurrentProgramRoot) {
+            AST* decl = findStaticDeclarationInAST(arg_node->token->value, arg_node, gCurrentProgramRoot);
+            if (decl) {
+                AST* t = decl->right ? resolveTypeAlias(decl->right) : NULL;
+                if (t) {
+                    arg_actual = t;
+                    arg_vt = t->var_type;
+                }
+            }
+        }
+    }
+
     // When coercion is not allowed, require an exact match of the base types
     // before proceeding with any structural comparisons. Allow NIL for pointer
     // parameters as a special case.
     if (!allow_coercion) {
         if (param_actual->var_type != arg_vt) {
             if (param_actual->var_type == TYPE_POINTER && arg_vt == TYPE_NIL) {
+                return true;
+            }
+            // Treat unresolved identifiers (VOID) as compatible when the
+            // parameter expects an integer. This aligns with frontends where
+            // declaration attribution may occur later in the pipeline.
+            if ((param_actual->var_type == TYPE_INT64 || param_actual->var_type == TYPE_INT32) &&
+                (arg_vt == TYPE_VOID || arg_vt == TYPE_UNKNOWN)) {
                 return true;
             }
             // Treat CHAR and STRING as interchangeable without requiring
@@ -1402,9 +1489,24 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (local_slot != -1) {
                     is_ref = current_function_compiler->locals[local_slot].is_ref;
                 }
+                // Robust fallback: if the variable is declared somewhere in the current
+                // function's body but wasn't added to the locals table yet (e.g., due to
+                // interleaved declarations/statements or frontend nuances), discover it
+                // and register it now so we address it as a local rather than a global.
+                if (compiler_dynamic_locals && local_slot == -1 && current_function_compiler->function_symbol &&
+                    current_function_compiler->function_symbol->type_def) {
+                    AST* func_decl = current_function_compiler->function_symbol->type_def;
+                    AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
+                    if (decl_in_scope) {
+                        addLocal(current_function_compiler, varName, line, false);
+                        local_slot = current_function_compiler->local_count - 1;
+                        is_ref = false;
+                    }
+                }
             }
 
             if (local_slot != -1) {
+                // For by-ref locals, the slot holds an address already.
                 if (is_ref) {
                     writeBytecodeChunk(chunk, GET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
@@ -1429,6 +1531,15 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 } else {
                     if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
                         fprintf(stderr, "L%d: Undefined variable '%s'.\n", line, varName);
+                        if (current_function_compiler && current_function_compiler->name) {
+                            DBG_PRINTF("[dbg] in function '%s', locals=", current_function_compiler->name);
+                            for (int li = 0; li < current_function_compiler->local_count; li++) {
+                                const char* lname = current_function_compiler->locals[li].name;
+                                if (!lname) continue;
+                                fprintf(stderr, "%s%s", li==0?"":" ,", lname);
+                            }
+                            fprintf(stderr, "\n");
+                        }
                         compiler_had_error = true;
                         break;
                     }
@@ -1440,6 +1551,18 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
+            // Constants defined in a record cannot have their address taken.
+            if (node->token && node->token->value) {
+                Value* const_ptr = findCompilerConstant(node->token->value);
+                if (const_ptr) {
+                    fprintf(stderr,
+                            "L%d: Compiler error: Cannot take address of constant field '%s'.\n",
+                            line, node->token->value);
+                    compiler_had_error = true;
+                    break;
+                }
+            }
+
             // Base expression might be a record value or a pointer to a record.
             if (node->left && node->left->var_type == TYPE_POINTER) {
                 compileRValue(node->left, chunk, getLine(node->left));
@@ -1448,7 +1571,69 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             AST* recType = getRecordTypeFromExpr(node->left);
+            if ((!recType || recType->type != AST_RECORD_TYPE) &&
+                node->left && node->left->type == AST_VARIABLE &&
+                node->left->token && node->left->token->value &&
+                strcasecmp(node->left->token->value, "myself") == 0) {
+                if (!recType && current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
+                    recType = current_class_record_type;
+                }
+                if ((!recType || recType->type != AST_RECORD_TYPE) &&
+                    current_function_compiler && current_function_compiler->function_symbol &&
+                    current_function_compiler->function_symbol->name) {
+                    const char* fname = current_function_compiler->function_symbol->name;
+                    const char* us = strchr(fname, '_');
+                    if (us) {
+                        size_t len = (size_t)(us - fname);
+                        char cls[MAX_SYMBOL_LENGTH];
+                        if (len >= sizeof(cls)) len = sizeof(cls) - 1;
+                        memcpy(cls, fname, len);
+                        cls[len] = '\0';
+                        for (size_t i = 0; i < len; i++) cls[i] = (char)tolower(cls[i]);
+                        recType = lookupType(cls);
+                        recType = resolveTypeAlias(recType);
+                        if (recType && recType->type == AST_TYPE_DECL && recType->left) {
+                            recType = recType->left;
+                        }
+                    }
+                }
+                if (!recType || recType->type != AST_RECORD_TYPE) {
+                    recType = findRecordTypeByFieldName(node->token ? node->token->value : NULL);
+                }
+            }
             int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
+            if (fieldOffset < 0 && recType && node->left && node->left->type == AST_VARIABLE &&
+                node->left->token && node->left->token->value &&
+                strcasecmp(node->left->token->value, "myself") == 0) {
+                // Fallback: case-insensitive search through class fields
+                int offset = 0;
+                if (recType->extra && recType->extra->token && recType->extra->token->value) {
+                    AST* parent = lookupType(recType->extra->token->value);
+                    offset = getRecordFieldCount(parent);
+                }
+                for (int i = 0; fieldOffset < 0 && i < recType->child_count; i++) {
+                    AST* decl = recType->children[i];
+                    if (!decl) continue;
+                    if (decl->type == AST_VAR_DECL) {
+                        for (int j = 0; j < decl->child_count; j++) {
+                            AST* var = decl->children[j];
+                            if (var && var->token && node->token && node->token->value &&
+                                strcasecmp(var->token->value, node->token->value) == 0) {
+                                fieldOffset = offset;
+                                break;
+                            }
+                            offset++;
+                        }
+                    } else if (decl->token) {
+                        if (node->token && node->token->value &&
+                            strcasecmp(decl->token->value, node->token->value) == 0) {
+                            fieldOffset = offset;
+                            break;
+                        }
+                        offset++;
+                    }
+                }
+            }
             if (recordTypeHasVTable(recType)) fieldOffset++;
             if (fieldOffset < 0) {
                 fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
@@ -1476,40 +1661,16 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
                 break; // We are done with this case
             } else {
-                // Standard array access: push index expressions first so the
-                // array base address ends up on top of the stack.  This order
-                // matches GET_ELEMENT_ADDRESS's expectation (it pops the base
-                // first, then each index).
+                // Standard array access: push the array base address first, followed by
+                // each index expression in declaration order. GET_ELEMENT_ADDRESS expects
+                // to pop the base first, then each index in order.
 
-                // Compile all index expressions. Their values will be on the stack
-                // below the array base.
+                // Push indices first
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-
-                // Finally, push the address of the array variable (Value*).
+                // Push address of the array variable (Value*) last so base is on top.
                 compileLValue(node->left, chunk, getLine(node->left));
-
-                // If the base resolves to an upvalue, ensure no extra temporary
-                // values remain above the array pointer.  We want the stack to be
-                // [..., index, array] before emitting GET_ELEMENT_ADDRESS.
-                if (current_function_compiler && node->left &&
-                    node->left->type == AST_VARIABLE && node->left->token) {
-                    const char* base_name = node->left->token->value;
-                    int base_local = resolveLocal(current_function_compiler, base_name);
-                    if (base_local == -1) {
-                        int base_up = resolveUpvalue(current_function_compiler, base_name);
-                        if (base_up != -1) {
-                            bool up_is_ref = current_function_compiler->upvalues[base_up].is_ref;
-                            if (!up_is_ref) {
-                                // Drop any temporary left behind when accessing the upvalue
-                                // so only the index and the array pointer remain.
-                                writeBytecodeChunk(chunk, SWAP, line);
-                                writeBytecodeChunk(chunk, POP, line);
-                            }
-                        }
-                    }
-                }
 
                 // Now, get the address of the specific element.
                 writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS, line);
@@ -1583,6 +1744,11 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    // Initialize debug flag from environment (REA_DEBUG=1 to enable)
+    if (!compiler_debug) {
+        const char* d = getenv("REA_DEBUG");
+        if (d && *d && *d != '0') compiler_debug = 1;
+    }
     gCurrentProgramRoot = rootNode;
     // Do NOT re-initialize the chunk here, it's already populated with unit code.
     // initBytecodeChunk(outputChunk);
@@ -1675,7 +1841,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         case AST_VAR_DECL: {
-            if (current_function_compiler == NULL) { // Global variables
+            bool global_ctx = (current_function_compiler == NULL) &&
+                              isGlobalScopeNode(node);
+            if (node->child_count > 0 && node->children[0] && node->children[0]->token) {
+                DBG_PRINTF("[dbg] VAR_DECL name=%s line=%d ctx=%s\n",
+                        node->children[0]->token->value,
+                        line,
+                        global_ctx ? "global" : (current_function_compiler ? "local" : "unknown"));
+            }
+
+            if (global_ctx) { // Global variables
                 AST* type_specifier_node = node->right;
 
                 // First, resolve the type alias if one exists.
@@ -2024,6 +2199,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         }
         case AST_CONST_DECL: {
             if (current_function_compiler == NULL && node->token) {
+                DBG_PRINTF("[dbg] CONST_DECL name=%s line=%d ctx=global\n", node->token->value, line);
                 Value const_val = makeVoid();
                 AST* type_specifier_node = node->right;
                 AST* actual_type_def_node = type_specifier_node;
@@ -2117,6 +2293,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
             if (!node->token || !node->token->value) break;
+            DBG_PRINTF("[dbg] compile decl %s\n", node->token->value);
             writeBytecodeChunk(chunk, JUMP, line);
             int jump_over_body_operand_offset = chunk->count;
             emitShort(chunk, 0xFFFF, line);
@@ -2125,14 +2302,29 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
             break;
         }
-        case AST_COMPOUND:
+        case AST_COMPOUND: {
+            // Pass 1: compile nested routine declarations so they are available
+            // regardless of where they appear in the block.
             for (int i = 0; i < node->child_count; i++) {
-                if (node->children[i]) {
-                    compileStatement(node->children[i], chunk,
-                                      getLine(node->children[i]));
+                AST *child = node->children[i];
+                if (child && (child->type == AST_PROCEDURE_DECL ||
+                              child->type == AST_FUNCTION_DECL)) {
+                    compileNode(child, chunk, getLine(child));
                 }
             }
+
+            // Pass 2: compile executable statements in their original order,
+            // skipping nested routine declarations which were already handled.
+            for (int i = 0; i < node->child_count; i++) {
+                AST *child = node->children[i];
+                if (!child || child->type == AST_PROCEDURE_DECL ||
+                    child->type == AST_FUNCTION_DECL) {
+                    continue;
+                }
+                compileStatement(child, chunk, getLine(child));
+            }
             break;
+        }
         default:
             compileStatement(node, chunk, line);
             break;
@@ -2160,7 +2352,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     int func_bytecode_start_address = chunk->count;
 
     HashTable* saved_class_const_table = current_class_const_table;
+    AST* saved_class_record_type = current_class_record_type;
     current_class_const_table = NULL;
+    current_class_record_type = NULL;
     const char* us_pos = strchr(func_name, '_');
     if (us_pos) {
         size_t cls_len = (size_t)(us_pos - func_name);
@@ -2169,8 +2363,17 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             strncpy(cls_name, func_name, cls_len);
             cls_name[cls_len] = '\0';
             AST* classType = lookupType(cls_name);
-            if (classType && classType->left && classType->left->type == AST_RECORD_TYPE && classType->left->symbol_table) {
-                current_class_const_table = (HashTable*)classType->left->symbol_table;
+            if (classType) {
+                AST* rec = NULL;
+                if (classType->left && classType->left->type == AST_RECORD_TYPE) {
+                    rec = classType->left;
+                } else if (classType->type == AST_RECORD_TYPE) {
+                    rec = classType;
+                }
+                if (rec) {
+                    if (rec->symbol_table) current_class_const_table = (HashTable*)rec->symbol_table;
+                    current_class_record_type = rec;
+                }
             }
         }
     }
@@ -2190,6 +2393,8 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (!proc_symbol) {
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);
         compiler_had_error = true;
+        current_class_const_table = saved_class_const_table;
+        current_class_record_type = saved_class_record_type;
         current_function_compiler = NULL;
         restoreLocalEnv(&env_snap);
         return;
@@ -2239,15 +2444,30 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     
     // Step 3: Add all other local variables.
     blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
-    if (blockNode && blockNode->type == AST_BLOCK && blockNode->child_count > 0 && blockNode->children[0]->type == AST_COMPOUND) {
-        AST* decls = blockNode->children[0];
-        for (int i = 0; i < decls->child_count; i++) {
-            if (decls->children[i] && decls->children[i]->type == AST_VAR_DECL) {
-                AST* var_decl_group = decls->children[i];
-                for (int j = 0; j < var_decl_group->child_count; j++) {
-                    AST* var_name_node = var_decl_group->children[j];
-                    if (var_name_node && var_name_node->token) {
-                        addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+    if (blockNode) {
+        if (blockNode->type == AST_BLOCK && blockNode->child_count > 0 &&
+            blockNode->children[0]->type == AST_COMPOUND) {
+            AST* decls = blockNode->children[0];
+            for (int i = 0; i < decls->child_count; i++) {
+                if (decls->children[i] && decls->children[i]->type == AST_VAR_DECL) {
+                    AST* var_decl_group = decls->children[i];
+                    for (int j = 0; j < var_decl_group->child_count; j++) {
+                        AST* var_name_node = var_decl_group->children[j];
+                        if (var_name_node && var_name_node->token) {
+                            addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+                        }
+                    }
+                }
+            }
+        } else if (compiler_dynamic_locals && blockNode->type == AST_COMPOUND) {
+            for (int i = 0; i < blockNode->child_count; i++) {
+                AST* child = blockNode->children[i];
+                if (child && child->type == AST_VAR_DECL) {
+                    for (int j = 0; j < child->child_count; j++) {
+                        AST* var_name_node = child->children[j];
+                        if (var_name_node && var_name_node->token) {
+                            addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+                        }
                     }
                 }
             }
@@ -2288,6 +2508,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         free(fc.locals[i].name);
     }
     current_class_const_table = saved_class_const_table;
+    current_class_record_type = saved_class_record_type;
     current_function_compiler = fc.enclosing;
     restoreLocalEnv(&env_snap);
 }
@@ -2504,9 +2725,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 for (int i = 0; i < node->child_count; i++) {
                     AST *varNameNode = node->children[i];
                     if (varNameNode && varNameNode->token) {
-                        addLocal(current_function_compiler,
-                                 varNameNode->token->value,
-                                 getLine(varNameNode), false);
+                        int slot = resolveLocal(current_function_compiler,
+                                                varNameNode->token->value);
+                        if (slot == -1) {
+                            addLocal(current_function_compiler,
+                                     varNameNode->token->value,
+                                     getLine(varNameNode), false);
+                        }
                     }
                 }
             }
@@ -2837,6 +3062,17 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             if (var_slot == -1) {
+                DBG_PRINTF("[dbg] FOR var '%s' not local; treating as global. Locals: ", var_node && var_node->token ? var_node->token->value : "<nil>");
+#ifdef DEBUG
+                if (current_function_compiler) {
+                    for (int li = 0; li < current_function_compiler->local_count; li++) {
+                        const char* lname = current_function_compiler->locals[li].name;
+                        if (!lname) continue;
+                        fprintf(stderr, "%s%s", li==0?"":" ,", lname);
+                    }
+                    fprintf(stderr, "\n");
+                }
+#endif
                 var_name_idx = addStringConstant(chunk, var_node->token->value);
             }
 
@@ -3222,7 +3458,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "getdate") == 0) ||
                     (strcasecmp(calleeName, "gettime") == 0) ||
                     /* MandelbrotRow returns results via the sixth VAR parameter */
-                    (strcasecmp(calleeName, "mandelbrotrow") == 0 && i == 5)
+                    ((strcasecmp(calleeName, "mandelbrotrow") == 0 ||
+                      strcasecmp(calleeName, "MandelbrotRow") == 0) && i == 5)
                 )) {
                     is_var_param = true;
                 }
@@ -3567,11 +3804,20 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compiler_had_error = true;
                 break;
             }
-            if (call->child_count > 0) {
-                fprintf(stderr, "L%d: Compiler warning: Arguments to '%s' ignored in spawn.\n", line, calleeName);
+            if (call->child_count == 0) {
+                writeBytecodeChunk(chunk, THREAD_CREATE, line);
+                emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
+            } else {
+                // Support spawning with multiple arguments (including receiver for methods).
+                // Stack layout for host: [addr, arg0, arg1, ..., argc]
+                emitConstant(chunk, addIntConstant(chunk, proc_symbol->bytecode_address), line);
+                for (int i = 0; i < call->child_count; i++) {
+                    compileRValue(call->children[i], chunk, getLine(call->children[i]));
+                }
+                emitConstant(chunk, addIntConstant(chunk, call->child_count), line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_THREAD_ADDR, line);
             }
-            writeBytecodeChunk(chunk, THREAD_CREATE, line);
-            emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
             break;
         }
         case AST_DEREFERENCE: {
@@ -3599,6 +3845,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (local_slot != -1) {
                     is_ref = current_function_compiler->locals[local_slot].is_ref;
                 }
+                // Robust fallback for locals not yet registered in the function state.
+                if (compiler_dynamic_locals && local_slot == -1 && current_function_compiler->function_symbol &&
+                    current_function_compiler->function_symbol->type_def) {
+                    AST* func_decl = current_function_compiler->function_symbol->type_def;
+                    AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
+                    if (decl_in_scope) {
+                        addLocal(current_function_compiler, varName, line, false);
+                        local_slot = current_function_compiler->local_count - 1;
+                        is_ref = false;
+                    }
+                }
             }
             
             if (strcasecmp(varName, "break_requested") == 0) {
@@ -3610,6 +3867,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
             
             if (local_slot != -1) {
+                DBG_PRINTF("[dbg] RV %s -> local[%d] line=%d\n", varName, local_slot, line);
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 if (is_ref && node->var_type != TYPE_ARRAY) {
@@ -3641,6 +3899,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (const_val_ptr) {
                             emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
                         } else {
+                            DBG_PRINTF("[dbg] RV %s -> global line=%d\n", varName, line);
                             int nameIndex = addStringConstant(chunk, varName);
                             emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
                                                nameIndex, line);
@@ -3651,7 +3910,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Get the address of the field, then get the value at that address.
+            // If this field is a compile-time constant, embed its value directly.
+            if (node->token && node->token->value) {
+                Value* const_ptr = findCompilerConstant(node->token->value);
+                if (const_ptr) {
+                    if (node->left) {
+                        compileRValue(node->left, chunk, getLine(node->left));
+                        writeBytecodeChunk(chunk, POP, line);
+                    }
+                    emitConstant(chunk, addConstantToChunk(chunk, const_ptr), line);
+                    break;
+                }
+            }
+            // Otherwise, load the field address and then fetch its value.
             compileLValue(node, chunk, getLine(node));
             writeBytecodeChunk(chunk, GET_INDIRECT, line);
             break;

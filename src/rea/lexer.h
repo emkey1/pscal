@@ -30,8 +30,10 @@ typedef enum {
 
     // Operators
     REA_TOKEN_PLUS,
+    REA_TOKEN_PLUS_PLUS,
     REA_TOKEN_PLUS_EQUAL,
     REA_TOKEN_MINUS,
+    REA_TOKEN_MINUS_MINUS,
     REA_TOKEN_MINUS_EQUAL,
     REA_TOKEN_STAR,
     REA_TOKEN_SLASH,
@@ -70,6 +72,8 @@ typedef enum {
     REA_TOKEN_FALSE,
     REA_TOKEN_CONST,
     REA_TOKEN_IMPORT,
+    REA_TOKEN_SPAWN,
+    REA_TOKEN_JOIN,
 
     // Type keywords
     REA_TOKEN_INT,
@@ -104,5 +108,6 @@ typedef struct {
 
 void reaInitLexer(ReaLexer *lexer, const char *source);
 ReaToken reaNextToken(ReaLexer *lexer);
+const char* reaTokenTypeToString(ReaTokenType type);
 
 #endif

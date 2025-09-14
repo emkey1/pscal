@@ -482,3 +482,57 @@ add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tes
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
 add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
 set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
+
+# ---- AST JSON to Bytecode tool ----
+set(JSON2BC_SOURCES
+    src/tools/json2bc.c
+    src/tools/ast_json_loader.c
+    src/rea/type_stubs.c
+    src/ast/ast.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
+    src/compiler/bytecode.c src/compiler/compiler.c
+    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/sdl.c src/backend_ast/audio.c
+    src/symbol/symbol.c
+    src/vm/vm.c
+    src/Pascal/globals.c
+)
+add_executable(pscaljson2bc ${JSON2BC_SOURCES})
+if(TARGET CURL::libcurl)
+    target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)
+else()
+    target_link_libraries(pscaljson2bc PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+endif()
+if(SDL)
+    target_include_directories(pscaljson2bc PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+    )
+    target_link_directories(pscaljson2bc PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
+    set(JSON2BC_SDL_LIBS "")
+    if(TARGET SDL2::SDL2)
+        list(APPEND JSON2BC_SDL_LIBS SDL2::SDL2)
+    else()
+        list(APPEND JSON2BC_SDL_LIBS ${SDL2_LIBRARIES})
+    endif()
+    list(APPEND JSON2BC_SDL_LIBS
+        ${PC_SDL2_IMAGE_LIBRARIES}
+        ${PC_SDL2_MIXER_LIBRARIES}
+        ${PC_SDL2_TTF_LIBRARIES}
+        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+    )
+    list(REMOVE_DUPLICATES JSON2BC_SDL_LIBS)
+    target_link_libraries(pscaljson2bc PRIVATE ${JSON2BC_SDL_LIBS})
+    target_compile_definitions(pscaljson2bc PRIVATE SDL)
+endif()
+
+# Install the JSON→Bytecode tool alongside other binaries
+install(TARGETS pscaljson2bc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

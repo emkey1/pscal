@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <ctype.h>
+#include <unistd.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -33,7 +34,10 @@ static const char *REA_USAGE =
     "   Options:\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
-"     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n";
+    "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
+    "     --no-cache             Compile fresh (ignore cached bytecode).\n"
+    "     --strict               Enable strict parser checks for top-level structure.\n"
+    "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
 
 static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
     if (!unit_list) return true;
@@ -208,6 +212,8 @@ int main(int argc, char **argv) {
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
     int vm_trace_head = 0;
+    int no_cache = 0;
+    int strict_mode = 0;
     int argi = 1;
     while (argc > argi && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "--dump-ast-json") == 0) {
@@ -217,6 +223,10 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[argi], "--no-cache") == 0) {
+            no_cache = 1;
+        } else if (strcmp(argv[argi], "--strict") == 0) {
+            strict_mode = 1;
         } else if (strncmp(argv[argi], "--vm-trace-head=", 16) == 0) {
             vm_trace_head = atoi(argv[argi] + 16);
         } else {
@@ -254,6 +264,9 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
+    // Note: Bootstrap of entrypoint is disabled; rely on source top-level or
+    // future bytecode-level CALL injection.
+
     initSymbolSystem();
     registerAllBuiltins();
     /* C-like style cast helpers */
@@ -269,6 +282,7 @@ int main(int argc, char **argv) {
     registerBuiltinFunction("tochar", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
 
+    if (strict_mode) reaSetStrictMode(1);
     AST *program = parseRea(src);
     if (!program) {
         free(src);
@@ -299,7 +313,8 @@ int main(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, dep_array, dep_count, &chunk);
+    bool used_cache = 0;
+    if (!no_cache) used_cache = loadBytecodeFromCache(path, argv[0], dep_array, dep_count, &chunk);
     if (dep_array) free(dep_array);
     if (used_cache) {
 #if defined(__APPLE__)
@@ -339,7 +354,9 @@ int main(int argc, char **argv) {
             if (dump_bytecode_flag) {
                 fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
                 disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-                if (!dump_bytecode_only_flag) {
+                if (dump_bytecode_only_flag) {
+                    _exit(EXIT_SUCCESS);
+                } else {
                     fprintf(stderr, "\n--- executing Program with VM ---\n");
                 }
             }
@@ -351,7 +368,9 @@ int main(int argc, char **argv) {
                 chunk.count, chunk.constants_count);
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
-            if (!dump_bytecode_only_flag) {
+            if (dump_bytecode_only_flag) {
+                _exit(EXIT_SUCCESS);
+            } else {
                 fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
             }
         }

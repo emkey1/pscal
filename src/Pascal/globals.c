@@ -54,6 +54,7 @@ int break_requested = 0;
 int exit_requested = 0;
 // Semantic/type error counter for the Pascal front end
 int pascal_semantic_error_count = 0;
+int pascal_parser_error_count = 0;
 
 
 #ifdef DEBUG
