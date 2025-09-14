@@ -85,6 +85,7 @@ class SolarSystemApp {
   const int TargetFPS = 60;
   const float AUScale = 15.7; // pixels per astronomical unit
   const int AUOffset = 20;    // base offset so Mercury clears the sun
+  const int OrbitSpacing = 2; // extra padding between successive orbits
 
     int FrameDelay;
     int centerX;
@@ -100,30 +101,38 @@ class SolarSystemApp {
 
   void initPlanets() {
     int orbit;
+    int extra = 0;
     // Mercury - 0.39 AU
-    orbit = trunc(AUOffset + AUScale * 0.39);
-    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, 2, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    orbit = trunc(AUOffset + AUScale * 0.39 + extra);
+    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, 1, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
     // Venus - 0.72 AU
-    orbit = trunc(AUOffset + AUScale * 0.72);
-    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, 4, 3.5, 218, 165,  32, myself.centerX, myself.centerY);
+    orbit = trunc(AUOffset + AUScale * 0.72 + extra);
+    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, 2, 3.5, 218, 165,  32, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
     // Earth - 1.00 AU
-    orbit = trunc(AUOffset + AUScale * 1.00);
-    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, 5, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
+    orbit = trunc(AUOffset + AUScale * 1.00 + extra);
+    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, 3, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
     myself.planets[3].isEarth = 1;
+    extra = extra + OrbitSpacing;
     // Mars - 1.52 AU
-    orbit = trunc(AUOffset + AUScale * 1.52);
-    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, 4, 2.4, 188,  39,  50, myself.centerX, myself.centerY);
+    orbit = trunc(AUOffset + AUScale * 1.52 + extra);
+    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, 2, 2.4, 188,  39,  50, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
     // Jupiter - 5.20 AU
-    orbit = trunc(AUOffset + AUScale * 5.20);
+    orbit = trunc(AUOffset + AUScale * 5.20 + extra);
     myself.planets[5] = new Planet(); Planet_init(myself.planets[5], orbit,18, 1.3, 205, 133,  63, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
     // Saturn - 9.58 AU
-    orbit = trunc(AUOffset + AUScale * 9.58);
+    orbit = trunc(AUOffset + AUScale * 9.58 + extra);
     myself.planets[6] = new Planet(); Planet_init(myself.planets[6], orbit,16, 0.9, 210, 180, 140, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
     // Uranus - 19.20 AU
-    orbit = trunc(AUOffset + AUScale * 19.20);
+    orbit = trunc(AUOffset + AUScale * 19.20 + extra);
     myself.planets[7] = new Planet(); Planet_init(myself.planets[7], orbit,12, 0.7, 173, 216, 230, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
     // Neptune - 30.05 AU
-    orbit = trunc(AUOffset + AUScale * 30.05);
+    orbit = trunc(AUOffset + AUScale * 30.05 + extra);
     myself.planets[8] = new Planet(); Planet_init(myself.planets[8], orbit,12, 0.5,  65, 105, 225, myself.centerX, myself.centerY);
   }
 
