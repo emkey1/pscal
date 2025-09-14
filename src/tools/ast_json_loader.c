@@ -364,6 +364,56 @@ static AST* parse_ast_object(J* j) {
             node->token->value = strdup("halt");
         }
     }
+
+    // Ensure string literal contents use actual characters, not backslash escapes.
+    // Some producers double-escape within JSON; defensively unescape here.
+    if (node->type == AST_STRING && node->token && node->token->value) {
+        char* s = node->token->value;
+        char* w = s; // write index
+        for (char* r = s; *r; ++r) {
+            if (*r == '\\') {
+                r++;
+                if (!*r) break;
+                switch (*r) {
+                    case 'n': *w++ = '\n'; break;
+                    case 'r': *w++ = '\r'; break;
+                    case 't': *w++ = '\t'; break;
+                    case 'b': *w++ = '\b'; break;
+                    case 'f': *w++ = '\f'; break;
+                    case '"': *w++ = '"'; break;
+                    case '\\': *w++ = '\\'; break;
+                    case 'u': {
+                        // Basic \uXXXX handling (BMP only). If malformed, write literally.
+                        int h1 = hexval(*(r+1));
+                        int h2 = hexval(*(r+2));
+                        int h3 = hexval(*(r+3));
+                        int h4 = hexval(*(r+4));
+                        if (h1>=0 && h2>=0 && h3>=0 && h4>=0) {
+                            unsigned code = (h1<<12)|(h2<<8)|(h3<<4)|h4;
+                            r += 4;
+                            if (code < 0x80) { *w++ = (char)code; }
+                            else if (code < 0x800) { *w++ = (char)(0xC0 | (code>>6)); *w++ = (char)(0x80 | (code & 0x3F)); }
+                            else { *w++ = (char)(0xE0 | (code>>12)); *w++ = (char)(0x80 | ((code>>6)&0x3F)); *w++ = (char)(0x80 | (code&0x3F)); }
+                        } else {
+                            // Write literally if malformed
+                            *w++ = '\\';
+                            *w++ = 'u';
+                        }
+                        break;
+                    }
+                    default:
+                        // Unknown escape; keep as-is (drop backslash)
+                        *w++ = *r;
+                        break;
+                }
+            } else {
+                *w++ = *r;
+            }
+        }
+        *w = '\0';
+        // Update stored length if any users rely on token length
+        node->token->length = (int)strlen(node->token->value);
+    }
     return node;
 }
 
