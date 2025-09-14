@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+# Resolve the script directory and repository root using realpath to ensure
+# the canonical filesystem casing is preserved even when the script is invoked
+# via a differently-cased path (e.g. "tests" vs "Tests").  macOS filesystems
+# are typically case-insensitive, which previously led to lowercase paths being
+# passed to the compiler and causing test diffs.
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.dirname(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$SCRIPT_DIR/..")"
 REA_BIN="$ROOT_DIR/build/bin/rea"
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
