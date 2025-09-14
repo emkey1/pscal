@@ -48,7 +48,16 @@ class MandelbrotApp {
     myself.minIm = -1.2;
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot");
-    inittextsystem();
+    string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+    string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+    if (fileexists(systemFontPath)) {
+      inittextsystem(systemFontPath, 18);
+    } else if (fileexists(repoFontPath1)) {
+      inittextsystem(repoFontPath1, 18);
+    } else {
+      inittextsystem(repoFontPath2, 18);
+    }
     printf("[int] init: initgraph done (%dx%d)\n", myself.Width, myself.Height);
     myself.textureID = createtexture(myself.Width, myself.Height);
     if (myself.textureID < 0) {
