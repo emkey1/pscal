@@ -135,19 +135,22 @@ class SolarSystemApp {
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();
-    SolarSystemApp_startThreads(myself);
+    // Start planet worker threads using the current object instance
+    myself.startThreads();
     writeln("Solar system simulation running. Press Q to quit.");
     while (!quit) {
       if (keypressed()) {
         char c = readkey();
         if (toupper(c) == 'Q') quit = true;
       }
-      SolarSystemApp_draw(myself);
+      // Draw all planets based on their updated positions
+      myself.draw();
       // Use the object's frame delay to pace the main loop and yield time to
       // planet worker threads, ensuring smooth motion.
       graphloop(myself.FrameDelay);
     }
-    SolarSystemApp_joinThreads(myself);
+    // Wait for all planet worker threads to finish before shutting down
+    myself.joinThreads();
     closegraph();
     writeln("Simulation finished.");
   }
