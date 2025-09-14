@@ -2,7 +2,7 @@
 // SDL Solar System Simulation in Rea using OOP and threads.
 // Each planet runs in its own thread and the frame rate is throttled.
 
-const int NumPlanets = 9;
+const int NumPlanets = 8;
 const int NumAsteroids = 200;
 
 bool quit = false;
@@ -83,6 +83,8 @@ class SolarSystemApp {
   const int WindowWidth = 1280;
   const int WindowHeight = 1024;
   const int TargetFPS = 60;
+  const float AUScale = 15.7; // pixels per astronomical unit
+  const int AUOffset = 20;    // base offset so Mercury clears the sun
 
     int FrameDelay;
     int centerX;
@@ -97,22 +99,40 @@ class SolarSystemApp {
   }
 
   void initPlanets() {
-    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], 64, 2, 4.7, 169, 169, 169, myself.centerX, myself.centerY);  // Mercury
-    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], 96, 4, 3.5, 218, 165,  32, myself.centerX, myself.centerY);  // Venus
-    myself.planets[3] = new Planet(); Planet_init(myself.planets[3],128, 5, 3.0,   0, 102, 255, myself.centerX, myself.centerY);  // Earth
+    int orbit;
+    // Mercury - 0.39 AU
+    orbit = trunc(AUOffset + AUScale * 0.39);
+    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, 2, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    // Venus - 0.72 AU
+    orbit = trunc(AUOffset + AUScale * 0.72);
+    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, 4, 3.5, 218, 165,  32, myself.centerX, myself.centerY);
+    // Earth - 1.00 AU
+    orbit = trunc(AUOffset + AUScale * 1.00);
+    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, 5, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
     myself.planets[3].isEarth = 1;
-    myself.planets[4] = new Planet(); Planet_init(myself.planets[4],160, 4, 2.4, 188,  39,  50, myself.centerX, myself.centerY);  // Mars
-    myself.planets[5] = new Planet(); Planet_init(myself.planets[5],256,18, 1.3, 205, 133,  63, myself.centerX, myself.centerY);  // Jupiter
-    myself.planets[6] = new Planet(); Planet_init(myself.planets[6],320,16, 0.9, 210, 180, 140, myself.centerX, myself.centerY);  // Saturn
-    myself.planets[7] = new Planet(); Planet_init(myself.planets[7],384,12, 0.7, 173, 216, 230, myself.centerX, myself.centerY);  // Uranus
-    myself.planets[8] = new Planet(); Planet_init(myself.planets[8],432,12, 0.5,  65, 105, 225, myself.centerX, myself.centerY);  // Neptune
-    myself.planets[9] = new Planet(); Planet_init(myself.planets[9],464, 2, 0.4, 220, 220, 220, myself.centerX, myself.centerY);  // Pluto
+    // Mars - 1.52 AU
+    orbit = trunc(AUOffset + AUScale * 1.52);
+    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, 4, 2.4, 188,  39,  50, myself.centerX, myself.centerY);
+    // Jupiter - 5.20 AU
+    orbit = trunc(AUOffset + AUScale * 5.20);
+    myself.planets[5] = new Planet(); Planet_init(myself.planets[5], orbit,18, 1.3, 205, 133,  63, myself.centerX, myself.centerY);
+    // Saturn - 9.58 AU
+    orbit = trunc(AUOffset + AUScale * 9.58);
+    myself.planets[6] = new Planet(); Planet_init(myself.planets[6], orbit,16, 0.9, 210, 180, 140, myself.centerX, myself.centerY);
+    // Uranus - 19.20 AU
+    orbit = trunc(AUOffset + AUScale * 19.20);
+    myself.planets[7] = new Planet(); Planet_init(myself.planets[7], orbit,12, 0.7, 173, 216, 230, myself.centerX, myself.centerY);
+    // Neptune - 30.05 AU
+    orbit = trunc(AUOffset + AUScale * 30.05);
+    myself.planets[8] = new Planet(); Planet_init(myself.planets[8], orbit,12, 0.5,  65, 105, 225, myself.centerX, myself.centerY);
   }
 
   void initAsteroids() {
     int i = 1;
     while (i <= NumAsteroids) {
-      myself.asteroidRadius[i] = 176 + random(64);
+      int inner = myself.planets[4].orbit; // Mars
+      int outer = myself.planets[5].orbit; // Jupiter
+      myself.asteroidRadius[i] = inner + random(outer - inner);
       myself.asteroidAngle[i] = random(360) * 0.017453292519943295;
       myself.asteroidSpeed[i] = (0.1 + random(5) * 0.05) * 0.017453292519943295;
       i = i + 1;
