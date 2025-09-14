@@ -300,6 +300,17 @@ static AST* parse_ast_object(J* j) {
         (void)expect(j, ',');
     }
 
+    // Some front ends (e.g. the C-like one) serialize function declarations
+    // with the function body stored in the "right" field rather than "extra"
+    // (which is what the Pascal compiler expects).  This leads to missing
+    // bodies during bytecode compilation and, in older builds, crashes.  Detect
+    // this layout and normalize it by moving the body to `extra` if needed.
+    if (node_type == AST_FUNCTION_DECL && extra == NULL && right &&
+        right->type == AST_COMPOUND) {
+        extra = right;
+        right = NULL;
+    }
+
     AST* node = newASTNode(node_type, tok);
     if (tok) { freeToken(tok); tok = NULL; }
     if (vtype != TYPE_UNKNOWN) setTypeAST(node, vtype);
