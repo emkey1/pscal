@@ -357,7 +357,9 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
          * the class currently being validated so that expressions like
          * `my.field` or `my.method()` resolve correctly.
          */
-        if (currentClass && strcasecmp(expr->token->value, "myself") == 0) {
+        if (currentClass && expr->token && expr->token->value &&
+            (strcasecmp(expr->token->value, "myself") == 0 ||
+             strcasecmp(expr->token->value, "my") == 0)) {
             return currentClass->name;
         }
         AST *decl = findStaticDeclarationInAST(expr->token->value, expr, gProgramRoot);
@@ -570,7 +572,8 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 if (node->child_count > 0 && node->children[0] &&
                     node->children[0]->type == AST_VARIABLE &&
                     node->children[0]->token && node->children[0]->token->value &&
-                    strcasecmp(node->children[0]->token->value, "myself") == 0) {
+                    (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
+                     strcasecmp(node->children[0]->token->value, "my") == 0)) {
                     firstIsMyself = true;
                 }
 

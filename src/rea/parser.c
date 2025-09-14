@@ -35,7 +35,9 @@ void reaSetStrictMode(int enable) { g_rea_strict_mode = enable ? 1 : 0; }
 // Strict scan for forbidden top-level constructs
 static bool strictScanTop(AST* n) {
     if (!n) return false;
-    if ((n->type == AST_VARIABLE && n->token && n->token->value && strcasecmp(n->token->value, "myself") == 0) ||
+    if ((n->type == AST_VARIABLE && n->token && n->token->value &&
+         (strcasecmp(n->token->value, "myself") == 0 ||
+          strcasecmp(n->token->value, "my") == 0)) ||
         n->type == AST_RETURN) {
         return true;
     }
@@ -819,9 +821,11 @@ static AST *parseFactor(ReaParser *p) {
                     }
                     if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
                     // Build call node and prepend receiver as first arg
-                    // Potentially mangle if receiver is 'myself' or freshly constructed 'new Class'
+                    // Potentially mangle if receiver is 'myself'/`my` or freshly constructed 'new Class'
                     const char* cls = NULL;
-                    if (node->type == AST_VARIABLE && node->token && node->token->value && strcasecmp(node->token->value, "myself") == 0) {
+                    if (node->type == AST_VARIABLE && node->token && node->token->value &&
+                        (strcasecmp(node->token->value, "myself") == 0 ||
+                         strcasecmp(node->token->value, "my") == 0)) {
                         cls = p->currentClassName;
                     } else if (node->type == AST_NEW && node->token && node->token->value) {
                         cls = node->token->value;
