@@ -10,7 +10,9 @@ int posMutex = mutex();
 class Planet {
   int orbit;
   int size;
+
   float speed; // degrees per update
+
   int r;
   int g;
   int b;
@@ -21,7 +23,7 @@ class Planet {
   int centerY;
   int tid;
 
-    Planet init(int o, int s, float spd, int red, int green, int blue, int cx, int cy) {
+    Planet init(int o, int s, int spd, int red, int green, int blue, int cx, int cy) {
       myself.orbit = o;
       myself.size = s;
       myself.speed = spd;
@@ -39,7 +41,7 @@ class Planet {
 
     void updateWorker() {
       while (!quit) {
-        myself.angle = myself.angle + myself.speed;
+        myself.angle = myself.angle + (myself.speed / 10.0);
         if (myself.angle >= 360.0) myself.angle = myself.angle - 360.0;
         float rad = myself.angle * 0.017453292519943295;
         float px = myself.centerX + cos(rad) * myself.orbit;
