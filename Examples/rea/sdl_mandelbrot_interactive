@@ -48,6 +48,7 @@ class MandelbrotApp {
     myself.minIm = -1.2;
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot");
+    inittextsystem();
     printf("[int] init: initgraph done (%dx%d)\n", myself.Width, myself.Height);
     myself.textureID = createtexture(myself.Width, myself.Height);
     if (myself.textureID < 0) {
@@ -181,14 +182,14 @@ class MandelbrotApp {
     shouldUpdate = (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height));
     if (shouldUpdate) {
       updatetexture(myself.textureID, myself.pixels);
-      cleardevice(); rendercopy(myself.textureID); updatescreen();
+      cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, "Rendering..."); updatescreen();
       myself.lastUpdatedRows = doneCount;
     }
     // Finalize when all rows are done or cancelled
     if ((doneCount == myself.Height) || myself.getCancel()) {
       if (doneCount > myself.lastUpdatedRows) {
         updatetexture(myself.textureID, myself.pixels);
-        cleardevice(); rendercopy(myself.textureID); updatescreen();
+        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, "Rendering..."); updatescreen();
         myself.lastUpdatedRows = doneCount;
       }
       MandelbrotApp_joinAndResetThreads(myself);
@@ -292,6 +293,7 @@ class MandelbrotApp {
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
     }
     destroytexture(myself.textureID);
+    quittextsystem();
     closegraph();
   }
 }

@@ -65,6 +65,7 @@ BEGIN
 
   // --- Initialize SDL Graphics ---
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  InitTextSystem;
   MandelTextureID := CreateTexture(WindowWidth, WindowHeight);
   IF MandelTextureID < 0 THEN
   BEGIN
@@ -137,6 +138,7 @@ BEGIN
       UpdateTexture(MandelTextureID, PixelData);
       ClearDevice;
       RenderCopy(MandelTextureID);
+       OutTextXY(8, 8, 'Rendering...');
       UpdateScreen;
       GraphLoop(0);
     END;
@@ -166,6 +168,7 @@ BEGIN
   ReadKey;
 
   DestroyTexture(MandelTextureID);
+  QuitTextSystem;
   CloseGraph;
 
   // --- Restore Console ---

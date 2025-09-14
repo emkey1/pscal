@@ -54,6 +54,7 @@ BEGIN
   // You could add a Delay(1000) here if you want users to definitely see the message
 
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  InitTextSystem;
   MandelTextureID := CreateTexture(WindowWidth, WindowHeight);
   IF MandelTextureID < 0 THEN
   BEGIN
@@ -135,6 +136,7 @@ BEGIN
       UpdateTexture(MandelTextureID, PixelData);
       ClearDevice;
       RenderCopy(MandelTextureID);
+      OutTextXY(8, 8, 'Rendering...');
       UpdateScreen;
       GraphLoop(0);
     END;
@@ -153,5 +155,6 @@ BEGIN
   ReadKey;
 
   DestroyTexture(MandelTextureID);
+  QuitTextSystem;
   CloseGraph;
 END.

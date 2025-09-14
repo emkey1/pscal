@@ -142,6 +142,7 @@ int main() {
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
+    inittextsystem();
     textureID = createtexture(Width, Height);
     if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
     cleardevice(); updatescreen();
@@ -219,6 +220,7 @@ int main() {
                 updatetexture(textureID, pixelData);
                 cleardevice();
                 rendercopy(textureID);
+                outtextxy(8, 8, "Rendering...");
                 updatescreen();
                 redraw = 0;
             }
@@ -281,6 +283,7 @@ int main() {
         }
     }
     destroytexture(textureID);
+    quittextsystem();
     closegraph();
     return 0;
 #else
