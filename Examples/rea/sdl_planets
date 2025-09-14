@@ -130,8 +130,11 @@ class SolarSystemApp {
   void initAsteroids() {
     int i = 1;
     while (i <= NumAsteroids) {
-      int inner = myself.planets[4].orbit; // Mars
-      int outer = myself.planets[5].orbit; // Jupiter
+      // Asteroid belt spans approximately 2.2 to 3.2 astronomical units
+      // from the Sun, so pick a radius within that AU range scaled to
+      // screen coordinates.
+      int inner = trunc(AUOffset + AUScale * 2.2);
+      int outer = trunc(AUOffset + AUScale * 3.2);
       myself.asteroidRadius[i] = inner + random(outer - inner);
       myself.asteroidAngle[i] = random(360) * 0.017453292519943295;
       myself.asteroidSpeed[i] = (0.1 + random(5) * 0.05) * 0.017453292519943295;
