@@ -776,6 +776,13 @@ static Value vmHostPrintf(VM* vm) {
                 i++;
             } else if (arg_index < arg_count) {
                 size_t j = i + 1;
+                // Parse minimal flags: support '0' for zero-padding
+                bool zero_pad = false;
+                while (j < flen) {
+                    if (fmt[j] == '0') { zero_pad = true; j++; continue; }
+                    // Ignore other flags for now ('-', '+', ' ', '#')
+                    break;
+                }
                 int width = 0;
                 int precision = -1;
                 while (j < flen && isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
@@ -807,14 +814,14 @@ static Value vmHostPrintf(VM* vm) {
                             u = (unsigned long long)AS_INTEGER(v);
                         }
                         bool is_unsigned = (spec=='u'||spec=='o'||spec=='x'||spec=='X');
-                        if (precision >= 0 && width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
-                        else if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
-                        else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
-                        else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
+                if (precision >= 0 && width > 0)
+                    snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
+                else if (precision >= 0)
+                    snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
+                else if (width > 0)
+                    snprintf(fmtbuf, sizeof(fmtbuf), zero_pad ? "%%0%d%s%c" : "%%%d%s%c", width, lenmod, spec);
+                else
+                    snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
 
                         // Cast to the correct type expected by the format length modifier
                         if (is_unsigned) {
@@ -862,7 +869,7 @@ static Value vmHostPrintf(VM* vm) {
                         else if (precision >= 0)
                             snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
                         else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
+                            snprintf(fmtbuf, sizeof(fmtbuf), zero_pad ? "%%0%d%s%c" : "%%%d%s%c", width, lenmod, spec);
                         else
                             snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
 
