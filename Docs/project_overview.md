@@ -31,7 +31,7 @@ The project follows a classic compiler and virtual machine design:
 
 ## Key Features and Capabilities
 
-* **Dual Language Support**: The ability to compile both Pascal-like and C-like code to the same bytecode is a major feature.
+* **Three Language Support**: The ability to compile  `Pascal`, a `C-like` language and an OOP (Object Oriented Programing) language called `Rea` to the same bytecode is a major feature.
 * **Rich Type System**: Signed and unsigned integers from 8 to 64 bits and floating-point types up to extended precision.
 * **Graphics and Audio**: Through SDL bindings, the language supports creating graphical applications with audio capabilities, including window creation, shape and text rendering, and sound playback.
 * **Networking**: HTTP helpers via `libcurl` plus low-level TCP/UDP sockets with DNS utilities.
