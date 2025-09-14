@@ -32,10 +32,10 @@ class Planet {
       myself.b = blue;
       myself.centerX = cx;
       myself.centerY = cy;
+      // Rea's trig functions expect angles in degrees, so no radian conversion
       myself.angle = random(360);
-      float rad = myself.angle * 0.017453292519943295;
-      myself.posX = cx + cos(rad) * o;
-      myself.posY = cy + sin(rad) * o;
+      myself.posX = cx + cos(myself.angle) * o;
+      myself.posY = cy + sin(myself.angle) * o;
       return myself;
     }
 
@@ -43,9 +43,8 @@ class Planet {
       while (!quit) {
         myself.angle = myself.angle + (myself.speed / 10.0);
         if (myself.angle >= 360.0) myself.angle = myself.angle - 360.0;
-        float rad = myself.angle * 0.017453292519943295;
-        float px = myself.centerX + cos(rad) * myself.orbit;
-        float py = myself.centerY + sin(rad) * myself.orbit;
+        float px = myself.centerX + cos(myself.angle) * myself.orbit;
+        float py = myself.centerY + sin(myself.angle) * myself.orbit;
         lock(posMutex);
         myself.posX = px;
         myself.posY = py;
@@ -135,19 +134,22 @@ class SolarSystemApp {
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();
-    SolarSystemApp_startThreads(myself);
+    // Start planet worker threads using the current object instance
+    myself.startThreads();
     writeln("Solar system simulation running. Press Q to quit.");
     while (!quit) {
       if (keypressed()) {
         char c = readkey();
         if (toupper(c) == 'Q') quit = true;
       }
-      SolarSystemApp_draw(myself);
+      // Draw all planets based on their updated positions
+      myself.draw();
       // Use the object's frame delay to pace the main loop and yield time to
       // planet worker threads, ensuring smooth motion.
       graphloop(myself.FrameDelay);
     }
-    SolarSystemApp_joinThreads(myself);
+    // Wait for all planet worker threads to finish before shutting down
+    myself.joinThreads();
     closegraph();
     writeln("Simulation finished.");
   }
