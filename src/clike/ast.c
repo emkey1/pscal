@@ -130,36 +130,121 @@ static void escapeString(FILE *out, const char *str, int len) {
     }
 }
 
-static const char* nodeTypeToString(ASTNodeTypeClike type) {
+/*
+ * Map C-like AST node types to Pascal AST node strings understood by
+ * tools/ast_json_loader.c.  The loader relies on astTypeFromString(), which
+ * expects the strings produced by astTypeToString() for Pascal AST enums.  If
+ * we emit the raw C-like names (e.g. "BINOP" or "IDENTIFIER") the loader would
+ * treat every node as AST_NOOP.  This translation keeps the structural
+ * information intact when deserialising.
+ */
+static const char* nodeTypeToPascalString(ASTNodeTypeClike type) {
     switch (type) {
-        case TCAST_PROGRAM: return "PROGRAM";
-        case TCAST_VAR_DECL: return "VAR_DECL";
-        case TCAST_FUN_DECL: return "FUN_DECL";
-        case TCAST_PARAM: return "PARAM";
-        case TCAST_COMPOUND: return "COMPOUND";
-        case TCAST_IF: return "IF";
-        case TCAST_WHILE: return "WHILE";
-        case TCAST_FOR: return "FOR";
-        case TCAST_DO_WHILE: return "DO_WHILE";
-        case TCAST_SWITCH: return "SWITCH";
-        case TCAST_CASE: return "CASE";
-        case TCAST_BREAK: return "BREAK";
-        case TCAST_CONTINUE: return "CONTINUE";
-        case TCAST_RETURN: return "RETURN";
-        case TCAST_EXPR_STMT: return "EXPR_STMT";
-        case TCAST_ASSIGN: return "ASSIGN";
-        case TCAST_BINOP: return "BINOP";
-        case TCAST_UNOP: return "UNOP";
-        case TCAST_TERNARY: return "TERNARY";
-        case TCAST_NUMBER: return "NUMBER";
-        case TCAST_STRING: return "STRING";
-        case TCAST_IDENTIFIER: return "IDENTIFIER";
-        case TCAST_ARRAY_ACCESS: return "ARRAY_ACCESS";
-        case TCAST_CALL: return "CALL";
-        case TCAST_STRUCT_DECL: return "STRUCT_DECL";
-        case TCAST_THREAD_SPAWN: return "THREAD_SPAWN";
-        case TCAST_THREAD_JOIN: return "THREAD_JOIN";
-        default: return "UNKNOWN";
+        case TCAST_PROGRAM:       return "PROGRAM";
+        case TCAST_VAR_DECL:      return "VAR_DECL";
+        case TCAST_FUN_DECL:      return "FUNCTION_DECL";
+        case TCAST_PARAM:         return "VAR_DECL";      /* best approximation */
+        case TCAST_COMPOUND:      return "COMPOUND";
+        case TCAST_IF:            return "IF";
+        case TCAST_WHILE:         return "WHILE";
+        case TCAST_FOR:           return "FOR_TO";       /* generic for-loop */
+        case TCAST_DO_WHILE:      return "REPEAT";
+        case TCAST_SWITCH:        return "CASE";
+        case TCAST_CASE:          return "CASE_BRANCH";
+        case TCAST_BREAK:         return "BREAK";
+        case TCAST_CONTINUE:      return "CONTINUE";
+        case TCAST_RETURN:        return "RETURN";
+        case TCAST_EXPR_STMT:     return "EXPR_STMT";
+        case TCAST_ASSIGN:        return "ASSIGN";
+        case TCAST_BINOP:         return "BINARY_OP";
+        case TCAST_UNOP:          return "UNARY_OP";
+        case TCAST_TERNARY:       return "IF";           /* represented via IF */
+        case TCAST_NUMBER:        return "NUMBER";
+        case TCAST_STRING:        return "STRING";
+        case TCAST_IDENTIFIER:    return "VARIABLE";
+        case TCAST_ARRAY_ACCESS:  return "ARRAY_ACCESS";
+        case TCAST_MEMBER:        return "FIELD_ACCESS";
+        case TCAST_ADDR:          return "ADDR_OF";
+        case TCAST_DEREF:         return "DEREFERENCE";
+        case TCAST_SIZEOF:        return "UNARY_OP";
+        case TCAST_CALL:          return "PROCEDURE_CALL";
+        case TCAST_STRUCT_DECL:   return "RECORD_TYPE";
+        case TCAST_THREAD_SPAWN:  return "THREAD_SPAWN";
+        case TCAST_THREAD_JOIN:   return "THREAD_JOIN";
+        default:                  return "UNKNOWN_AST_TYPE";
+    }
+}
+
+static const char* clikeTokenTypeToPascalString(ClikeTokenType type) {
+    switch (type) {
+        case CLIKE_TOKEN_IF:            return "IF";
+        case CLIKE_TOKEN_ELSE:          return "ELSE";
+        case CLIKE_TOKEN_WHILE:         return "WHILE";
+        case CLIKE_TOKEN_FOR:           return "FOR";
+        case CLIKE_TOKEN_DO:            return "DO";
+        case CLIKE_TOKEN_SWITCH:       return "CASE";
+        case CLIKE_TOKEN_CASE:         return "CASE";
+        case CLIKE_TOKEN_DEFAULT:      return "ELSE";
+        case CLIKE_TOKEN_STRUCT:       return "RECORD";
+        case CLIKE_TOKEN_ENUM:         return "ENUM";
+        case CLIKE_TOKEN_CONST:        return "CONST";
+        case CLIKE_TOKEN_BREAK:        return "BREAK";
+        case CLIKE_TOKEN_CONTINUE:     return "CONTINUE";
+        case CLIKE_TOKEN_RETURN:       return "RETURN";
+        case CLIKE_TOKEN_IMPORT:       return "USES";
+        case CLIKE_TOKEN_SPAWN:        return "SPAWN";
+        case CLIKE_TOKEN_JOIN:         return "JOIN";
+        case CLIKE_TOKEN_IDENTIFIER:   return "IDENTIFIER";
+        case CLIKE_TOKEN_NUMBER:       return "INTEGER_CONST";
+        case CLIKE_TOKEN_FLOAT_LITERAL:return "REAL_CONST";
+        case CLIKE_TOKEN_CHAR_LITERAL: return "STRING_CONST";
+        case CLIKE_TOKEN_STRING:       return "STRING_CONST";
+        case CLIKE_TOKEN_PLUS:         return "PLUS";
+        case CLIKE_TOKEN_PLUS_EQUAL:   return "PLUS";
+        case CLIKE_TOKEN_MINUS:        return "MINUS";
+        case CLIKE_TOKEN_MINUS_EQUAL:  return "MINUS";
+        case CLIKE_TOKEN_PLUS_PLUS:    return "PLUS";
+        case CLIKE_TOKEN_MINUS_MINUS:  return "MINUS";
+        case CLIKE_TOKEN_STAR:         return "MUL";
+        case CLIKE_TOKEN_STAR_EQUAL:   return "MUL";
+        case CLIKE_TOKEN_SLASH:        return "SLASH";
+        case CLIKE_TOKEN_SLASH_EQUAL:  return "SLASH";
+        case CLIKE_TOKEN_PERCENT:      return "MOD";
+        case CLIKE_TOKEN_PERCENT_EQUAL:return "MOD";
+        case CLIKE_TOKEN_TILDE:        return "NOT";
+        case CLIKE_TOKEN_BIT_AND:      return "AND";
+        case CLIKE_TOKEN_BIT_AND_EQUAL:return "AND";
+        case CLIKE_TOKEN_BIT_OR:       return "OR";
+        case CLIKE_TOKEN_BIT_OR_EQUAL: return "OR";
+        case CLIKE_TOKEN_SHL:          return "SHL";
+        case CLIKE_TOKEN_SHL_EQUAL:    return "SHL";
+        case CLIKE_TOKEN_SHR:          return "SHR";
+        case CLIKE_TOKEN_SHR_EQUAL:    return "SHR";
+        case CLIKE_TOKEN_BANG:         return "NOT";
+        case CLIKE_TOKEN_BANG_EQUAL:   return "NOT_EQUAL";
+        case CLIKE_TOKEN_EQUAL:        return "ASSIGN";
+        case CLIKE_TOKEN_EQUAL_EQUAL:  return "EQUAL";
+        case CLIKE_TOKEN_LESS:         return "LESS";
+        case CLIKE_TOKEN_LESS_EQUAL:   return "LESS_EQUAL";
+        case CLIKE_TOKEN_GREATER:      return "GREATER";
+        case CLIKE_TOKEN_GREATER_EQUAL:return "GREATER_EQUAL";
+        case CLIKE_TOKEN_AND_AND:      return "AND";
+        case CLIKE_TOKEN_OR_OR:        return "OR";
+        case CLIKE_TOKEN_QUESTION:     return "UNKNOWN";
+        case CLIKE_TOKEN_COLON:        return "COLON";
+        case CLIKE_TOKEN_DOT:          return "PERIOD";
+        case CLIKE_TOKEN_ARROW:        return "UNKNOWN";
+        case CLIKE_TOKEN_SEMICOLON:    return "SEMICOLON";
+        case CLIKE_TOKEN_COMMA:        return "COMMA";
+        case CLIKE_TOKEN_LPAREN:       return "LPAREN";
+        case CLIKE_TOKEN_RPAREN:       return "RPAREN";
+        case CLIKE_TOKEN_LBRACE:       return "LBRACKET";
+        case CLIKE_TOKEN_RBRACE:       return "RBRACKET";
+        case CLIKE_TOKEN_LBRACKET:     return "LBRACKET";
+        case CLIKE_TOKEN_RBRACKET:     return "RBRACKET";
+        case CLIKE_TOKEN_EOF:          return "EOF";
+        case CLIKE_TOKEN_UNKNOWN:      return "UNKNOWN";
+        default:                       return "IDENTIFIER";
     }
 }
 
@@ -174,20 +259,32 @@ static void dumpASTClikeJSONRecursive(ASTNodeClike *node, FILE *out, int level) 
     fputs("{\n", out);
 
     indent(out, level + 2);
-    fprintf(out, "\"type\": \"%s\"", nodeTypeToString(node->type));
+    fprintf(out, "\"node_type\": \"%s\"", nodeTypeToPascalString(node->type));
 
-    if (node->token.type != CLIKE_TOKEN_UNKNOWN) {
+    /* Emit token in the format expected by tools/ast_json_loader.c */
+    if (node->token.type != CLIKE_TOKEN_UNKNOWN ||
+        (node->token.lexeme && node->token.length > 0)) {
         fputs(",\n", out);
         indent(out, level + 2);
-        fprintf(out, "\"tokenType\": \"%s\"", clikeTokenTypeToString(node->token.type));
-    }
-    if (node->token.lexeme && node->token.length > 0) {
-        fputs(",\n", out);
+        fputs("\"token\": {\n", out);
+        indent(out, level + 4);
+        fprintf(out, "\"type\": \"%s\"", clikeTokenTypeToPascalString(node->token.type));
+        if (node->token.lexeme && node->token.length > 0) {
+            fputs(",\n", out);
+            indent(out, level + 4);
+            fputs("\"value\": \"", out);
+            escapeString(out, node->token.lexeme, node->token.length);
+            fputc('"', out);
+        }
+        fputc('\n', out);
         indent(out, level + 2);
-        fputs("\"token\": \"", out);
-        escapeString(out, node->token.lexeme, node->token.length);
-        fputc('"', out);
+        fputc('}', out);
     }
+
+    /* Minimal type annotation so the loader sets TYPE_UNKNOWN */
+    fputs(",\n", out);
+    indent(out, level + 2);
+    fputs("\"var_type_annotated\": \"UNKNOWN_VAR_TYPE\"", out);
 
     if (node->left) {
         fputs(",\n", out);
