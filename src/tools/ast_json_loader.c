@@ -338,5 +338,44 @@ AST* loadASTFromJSON(const char* json_text) {
     J j = { json_text, 0, strlen(json_text) };
     skip_ws(&j);
     AST* root = parse_ast_node(&j);
+    if (root && root->type == AST_PROGRAM && !root->right && root->child_count > 0) {
+        AST* decls = newASTNode(AST_COMPOUND, NULL);
+        decls->children = root->children;
+        decls->child_count = root->child_count;
+        decls->child_capacity = root->child_count;
+        for (int i = 0; i < decls->child_count; i++) {
+            if (decls->children[i]) {
+                decls->children[i]->parent = decls;
+            }
+        }
+        root->children = NULL;
+        root->child_count = 0;
+        root->child_capacity = 0;
+
+        int hasMain = 0;
+        for (int i = 0; i < decls->child_count; i++) {
+            AST* c = decls->children[i];
+            if (c && (c->type == AST_FUNCTION_DECL || c->type == AST_PROCEDURE_DECL) &&
+                c->token && c->token->value && strcmp(c->token->value, "main") == 0) {
+                hasMain = 1;
+                break;
+            }
+        }
+
+        AST* body = newASTNode(AST_COMPOUND, NULL);
+        if (hasMain) {
+            Token* mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
+            AST* call = newASTNode(AST_PROCEDURE_CALL, mainTok);
+            freeToken(mainTok);
+            addChild(body, call);
+        }
+
+        AST* block = newASTNode(AST_BLOCK, NULL);
+        block->is_global_scope = true;
+        addChild(block, decls);
+        addChild(block, body);
+        root->right = block;
+        block->parent = root;
+    }
     return root;
 }
