@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 
 #include "tools/ast_json_loader.h"
@@ -43,6 +44,35 @@ static void initSymbolSystemMinimal(void) {
     current_procedure_table = procedure_table;
 }
 
+static void predeclare_procedures(AST* node) {
+    if (!node) return;
+    if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
+        if (node->token && node->token->value) {
+            Symbol* sym = malloc(sizeof(Symbol));
+            if (sym) {
+                memset(sym, 0, sizeof(Symbol));
+                sym->name = strdup(node->token->value);
+                if (sym->name) {
+                    for (char* p = sym->name; *p; ++p) *p = tolower((unsigned char)*p);
+                    sym->type = node->var_type;
+                    sym->type_def = node;
+                    sym->bytecode_address = -1;
+                    sym->slot_index = -1;
+                    hashTableInsert(procedure_table, sym);
+                } else {
+                    free(sym);
+                }
+            }
+        }
+    }
+    if (node->left) predeclare_procedures(node->left);
+    if (node->right) predeclare_procedures(node->right);
+    if (node->extra) predeclare_procedures(node->extra);
+    for (int i = 0; i < node->child_count; i++) {
+        predeclare_procedures(node->children[i]);
+    }
+}
+
 int main(int argc, char** argv) {
     int dump_bc = 0, dump_only = 0;
     const char* in_path = NULL;
@@ -74,6 +104,8 @@ int main(int argc, char** argv) {
 
     initSymbolSystemMinimal();
     registerAllBuiltins();
+
+    predeclare_procedures(root);
 
     BytecodeChunk chunk; initBytecodeChunk(&chunk);
     bool ok = compileASTToBytecode(root, &chunk);
