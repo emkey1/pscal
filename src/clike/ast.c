@@ -174,20 +174,32 @@ static void dumpASTClikeJSONRecursive(ASTNodeClike *node, FILE *out, int level) 
     fputs("{\n", out);
 
     indent(out, level + 2);
-    fprintf(out, "\"type\": \"%s\"", nodeTypeToString(node->type));
+    fprintf(out, "\"node_type\": \"%s\"", nodeTypeToString(node->type));
 
-    if (node->token.type != CLIKE_TOKEN_UNKNOWN) {
+    /* Emit token in the format expected by tools/ast_json_loader.c */
+    if (node->token.type != CLIKE_TOKEN_UNKNOWN ||
+        (node->token.lexeme && node->token.length > 0)) {
         fputs(",\n", out);
         indent(out, level + 2);
-        fprintf(out, "\"tokenType\": \"%s\"", clikeTokenTypeToString(node->token.type));
-    }
-    if (node->token.lexeme && node->token.length > 0) {
-        fputs(",\n", out);
+        fputs("\"token\": {\n", out);
+        indent(out, level + 4);
+        fprintf(out, "\"type\": \"%s\"", clikeTokenTypeToString(node->token.type));
+        if (node->token.lexeme && node->token.length > 0) {
+            fputs(",\n", out);
+            indent(out, level + 4);
+            fputs("\"value\": \"", out);
+            escapeString(out, node->token.lexeme, node->token.length);
+            fputc('"', out);
+        }
+        fputc('\n', out);
         indent(out, level + 2);
-        fputs("\"token\": \"", out);
-        escapeString(out, node->token.lexeme, node->token.length);
-        fputc('"', out);
+        fputc('}', out);
     }
+
+    /* Minimal type annotation so the loader sets TYPE_UNKNOWN */
+    fputs(",\n", out);
+    indent(out, level + 2);
+    fputs("\"var_type_annotated\": \"UNKNOWN_VAR_TYPE\"", out);
 
     if (node->left) {
         fputs(",\n", out);
