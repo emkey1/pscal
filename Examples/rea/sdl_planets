@@ -23,7 +23,7 @@ class Planet {
   int centerY;
   int tid;
 
-    Planet init(int o, int s, int spd, int red, int green, int blue, int cx, int cy) {
+    Planet init(int o, int s, float spd, int red, int green, int blue, int cx, int cy) {
       myself.orbit = o;
       myself.size = s;
       myself.speed = spd;
