@@ -395,6 +395,7 @@ begin
   testByte := 128;
   tempInt := testByte;
   AssertEqualInt(128, tempInt, 'Assign Integer to Byte');
+  AssertEqualInt(255, byte(511), 'Byte(511)');
 end;
 
 procedure TestWordType;
