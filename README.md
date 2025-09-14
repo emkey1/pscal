@@ -247,12 +247,17 @@ Install: `pscaljson2bc` is installed alongside `pascal` and `pscalvm` by `cmake 
 
 More: see the full guide at `Docs/pscaljson2bc.md`.
 
-Bash completion: a minimal completion script is available at `tools/completions/pscaljson2bc.bash`.
-Source it in your shell to enable option completion:
-
-```sh
-source tools/completions/pscaljson2bc.bash
-```
+Shell completions:
+- Bash: source `tools/completions/pscaljson2bc.bash` to enable option completion:
+  ```sh
+  source tools/completions/pscaljson2bc.bash
+  ```
+- Zsh: add `tools/completions` to your `fpath` or copy `_pscaljson2bc` into a directory in `fpath`, then `autoload -Uz compinit && compinit`.
+  ```zsh
+  fpath=("$PWD/tools/completions" $fpath)
+  autoload -Uz compinit && compinit
+  ```
+Completions can also be installed automatically by CMake (see the `PSCAL_INSTALL_COMPLETIONS` option).
 
 All of the above apply to both sync and async requests. Async jobs snapshot session options at submission.
 

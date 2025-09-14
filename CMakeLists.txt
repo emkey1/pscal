@@ -536,3 +536,15 @@ endif()
 
 # Install the JSON→Bytecode tool alongside other binaries
 install(TARGETS pscaljson2bc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+# ---- Optional shell completions ----
+option(PSCAL_INSTALL_COMPLETIONS "Install shell completion scripts for pscaljson2bc" ON)
+if(PSCAL_INSTALL_COMPLETIONS)
+    # Bash completion (standard location). Rename to the program name without extension
+    install(FILES tools/completions/pscaljson2bc.bash
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/bash-completion/completions"
+            RENAME pscaljson2bc)
+    # Zsh completion (site-functions). Ensure the filename begins with an underscore
+    install(FILES tools/completions/_pscaljson2bc
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/zsh/site-functions")
+endif()
