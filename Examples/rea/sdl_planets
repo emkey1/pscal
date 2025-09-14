@@ -21,47 +21,47 @@ class Planet {
   int centerY;
   int tid;
 
-  Planet init(int o, int s, float spd, int red, int green, int blue, int cx, int cy) {
-    my.orbit = o;
-    my.size = s;
-    my.speed = spd;
-    my.r = red;
-    my.g = green;
-    my.b = blue;
-    my.centerX = cx;
-    my.centerY = cy;
-    my.angle = random(360);
-    my.posX = cx + cos(my.angle) * o;
-    my.posY = cy + sin(my.angle) * o;
-    return my;
-  }
-
-  void updateWorker() {
-    while (!quit) {
-      my.angle = my.angle + my.speed;
-      if (my.angle >= 360.0) my.angle = my.angle - 360.0;
-      float px = my.centerX + cos(my.angle) * my.orbit;
-      float py = my.centerY + sin(my.angle) * my.orbit;
-      lock(posMutex);
-      my.posX = px;
-      my.posY = py;
-      unlock(posMutex);
-      delay(16);
+    Planet init(int o, int s, float spd, int red, int green, int blue, int cx, int cy) {
+      myself.orbit = o;
+      myself.size = s;
+      myself.speed = spd;
+      myself.r = red;
+      myself.g = green;
+      myself.b = blue;
+      myself.centerX = cx;
+      myself.centerY = cy;
+      myself.angle = random(360);
+      myself.posX = cx + cos(myself.angle) * o;
+      myself.posY = cy + sin(myself.angle) * o;
+      return myself;
     }
-  }
 
-  void start() {
-    my.tid = spawn Planet_updateWorker(my);
-  }
+    void updateWorker() {
+      while (!quit) {
+        myself.angle = myself.angle + myself.speed;
+        if (myself.angle >= 360.0) myself.angle = myself.angle - 360.0;
+        float px = myself.centerX + cos(myself.angle) * myself.orbit;
+        float py = myself.centerY + sin(myself.angle) * myself.orbit;
+        lock(posMutex);
+        myself.posX = px;
+        myself.posY = py;
+        unlock(posMutex);
+        delay(16);
+      }
+    }
 
-  void join() {
-    join my.tid;
-  }
+    void start() {
+      myself.tid = spawn Planet_updateWorker(myself);
+    }
 
-  void draw() {
-    setrgbcolor(my.r, my.g, my.b);
-    fillcircle(trunc(my.posX), trunc(my.posY), my.size);
-  }
+    void join() {
+      join myself.tid;
+    }
+
+    void draw() {
+      setrgbcolor(myself.r, myself.g, myself.b);
+      fillcircle(trunc(myself.posX), trunc(myself.posY), myself.size);
+    }
 }
 
 class SolarSystemApp {
@@ -69,31 +69,31 @@ class SolarSystemApp {
   const int WindowHeight = 600;
   const int TargetFPS = 60;
 
-  int FrameDelay;
-  int centerX;
-  int centerY;
-  Planet planets[NumPlanets + 1];
+    int FrameDelay;
+    int centerX;
+    int centerY;
+    Planet planets[NumPlanets + 1];
 
   void SolarSystemApp() {
     // no special initialization needed beyond defaults
   }
 
   void initPlanets() {
-    my.planets[1] = (new Planet()).init( 40, 3, 4.7, 200, 200, 200, my.centerX, my.centerY); // Mercury
-    my.planets[2] = (new Planet()).init( 60, 5, 3.5, 255, 165,   0, my.centerX, my.centerY); // Venus
-    my.planets[3] = (new Planet()).init( 80, 5, 3.0,   0,   0, 255, my.centerX, my.centerY); // Earth
-    my.planets[4] = (new Planet()).init(100, 4, 2.4, 255,   0,   0, my.centerX, my.centerY); // Mars
-    my.planets[5] = (new Planet()).init(130, 9, 1.3, 210, 105,  30, my.centerX, my.centerY); // Jupiter
-    my.planets[6] = (new Planet()).init(160, 8, 1.0, 210, 180, 140, my.centerX, my.centerY); // Saturn
-    my.planets[7] = (new Planet()).init(190, 7, 0.7, 135, 206, 235, my.centerX, my.centerY); // Uranus
-    my.planets[8] = (new Planet()).init(220, 7, 0.5,  65, 105, 225, my.centerX, my.centerY); // Neptune
-    my.planets[9] = (new Planet()).init(250, 3, 0.4, 169, 169, 169, my.centerX, my.centerY); // Pluto
+    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], 40, 3, 4.7, 200, 200, 200, myself.centerX, myself.centerY); // Mercury
+    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], 60, 5, 3.5, 255, 165,   0, myself.centerX, myself.centerY); // Venus
+    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], 80, 5, 3.0,   0,   0, 255, myself.centerX, myself.centerY); // Earth
+    myself.planets[4] = new Planet(); Planet_init(myself.planets[4],100, 4, 2.4, 255,   0,   0, myself.centerX, myself.centerY); // Mars
+    myself.planets[5] = new Planet(); Planet_init(myself.planets[5],130, 9, 1.3, 210, 105,  30, myself.centerX, myself.centerY); // Jupiter
+    myself.planets[6] = new Planet(); Planet_init(myself.planets[6],160, 8, 1.0, 210, 180, 140, myself.centerX, myself.centerY); // Saturn
+    myself.planets[7] = new Planet(); Planet_init(myself.planets[7],190, 7, 0.7, 135, 206, 235, myself.centerX, myself.centerY); // Uranus
+    myself.planets[8] = new Planet(); Planet_init(myself.planets[8],220, 7, 0.5,  65, 105, 225, myself.centerX, myself.centerY); // Neptune
+    myself.planets[9] = new Planet(); Planet_init(myself.planets[9],250, 3, 0.4, 169, 169, 169, myself.centerX, myself.centerY); // Pluto
   }
 
   void startThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      my.planets[i].start();
+      Planet_start(myself.planets[i]);
       i = i + 1;
     }
   }
@@ -102,10 +102,10 @@ class SolarSystemApp {
     lock(posMutex);
     cleardevice();
     setrgbcolor(255, 255, 0); // Sun
-    fillcircle(my.centerX, my.centerY, 12);
+    fillcircle(myself.centerX, myself.centerY, 12);
     int i = 1;
     while (i <= NumPlanets) {
-      my.planets[i].draw();
+      Planet_draw(myself.planets[i]);
       i = i + 1;
     }
     unlock(posMutex);
@@ -115,29 +115,29 @@ class SolarSystemApp {
   void joinThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      my.planets[i].join();
+      Planet_join(myself.planets[i]);
       i = i + 1;
     }
   }
 
   void run() {
     initgraph(WindowWidth, WindowHeight, "Rea SDL Solar System");
-    my.centerX = getmaxx() / 2;
-    my.centerY = getmaxy() / 2;
+    myself.centerX = getmaxx() / 2;
+    myself.centerY = getmaxy() / 2;
     randomize();
-    my.FrameDelay = trunc(1000 / TargetFPS);
-    my.initPlanets();
-    my.startThreads();
+    myself.FrameDelay = trunc(1000 / TargetFPS);
+    myself.initPlanets();
+    SolarSystemApp_startThreads(myself);
     writeln("Solar system simulation running. Press Q to quit.");
     while (!quit) {
       if (keypressed()) {
         char c = readkey();
         if (toupper(c) == 'Q') quit = true;
       }
-      my.draw();
+      SolarSystemApp_draw(myself);
       graphloop(my.FrameDelay);
     }
-    my.joinThreads();
+    SolarSystemApp_joinThreads(myself);
     closegraph();
     writeln("Simulation finished.");
   }
