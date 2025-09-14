@@ -6,8 +6,8 @@ interface
 function UpperCase(S: string): string;
 function LowerCase(S: string): string;
 function Trim(S: string): string;
-// function TrimLeft(S: string): string; // TODO
-// function TrimRight(S: string): string; // TODO
+function TrimLeft(S: string): string;
+function TrimRight(S: string): string;
 function QuotedStr(S: string): string; // Simplified: Doesn't handle internal quotes
 
 // --- File System ---
@@ -74,7 +74,34 @@ begin
    else
      Res := '';
 
-   LowerCase := Res;
+  LowerCase := Res;
+end;
+
+function TrimLeft(S: string): string;
+var
+  First, Len: Integer;
+begin
+  Len := Length(S);
+  First := 1;
+  while (First <= Len) and (S[First] = ' ') do
+    Inc(First);
+  if First > Len then
+    TrimLeft := ''
+  else
+    TrimLeft := Copy(S, First, Len - First + 1);
+end;
+
+function TrimRight(S: string): string;
+var
+  Last: Integer;
+begin
+  Last := Length(S);
+  while (Last > 0) and (S[Last] = ' ') do
+    Dec(Last);
+  if Last < 1 then
+    TrimRight := ''
+  else
+    TrimRight := Copy(S, 1, Last);
 end;
 
 function Trim(S: string): string;
