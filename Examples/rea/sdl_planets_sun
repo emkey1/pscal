@@ -9,9 +9,12 @@ bool quit = false;
 int posMutex = mutex();
 float earthMonths = 0.0;
 
+const float SunMinRadiusPixels = 32.0;
+const float PlanetVisualScale = 12.0;
+
 class Planet {
   int orbit;
-  int size;
+  float size;
 
   float speed; // radians per update
 
@@ -26,7 +29,7 @@ class Planet {
   int tid;
   int isEarth;
 
-    Planet init(int o, int s, float spdDeg, int red, int green, int blue, int cx, int cy) {
+    Planet init(int o, float s, float spdDeg, int red, int green, int blue, int cx, int cy) {
       myself.orbit = o;
       myself.size = s;
       // Store angular speed in radians for precise updates even below 1 degree
@@ -76,7 +79,11 @@ class Planet {
 
 void Planet_draw(Planet p) {
   setrgbcolor(p.r, p.g, p.b);
-  fillcircle(trunc(p.posX), trunc(p.posY), p.size);
+  int drawRadius = trunc(p.size * PlanetVisualScale);
+  if (drawRadius < 1) {
+    drawRadius = 1;
+  }
+  fillcircle(trunc(p.posX), trunc(p.posY), drawRadius);
 }
 
 class SolarSystemApp {
@@ -84,12 +91,17 @@ class SolarSystemApp {
   const int WindowHeight = 1024;
   const int TargetFPS = 60;
   const float SunRadiusAU = 0.00465; // Sun radius expressed in AU
+  const float MercuryRadiusAU = 0.0000163;
+  const float VenusRadiusAU   = 0.0000405;
+  const float EarthRadiusAU   = 0.0000426;
+  const float MarsRadiusAU    = 0.0000226;
 
     int FrameDelay;
     int centerX;
     int centerY;
     float AUScale; // pixels per astronomical unit
     int sunRadius; // Sun radius in pixels
+    float SizeScale; // scale factor applied to all body sizes for visibility
     Planet planets[NumPlanets + 1];
 
   void SolarSystemApp() {
@@ -98,19 +110,24 @@ class SolarSystemApp {
 
   void initPlanets() {
     int orbit;
-    // Mercury - 0.39 AU
+    float radius;
+    // Mercury - 0.39 AU orbit, true radius
     orbit = trunc(myself.AUScale * 0.39);
-    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, 1, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
-    // Venus - 0.72 AU
+    radius = myself.AUScale * MercuryRadiusAU * myself.SizeScale;
+    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, radius, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    // Venus - 0.72 AU orbit, true radius
     orbit = trunc(myself.AUScale * 0.72);
-    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, 2, 3.5, 218, 165, 32, myself.centerX, myself.centerY);
-    // Earth - 1.00 AU
+    radius = myself.AUScale * VenusRadiusAU * myself.SizeScale;
+    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, radius, 3.5, 218, 165, 32, myself.centerX, myself.centerY);
+    // Earth - 1.00 AU orbit, true radius
     orbit = trunc(myself.AUScale * 1.00);
-    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, 3, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
+    radius = myself.AUScale * EarthRadiusAU * myself.SizeScale;
+    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, radius, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
     myself.planets[3].isEarth = 1;
-    // Mars - 1.52 AU
+    // Mars - 1.52 AU orbit, true radius
     orbit = trunc(myself.AUScale * 1.52);
-    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, 2, 2.4, 188, 39, 50, myself.centerX, myself.centerY);
+    radius = myself.AUScale * MarsRadiusAU * myself.SizeScale;
+    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, radius, 2.4, 188, 39, 50, myself.centerX, myself.centerY);
   }
 
   void startThreads() {
@@ -151,11 +168,14 @@ class SolarSystemApp {
     myself.centerY = getmaxy() / 2;
     // Scale astronomical units so Mars stays fully on screen with a small margin
     myself.AUScale = (myself.centerY - 10) / 1.52;
-    myself.sunRadius = trunc(myself.AUScale * SunRadiusAU);
-    // At this screen resolution the true scale yields ~1px, which is hard to see.
-    // Clamp to a small minimum so the Sun remains visible while preserving
-    // proportional scaling for larger windows.
-    if (myself.sunRadius < 4) myself.sunRadius = 4;
+    // Calculate a size scaling factor so the Sun remains visible while keeping
+    // the same proportion for planet sizes.
+    float rawSun = myself.AUScale * SunRadiusAU;
+    myself.SizeScale = SunMinRadiusPixels / rawSun;
+    if (myself.SizeScale < 1.0) {
+      myself.SizeScale = 1.0;
+    }
+    myself.sunRadius = trunc(rawSun * myself.SizeScale);
     inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
