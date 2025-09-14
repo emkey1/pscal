@@ -17,7 +17,8 @@ char **gParamValues = NULL;
 
 static const char* USAGE =
     "Usage: pscaljson2bc [--dump-bytecode | --dump-bytecode-only] [-o <out.bc>] [<ast.json>]\n"
-    "  If no input file is provided or '-' is used, reads from stdin.\n";
+    "  If no input file is provided or '-' is used, reads from stdin.\n"
+    "  -h, --help                 Show this help and exit.\n";
 
 static char* slurp(FILE* f) {
     if (!f) return NULL;
@@ -47,7 +48,10 @@ int main(int argc, char** argv) {
     const char* out_path = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--dump-bytecode") == 0) { dump_bc = 1; }
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("%s", USAGE);
+            return EXIT_SUCCESS;
+        } else if (strcmp(argv[i], "--dump-bytecode") == 0) { dump_bc = 1; }
         else if (strcmp(argv[i], "--dump-bytecode-only") == 0) { dump_bc = 1; dump_only = 1; }
         else if ((strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) && i+1 < argc) { out_path = argv[++i]; }
         else if (argv[i][0] == '-') { fprintf(stderr, "%s", USAGE); return EXIT_FAILURE; }
