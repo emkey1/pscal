@@ -351,6 +351,15 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
     switch (expr->type) {
     case AST_VARIABLE: {
         if (!expr->token || !expr->token->value) return NULL;
+        /*
+         * The current object reference can appear as the implicit
+         * parameter "myself".  If semantic lookup fails, fall back to
+         * the class currently being validated so that expressions like
+         * `my.field` or `my.method()` resolve correctly.
+         */
+        if (currentClass && strcasecmp(expr->token->value, "myself") == 0) {
+            return currentClass->name;
+        }
         AST *decl = findStaticDeclarationInAST(expr->token->value, expr, gProgramRoot);
         if (!decl && currentClass) {
             Symbol *fs = lookupField(currentClass, expr->token->value);
