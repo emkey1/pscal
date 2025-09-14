@@ -86,6 +86,7 @@ class SolarSystemApp {
   const int TargetFPS = 60;
   const int AUOffset = 20;    // base offset so Mercury clears the sun
   const int OrbitSpacing = 2; // extra padding between successive orbits
+  const int JupiterSize = 18; // largest planet radius for scaling
 
     int FrameDelay;
     int centerX;
@@ -188,8 +189,9 @@ class SolarSystemApp {
     initgraph(WindowWidth, WindowHeight, "Rea SDL Inner Solar System");
     myself.centerX = getmaxx() / 2;
     myself.centerY = getmaxy() / 2;
-    // Scale astronomical units so Jupiter nearly reaches the screen edge
-    myself.AUScale = (myself.centerY - AUOffset - 10) / 5.20;
+    // Scale astronomical units so Jupiter stays fully on screen with a small margin
+    int maxExtra = OrbitSpacing * (NumPlanets - 1);
+    myself.AUScale = (myself.centerY - AUOffset - maxExtra - JupiterSize - 10) / 5.20;
     inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
