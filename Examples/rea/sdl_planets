@@ -54,7 +54,10 @@ class Planet {
       myself.tid = spawn Planet_updateWorker(myself);
     }
 
-    void join() {
+    // Wait for the worker thread to finish. "join" is a reserved keyword in
+    // Rea, so give the method a more explicit name to avoid confusion with the
+    // built-in thread operation.
+    void joinThread() {
       join myself.tid;
     }
 
@@ -116,7 +119,7 @@ class SolarSystemApp {
   void joinThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_join(myself.planets[i]);
+      Planet_joinThread(myself.planets[i]);
       i = i + 1;
     }
   }
@@ -136,7 +139,9 @@ class SolarSystemApp {
         if (toupper(c) == 'Q') quit = true;
       }
       SolarSystemApp_draw(myself);
-      graphloop(my.FrameDelay);
+      // Use the object's frame delay to pace the main loop and yield time to
+      // planet worker threads, ensuring smooth motion.
+      graphloop(myself.FrameDelay);
     }
     SolarSystemApp_joinThreads(myself);
     closegraph();
