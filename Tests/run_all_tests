@@ -19,3 +19,8 @@ echo "Running Tiny Tests"
 ./run_tiny_tests.sh
 echo
 echo "Tiny Tests End"
+echo
+echo "====================================="
+echo "Running JSON2BC Tests"
+./run_json2bc_tests.sh
+echo "JSON2BC Tests End"
