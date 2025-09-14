@@ -157,7 +157,7 @@ static AST* parse_ast_object(J* j) {
     int by_ref = 0, is_inline = 0, is_global_scope = 0;
     int i_val = 0;
     // Children to set after creating node
-    AST* left = NULL; AST* right = NULL; AST* extra = NULL;
+    AST* left = NULL; AST* right = NULL; AST* extra = NULL; AST* third = NULL;
     AST* program_name_node = NULL; AST* main_block = NULL;
     List* unit_list = NULL;
     // temp vectors for children
@@ -254,6 +254,9 @@ static AST* parse_ast_object(J* j) {
             program_name_node = parse_ast_node(j);
         } else if (strcmp(key, "main_block") == 0) {
             main_block = parse_ast_node(j);
+        } else if (strcmp(key, "third") == 0) {
+            // Some frontends emit a 'third' pointer (e.g., ternary). Treat it like 'extra'.
+            if (parse_null(j)) third = NULL; else third = parse_ast_node(j);
         } else if (strcmp(key, "uses_clauses") == 0) {
             if (!expect(j, '[')) { free(key); free(kids); return NULL; }
             while (1) {
@@ -325,9 +328,26 @@ static AST* parse_ast_object(J* j) {
     if (left) setLeft(node, left);
     if (right) setRight(node, right);
     if (extra) setExtra(node, extra);
+    if (!extra && third) setExtra(node, third);
     if (node->type == AST_BLOCK) {
         if (decls) set_child_index(node, 0, decls);
         if (body) set_child_index(node, 1, body);
+    }
+    // Normalize single-name VAR_DECL nodes (as produced by clike) to the
+    // Pascal shape: names as children, type on right. When token holds the
+    // declared identifier and there are no children yet, create a child node
+    // for the name and clear the VAR_DECL's own token to avoid confusion.
+    if (node->type == AST_VAR_DECL && node->token && node->child_count == 0) {
+        Token* nameTok = newToken(node->token->type,
+                                  node->token->value ? node->token->value : NULL,
+                                  node->token->line,
+                                  node->token->column);
+        AST* nameNode = newASTNode(AST_VARIABLE, nameTok);
+        if (nameTok) freeToken(nameTok);
+        addChild(node, nameNode);
+        // The node's 'right' already points to a type node when present in input.
+        freeToken(node->token);
+        node->token = NULL;
     }
     for (int i = 0; i < kids_count; i++) {
         addChild(node, kids[i]);
