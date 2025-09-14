@@ -353,6 +353,17 @@ static AST* parse_ast_object(J* j) {
         addChild(node, kids[i]);
     }
     free(kids);
+
+    // Normalize cross-frontend differences:
+    // - clike uses 'exit([code])' to terminate the program; map it to the VM's
+    //   'halt' builtin so an optional exit code is supported. This avoids the
+    //   Pascal compiler's 'exit' semantics (function-exit) and related errors.
+    if (node->type == AST_PROCEDURE_CALL && node->token && node->token->value) {
+        if (strcasecmp(node->token->value, "exit") == 0) {
+            free(node->token->value);
+            node->token->value = strdup("halt");
+        }
+    }
     return node;
 }
 

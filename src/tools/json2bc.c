@@ -124,7 +124,10 @@ int main(int argc, char** argv) {
 
     AST* root = loadASTFromJSON(json);
     free(json);
-    if (!root) { fprintf(stderr, "Failed to parse AST JSON.\n"); return EXIT_FAILURE; }
+    if (!root) { fprintf(stderr, "Failed to parse AST JSON.\n");
+        // Best-effort: avoid leaving a stale or partial output file on failure.
+        if (out_path && strcmp(out_path, "-") != 0) { unlink(out_path); }
+        return EXIT_FAILURE; }
 
     initSymbolSystemMinimal();
     registerAllBuiltins();
@@ -148,6 +151,7 @@ int main(int argc, char** argv) {
         freeTypeTable();
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+        if (out_path && strcmp(out_path, "-") != 0) { unlink(out_path); }
         return EXIT_FAILURE;
     }
 
