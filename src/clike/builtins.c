@@ -72,10 +72,12 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("float", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("char", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("bool", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("byte", AST_FUNCTION_DECL, NULL);
     /* synonyms to avoid parser conflicts with type tokens */
     registerBuiltinFunction("toint", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("todouble", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tofloat", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tochar", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
 }

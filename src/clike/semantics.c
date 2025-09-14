@@ -13,6 +13,7 @@ static VarType builtinReturnType(const char* name) {
 
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
     if (strcasecmp(name, "ord")  == 0) return TYPE_INT32;
+    if (strcasecmp(name, "byte") == 0 || strcasecmp(name, "tobyte") == 0) return TYPE_BYTE;
 
     if (strcasecmp(name, "sqrt") == 0) return TYPE_LONG_DOUBLE;
 

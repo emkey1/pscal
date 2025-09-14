@@ -127,6 +127,28 @@ static Value vmBuiltinToChar(VM* vm, int arg_count, Value* args) {
     return makeChar((int)c);
 }
 
+static Value vmBuiltinToByte(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "byte(x) expects 1 argument.");
+        return makeByte(0);
+    }
+    Value v = args[0];
+    unsigned char b = 0;
+    if (isRealType(v.type)) {
+        long double d = AS_REAL(v);
+        b = (unsigned char)((long long)d);
+    } else if (IS_INTLIKE(v)) {
+        b = (unsigned char)AS_INTEGER(v);
+    } else if (v.type == TYPE_BOOLEAN) {
+        b = v.i_val ? 1 : 0;
+    } else if (v.type == TYPE_CHAR) {
+        b = (unsigned char)v.c_val;
+    } else {
+        b = 0;
+    }
+    return makeByte(b);
+}
+
 static Value vmBuiltinToBool(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "bool(x) expects 1 argument.");
@@ -191,6 +213,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
     {"bool", vmBuiltinToBool},
+    {"byte", vmBuiltinToByte},
     {"bytecodeversion", vmBuiltinBytecodeVersion},
     {"ceil", vmBuiltinCeil},
     {"char", vmBuiltinToChar},
@@ -3768,6 +3791,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ArcTan", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Beep", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Byte", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Ceil", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
@@ -3918,5 +3942,6 @@ void registerAllBuiltins(void) {
     registerVmBuiltin("tofloat",  vmBuiltinToFloat);
     registerVmBuiltin("tochar",   vmBuiltinToChar);
     registerVmBuiltin("tobool",   vmBuiltinToBool);
+    registerVmBuiltin("tobyte",   vmBuiltinToByte);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
