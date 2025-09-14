@@ -10,6 +10,7 @@
 #include "backend_ast/builtin.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
+#include "core/cache.h"
 #include "core/utils.h"
 
 int gParamCount = 0;
@@ -102,19 +103,28 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Write raw bytecode to output
-    FILE* out = stdout;
+    // Write bytecode to output, preserving metadata so the VM can load it.
     if (out_path && strcmp(out_path, "-") != 0) {
-        out = fopen(out_path, "wb");
-        if (!out) { perror("open output"); freeBytecodeChunk(&chunk); freeAST(root); return EXIT_FAILURE; }
-    }
-    if (chunk.count > 0 && chunk.code) {
-        size_t written = fwrite(chunk.code, 1, (size_t)chunk.count, out);
-        if (written != (size_t)chunk.count) {
-            fprintf(stderr, "Short write: wrote %zu of %d bytes.\n", written, chunk.count);
+        if (!saveBytecodeToFile(out_path, in_path ? in_path : "<stdin>", &chunk)) {
+            fprintf(stderr, "Failed to write bytecode to %s\n", out_path);
+            freeBytecodeChunk(&chunk);
+            freeAST(root);
+            freeProcedureTable();
+            freeTypeTableASTNodes();
+            freeTypeTable();
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+            return EXIT_FAILURE;
+        }
+    } else {
+        FILE* out = stdout;
+        if (chunk.count > 0 && chunk.code) {
+            size_t written = fwrite(chunk.code, 1, (size_t)chunk.count, out);
+            if (written != (size_t)chunk.count) {
+                fprintf(stderr, "Short write: wrote %zu of %d bytes.\n", written, chunk.count);
+            }
         }
     }
-    if (out != stdout) fclose(out);
 
     freeBytecodeChunk(&chunk);
     freeAST(root);

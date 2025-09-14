@@ -773,25 +773,20 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
     return ok;
 }
 
-void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
-    char* cache_path = buildCachePath(source_path);
-    if (!cache_path) return;
-    FILE* f = fopen(cache_path, "wb");
-    if (!f) { free(cache_path); return; }
+static bool serializeBytecodeChunk(FILE* f, const char* source_path, const BytecodeChunk* chunk) {
+    if (!f) return false;
     uint32_t magic = CACHE_MAGIC, ver = chunk->version;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
     if (!writeSourcePath(f, source_path)) {
-        fclose(f);
-        free(cache_path);
-        return;
+        return false;
     }
     fwrite(&chunk->count, sizeof(chunk->count), 1, f);
     fwrite(&chunk->constants_count, sizeof(chunk->constants_count), 1, f);
     fwrite(chunk->code, 1, chunk->count, f);
     fwrite(chunk->lines, sizeof(int), chunk->count, f);
     for (int i = 0; i < chunk->constants_count; ++i) {
-        if (!writeValue(f, &chunk->constants[i])) { break; }
+        if (!writeValue(f, &chunk->constants[i])) { return false; }
     }
     int proc_count = 0;
     if (procedure_table) {
@@ -862,6 +857,23 @@ void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
         fwrite(entry->name, 1, name_len, f);
         writeAst(f, entry->typeAST);
     }
+    return true;
+}
+
+void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
+    char* cache_path = buildCachePath(source_path);
+    if (!cache_path) return;
+    FILE* f = fopen(cache_path, "wb");
+    if (!f) { free(cache_path); return; }
+    serializeBytecodeChunk(f, source_path, chunk);
     fclose(f);
     free(cache_path);
+}
+
+bool saveBytecodeToFile(const char* file_path, const char* source_path, const BytecodeChunk* chunk) {
+    FILE* f = fopen(file_path, "wb");
+    if (!f) return false;
+    bool ok = serializeBytecodeChunk(f, source_path, chunk);
+    fclose(f);
+    return ok;
 }
