@@ -235,7 +235,16 @@ static void flushCapturedStderrAtExit(void) {
         rewind(tmp);
         char buf[4096]; size_t n;
         while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) {
-            (void)write(STDERR_FILENO, buf, n);
+            size_t total = 0;
+            while (total < n) {
+                ssize_t w = write(STDERR_FILENO, buf + total, n - total);
+                if (w <= 0) {
+                    total = n; // force exit outer loop on error
+                    break;
+                }
+                total += (size_t)w;
+            }
+            if (total < n) break;
         }
         fclose(tmp);
     }
@@ -390,7 +399,16 @@ int main(int argc, char *argv[]) {
             if (result != EXIT_SUCCESS || has_cached || has_non_ws) {
                 rewind(s_stderr_tmp);
                 while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
-                    (void)write(STDERR_FILENO, buf, n);
+                    size_t total = 0;
+                    while (total < n) {
+                        ssize_t w = write(STDERR_FILENO, buf + total, n - total);
+                        if (w <= 0) {
+                            total = n;
+                            break;
+                        }
+                        total += (size_t)w;
+                    }
+                    if (total < n) break;
                 }
             }
             fclose(s_stderr_tmp);
