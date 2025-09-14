@@ -533,3 +533,6 @@ if(SDL)
     target_link_libraries(pscaljson2bc PRIVATE ${JSON2BC_SDL_LIBS})
     target_compile_definitions(pscaljson2bc PRIVATE SDL)
 endif()
+
+# Install the JSON→Bytecode tool alongside other binaries
+install(TARGETS pscaljson2bc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
