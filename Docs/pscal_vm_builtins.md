@@ -241,7 +241,7 @@ These built-ins are available when Pscal is built with SDL support.
 | freesound | (sound: Sound) | void | Free a loaded sound. |
 | playsound | (sound: Sound) | void | Play sound. |
 | issoundplaying | (sound: Sound) | Boolean | Query if sound playing. |
-| inittextsystem | () | void | Initialize text subsystem. |
+| inittextsystem | (fontPath: String, fontSize: Integer) | void | Initialize text subsystem with a TTF font. |
 | quittextsystem | () | void | Shut down text subsystem. |
 | getmousestate | (var x: Integer, var y: Integer, var buttons: Integer) | void | Query mouse position and buttons. |
 | getticks | () | Integer | Milliseconds since start. |

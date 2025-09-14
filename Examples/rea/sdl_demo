@@ -2,9 +2,20 @@
 // Rea SDL demo (requires building with -DSDL=ON)
 
 writeln("Starting Rea SDL demo (initializing text system)...");
-InitTextSystem();
+InitGraph(1, 1, "Rea SDL demo");
+string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+if (fileexists(systemFontPath)) {
+  InitTextSystem(systemFontPath, 18);
+} else if (fileexists(repoFontPath1)) {
+  InitTextSystem(repoFontPath1, 18);
+} else {
+  InitTextSystem(repoFontPath2, 18);
+}
 SetColor(255, 255, 255, 255);
-writeln("Text system initialized. (No window shown in this demo.)");
+writeln("Text system initialized.");
 QuitTextSystem();
+CloseGraph();
 writeln("Rea SDL demo finished.");
 
