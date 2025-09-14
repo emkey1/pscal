@@ -11,7 +11,7 @@ class Planet {
   int orbit;
   int size;
 
-  float speed; // degrees per update
+  float speed; // radians per update
 
   int r;
   int g;
@@ -23,30 +23,29 @@ class Planet {
   int centerY;
   int tid;
 
-    Planet init(int o, int s, float spd, int red, int green, int blue, int cx, int cy) {
+    Planet init(int o, int s, float spdDeg, int red, int green, int blue, int cx, int cy) {
       myself.orbit = o;
       myself.size = s;
-      myself.speed = spd;
+      // Store angular speed in radians for precise updates even below 1 degree
+      myself.speed = spdDeg * 0.017453292519943295; // degrees -> radians
       myself.r = red;
       myself.g = green;
       myself.b = blue;
       myself.centerX = cx;
       myself.centerY = cy;
-      // Rea's trig functions operate on radians, so convert our degree angle
-      myself.angle = random(360);
-      float rad = myself.angle * 0.017453292519943295; // degrees -> radians
-      myself.posX = cx + cos(rad) * o;
-      myself.posY = cy + sin(rad) * o;
+      // Initialize angle in radians as well
+      myself.angle = random(360) * 0.017453292519943295;
+      myself.posX = cx + cos(myself.angle) * o;
+      myself.posY = cy + sin(myself.angle) * o;
       return myself;
     }
 
     void updateWorker() {
       while (!quit) {
         myself.angle = myself.angle + myself.speed;
-        if (myself.angle >= 360.0) myself.angle = myself.angle - 360.0;
-        float rad = myself.angle * 0.017453292519943295;
-        float px = myself.centerX + cos(rad) * myself.orbit;
-        float py = myself.centerY + sin(rad) * myself.orbit;
+        if (myself.angle >= 6.283185307179586) myself.angle = myself.angle - 6.283185307179586; // 2*pi
+        float px = myself.centerX + cos(myself.angle) * myself.orbit;
+        float py = myself.centerY + sin(myself.angle) * myself.orbit;
         lock(posMutex);
         myself.posX = px;
         myself.posY = py;
@@ -74,8 +73,8 @@ void Planet_draw(Planet p) {
 }
 
 class SolarSystemApp {
-  const int WindowWidth = 800;
-  const int WindowHeight = 600;
+  const int WindowWidth = 1280;
+  const int WindowHeight = 1024;
   const int TargetFPS = 60;
 
     int FrameDelay;
@@ -88,15 +87,15 @@ class SolarSystemApp {
   }
 
   void initPlanets() {
-    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], 40, 3, 4.7, 200, 200, 200, myself.centerX, myself.centerY);  // Mercury
-    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], 60, 4, 3.5, 255, 165,   0, myself.centerX, myself.centerY);  // Venus
-    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], 80, 5, 3.0,   0,   0, 255, myself.centerX, myself.centerY);  // Earth
-    myself.planets[4] = new Planet(); Planet_init(myself.planets[4],100, 3, 2.4, 255,   0,   0, myself.centerX, myself.centerY);  // Mars
-    myself.planets[5] = new Planet(); Planet_init(myself.planets[5],160,16, 1.3, 210, 105,  30, myself.centerX, myself.centerY);  // Jupiter
-    myself.planets[6] = new Planet(); Planet_init(myself.planets[6],200,15, 0.9, 210, 180, 140, myself.centerX, myself.centerY);  // Saturn
-    myself.planets[7] = new Planet(); Planet_init(myself.planets[7],240, 9, 0.7, 135, 206, 235, myself.centerX, myself.centerY);  // Uranus
-    myself.planets[8] = new Planet(); Planet_init(myself.planets[8],270, 9, 0.5,  65, 105, 225, myself.centerX, myself.centerY);  // Neptune
-    myself.planets[9] = new Planet(); Planet_init(myself.planets[9],290, 2, 0.4, 169, 169, 169, myself.centerX, myself.centerY);  // Pluto
+    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], 64, 3, 4.7, 200, 200, 200, myself.centerX, myself.centerY);  // Mercury
+    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], 96, 4, 3.5, 255, 165,   0, myself.centerX, myself.centerY);  // Venus
+    myself.planets[3] = new Planet(); Planet_init(myself.planets[3],128, 5, 3.0,   0,   0, 255, myself.centerX, myself.centerY);  // Earth
+    myself.planets[4] = new Planet(); Planet_init(myself.planets[4],160, 3, 2.4, 255,   0,   0, myself.centerX, myself.centerY);  // Mars
+    myself.planets[5] = new Planet(); Planet_init(myself.planets[5],256,16, 1.3, 210, 105,  30, myself.centerX, myself.centerY);  // Jupiter
+    myself.planets[6] = new Planet(); Planet_init(myself.planets[6],320,15, 0.9, 210, 180, 140, myself.centerX, myself.centerY);  // Saturn
+    myself.planets[7] = new Planet(); Planet_init(myself.planets[7],384, 9, 0.7, 135, 206, 235, myself.centerX, myself.centerY);  // Uranus
+    myself.planets[8] = new Planet(); Planet_init(myself.planets[8],432, 9, 0.5,  65, 105, 225, myself.centerX, myself.centerY);  // Neptune
+    myself.planets[9] = new Planet(); Planet_init(myself.planets[9],464, 2, 0.4, 169, 169, 169, myself.centerX, myself.centerY);  // Pluto
   }
 
   void startThreads() {
