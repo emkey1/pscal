@@ -58,10 +58,11 @@ class Planet {
       join myself.tid;
     }
 
-    void draw() {
-      setrgbcolor(myself.r, myself.g, myself.b);
-      fillcircle(trunc(myself.posX), trunc(myself.posY), myself.size);
-    }
+  }
+
+void Planet_draw(Planet p) {
+  setrgbcolor(p.r, p.g, p.b);
+  fillcircle(trunc(p.posX), trunc(p.posY), p.size);
 }
 
 class SolarSystemApp {
