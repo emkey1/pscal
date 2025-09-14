@@ -152,7 +152,10 @@ class SolarSystemApp {
     // Scale astronomical units so Mars stays fully on screen with a small margin
     myself.AUScale = (myself.centerY - 10) / 1.52;
     myself.sunRadius = trunc(myself.AUScale * SunRadiusAU);
-    if (myself.sunRadius < 1) myself.sunRadius = 1;
+    // At this screen resolution the true scale yields ~1px, which is hard to see.
+    // Clamp to a small minimum so the Sun remains visible while preserving
+    // proportional scaling for larger windows.
+    if (myself.sunRadius < 4) myself.sunRadius = 4;
     inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
