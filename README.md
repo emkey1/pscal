@@ -245,6 +245,15 @@ build/bin/pscald out.bc
 
 Install: `pscaljson2bc` is installed alongside `pascal` and `pscalvm` by `cmake --install <build-dir>`.
 
+More: see the full guide at `Docs/pscaljson2bc.md`.
+
+Bash completion: a minimal completion script is available at `tools/completions/pscaljson2bc.bash`.
+Source it in your shell to enable option completion:
+
+```sh
+source tools/completions/pscaljson2bc.bash
+```
+
 All of the above apply to both sync and async requests. Async jobs snapshot session options at submission.
 
 An interactive session is also available via `build/bin/clike-repl`, which
