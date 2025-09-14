@@ -31,8 +31,9 @@ class Planet {
       myself.centerX = cx;
       myself.centerY = cy;
       myself.angle = random(360);
-      myself.posX = cx + cos(myself.angle) * o;
-      myself.posY = cy + sin(myself.angle) * o;
+      float rad = myself.angle * 0.017453292519943295;
+      myself.posX = cx + cos(rad) * o;
+      myself.posY = cy + sin(rad) * o;
       return myself;
     }
 
@@ -40,8 +41,9 @@ class Planet {
       while (!quit) {
         myself.angle = myself.angle + myself.speed;
         if (myself.angle >= 360.0) myself.angle = myself.angle - 360.0;
-        float px = myself.centerX + cos(myself.angle) * myself.orbit;
-        float py = myself.centerY + sin(myself.angle) * myself.orbit;
+        float rad = myself.angle * 0.017453292519943295;
+        float px = myself.centerX + cos(rad) * myself.orbit;
+        float py = myself.centerY + sin(rad) * myself.orbit;
         lock(posMutex);
         myself.posX = px;
         myself.posY = py;
