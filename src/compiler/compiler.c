@@ -4294,13 +4294,73 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
-                if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
-                    AST* type_arg_node = node->children[0];
-                    int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
-                    emitConstant(chunk, typeNameIndex, line);
+                // Accept either a type identifier (AST_VARIABLE), a type reference,
+                // or an expression whose static var_type is known. Push the type name
+                // as a string for the VM builtin to resolve.
+                if (node->child_count == 1) {
+                    AST* arg0 = node->children[0];
+                    DBG_PRINTF("[dbg low/high] arg0 type=%s token=%s vtype=%s\n",
+                               astTypeToString(arg0->type),
+                               (arg0->token && arg0->token->value) ? arg0->token->value : "<null>",
+                               varTypeToString(arg0->var_type));
+                    const char* tname = NULL;
+                    char buf[32];
+                    if (arg0->type == AST_VARIABLE && arg0->token && arg0->token->value) {
+                        // Prefer resolving through the type table so we can pass a typed Value
+                        AST* td = lookupType(arg0->token->value);
+                        if (td) {
+                            VarType tv = td->var_type;
+                            if (tv == TYPE_INTEGER) tv = TYPE_INT32; // normalize
+                            if (tv == TYPE_REAL) tv = TYPE_DOUBLE;
+                            if (tv == TYPE_INT32 || tv == TYPE_DOUBLE || tv == TYPE_FLOAT ||
+                                tv == TYPE_CHAR  || tv == TYPE_BOOLEAN || tv == TYPE_BYTE || tv == TYPE_WORD) {
+                                Value av; memset(&av, 0, sizeof(Value)); av.type = tv;
+                                int cidx = addConstantToChunk(chunk, &av);
+                                emitConstant(chunk, cidx, line);
+                                tname = NULL; // Already emitted typed argument
+                            } else {
+                                tname = arg0->token->value;
+                            }
+                        } else {
+                            tname = arg0->token->value;
+                        }
+                    } else if ((arg0->type == AST_TYPE_REFERENCE || arg0->type == AST_PROCEDURE_CALL) && arg0->token && arg0->token->value) {
+                        tname = arg0->token->value;
+                    } else if (arg0->var_type != TYPE_UNKNOWN && arg0->var_type != TYPE_VOID) {
+                        // Map known VarType to Pascal type name expected by VM builtin
+                        switch (arg0->var_type) {
+                            case TYPE_INT32:
+                                tname = "integer"; break;
+                            case TYPE_DOUBLE:
+                                tname = "real"; break;
+                            case TYPE_FLOAT:
+                                tname = "float"; break;
+                            case TYPE_CHAR:
+                                tname = "char"; break;
+                            case TYPE_BOOLEAN:
+                                tname = "boolean"; break;
+                            case TYPE_BYTE:
+                                tname = "byte"; break;
+                            case TYPE_WORD:
+                                tname = "word"; break;
+                            default:
+                                // Fallback to varTypeToString; VM builtin may not recognize it.
+                                snprintf(buf, sizeof(buf), "%s", varTypeToString(arg0->var_type));
+                                tname = buf;
+                                break;
+                        }
+                    }
+                    if (tname) {
+                        int typeNameIndex = addStringConstant(chunk, tname);
+                        emitConstant(chunk, typeNameIndex, line);
+                    } else {
+                        // Fallback to integer if we cannot determine the type identifier
+                        int typeNameIndex = addStringConstant(chunk, "integer");
+                        emitConstant(chunk, typeNameIndex, line);
+                    }
                 } else {
-                    fprintf(stderr, "L%d: Compiler error: Argument to '%s' must be a single type identifier.\n", line, functionName);
-                    compiler_had_error = true;
+                    int typeNameIndex = addStringConstant(chunk, "integer");
+                    emitConstant(chunk, typeNameIndex, line);
                 }
             } else {
                 for (int i = 0; i < node->child_count; i++) {
