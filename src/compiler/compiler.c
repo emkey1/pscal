@@ -530,7 +530,8 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
     if (expr->type == AST_VARIABLE && expr->token && expr->token->value &&
-        strcasecmp(expr->token->value, "myself") == 0 &&
+        (strcasecmp(expr->token->value, "myself") == 0 ||
+         strcasecmp(expr->token->value, "my") == 0) &&
         current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
         return current_class_record_type;
     }
@@ -1574,7 +1575,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if ((!recType || recType->type != AST_RECORD_TYPE) &&
                 node->left && node->left->type == AST_VARIABLE &&
                 node->left->token && node->left->token->value &&
-                strcasecmp(node->left->token->value, "myself") == 0) {
+                (strcasecmp(node->left->token->value, "myself") == 0 ||
+                 strcasecmp(node->left->token->value, "my") == 0)) {
                 if (!recType && current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
                     recType = current_class_record_type;
                 }
@@ -1604,7 +1606,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
             if (fieldOffset < 0 && recType && node->left && node->left->type == AST_VARIABLE &&
                 node->left->token && node->left->token->value &&
-                strcasecmp(node->left->token->value, "myself") == 0) {
+                (strcasecmp(node->left->token->value, "myself") == 0 ||
+                 strcasecmp(node->left->token->value, "my") == 0)) {
                 // Fallback: case-insensitive search through class fields
                 int offset = 0;
                 if (recType->extra && recType->extra->token && recType->extra->token->value) {
@@ -3218,7 +3221,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     // Prefer explicit type identifier token value
                     if (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE) {
                         cls_name = tdef->token->value;
-                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "myself") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
+                    } else if (recv->token && recv->token->value &&
+                               (strcasecmp(recv->token->value, "myself") == 0 ||
+                                strcasecmp(recv->token->value, "my") == 0) &&
+                               current_function_compiler && current_function_compiler->function_symbol) {
                         // Derive from current function name 'Class_method' if available
                         const char* fname = current_function_compiler->function_symbol->name;
                         const char* us = fname ? strchr(fname, '_') : NULL;
