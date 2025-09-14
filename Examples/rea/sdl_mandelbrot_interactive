@@ -103,7 +103,6 @@ class MandelbrotApp {
       c_im = myself.maxIm - y * myself.imFactor;
       mandelbrotrow(myself.minRe, myself.reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
       idx = y * myself.Width * myself.BytesPerPixel;
-      lock(myself.rowMutex);
       for (x = 0; x < myself.Width; x = x + 1) {
         n = row[x];
         if (n == myself.MaxIterations) { R = G = B = 0; }
@@ -118,6 +117,7 @@ class MandelbrotApp {
         myself.pixels[idx + 3] = char(255);
         idx = idx + myself.BytesPerPixel;
       }
+      lock(myself.rowMutex);
       myself.rowDone[y] = true;
       unlock(myself.rowMutex);
     }
@@ -132,7 +132,7 @@ class MandelbrotApp {
   void startCompute() {
     int tid[ThreadCount];
     int i, y;
-    for (i = 0; i < myself.Width * myself.Height * myself.BytesPerPixel; i = i + 1) { myself.pixels[i] = char(0); }
+    // Avoid clearing the entire buffer up-front; rows overwrite their regions as they complete.
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     myself.reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
     myself.imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);

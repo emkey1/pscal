@@ -110,7 +110,6 @@ void computeRows(int startY, int endY) {
         c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
-        lock(rowMutex);
         for (x = 0; x < Width; x++) {
             n = row[x];
             if (n == MaxIterations) { R = G = B = 0; }
@@ -125,6 +124,7 @@ void computeRows(int startY, int endY) {
             pixelData[idx + 3] = 255;
             idx += BytesPerPixel;
         }
+        lock(rowMutex);
         rowDone[y] = 1;
         unlock(rowMutex);
     }
