@@ -710,10 +710,16 @@ static Value vmHostCreateThreadAddr(VM* vm) {
     if (IS_INTLIKE(argcVal)) {
         int argc = (int)AS_INTEGER(argcVal);
         if (argc < 0) argc = 0;
+        int totalArgs = argc;
         Value args[8];
         if (argc > 8) argc = 8;
-        for (int i = argc - 1; i >= 0; i--) {
-            args[i] = pop(vm);
+        for (int i = totalArgs - 1; i >= 0; i--) {
+            Value v = pop(vm);
+            if (i < 8) {
+                args[i] = v;
+            } else {
+                freeValue(&v);
+            }
         }
         Value addrVal = pop(vm);
         uint16_t entry = 0;
