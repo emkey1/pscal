@@ -291,6 +291,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 if (node->left->type == TCAST_CALL) {
                     char* name = tokenToCString(node->left->token);
                     Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                    sym = resolveSymbolAlias(sym);
                     BuiltinRoutineType btype = getBuiltinType(name);
                     if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
                         needPop = false;
@@ -855,6 +856,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 char* name = tokenToCString(node->left->token);
                 // If it's a known function, emit its bytecode address as an integer constant.
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
                 if (sym) {
                     Value addr; memset(&addr, 0, sizeof(Value));
                     addr.type = TYPE_INT32;
@@ -991,6 +993,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             if (call && call->type == TCAST_CALL) {
                 char *name = tokenToCString(call->token);
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
                 if (sym) {
                     /*
                      * When a function with local variables is spawned directly,
@@ -1257,6 +1260,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     compileExpression(node->children[i], chunk, ctx);
                 }
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
                 int nameIndex = addStringConstant(chunk, name);
                 if (sym) {
                     writeBytecodeChunk(chunk, CALL, node->token.line);
@@ -1334,6 +1338,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
      */
     toLowerString(fname);
     Symbol* sym = hashTableLookup(procedure_table, fname);
+    sym = resolveSymbolAlias(sym);
     if (!sym) {
         sym = malloc(sizeof(Symbol));
         memset(sym, 0, sizeof(Symbol));
@@ -1402,6 +1407,7 @@ static void patchForwardCalls(BytecodeChunk *chunk) {
                     lookup[sizeof(lookup) - 1] = '\0';
                     toLowerString(lookup);
                     Symbol *sym = hashTableLookup(procedure_table, lookup);
+                    sym = resolveSymbolAlias(sym);
                     if (sym && sym->is_defined) {
                         patchShort(chunk, offset + 3,
                                    (uint16_t)sym->bytecode_address);
@@ -1533,6 +1539,7 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
         compileFunction(decl, chunk);
         if (strcmp(name, "main") == 0) {
             Symbol* sym = (Symbol*)hashTableLookup(procedure_table, name);
+            sym = resolveSymbolAlias(sym);
             mainAddress = sym->bytecode_address;
             mainArity = sym->arity;
         }

@@ -552,12 +552,13 @@ static void addInheritedMethodAliases(void) {
                                     char targetName[MAX_SYMBOL_LENGTH * 2];
                                     snprintf(targetName, sizeof(targetName), "%s_%s", parentLower, m->name);
                                     Symbol *target = hashTableLookup(procedure_table, targetName);
+                                    target = resolveSymbolAlias(target);
                                     if (target) {
                                         Symbol *alias = (Symbol *)calloc(1, sizeof(Symbol));
                                         if (alias) {
                                             alias->name = strdup(aliasName);
                                             alias->is_alias = true;
-                                            alias->real_symbol = target->is_alias ? target->real_symbol : target;
+                                            alias->real_symbol = target;
                                             alias->type = target->type;
                                             alias->type_def = target->type_def ? copyAST(target->type_def) : NULL;
                                             if (alias->type_def && alias->type_def->token) {
