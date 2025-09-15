@@ -73,12 +73,11 @@ class Planet {
       join myself.tid;
     }
 
+    void draw() {
+      setrgbcolor(myself.r, myself.g, myself.b);
+      fillcircle(trunc(myself.posX), trunc(myself.posY), myself.size);
+    }
   }
-
-void Planet p.draw() {
-  setrgbcolor(p.r, p.g, p.b);
-  fillcircle(trunc(p.posX), trunc(p.posY), p.size);
-}
 
 class SolarSystemApp {
   const int WindowWidth = 1280;

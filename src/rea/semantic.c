@@ -704,7 +704,15 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
-        /* Implicit field access rewriting disabled; rely on explicit 'myself'. */
+        /* Preserve explicit syntax while still annotating variables with their
+         * declared types so later analyses (e.g. array element access) can
+         * determine the base type.
+         */
+        AST *decl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+        if (decl && decl->right) {
+            node->type_def = decl->right;
+            node->var_type = decl->right->var_type;
+        }
     }
 
     if (node->type == AST_FIELD_ACCESS) {
@@ -784,6 +792,23 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
+        if (!node->left && node->token && node->token->value && node->i_val == 0) {
+            const char *us = strchr(node->token->value, '_');
+            if (us) {
+                size_t cls_len = (size_t)(us - node->token->value);
+                char cls[MAX_SYMBOL_LENGTH];
+                if (cls_len < sizeof(cls)) {
+                    memcpy(cls, node->token->value, cls_len);
+                    cls[cls_len] = '\0';
+                    if (lookupClass(cls)) {
+                        fprintf(stderr,
+                                "Legacy method call '%s' is no longer supported; use instance.%s() instead\n",
+                                node->token->value, us + 1);
+                        pascal_semantic_error_count++;
+                    }
+                }
+            }
+        }
         if (node->i_val == 1) {
             /* super constructor/method call already has implicit 'myself' */
             if (node->token && node->token->value && !strchr(node->token->value, '_')) {
@@ -909,11 +934,11 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 setTypeAST(ptrType, TYPE_POINTER);
                 node->type_def = ptrType;
             }
-            node->var_type = TYPE_POINTER;
+            setTypeAST(node, TYPE_POINTER);
             return;
         }
         AST *elemType = copyAST(baseType);
-        node->var_type = baseType->var_type;
+        setTypeAST(node, baseType->var_type);
         if (node->var_type == TYPE_RECORD || node->var_type == TYPE_VOID ||
             node->var_type == TYPE_UNKNOWN || baseType->type == AST_TYPE_REFERENCE ||
             baseType->type == AST_RECORD_TYPE) {
@@ -921,7 +946,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             setRight(ptrType, elemType);
             setTypeAST(ptrType, TYPE_POINTER);
             node->type_def = ptrType;
-            node->var_type = TYPE_POINTER;
+            setTypeAST(node, TYPE_POINTER);
         } else {
             node->type_def = elemType;
         }
