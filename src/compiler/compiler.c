@@ -2408,18 +2408,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     fc.function_symbol = proc_symbol;
     proc_symbol->enclosing = fc.enclosing ? fc.enclosing->function_symbol : NULL;
 
-    if (current_procedure_table != procedure_table) {
-        if (!hashTableLookup(procedure_table, proc_symbol->name)) {
-            Symbol* alias = malloc(sizeof(Symbol));
-            *alias = *proc_symbol;
-            alias->name = strdup(proc_symbol->name);
-            alias->is_alias = true;
-            alias->real_symbol = proc_symbol;
-            alias->next = NULL;
-            hashTableInsert(procedure_table, alias);
-        }
-    }
-
     // Step 1: Add parameters to the local scope FIRST.
     if (func_decl_node->children) {
         for (int i = 0; i < func_decl_node->child_count; i++) {
@@ -4594,9 +4582,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 // Directly search the global procedure table instead of relying on
                 // lookupProcedure(), which depends on current_procedure_table.
                 Symbol* symbol_to_patch = hashTableLookup(procedure_table, lookup_name);
-                if (symbol_to_patch && symbol_to_patch->is_alias) {
-                    symbol_to_patch = symbol_to_patch->real_symbol;
-                }
+                symbol_to_patch = resolveSymbolAlias(symbol_to_patch);
 
                 if (symbol_to_patch && symbol_to_patch->is_defined) {
                     // Patch the address in place. The address occupies bytes offset+3 and offset+4.

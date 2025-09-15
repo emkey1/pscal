@@ -620,6 +620,14 @@ Symbol *lookupProcedure(const char *name) {
     return NULL;
 }
 
+Symbol *resolveSymbolAlias(Symbol *sym) {
+    if (!sym) return NULL;
+    if (sym->is_alias && sym->real_symbol) {
+        return sym->real_symbol;
+    }
+    return sym;
+}
+
 // --- Other Symbol Table Functions (Implementation changes) ---
 
 // updateSymbol implementation remains largely the same, but it uses lookupSymbol (which is modified).

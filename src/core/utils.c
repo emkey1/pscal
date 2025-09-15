@@ -1516,6 +1516,7 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                 toLowerString(qualified_lower);
 
                 Symbol* qualified_proc_symbol = hashTableLookup(procedure_table, qualified_lower);
+                qualified_proc_symbol = resolveSymbolAlias(qualified_proc_symbol);
                 if (qualified_proc_symbol && qualified_proc_symbol->type_def &&
                     qualified_proc_symbol->type_def != (AST*)0x1) {
 
