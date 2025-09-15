@@ -1,13 +1,16 @@
 #!/usr/bin/env rea
 // SDL Inner Planets with True Sun Scale in Rea using OOP and threads.
-// Only Mercury, Venus, Earth and Mars are simulated. The Sun is scaled to
-// its actual radius relative to astronomical units.
+// Only Mercury, Venus, Earth with its Moon, and Mars are simulated. The Sun is
+// scaled to its actual radius relative to astronomical units.
 
 const int NumPlanets = 4;
 
 bool quit = false;
 int posMutex = mutex();
 float earthMonths = 0.0;
+
+const float SunMinRadiusPixels = 32.0;
+const float PlanetVisualScale = 12.0;
 
 class Planet {
   int orbit;
@@ -76,11 +79,15 @@ class Planet {
 
 void Planet_draw(Planet p) {
   setrgbcolor(p.r, p.g, p.b);
-  if (p.size >= 1.0) {
-    fillcircle(trunc(p.posX), trunc(p.posY), trunc(p.size));
-  } else {
-    putpixel(trunc(p.posX), trunc(p.posY));
+
+  // Round the scaled radius so small planets like Mars don't disappear
+  int drawRadius = round(p.size * PlanetVisualScale);
+  if (drawRadius < 1) {
+    drawRadius = 1;
   }
+  fillcircle(trunc(p.posX), trunc(p.posY), drawRadius);
+
+=
 }
 
 class SolarSystemApp {
@@ -93,6 +100,10 @@ class SolarSystemApp {
   const float EarthRadiusAU   = 0.0000426;
   const float MarsRadiusAU    = 0.0000226;
 
+  const float MoonRadiusAU    = 0.0000116;
+  const float MoonOrbitAU     = 0.00257;
+
+
     int FrameDelay;
     int centerX;
     int centerY;
@@ -100,6 +111,10 @@ class SolarSystemApp {
     int sunRadius; // Sun radius in pixels
     float SizeScale; // scale factor applied to all body sizes for visibility
     Planet planets[NumPlanets + 1];
+    int moonOrbit;
+    float moonSize;
+    float moonAngle;
+    float moonSpeed;
 
   void SolarSystemApp() {
     // no special initialization needed beyond defaults
@@ -121,6 +136,13 @@ class SolarSystemApp {
     radius = myself.AUScale * EarthRadiusAU * myself.SizeScale;
     myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, radius, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
     myself.planets[3].isEarth = 1;
+
+    // Moon - orbits Earth at 0.00257 AU with true radius
+    myself.moonOrbit = trunc(myself.AUScale * MoonOrbitAU);
+    myself.moonSize = myself.AUScale * MoonRadiusAU * myself.SizeScale;
+    myself.moonAngle = random(360) * 0.017453292519943295;
+    myself.moonSpeed = 40.0 * 0.017453292519943295;
+
     // Mars - 1.52 AU orbit, true radius
     orbit = trunc(myself.AUScale * 1.52);
     radius = myself.AUScale * MarsRadiusAU * myself.SizeScale;
@@ -145,6 +167,15 @@ class SolarSystemApp {
       Planet_draw(myself.planets[i]);
       i = i + 1;
     }
+    // Update and draw Earth's Moon
+    myself.moonAngle = myself.moonAngle + myself.moonSpeed;
+    if (myself.moonAngle >= 6.283185307179586) myself.moonAngle = myself.moonAngle - 6.283185307179586;
+    float mx = myself.planets[3].posX + cos(myself.moonAngle) * myself.moonOrbit;
+    float my = myself.planets[3].posY + sin(myself.moonAngle) * myself.moonOrbit;
+    setrgbcolor(200, 200, 200);
+    int moonDrawRadius = round(myself.moonSize * PlanetVisualScale);
+    if (moonDrawRadius < 1) moonDrawRadius = 1;
+    fillcircle(trunc(mx), trunc(my), moonDrawRadius);
     str monthStr = "Earth months elapsed: " + inttostr(trunc(earthMonths));
     outtextxy(getmaxx() - 220, 16, monthStr);
     unlock(posMutex);
@@ -168,9 +199,11 @@ class SolarSystemApp {
     // Calculate a size scaling factor so the Sun remains visible while keeping
     // the same proportion for planet sizes.
     float rawSun = myself.AUScale * SunRadiusAU;
-    myself.SizeScale = 1.0;
-    if (rawSun < 4.0) {
-      myself.SizeScale = 4.0 / rawSun;
+
+    myself.SizeScale = SunMinRadiusPixels / rawSun;
+    if (myself.SizeScale < 1.0) {
+      myself.SizeScale = 1.0;
+
     }
     myself.sunRadius = trunc(rawSun * myself.SizeScale);
     inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);

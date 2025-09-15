@@ -611,8 +611,11 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
         if (baseType) {
-            node->var_type = baseType->var_type;
             node->type_def = copyAST(baseType);
+            node->var_type = baseType->var_type;
+            if (node->var_type == TYPE_RECORD || node->var_type == TYPE_VOID) {
+                node->var_type = TYPE_POINTER;
+            }
         }
         return;
     }
