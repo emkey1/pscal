@@ -175,14 +175,6 @@ class SolarSystemApp {
     updatescreen();
   }
 
-  void joinThreads() {
-    int i = 1;
-    while (i <= NumPlanets) {
-      Planet_joinThread(myself.planets[i]);
-      i = i + 1;
-    }
-  }
-
   void run() {
     initgraph(WindowWidth, WindowHeight, "Rea SDL Sun-Scaled Inner Planets");
     myself.centerX = getmaxx() / 2;
@@ -216,7 +208,7 @@ class SolarSystemApp {
       graphloop(myself.FrameDelay);
     }
     // Wait for all planet worker threads to finish before shutting down
-    myself.joinThreads();
+    joinThreads();
     closegraph();
     writeln("Simulation finished.");
   }
