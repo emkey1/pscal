@@ -269,7 +269,14 @@ static void collectMethods(AST *node) {
                                 Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
                                 if (ps) {
                                     ps->name = strdup(lowerName);
-                                    ps->type_def = node;
+                                    /*
+                                     * Store a deep copy of the AST node in the global procedure
+                                     * table.  freeProcedureTable() assumes ownership of
+                                     * type_def entries and will call freeAST on them during
+                                     * teardown; using the original node would result in a
+                                     * double free when the program AST is cleaned up separately.
+                                     */
+                                    ps->type_def = copyAST(node);
                                     hashTableInsert(procedure_table, ps);
                                 }
                             }
