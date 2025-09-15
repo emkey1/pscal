@@ -229,4 +229,4 @@ class SolarSystemApp {
   }
 }
 SolarSystemApp app = new SolarSystemApp();
-SolarSystemApp_run(app);
+app.run();

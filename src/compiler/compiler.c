@@ -3237,10 +3237,24 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                 }
                 if (cls_name && calleeName) {
+                    size_t cls_len = strlen(cls_name);
+                    size_t callee_len = strlen(calleeName);
+                    bool alreadyQualified = false;
+                    if (callee_len > cls_len &&
+                        strncasecmp(calleeName, cls_name, cls_len) == 0 &&
+                        calleeName[cls_len] == '_') {
+                        alreadyQualified = true;
+                    }
+
+                    const char* lookup_name = calleeName;
                     char mangled[MAX_SYMBOL_LENGTH * 2 + 2];
-                    snprintf(mangled, sizeof(mangled), "%s_%s", cls_name, calleeName);
+                    if (!alreadyQualified) {
+                        snprintf(mangled, sizeof(mangled), "%s_%s", cls_name, calleeName);
+                        lookup_name = mangled;
+                    }
+
                     char mangled_lower[MAX_SYMBOL_LENGTH * 2 + 2];
-                    strncpy(mangled_lower, mangled, sizeof(mangled_lower) - 1);
+                    strncpy(mangled_lower, lookup_name, sizeof(mangled_lower) - 1);
                     mangled_lower[sizeof(mangled_lower) - 1] = '\0';
                     toLowerString(mangled_lower);
                     Symbol* m = lookupProcedure(mangled_lower);
@@ -4146,7 +4160,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             // If this is a qualified call like receiver.method(...), attempt to
             // mangle to ClassName_method by inspecting the receiver's static type.
             char mangled_name_buf[MAX_SYMBOL_LENGTH * 2 + 2];
-            if (isCallQualified && node->left) {
+            if (isCallQualified && node->left && functionName) {
                 const char* cls_name = NULL;
                 AST* type_ref = node->left->type_def;
                 if (type_ref) {
@@ -4161,8 +4175,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     }
                 }
                 if (cls_name) {
-                    snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s_%s", cls_name, functionName);
-                    functionName = mangled_name_buf;
+                    size_t cls_len = strlen(cls_name);
+                    size_t fn_len = strlen(functionName);
+                    bool alreadyQualified = false;
+                    if (fn_len > cls_len &&
+                        strncasecmp(functionName, cls_name, cls_len) == 0 &&
+                        functionName[cls_len] == '_') {
+                        alreadyQualified = true;
+                    }
+                    if (!alreadyQualified) {
+                        snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s_%s", cls_name, functionName);
+                        functionName = mangled_name_buf;
+                    }
                 }
             }
 
