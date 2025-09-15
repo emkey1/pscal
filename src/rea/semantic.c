@@ -263,6 +263,16 @@ static void collectMethods(AST *node) {
                             sym->value = v;
                             sym->type_def = node; /* reference for signature */
                             hashTableInsert(ci->methods, sym);
+                            char lowerName[MAX_SYMBOL_LENGTH];
+                            lowerCopy(fullname, lowerName);
+                            if (!lookupProcedure(lowerName)) {
+                                Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                if (ps) {
+                                    ps->name = strdup(lowerName);
+                                    ps->type_def = node;
+                                    hashTableInsert(procedure_table, ps);
+                                }
+                            }
                         } else {
                             free(sym); free(v); free(lname);
                         }

@@ -228,6 +228,5 @@ class SolarSystemApp {
     writeln("Simulation finished.");
   }
 }
-
 SolarSystemApp app = new SolarSystemApp();
 SolarSystemApp_run(app);
