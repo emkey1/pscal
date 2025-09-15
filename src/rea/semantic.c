@@ -599,25 +599,23 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     already = true;
                 }
                 ClassInfo *ci = lookupClass(cls);
-                if (ci && lookupMethod(ci, method)) {
-                    if (!already) {
-                        size_t ln = strlen(cls) + 1 + strlen(name) + 1;
-                        char *m = (char*)malloc(ln);
-                        if (m) {
-                            snprintf(m, ln, "%s_%s", cls, name);
-                            free(node->token->value);
-                            node->token->value = m;
-                            node->token->length = strlen(m);
+                if (ci) {
+                    Symbol *ms = lookupMethod(ci, method);
+                    if (ms) {
+                        if (!already) {
+                            size_t ln = strlen(cls) + 1 + strlen(name) + 1;
+                            char *m = (char*)malloc(ln);
+                            if (m) {
+                                snprintf(m, ln, "%s_%s", cls, name);
+                                free(node->token->value);
+                                node->token->value = m;
+                                node->token->length = strlen(m);
+                            }
                         }
-                    }
-                } else if (ci) {
-                    size_t ln = strlen(cls) + 1 + strlen(name) + 1;
-                    char *m = (char*)malloc(ln);
-                    if (m) {
-                        snprintf(m, ln, "%s_%s", cls, name);
-                        free(node->token->value);
-                        node->token->value = m;
-                        node->token->length = strlen(m);
+                    } else {
+                        fprintf(stderr, "Unknown method '%s' on class '%s'\n",
+                                method ? method : "(null)", cls);
+                        pascal_semantic_error_count++;
                     }
                 }
                 if (node->child_count > 0 && node->children[0] &&
