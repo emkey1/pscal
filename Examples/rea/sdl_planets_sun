@@ -79,7 +79,8 @@ class Planet {
 
 void Planet_draw(Planet p) {
   setrgbcolor(p.r, p.g, p.b);
-  int drawRadius = trunc(p.size * PlanetVisualScale);
+  // Round the scaled radius so small planets like Mars don't disappear
+  int drawRadius = round(p.size * PlanetVisualScale);
   if (drawRadius < 1) {
     drawRadius = 1;
   }
