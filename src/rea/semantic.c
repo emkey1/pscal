@@ -231,7 +231,7 @@ static void collectMethods(AST *node) {
     if (!node) return;
     if ((node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) && node->token && node->token->value) {
         const char *fullname = node->token->value;
-        const char *us = strchr(fullname, '_');
+        const char *us = strchr(fullname, '.');
         if (us) {
             size_t cls_len = (size_t)(us - fullname);
             char *cls = (char *)malloc(cls_len + 1);
@@ -325,7 +325,7 @@ static void collectMethods(AST *node) {
                         size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
                         char *mangled = (char *)malloc(ln);
                         if (mangled) {
-                            snprintf(mangled, ln, "%s_%s", cls, fullname);
+                            snprintf(mangled, ln, "%s.%s", cls, fullname);
                             free(node->token->value);
                             node->token->value = mangled;
                             node->token->length = strlen(mangled);
@@ -398,7 +398,7 @@ static void collectMethods(AST *node) {
                     size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
                     char *mangled = (char *)malloc(ln);
                     if (mangled) {
-                        snprintf(mangled, ln, "%s_%s", cls, fullname);
+                        snprintf(mangled, ln, "%s.%s", cls, fullname);
                         free(node->token->value);
                         node->token->value = mangled;
                         node->token->length = strlen(mangled);
@@ -544,13 +544,13 @@ static void addInheritedMethodAliases(void) {
                                 char classLower[MAX_SYMBOL_LENGTH];
                                 lowerCopy(ci->name, classLower);
                                 char aliasName[MAX_SYMBOL_LENGTH * 2];
-                                snprintf(aliasName, sizeof(aliasName), "%s_%s", classLower, m->name);
+                                snprintf(aliasName, sizeof(aliasName), "%s.%s", classLower, m->name);
                                 if (!hashTableLookup(procedure_table, aliasName)) {
                                     /* Find parent's fully qualified symbol */
                                     char parentLower[MAX_SYMBOL_LENGTH];
                                     lowerCopy(p->name, parentLower);
                                     char targetName[MAX_SYMBOL_LENGTH * 2];
-                                    snprintf(targetName, sizeof(targetName), "%s_%s", parentLower, m->name);
+                                    snprintf(targetName, sizeof(targetName), "%s.%s", parentLower, m->name);
                                     Symbol *target = hashTableLookup(procedure_table, targetName);
                                     target = resolveSymbolAlias(target);
                                     if (target) {
@@ -565,7 +565,7 @@ static void addInheritedMethodAliases(void) {
                                                 size_t ln = strlen(ci->name) + 1 + strlen(m->name) + 1;
                                                 char *full = (char *)malloc(ln);
                                                 if (full) {
-                                                    snprintf(full, ln, "%s_%s", ci->name, m->name);
+                                                    snprintf(full, ln, "%s.%s", ci->name, m->name);
                                                     free(alias->type_def->token->value);
                                                     alias->type_def->token->value = full;
                                                     alias->type_def->token->length = (int)strlen(full);
@@ -691,7 +691,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     ClassInfo *clsContext = currentClass;
     if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
         const char *fullname = node->token ? node->token->value : NULL;
-        const char *us = fullname ? strchr(fullname, '_') : NULL;
+        const char *us = fullname ? strchr(fullname, '.') : NULL;
         if (us) {
             size_t len = (size_t)(us - fullname);
             char buf[MAX_SYMBOL_LENGTH];
@@ -812,12 +812,12 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         }
         if (node->i_val == 1) {
             /* super constructor/method call already has implicit 'myself' */
-            if (node->token && node->token->value && !strchr(node->token->value, '_')) {
+            if (node->token && node->token->value && !strchr(node->token->value, '.')) {
                 const char *pname = node->token->value;
                 size_t ln = strlen(pname) + 1 + strlen(pname) + 1;
                 char *m = (char*)malloc(ln);
                 if (m) {
-                    snprintf(m, ln, "%s_%s", pname, pname);
+                    snprintf(m, ln, "%s.%s", pname, pname);
                     free(node->token->value);
                     node->token->value = m;
                     node->token->length = strlen(m);
@@ -828,7 +828,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             const char *name = node->token ? node->token->value : NULL;
             if (cls && name) {
                 const char *method = name;
-                const char *us = strchr(name, '_');
+                const char *us = strchr(name, '.');
                 bool already = false;
                 if (us && strncasecmp(name, cls, (size_t)(us - name)) == 0) {
                     method = us + 1;
@@ -841,7 +841,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                         size_t ln = strlen(cls) + 1 + strlen(name) + 1;
                         char *m = (char*)malloc(ln);
                         if (m) {
-                            snprintf(m, ln, "%s_%s", cls, name);
+                            snprintf(m, ln, "%s.%s", cls, name);
                             free(node->token->value);
                             node->token->value = m;
                             node->token->length = strlen(m);

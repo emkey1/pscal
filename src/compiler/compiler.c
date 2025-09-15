@@ -214,9 +214,9 @@ static void emitVTables(BytecodeChunk* chunk) {
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
             if (base && base->type_def && base->type_def->is_virtual && sym->name) {
-                const char* us = strchr(sym->name, '_');
-                if (us) {
-                    size_t cls_len = (size_t)(us - sym->name);
+                const char* dot = strchr(sym->name, '.');
+                if (dot) {
+                    size_t cls_len = (size_t)(dot - sym->name);
                     char cls[256];
                     if (cls_len < sizeof(cls)) {
                         memcpy(cls, sym->name, cls_len);
@@ -573,9 +573,9 @@ static AST* getRecordTypeFromExpr(AST* expr) {
         } else if (current_function_compiler && current_function_compiler->function_symbol &&
                    current_function_compiler->function_symbol->name) {
             const char* fname = current_function_compiler->function_symbol->name;
-            const char* us = strchr(fname, '_');
-            if (us) {
-                size_t len = (size_t)(us - fname);
+            const char* dot = strchr(fname, '.');
+            if (dot) {
+                size_t len = (size_t)(dot - fname);
                 char cls[MAX_SYMBOL_LENGTH];
                 if (len >= sizeof(cls)) len = sizeof(cls) - 1;
                 memcpy(cls, fname, len);
@@ -624,7 +624,7 @@ static bool recordTypeHasVTable(AST* recordType) {
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
             if (base && base->name && base->type_def && base->type_def->is_virtual &&
-                strncasecmp(base->name, name, len) == 0 && base->name[len] == '_') {
+                strncasecmp(base->name, name, len) == 0 && base->name[len] == '.') {
                 AST* func = base->type_def;
                 if (func->child_count > 0) {
                     AST* firstParam = func->children[0];
@@ -1584,9 +1584,9 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     current_function_compiler && current_function_compiler->function_symbol &&
                     current_function_compiler->function_symbol->name) {
                     const char* fname = current_function_compiler->function_symbol->name;
-                    const char* us = strchr(fname, '_');
-                    if (us) {
-                        size_t len = (size_t)(us - fname);
+                    const char* dot = strchr(fname, '.');
+                    if (dot) {
+                        size_t len = (size_t)(dot - fname);
                         char cls[MAX_SYMBOL_LENGTH];
                         if (len >= sizeof(cls)) len = sizeof(cls) - 1;
                         memcpy(cls, fname, len);
@@ -2358,9 +2358,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     AST* saved_class_record_type = current_class_record_type;
     current_class_const_table = NULL;
     current_class_record_type = NULL;
-    const char* us_pos = strchr(func_name, '_');
-    if (us_pos) {
-        size_t cls_len = (size_t)(us_pos - func_name);
+    const char* dot_pos = strchr(func_name, '.');
+    if (dot_pos) {
+        size_t cls_len = (size_t)(dot_pos - func_name);
         if (cls_len < MAX_SYMBOL_LENGTH) {
             char cls_name[MAX_SYMBOL_LENGTH];
             strncpy(cls_name, func_name, cls_len);
@@ -3219,12 +3219,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                (strcasecmp(recv->token->value, "myself") == 0 ||
                                 strcasecmp(recv->token->value, "my") == 0) &&
                                current_function_compiler && current_function_compiler->function_symbol) {
-                        // Derive from current function name 'Class_method' if available
+                        // Derive from current function name 'Class.method' if available
                         const char* fname = current_function_compiler->function_symbol->name;
-                        const char* us = fname ? strchr(fname, '_') : NULL;
+                        const char* dot = fname ? strchr(fname, '.') : NULL;
                         static char buf[256];
-                        if (fname && us && (us - fname) < (int)sizeof(buf)) {
-                            size_t n = (size_t)(us - fname);
+                        if (fname && dot && (dot - fname) < (int)sizeof(buf)) {
+                            size_t n = (size_t)(dot - fname);
                             memcpy(buf, fname, n); buf[n] = '\0';
                             cls_name = buf;
                         }
@@ -3236,14 +3236,14 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     bool alreadyQualified = false;
                     if (callee_len > cls_len &&
                         strncasecmp(calleeName, cls_name, cls_len) == 0 &&
-                        calleeName[cls_len] == '_') {
+                        calleeName[cls_len] == '.') {
                         alreadyQualified = true;
                     }
 
                     const char* lookup_name = calleeName;
                     char mangled[MAX_SYMBOL_LENGTH * 2 + 2];
                     if (!alreadyQualified) {
-                        snprintf(mangled, sizeof(mangled), "%s_%s", cls_name, calleeName);
+                        snprintf(mangled, sizeof(mangled), "%s.%s", cls_name, calleeName);
                         lookup_name = mangled;
                     }
 
@@ -4152,7 +4152,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             // If this is a qualified call like receiver.method(...), attempt to
-            // mangle to ClassName_method by inspecting the receiver's static type.
+            // mangle to ClassName.method by inspecting the receiver's static type.
             char mangled_name_buf[MAX_SYMBOL_LENGTH * 2 + 2];
             if (isCallQualified && node->left && functionName) {
                 const char* cls_name = NULL;
@@ -4174,11 +4174,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     bool alreadyQualified = false;
                     if (fn_len > cls_len &&
                         strncasecmp(functionName, cls_name, cls_len) == 0 &&
-                        functionName[cls_len] == '_') {
+                        functionName[cls_len] == '.') {
                         alreadyQualified = true;
                     }
                     if (!alreadyQualified) {
-                        snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s_%s", cls_name, functionName);
+                        snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s.%s", cls_name, functionName);
                         functionName = mangled_name_buf;
                     }
                 }
