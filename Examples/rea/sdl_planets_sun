@@ -77,7 +77,6 @@ class Planet {
 
     void draw() {
       setrgbcolor(myself.r, myself.g, myself.b);
-
       // Round the scaled radius so small planets like Mars don't disappear
       int drawRadius = round(myself.size * PlanetVisualScale);
       if (drawRadius < 1) {
@@ -85,7 +84,6 @@ class Planet {
       }
       fillcircle(trunc(myself.posX), trunc(myself.posY), drawRadius);
     }
-
   }
 
 class SolarSystemApp {

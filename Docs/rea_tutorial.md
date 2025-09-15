@@ -296,7 +296,7 @@ app.run();
 ```
 Creates the `BallsApp` instance and invokes its `run` method.
 
-**Syntax notes:** Top-level code allocates a class with `new` and invokes methods using `object.method()` syntax. The older `ClassName_method(instance)` form is no longer supported.
+**Syntax notes:** Top-level code allocates a class with `new` and invokes methods using `object.method()` syntax.
 
 ## Next steps
 

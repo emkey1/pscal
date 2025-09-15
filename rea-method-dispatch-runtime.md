@@ -1,9 +1,5 @@
 # Rea method dispatch runtime investigation
 
-Summary:
-- Qualified calls now compile to direct calls; method invocations like `obj.method(args)` translate to the internal `Class_method(obj, args)` form and work in disassembly.
-- Direct calls to the mangled `Class_method(obj, ...)` form are no longer accepted by the front end.
-- A runtime stack underflow occurs at program start when executing method_calls.
 
 Next steps:
 - Ensure annotateTypes sets receiver expression types in statement contexts before compileStatement type checks.

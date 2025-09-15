@@ -77,7 +77,6 @@ class Planet {
       setrgbcolor(myself.r, myself.g, myself.b);
       fillcircle(trunc(myself.posX), trunc(myself.posY), myself.size);
     }
-
   }
 
 class SolarSystemApp {
