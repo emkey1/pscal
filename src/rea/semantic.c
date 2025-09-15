@@ -232,60 +232,54 @@ static void collectMethods(AST *node) {
                 free(cls);
             }
         } else if (node->parent && node->parent->type == AST_COMPOUND) {
-            /* Handle un-mangled methods; parameter info may be in a preceding sibling */
-            AST *param = NULL;
-            for (int i = 0; i < node->parent->child_count; i++) {
-                if (node->parent->children[i] == node) {
-                    if (i > 0) param = node->parent->children[i - 1];
-                    break;
+            /* Handle un-mangled methods; examine first parameter for class type */
+            AST *param = (node->child_count > 0) ? node->children[0] : NULL;
+            if (param && param->type == AST_VAR_DECL) {
+                AST *ptype = param->right;
+                while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
+                    ptype = ptype->right;
                 }
-            }
-            if (param && param->child_count > 0) param = param->children[0];
-            if (param && param->type != AST_VAR_DECL) param = NULL;
-            AST *ptype = param ? param->right : NULL;
-            while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
-                ptype = ptype->right;
-            }
-            if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value) {
-                const char *cls = ptype->token->value;
-                ClassInfo *ci = lookupClass(cls);
-                if (ci) {
-                    size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
-                    char *mangled = (char *)malloc(ln);
-                    if (mangled) {
-                        snprintf(mangled, ln, "%s_%s", cls, fullname);
-                        free(node->token->value);
-                        node->token->value = mangled;
-                        node->token->length = strlen(mangled);
-                        fullname = node->token->value;
-                    }
-                    char *lname = lowerDup(fullname + strlen(cls) + 1);
-                    if (lname) {
-                        if (hashTableLookup(ci->methods, lname)) {
-                            fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
-                            pascal_semantic_error_count++;
-                            free(lname);
-                        } else {
-                            Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
-                            Value *v = (Value *)calloc(1, sizeof(Value));
-                            if (sym && v) {
-                                sym->name = lname;
-                                v->ptr_val = (Value *)node;
-                                sym->value = v;
-                                sym->type_def = node;
-                                hashTableInsert(ci->methods, sym);
-                                char lowerName[MAX_SYMBOL_LENGTH];
-                                lowerCopy(fullname, lowerName);
-                                if (!lookupProcedure(lowerName)) {
-                                    Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
-                                    if (ps) {
-                                        ps->name = strdup(lowerName);
-                                        ps->type_def = node;
-                                        hashTableInsert(procedure_table, ps);
-                                    }
-                                }
+                if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value) {
+                    const char *cls = ptype->token->value;
+                    ClassInfo *ci = lookupClass(cls);
+                    if (ci) {
+                        size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
+                        char *mangled = (char *)malloc(ln);
+                        if (mangled) {
+                            snprintf(mangled, ln, "%s_%s", cls, fullname);
+                            free(node->token->value);
+                            node->token->value = mangled;
+                            node->token->length = strlen(mangled);
+                            fullname = node->token->value;
+                        }
+                        char *lname = lowerDup(fullname + strlen(cls) + 1);
+                        if (lname) {
+                            if (hashTableLookup(ci->methods, lname)) {
+                                fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
+                                pascal_semantic_error_count++;
+                                free(lname);
                             } else {
-                                free(sym); free(v); free(lname);
+                                Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
+                                Value *v = (Value *)calloc(1, sizeof(Value));
+                                if (sym && v) {
+                                    sym->name = lname;
+                                    v->ptr_val = (Value *)node;
+                                    sym->value = v;
+                                    sym->type_def = node;
+                                    hashTableInsert(ci->methods, sym);
+                                    char lowerName[MAX_SYMBOL_LENGTH];
+                                    lowerCopy(fullname, lowerName);
+                                    if (!lookupProcedure(lowerName)) {
+                                        Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                        if (ps) {
+                                            ps->name = strdup(lowerName);
+                                            ps->type_def = node;
+                                            hashTableInsert(procedure_table, ps);
+                                        }
+                                    }
+                                } else {
+                                    free(sym); free(v); free(lname);
+                                }
                             }
                         }
                     }
