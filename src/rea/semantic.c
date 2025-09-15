@@ -189,6 +189,44 @@ static void collectClasses(AST *node) {
     }
 }
 
+static void ensureSelfParam(AST *node, const char *cls) {
+    if (!node || !cls) return;
+    bool hasSelf = false;
+    if (node->child_count > 0) {
+        AST *param = node->children[0];
+        if (param && param->type == AST_VAR_DECL) {
+            AST *ptype = param->right;
+            while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
+                ptype = ptype->right;
+            }
+            if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value &&
+                strcasecmp(ptype->token->value, cls) == 0) {
+                hasSelf = true;
+            }
+        }
+    }
+    if (hasSelf) return;
+
+    Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", node->token ? node->token->line : 0, 0);
+    Token *clsTok = newToken(TOKEN_IDENTIFIER, cls, node->token ? node->token->line : 0, 0);
+    AST *typeRef = newASTNode(AST_TYPE_REFERENCE, clsTok);
+    setTypeAST(typeRef, TYPE_RECORD);
+    AST *ptrType = newASTNode(AST_POINTER_TYPE, NULL);
+    setRight(ptrType, typeRef);
+    setTypeAST(ptrType, TYPE_POINTER);
+    AST *varDecl = newASTNode(AST_VAR_DECL, selfTok);
+    setRight(varDecl, ptrType);
+    setTypeAST(varDecl, TYPE_POINTER);
+
+    addChild(node, NULL);
+    for (int i = node->child_count - 1; i > 0; i--) {
+        node->children[i] = node->children[i - 1];
+        if (node->children[i]) node->children[i]->parent = node;
+    }
+    node->children[0] = varDecl;
+    varDecl->parent = node;
+}
+
 static void collectMethods(AST *node) {
     if (!node) return;
     if ((node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) && node->token && node->token->value) {
@@ -206,6 +244,7 @@ static void collectMethods(AST *node) {
                     fprintf(stderr, "Method '%s' defined for unknown class '%s'\n", mname, cls);
                     pascal_semantic_error_count++;
                 } else {
+                    ensureSelfParam(node, cls);
                     char *lname = lowerDup(mname);
                     if (!lname) {
                         free(cls);
@@ -234,6 +273,29 @@ static void collectMethods(AST *node) {
         } else if (node->parent && node->parent->type == AST_COMPOUND) {
             /* Handle un-mangled methods; examine first parameter for class type */
             AST *param = (node->child_count > 0) ? node->children[0] : NULL;
+            if (!param) {
+                /* Some parsers emit an explicit 'myself' VAR_DECL as a sibling
+                 * preceding the procedure declaration instead of a child.  If we
+                 * detect that pattern, adopt the VAR_DECL as the method's first
+                 * parameter so method collection and later argument checks work
+                 * as expected.
+                 */
+                AST *parent = node->parent;
+                for (int i = 0; i < parent->child_count; i++) {
+                    if (parent->children[i] == node && i > 0) {
+                        AST *prev = parent->children[i - 1];
+                        if (prev && prev->type == AST_VAR_DECL) {
+                            addChild(node, prev);
+                            for (int j = i - 1; j < parent->child_count - 1; j++) {
+                                parent->children[j] = parent->children[j + 1];
+                            }
+                            parent->child_count--;
+                            param = node->children[0];
+                        }
+                        break;
+                    }
+                }
+            }
             if (param && param->type == AST_VAR_DECL) {
                 AST *ptype = param->right;
                 while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
@@ -252,6 +314,7 @@ static void collectMethods(AST *node) {
                             node->token->length = strlen(mangled);
                             fullname = node->token->value;
                         }
+                        ensureSelfParam(node, cls);
                         char *lname = lowerDup(fullname + strlen(cls) + 1);
                         if (lname) {
                             if (hashTableLookup(ci->methods, lname)) {
@@ -280,6 +343,55 @@ static void collectMethods(AST *node) {
                                 } else {
                                     free(sym); free(v); free(lname);
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (node->parent && node->parent->type == AST_RECORD_TYPE) {
+            AST *typeDecl = node->parent;
+            while (typeDecl && typeDecl->type != AST_TYPE_DECL) typeDecl = typeDecl->parent;
+            const char *cls = (typeDecl && typeDecl->token) ? typeDecl->token->value : NULL;
+            if (cls) {
+                ClassInfo *ci = lookupClass(cls);
+                if (ci) {
+                    size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
+                    char *mangled = (char *)malloc(ln);
+                    if (mangled) {
+                        snprintf(mangled, ln, "%s_%s", cls, fullname);
+                        free(node->token->value);
+                        node->token->value = mangled;
+                        node->token->length = strlen(mangled);
+                        fullname = node->token->value;
+                    }
+                    ensureSelfParam(node, cls);
+                    char *lname = lowerDup(fullname + strlen(cls) + 1);
+                    if (lname) {
+                        if (hashTableLookup(ci->methods, lname)) {
+                            fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
+                            pascal_semantic_error_count++;
+                            free(lname);
+                        } else {
+                            Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
+                            Value *v = (Value *)calloc(1, sizeof(Value));
+                            if (sym && v) {
+                                sym->name = lname;
+                                v->ptr_val = (Value *)node;
+                                sym->value = v;
+                                sym->type_def = node;
+                                hashTableInsert(ci->methods, sym);
+                                char lowerName[MAX_SYMBOL_LENGTH];
+                                lowerCopy(fullname, lowerName);
+                                if (!lookupProcedure(lowerName)) {
+                                    Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                    if (ps) {
+                                        ps->name = strdup(lowerName);
+                                        ps->type_def = node;
+                                        hashTableInsert(procedure_table, ps);
+                                    }
+                                }
+                            } else {
+                                free(sym); free(v); free(lname);
                             }
                         }
                     }
@@ -595,33 +707,35 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 ClassInfo *ci = lookupClass(cls);
                 if (ci) {
                     Symbol *ms = lookupMethod(ci, method);
-                    if (ms) {
-                        if (!already) {
-                            size_t ln = strlen(cls) + 1 + strlen(name) + 1;
-                            char *m = (char*)malloc(ln);
-                            if (m) {
-                                snprintf(m, ln, "%s_%s", cls, name);
-                                free(node->token->value);
-                                node->token->value = m;
-                                node->token->length = strlen(m);
-                            }
+                    if (!already && (ms || cls)) {
+                        size_t ln = strlen(cls) + 1 + strlen(name) + 1;
+                        char *m = (char*)malloc(ln);
+                        if (m) {
+                            snprintf(m, ln, "%s_%s", cls, name);
+                            free(node->token->value);
+                            node->token->value = m;
+                            node->token->length = strlen(m);
                         }
-                    } else {
-                        fprintf(stderr, "Unknown method '%s' on class '%s'\n",
-                                method ? method : "(null)", cls);
-                        pascal_semantic_error_count++;
                     }
                 }
-                if (node->child_count > 0 && node->children[0] &&
-                    node->children[0]->type == AST_VARIABLE &&
-                    node->children[0]->token && node->children[0]->token->value &&
-                    (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
-                     strcasecmp(node->children[0]->token->value, "my") == 0)) {
-                    freeAST(node->children[0]);
-                    for (int i = 1; i < node->child_count; i++) {
-                        node->children[i-1] = node->children[i];
-                    }
-                    node->child_count--;
+            }
+            if (node->child_count > 0 && node->children[0] &&
+                node->children[0]->type == AST_VARIABLE &&
+                node->children[0]->token && node->children[0]->token->value &&
+                (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
+                 strcasecmp(node->children[0]->token->value, "my") == 0)) {
+                /*
+                 * The parser places the receiver both as `left` and as the first
+                 * child argument.  Using the same node in both locations leads to
+                 * double-free errors when the AST is destroyed.  Instead of
+                 * discarding the child (which would make the argument list empty),
+                 * keep a separate copy so the call still receives the receiver as
+                 * its first argument.
+                 */
+                AST *recv_copy = copyAST(node->left);
+                if (recv_copy) {
+                    node->children[0] = recv_copy;
+                    recv_copy->parent = node;
                 }
             }
         } else if (currentClass && node->token) {
@@ -679,12 +793,33 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 baseType = NULL;
             }
         }
-        if (baseType) {
-            node->type_def = copyAST(baseType);
-            node->var_type = baseType->var_type;
-            if (node->var_type == TYPE_RECORD || node->var_type == TYPE_VOID) {
-                node->var_type = TYPE_POINTER;
+        if (!baseType) {
+            const char *cls = resolveExprClass(node->left, clsContext);
+            if (cls) {
+                Token *tok = newToken(TOKEN_IDENTIFIER, cls,
+                                       node->token ? node->token->line : 0, 0);
+                AST *typeRef = newASTNode(AST_TYPE_REFERENCE, tok);
+                setTypeAST(typeRef, TYPE_RECORD);
+                AST *ptrType = newASTNode(AST_POINTER_TYPE, NULL);
+                setRight(ptrType, typeRef);
+                setTypeAST(ptrType, TYPE_POINTER);
+                node->type_def = ptrType;
             }
+            node->var_type = TYPE_POINTER;
+            return;
+        }
+        AST *elemType = copyAST(baseType);
+        node->var_type = baseType->var_type;
+        if (node->var_type == TYPE_RECORD || node->var_type == TYPE_VOID ||
+            node->var_type == TYPE_UNKNOWN || baseType->type == AST_TYPE_REFERENCE ||
+            baseType->type == AST_RECORD_TYPE) {
+            AST *ptrType = newASTNode(AST_POINTER_TYPE, NULL);
+            setRight(ptrType, elemType);
+            setTypeAST(ptrType, TYPE_POINTER);
+            node->type_def = ptrType;
+            node->var_type = TYPE_POINTER;
+        } else {
+            node->type_def = elemType;
         }
         return;
     }

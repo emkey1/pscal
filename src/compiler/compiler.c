@@ -3308,33 +3308,44 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
+                int arg_start = 0;
+                int arg_count = node->child_count;
                 bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
                 bool is_halt = (strcasecmp(calleeName, "halt") == 0);
+                if (expected == 0 && arg_count == 1 &&
+                    node->children[0] &&
+                    node->children[0]->type == AST_VARIABLE &&
+                    node->children[0]->token && node->children[0]->token->value &&
+                    (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
+                     strcasecmp(node->children[0]->token->value, "my") == 0)) {
+                    arg_start = 1;
+                    arg_count--;
+                }
                 if (is_inc_dec) {
-                    if (!(node->child_count == 1 || node->child_count == 2)) {
+                    if (!(arg_count == 1 || arg_count == 2)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
-                                line, calleeName, node->child_count);
+                                line, calleeName, arg_count);
                         compiler_had_error = true;
                         param_mismatch = true;
                     }
                 } else if (is_halt) {
-                    if (!(node->child_count == 0 || node->child_count == 1)) {
+                    if (!(arg_count == 0 || arg_count == 1)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 0 or 1 argument(s) but %d were provided.\n",
-                                line, calleeName, node->child_count);
+                                line, calleeName, arg_count);
                         compiler_had_error = true;
                         param_mismatch = true;
                     }
-                } else if (node->child_count != expected) {
+                } else if (arg_count != expected) {
                     fprintf(stderr, "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
-                            line, calleeName, expected, node->child_count);
+                            line, calleeName, expected, arg_count);
                     compiler_had_error = true;
                     param_mismatch = true;
                 }
 
                 if (!param_mismatch) {
-                    for (int i = 0; i < node->child_count; i++) {
+                    for (int i = 0; i < arg_count; i++) {
                         AST* param_node = proc_symbol->type_def->children[i];
-                        AST* arg_node = node->children[i];
+                        AST* arg_node = node->children[i + arg_start];
                         if (!param_node || !arg_node) continue;
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
