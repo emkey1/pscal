@@ -213,13 +213,13 @@ static void emitVTables(BytecodeChunk* chunk) {
         Symbol* sym = procedure_table->buckets[b];
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
-            if (base && base->type_def && base->type_def->is_virtual && base->name) {
-                const char* us = strchr(base->name, '_');
+            if (base && base->type_def && base->type_def->is_virtual && sym->name) {
+                const char* us = strchr(sym->name, '_');
                 if (us) {
-                    size_t cls_len = (size_t)(us - base->name);
+                    size_t cls_len = (size_t)(us - sym->name);
                     char cls[256];
                     if (cls_len < sizeof(cls)) {
-                        memcpy(cls, base->name, cls_len);
+                        memcpy(cls, sym->name, cls_len);
                         cls[cls_len] = '\0';
                         int idx = -1;
                         for (int i = 0; i < table_count; i++) {
