@@ -4,7 +4,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    3 JUMP               11 (to 0014)
 
---- Function point_setx (at 0003) ---
+--- Function point.setx (at 0003) ---
 0003    4 GET_LOCAL           1 (slot)
 0005    | GET_LOCAL           0 (slot)
 0007    | GET_FIELD_OFFSET    2 (index)
