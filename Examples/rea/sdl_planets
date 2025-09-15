@@ -62,7 +62,7 @@ class Planet {
     }
 
     void start() {
-      myself.tid = spawn Planet_updateWorker(myself);
+      myself.tid = spawn myself.updateWorker();
     }
 
     // Wait for the worker thread to finish. "join" is a reserved keyword in
@@ -72,12 +72,12 @@ class Planet {
       join myself.tid;
     }
 
-  }
+    void draw() {
+      setrgbcolor(myself.r, myself.g, myself.b);
+      fillcircle(trunc(myself.posX), trunc(myself.posY), myself.size);
+    }
 
-void Planet_draw(Planet p) {
-  setrgbcolor(p.r, p.g, p.b);
-  fillcircle(trunc(p.posX), trunc(p.posY), p.size);
-}
+  }
 
 class SolarSystemApp {
   const int WindowWidth = 1280;
@@ -104,36 +104,36 @@ class SolarSystemApp {
     int extra = 0;
     // Mercury - 0.39 AU
     orbit = trunc(AUOffset + AUScale * 0.39 + extra);
-    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, 1, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    myself.planets[1] = new Planet(); myself.planets[1].init(orbit, 1, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
     extra = extra + OrbitSpacing;
     // Venus - 0.72 AU
     orbit = trunc(AUOffset + AUScale * 0.72 + extra);
-    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, 2, 3.5, 218, 165,  32, myself.centerX, myself.centerY);
+    myself.planets[2] = new Planet(); myself.planets[2].init(orbit, 2, 3.5, 218, 165,  32, myself.centerX, myself.centerY);
     extra = extra + OrbitSpacing;
     // Earth - 1.00 AU
     orbit = trunc(AUOffset + AUScale * 1.00 + extra);
-    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, 3, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
+    myself.planets[3] = new Planet(); myself.planets[3].init(orbit, 3, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
     myself.planets[3].isEarth = 1;
     extra = extra + OrbitSpacing;
     // Mars - 1.52 AU
     orbit = trunc(AUOffset + AUScale * 1.52 + extra);
-    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, 2, 2.4, 188,  39,  50, myself.centerX, myself.centerY);
+    myself.planets[4] = new Planet(); myself.planets[4].init(orbit, 2, 2.4, 188,  39,  50, myself.centerX, myself.centerY);
     extra = extra + OrbitSpacing;
     // Jupiter - 5.20 AU
     orbit = trunc(AUOffset + AUScale * 5.20 + extra);
-    myself.planets[5] = new Planet(); Planet_init(myself.planets[5], orbit,18, 1.3, 205, 133,  63, myself.centerX, myself.centerY);
+    myself.planets[5] = new Planet(); myself.planets[5].init(orbit,18, 1.3, 205, 133,  63, myself.centerX, myself.centerY);
     extra = extra + OrbitSpacing;
     // Saturn - 9.58 AU
     orbit = trunc(AUOffset + AUScale * 9.58 + extra);
-    myself.planets[6] = new Planet(); Planet_init(myself.planets[6], orbit,16, 0.9, 210, 180, 140, myself.centerX, myself.centerY);
+    myself.planets[6] = new Planet(); myself.planets[6].init(orbit,16, 0.9, 210, 180, 140, myself.centerX, myself.centerY);
     extra = extra + OrbitSpacing;
     // Uranus - 19.20 AU
     orbit = trunc(AUOffset + AUScale * 19.20 + extra);
-    myself.planets[7] = new Planet(); Planet_init(myself.planets[7], orbit,12, 0.7, 173, 216, 230, myself.centerX, myself.centerY);
+    myself.planets[7] = new Planet(); myself.planets[7].init(orbit,12, 0.7, 173, 216, 230, myself.centerX, myself.centerY);
     extra = extra + OrbitSpacing;
     // Neptune - 30.05 AU
     orbit = trunc(AUOffset + AUScale * 30.05 + extra);
-    myself.planets[8] = new Planet(); Planet_init(myself.planets[8], orbit,12, 0.5,  65, 105, 225, myself.centerX, myself.centerY);
+    myself.planets[8] = new Planet(); myself.planets[8].init(orbit,12, 0.5,  65, 105, 225, myself.centerX, myself.centerY);
   }
 
   void initAsteroids() {
@@ -154,7 +154,7 @@ class SolarSystemApp {
   void startThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_start(myself.planets[i]);
+      myself.planets[i].start();
       i = i + 1;
     }
   }
@@ -178,7 +178,7 @@ class SolarSystemApp {
     }
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_draw(myself.planets[i]);
+      myself.planets[i].draw();
       i = i + 1;
     }
     str monthStr = "Earth months elapsed: " + inttostr(trunc(earthMonths));
@@ -190,7 +190,7 @@ class SolarSystemApp {
   void joinThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_joinThread(myself.planets[i]);
+      myself.planets[i].joinThread();
       i = i + 1;
     }
   }
@@ -226,4 +226,4 @@ class SolarSystemApp {
 }
 
 SolarSystemApp app = new SolarSystemApp();
-SolarSystemApp_run(app);
+app.run();

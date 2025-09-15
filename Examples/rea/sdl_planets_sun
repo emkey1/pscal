@@ -65,7 +65,7 @@ class Planet {
     }
 
     void start() {
-      myself.tid = spawn Planet_updateWorker(myself);
+      myself.tid = spawn myself.updateWorker();
     }
 
     // Wait for the worker thread to finish. "join" is a reserved keyword in
@@ -75,18 +75,18 @@ class Planet {
       join myself.tid;
     }
 
-  }
+    void draw() {
+      setrgbcolor(myself.r, myself.g, myself.b);
 
-void Planet_draw(Planet p) {
-  setrgbcolor(p.r, p.g, p.b);
+      // Round the scaled radius so small planets like Mars don't disappear
+      int drawRadius = round(myself.size * PlanetVisualScale);
+      if (drawRadius < 1) {
+        drawRadius = 1;
+      }
+      fillcircle(trunc(myself.posX), trunc(myself.posY), drawRadius);
+    }
 
-  // Round the scaled radius so small planets like Mars don't disappear
-  int drawRadius = round(p.size * PlanetVisualScale);
-  if (drawRadius < 1) {
-    drawRadius = 1;
   }
-  fillcircle(trunc(p.posX), trunc(p.posY), drawRadius);
-}
 
 class SolarSystemApp {
   const int WindowWidth = 1280;
@@ -124,15 +124,15 @@ class SolarSystemApp {
     // Mercury - 0.39 AU orbit, true radius
     orbit = trunc(myself.AUScale * 0.39);
     radius = myself.AUScale * MercuryRadiusAU * myself.SizeScale;
-    myself.planets[1] = new Planet(); Planet_init(myself.planets[1], orbit, radius, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    myself.planets[1] = new Planet(); myself.planets[1].init(orbit, radius, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
     // Venus - 0.72 AU orbit, true radius
     orbit = trunc(myself.AUScale * 0.72);
     radius = myself.AUScale * VenusRadiusAU * myself.SizeScale;
-    myself.planets[2] = new Planet(); Planet_init(myself.planets[2], orbit, radius, 3.5, 218, 165, 32, myself.centerX, myself.centerY);
+    myself.planets[2] = new Planet(); myself.planets[2].init(orbit, radius, 3.5, 218, 165, 32, myself.centerX, myself.centerY);
     // Earth - 1.00 AU orbit, true radius
     orbit = trunc(myself.AUScale * 1.00);
     radius = myself.AUScale * EarthRadiusAU * myself.SizeScale;
-    myself.planets[3] = new Planet(); Planet_init(myself.planets[3], orbit, radius, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
+    myself.planets[3] = new Planet(); myself.planets[3].init(orbit, radius, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
     myself.planets[3].isEarth = 1;
 
     // Moon - orbits Earth at 0.00257 AU with true radius
@@ -144,13 +144,13 @@ class SolarSystemApp {
     // Mars - 1.52 AU orbit, true radius
     orbit = trunc(myself.AUScale * 1.52);
     radius = myself.AUScale * MarsRadiusAU * myself.SizeScale;
-    myself.planets[4] = new Planet(); Planet_init(myself.planets[4], orbit, radius, 2.4, 188, 39, 50, myself.centerX, myself.centerY);
+    myself.planets[4] = new Planet(); myself.planets[4].init(orbit, radius, 2.4, 188, 39, 50, myself.centerX, myself.centerY);
   }
 
   void startThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_start(myself.planets[i]);
+      myself.planets[i].start();
       i = i + 1;
     }
   }
@@ -162,7 +162,7 @@ class SolarSystemApp {
     fillcircle(myself.centerX, myself.centerY, myself.sunRadius);
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_draw(myself.planets[i]);
+      myself.planets[i].draw();
       i = i + 1;
     }
     // Update and draw Earth's Moon
@@ -183,7 +183,7 @@ class SolarSystemApp {
   void joinThreads() {
     int i = 1;
     while (i <= NumPlanets) {
-      Planet_joinThread(myself.planets[i]);
+      myself.planets[i].joinThread();
       i = i + 1;
     }
   }
@@ -229,4 +229,4 @@ class SolarSystemApp {
   }
 }
 SolarSystemApp app = new SolarSystemApp();
-SolarSystemApp_run(app);
+app.run();
