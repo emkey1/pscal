@@ -3325,10 +3325,21 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         param_mismatch = true;
                     }
                 } else if (node->child_count != expected) {
-                    fprintf(stderr, "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
-                            line, calleeName, expected, node->child_count);
-                    compiler_had_error = true;
-                    param_mismatch = true;
+                    bool selfAdjust = false;
+                    if (expected == 0 && node->child_count == 1 &&
+                        node->children[0] &&
+                        node->children[0]->type == AST_VARIABLE &&
+                        node->children[0]->token && node->children[0]->token->value &&
+                        (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
+                         strcasecmp(node->children[0]->token->value, "my") == 0)) {
+                        selfAdjust = true;
+                    }
+                    if (!selfAdjust) {
+                        fprintf(stderr, "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
+                                line, calleeName, expected, node->child_count);
+                        compiler_had_error = true;
+                        param_mismatch = true;
+                    }
                 }
 
                 if (!param_mismatch) {
