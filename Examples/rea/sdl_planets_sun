@@ -86,8 +86,6 @@ void Planet_draw(Planet p) {
     drawRadius = 1;
   }
   fillcircle(trunc(p.posX), trunc(p.posY), drawRadius);
-
-=
 }
 
 class SolarSystemApp {
