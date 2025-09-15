@@ -263,6 +263,23 @@ static void collectMethods(AST *node) {
                             sym->value = v;
                             sym->type_def = node; /* reference for signature */
                             hashTableInsert(ci->methods, sym);
+                            char lowerName[MAX_SYMBOL_LENGTH];
+                            lowerCopy(fullname, lowerName);
+                            if (!lookupProcedure(lowerName)) {
+                                Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                if (ps) {
+                                    ps->name = strdup(lowerName);
+                                    /*
+                                     * Store a deep copy of the AST node in the global procedure
+                                     * table.  freeProcedureTable() assumes ownership of
+                                     * type_def entries and will call freeAST on them during
+                                     * teardown; using the original node would result in a
+                                     * double free when the program AST is cleaned up separately.
+                                     */
+                                    ps->type_def = copyAST(node);
+                                    hashTableInsert(procedure_table, ps);
+                                }
+                            }
                         } else {
                             free(sym); free(v); free(lname);
                         }
