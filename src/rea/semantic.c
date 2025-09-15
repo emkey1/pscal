@@ -332,6 +332,17 @@ static void collectMethods(AST *node) {
                             fullname = node->token->value;
                         }
                         ensureSelfParam(node, cls);
+                        // Assign method index for implicitly declared methods
+                        int method_index = 0;
+                        if (ci->methods) {
+                            for (int mb = 0; mb < HASHTABLE_SIZE; mb++) {
+                                for (Symbol *ms = ci->methods->buckets[mb]; ms; ms = ms->next) {
+                                    method_index++;
+                                }
+                            }
+                        }
+                        node->is_virtual = true;
+                        node->i_val = method_index;
                         char *lname = lowerDup(fullname + strlen(cls) + 1);
                         if (lname) {
                             if (hashTableLookup(ci->methods, lname)) {
@@ -349,12 +360,24 @@ static void collectMethods(AST *node) {
                                     hashTableInsert(ci->methods, sym);
                                     char lowerName[MAX_SYMBOL_LENGTH];
                                     lowerCopy(fullname, lowerName);
-                                    if (!lookupProcedure(lowerName)) {
+                                    Symbol *existing = lookupProcedure(lowerName);
+                                    if (!existing) {
                                         Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
                                         if (ps) {
                                             ps->name = strdup(lowerName);
                                             ps->type_def = node;
                                             hashTableInsert(procedure_table, ps);
+                                            existing = ps;
+                                        }
+                                    } else {
+                                        existing->type_def = node;
+                                    }
+                                    // Ensure bare method name aliases to the mangled symbol
+                                    if (existing) {
+                                        Symbol *alias = lookupProcedure(lname);
+                                        if (alias) {
+                                            alias->is_alias = true;
+                                            alias->real_symbol = existing;
                                         }
                                     }
                                 } else {

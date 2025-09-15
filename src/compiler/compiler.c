@@ -3206,6 +3206,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 proc_symbol = proc_symbol->real_symbol;
             }
 
+            // Ensure the target procedure is compiled so its address is available
+            if (proc_symbol && !proc_symbol->is_defined && proc_symbol->type_def) {
+                compileDefinedFunction(proc_symbol->type_def, chunk,
+                                      getLine(proc_symbol->type_def));
+            }
+
             bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
 
 #ifdef FRONTEND_REA
