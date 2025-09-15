@@ -1,7 +1,7 @@
 # Rea method dispatch runtime investigation
 
 Summary:
-- Qualified calls now compile to direct calls (Class_method(this, ...)) and work in disassembly.
+- Qualified calls now compile to direct calls; method invocations like `obj.method(args)` translate to the internal `Class_method(obj, args)` form and work in disassembly.
 - A runtime stack underflow occurs at program start when executing method_calls.
 
 Next steps:
