@@ -317,6 +317,70 @@ static void checkOverrides(void) {
 }
 
 /* ------------------------------------------------------------------------- */
+/*  Inherited method alias insertion                                        */
+/* ------------------------------------------------------------------------- */
+
+static void addInheritedMethodAliases(void) {
+    if (!class_table || !procedure_table) return;
+
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        Symbol *s = class_table->buckets[i];
+        while (s) {
+            ClassInfo *ci = s->value ? (ClassInfo *)s->value->ptr_val : NULL;
+            if (ci && ci->parent) {
+                ClassInfo *p = ci->parent;
+                while (p) {
+                    for (int j = 0; j < HASHTABLE_SIZE; j++) {
+                        Symbol *m = p->methods ? p->methods->buckets[j] : NULL;
+                        while (m) {
+                            /* Skip if subclass defines/overrides this method */
+                            if (!hashTableLookup(ci->methods, m->name)) {
+                                char classLower[MAX_SYMBOL_LENGTH];
+                                lowerCopy(ci->name, classLower);
+                                char aliasName[MAX_SYMBOL_LENGTH * 2];
+                                snprintf(aliasName, sizeof(aliasName), "%s_%s", classLower, m->name);
+                                if (!hashTableLookup(procedure_table, aliasName)) {
+                                    /* Find parent's fully qualified symbol */
+                                    char parentLower[MAX_SYMBOL_LENGTH];
+                                    lowerCopy(p->name, parentLower);
+                                    char targetName[MAX_SYMBOL_LENGTH * 2];
+                                    snprintf(targetName, sizeof(targetName), "%s_%s", parentLower, m->name);
+                                    Symbol *target = hashTableLookup(procedure_table, targetName);
+                                    if (target) {
+                                        Symbol *alias = (Symbol *)calloc(1, sizeof(Symbol));
+                                        if (alias) {
+                                            alias->name = strdup(aliasName);
+                                            alias->is_alias = true;
+                                            alias->real_symbol = target->is_alias ? target->real_symbol : target;
+                                            alias->type = target->type;
+                                            alias->type_def = target->type_def ? copyAST(target->type_def) : NULL;
+                                            if (alias->type_def && alias->type_def->token) {
+                                                size_t ln = strlen(ci->name) + 1 + strlen(m->name) + 1;
+                                                char *full = (char *)malloc(ln);
+                                                if (full) {
+                                                    snprintf(full, ln, "%s_%s", ci->name, m->name);
+                                                    free(alias->type_def->token->value);
+                                                    alias->type_def->token->value = full;
+                                                    alias->type_def->token->length = (int)strlen(full);
+                                                }
+                                            }
+                                            hashTableInsert(procedure_table, alias);
+                                        }
+                                    }
+                                }
+                            }
+                            m = m->next;
+                        }
+                    }
+                    p = p->parent;
+                }
+            }
+            s = s->next;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /*  Field/method usage checks                                                */
 /* ------------------------------------------------------------------------- */
 
@@ -622,6 +686,7 @@ void reaPerformSemanticAnalysis(AST *root) {
     collectMethods(root);
     linkParents();
     checkOverrides();
+    addInheritedMethodAliases();
     validateNodeInternal(root, NULL);
     freeClassTable();
 }
