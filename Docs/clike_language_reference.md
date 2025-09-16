@@ -268,6 +268,10 @@ int main() {
 #endif
 ```
 
+For a fuller walkthrough that renders a shaded, rotating cube with depth
+testing, matrix manipulation, and swap-interval toggling, refer to
+`Examples/clike/sdl_smoke`.
+
 ### **Example Code**
 
 Here is a simple "Hello, World!" program to demonstrate the language's syntax:

@@ -152,6 +152,10 @@ int main() {
 }
 ```
 
+The repository includes `Examples/rea/sdl_demo`, which expands this into a
+complete rotating cube rendered with per-face colors, depth testing, and periodic
+swap-interval toggling.
+
 ### **Example**
 
 ```rea

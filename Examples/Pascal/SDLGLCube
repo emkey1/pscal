@@ -6,8 +6,9 @@ const
   Height = 600;
 
 var
-  frame : Integer;
-  angle : Real;
+  frame  : Integer;
+  angle  : Real;
+  VSyncOn: Boolean;
 
 procedure DrawCube;
 begin
@@ -57,10 +58,21 @@ begin
   GLViewport(0, 0, Width, Height);
   GLClearDepth(1.0);
   GLDepthTest(true);
+  VSyncOn := true;
+  GLSetSwapInterval(1);
 
   for frame := 0 to 599 do
   begin
     angle := frame * 0.6;
+
+    if (frame > 0) and (frame mod 180 = 0) then
+    begin
+      VSyncOn := not VSyncOn;
+      if VSyncOn then
+        GLSetSwapInterval(1)
+      else
+        GLSetSwapInterval(0);
+    end;
 
     GLClearColor(0.1, 0.1, 0.15, 1.0);
     GLClear();
