@@ -225,6 +225,30 @@ join tid;
 
 The C-like front end has access to the rich set of built-in functions provided by the PSCAL VM, including file I/O, string manipulation, mathematical functions, and more. Some common C library functions are also mapped to their Pascal equivalents (e.g., `strlen` is mapped to `length`).
 
+When PSCAL is built with SDL support (`-DSDL=ON`), clike programs can also call the SDL graphics and audio helpers. This includes the 3D routines `initgraph3d`, `glsetswapinterval`, and `glswapwindow`, which manage an OpenGL-backed window and control its swap interval. A minimal render loop looks like:
+
+```c
+#ifdef SDL_ENABLED
+int main() {
+  int vsync_on = 1;
+  initgraph3d(640, 480, "Swap Demo", 24, 8);
+  glsetswapinterval(1);
+
+  for (int frame = 0; frame < 600; frame = frame + 1) {
+    if (frame > 0 && frame % 120 == 0) {
+      vsync_on = !vsync_on;
+      glsetswapinterval(vsync_on ? 1 : 0);
+    }
+    glswapwindow();
+    graphloop(1);
+  }
+
+  closegraph3d();
+  return 0;
+}
+#endif
+```
+
 ### **Example Code**
 
 Here is a simple "Hello, World!" program to demonstrate the language's syntax:

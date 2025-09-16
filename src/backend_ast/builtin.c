@@ -289,6 +289,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
+    {"glsetswapinterval", vmBuiltinGlsetswapinterval},
+    {"glswapwindow", vmBuiltinGlswapwindow},
 #endif
     {"gettime", vmBuiltinDosGettime},
 #ifdef SDL
@@ -3714,6 +3716,7 @@ void registerAllBuiltins(void) {
 
 #ifdef SDL
     /* Additional SDL graphics and sound built-ins */
+    registerBuiltinFunction("CloseGraph3D", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CreateTargetTexture", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("CreateTexture", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("DestroyTexture", AST_PROCEDURE_DECL, NULL);
@@ -3727,6 +3730,9 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("GLSetSwapInterval", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("GLSwapWindow", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("InitGraph3D", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IsSoundPlaying", AST_FUNCTION_DECL, NULL);

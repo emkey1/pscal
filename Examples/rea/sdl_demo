@@ -1,24 +1,31 @@
 #!/usr/bin/env rea
 // Rea SDL demo (requires building with -DSDL=ON)
 // InitGraph3D(widthPixels, heightPixels, title, depthBits, stencilBits) creates
-// an SDL window backed by an OpenGL context. CloseGraph3D() (or CloseGraph())
-// releases that context along with the window.
+// an SDL window backed by an OpenGL context. GLSwapWindow presents the frame
+// while GLSetSwapInterval toggles vsync.
 
-writeln("Starting Rea SDL demo (initializing text system)...");
-InitGraph(1, 1, "Rea SDL demo");
-string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
-string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
-string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
-if (fileexists(systemFontPath)) {
-  InitTextSystem(systemFontPath, 18);
-} else if (fileexists(repoFontPath1)) {
-  InitTextSystem(repoFontPath1, 18);
-} else {
-  InitTextSystem(repoFontPath2, 18);
+int main() {
+  bool vsyncOn = true;
+
+  InitGraph3D(640, 480, "Rea SDL swap demo", 24, 8);
+  GLSetSwapInterval(1);
+
+  for (int frame = 0; frame < 600; frame = frame + 1) {
+    if (frame > 0 && frame % 120 == 0) {
+      vsyncOn = !vsyncOn;
+      if (vsyncOn) {
+        GLSetSwapInterval(1);
+      } else {
+        GLSetSwapInterval(0);
+      }
+    }
+
+    // Submit OpenGL draw calls here before swapping.
+    GLSwapWindow();
+    GraphLoop(1);
+  }
+
+  CloseGraph3D();
+  return 0;
 }
-SetColor(255, 255, 255, 255);
-writeln("Text system initialized.");
-QuitTextSystem();
-CloseGraph();
-writeln("Rea SDL demo finished.");
 

@@ -1,11 +1,31 @@
 #!/usr/bin/env clike
 #ifdef SDL_ENABLED
 // initgraph3d(widthPixels, heightPixels, title, depthBits, stencilBits) builds
-// an OpenGL-capable SDL window. closegraph3d() or closegraph() releases the
-// GL context and any associated window/renderer state.
+// an OpenGL-capable SDL window. glswapwindow() presents the frame and
+// glsetswapinterval() toggles vsync.
 int main() {
-    initgraph(320, 240, "SDL Smoke");
-    closegraph();
+    int frame;
+    int vsync_on = 1;
+
+    initgraph3d(640, 480, "SDL Swap Demo", 24, 8);
+    glsetswapinterval(1);
+
+    for (frame = 0; frame < 600; frame = frame + 1) {
+        if (frame > 0 && frame % 120 == 0) {
+            vsync_on = !vsync_on;
+            if (vsync_on) {
+                glsetswapinterval(1);
+            } else {
+                glsetswapinterval(0);
+            }
+        }
+
+        /* Submit your OpenGL draw calls here before swapping. */
+        glswapwindow();
+        graphloop(1);
+    }
+
+    closegraph3d();
     return 0;
 }
 #else
