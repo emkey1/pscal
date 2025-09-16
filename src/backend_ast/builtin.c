@@ -5,6 +5,7 @@
 #ifdef SDL
 #include "backend_ast/sdl.h"
 #include "backend_ast/audio.h"
+#include "backend_ast/gl.h"
 #endif
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
@@ -289,8 +290,24 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
+    {"glbegin", vmBuiltinGlbegin},
+    {"glclear", vmBuiltinGlclear},
+    {"glclearcolor", vmBuiltinGlclearcolor},
+    {"glcleardepth", vmBuiltinGlcleardepth},
+    {"glcolor3f", vmBuiltinGlcolor3f},
+    {"gldepthtest", vmBuiltinGldepthtest},
+    {"glend", vmBuiltinGlend},
+    {"glloadidentity", vmBuiltinGlloadidentity},
+    {"glmatrixmode", vmBuiltinGlmatrixmode},
+    {"glpopmatrix", vmBuiltinGlpopmatrix},
+    {"glpushmatrix", vmBuiltinGlpushmatrix},
+    {"glrotatef", vmBuiltinGlrotatef},
+    {"glscalef", vmBuiltinGlscalef},
     {"glsetswapinterval", vmBuiltinGlsetswapinterval},
     {"glswapwindow", vmBuiltinGlswapwindow},
+    {"gltranslatef", vmBuiltinGltranslatef},
+    {"glvertex3f", vmBuiltinGlvertex3f},
+    {"glviewport", vmBuiltinGlviewport},
 #endif
     {"gettime", vmBuiltinDosGettime},
 #ifdef SDL
@@ -3700,6 +3717,35 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     return BUILTIN_TYPE_NONE;
 }
 
+#ifdef SDL
+static const char *const sdl_gl_builtin_names[] = {
+    "GLBegin",
+    "GLClear",
+    "GLClearColor",
+    "GLClearDepth",
+    "GLColor3f",
+    "GLDepthTest",
+    "GLEnd",
+    "GLLoadIdentity",
+    "GLMatrixMode",
+    "GLPopMatrix",
+    "GLPushMatrix",
+    "GLRotatef",
+    "GLScalef",
+    "GLSetSwapInterval",
+    "GLSwapWindow",
+    "GLTranslatef",
+    "GLVertex3f",
+    "GLViewport",
+};
+
+void registerSdlGlBuiltins(void) {
+    for (size_t i = 0; i < sizeof(sdl_gl_builtin_names) / sizeof(sdl_gl_builtin_names[0]); ++i) {
+        registerBuiltinFunction(sdl_gl_builtin_names[i], AST_PROCEDURE_DECL, NULL);
+    }
+}
+#endif
+
 void registerAllBuiltins(void) {
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
@@ -3730,8 +3776,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GLSetSwapInterval", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GLSwapWindow", AST_PROCEDURE_DECL, NULL);
+    registerSdlGlBuiltins();
     registerBuiltinFunction("InitGraph3D", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);

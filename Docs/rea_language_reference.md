@@ -111,15 +111,34 @@ Rea code can call any PSCAL VM built‑in, including I/O (`writeln`, `printf`),
 string helpers, math functions, and threading primitives such as `spawn`,
 `join`, `mutex`, `lock`, and `unlock`.
 
-When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D routines `InitGraph3D`, `GLSetSwapInterval`, and `GLSwapWindow` expose an OpenGL-backed window and its swap interval. A short render loop looks like:
+When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLVertex3f`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
 
 ```rea
 int main() {
   bool vsyncOn = true;
   InitGraph3D(640, 480, "Swap Demo", 24, 8);
+  GLViewport(0, 0, 640, 480);
+  GLClearDepth(1.0);
+  GLDepthTest(true);
   GLSetSwapInterval(1);
 
   for (int frame = 0; frame < 600; frame = frame + 1) {
+    GLClearColor(0.1, 0.1, 0.15, 1.0);
+    GLClear();
+
+    GLMatrixMode("modelview");
+    GLLoadIdentity();
+    GLRotatef(frame * 0.5, 0.0, 1.0, 0.0);
+
+    GLBegin("triangles");
+      GLColor3f(1.0, 0.0, 0.0);
+      GLVertex3f(0.0, 0.5, 0.0);
+      GLColor3f(0.0, 1.0, 0.0);
+      GLVertex3f(-0.5, -0.5, 0.0);
+      GLColor3f(0.0, 0.0, 1.0);
+      GLVertex3f(0.5, -0.5, 0.0);
+    GLEnd();
+
     if (frame > 0 && frame % 120 == 0) {
       vsyncOn = !vsyncOn;
       GLSetSwapInterval(vsyncOn ? 1 : 0);

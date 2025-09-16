@@ -269,6 +269,9 @@ int main(int argc, char **argv) {
 
     initSymbolSystem();
     registerAllBuiltins();
+#ifdef SDL
+    registerSdlGlBuiltins();
+#endif
     /* C-like style cast helpers */
     registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
