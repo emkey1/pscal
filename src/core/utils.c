@@ -896,6 +896,8 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_POINTER:
             v.ptr_val = NULL;
             break;
+        case TYPE_NIL:
+            return makeNil();
         case TYPE_VOID:
             break;
         default:
