@@ -210,8 +210,24 @@ imported from each front end (Pascal, CLike, and Rea).
 | closegraph | () | void | Close graphics. |
 | closegraph3d | () | void | Close the OpenGL window and delete its context. |
 | graphloop | () | void | Poll events and delay. |
+| glbegin | (mode: String\|Integer) | void | Begin an immediate-mode primitive using the named GLenum (for example `"triangles"` or `"quads"`). |
+| glclear | (mask: Integer = GL_COLOR_BUFFER_BIT \| GL_DEPTH_BUFFER_BIT) | void | Clear buffers with `glClear`; defaults to color and depth. |
+| glclearcolor | (r: Real, g: Real, b: Real, a: Real) | void | Set the RGBA clear color. |
+| glcleardepth | (depth: Real) | void | Set the depth buffer clear value (clamped to 0..1). |
+| glcolor3f | (r: Real, g: Real, b: Real) | void | Set the current vertex color (components are clamped to 0..1). |
+| gldepthtest | (enable: Boolean) | void | Enable or disable depth testing. |
+| glend | () | void | End the current immediate-mode primitive. |
+| glloadidentity | () | void | Replace the current matrix with the identity matrix. |
+| glmatrixmode | (mode: String\|Integer) | void | Select the active matrix stack (`"projection"`, `"modelview"`, `"texture"`, or a raw GLenum). |
+| glpopmatrix | () | void | Pop the top matrix from the current stack. |
+| glpushmatrix | () | void | Push a copy of the current matrix onto the stack. |
+| glrotatef | (angle: Real, x: Real, y: Real, z: Real) | void | Apply a rotation (degrees) about the supplied axis. |
+| glscalef | (x: Real, y: Real, z: Real) | void | Apply a non-uniform scale to the current matrix. |
 | glsetswapinterval | (interval: Integer) | void | Set the OpenGL swap interval (0 disables vsync, 1 enables it). |
 | glswapwindow | () | void | Swap the OpenGL window buffers to present the rendered frame. |
+| gltranslatef | (x: Real, y: Real, z: Real) | void | Apply a translation to the current matrix. |
+| glvertex3f | (x: Real, y: Real, z: Real) | void | Emit a vertex for the active primitive. |
+| glviewport | (x: Integer, y: Integer, width: Integer, height: Integer) | void | Configure the OpenGL viewport rectangle. |
 | updatescreen | () | void | Present renderer. |
 | cleardevice | () | void | Clear renderer. |
 | setcolor | (color: Integer) | void | Set drawing color. |
@@ -260,16 +276,33 @@ var
   frame: Integer;
 begin
   InitGraph3D(640, 480, 'Swap Demo', 24, 8);
+  GLViewport(0, 0, 640, 480);
+  GLClearDepth(1.0);
+  GLDepthTest(true);
   GLSetSwapInterval(1); { enable vsync }
 
   for frame := 0 to 599 do
   begin
-    { Issue your OpenGL rendering here }
+    GLClearColor(0.1, 0.1, 0.15, 1.0);
+    GLClear();
+
+    GLMatrixMode('modelview');
+    GLLoadIdentity();
+    GLRotatef(frame * 0.5, 0.0, 1.0, 0.0);
+
+    GLBegin('triangles');
+      GLColor3f(1.0, 0.0, 0.0);
+      GLVertex3f(0.0, 0.5, 0.0);
+      GLColor3f(0.0, 1.0, 0.0);
+      GLVertex3f(-0.5, -0.5, 0.0);
+      GLColor3f(0.0, 0.0, 1.0);
+      GLVertex3f(0.5, -0.5, 0.0);
+    GLEnd();
 
     if frame = 300 then
       GLSetSwapInterval(0); { drop vsync after five seconds }
 
-    GLSwapWindow;          { present the frame }
+    GLSwapWindow();
     GraphLoop(1);          { keep SDL responsive without busy waiting }
   end;
 

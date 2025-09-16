@@ -81,6 +81,8 @@ include_directories(
 )
 
 # ---- Dependencies ----
+set(PSCAL_OPENGL_TARGET "")
+
 if(SDL)
     find_package(PkgConfig REQUIRED)
 
@@ -109,6 +111,15 @@ if(SDL)
     message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
     message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
     message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
+
+    find_package(OpenGL REQUIRED)
+    if(TARGET OpenGL::GL)
+        set(PSCAL_OPENGL_TARGET OpenGL::GL)
+    elseif(TARGET OpenGL::OpenGL)
+        set(PSCAL_OPENGL_TARGET OpenGL::OpenGL)
+    elseif(OPENGL_LIBRARIES)
+        set(PSCAL_OPENGL_TARGET ${OPENGL_LIBRARIES})
+    endif()
 endif()
 
 # --- CURL (two-path strategy) ---
@@ -164,6 +175,7 @@ if(SDL)
     list(APPEND PSCAL_SOURCES
         src/backend_ast/sdl.c
         src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
 endif()
@@ -219,6 +231,11 @@ function(add_pscal_executable target_name)
         list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LDFLAGS_OTHER})
         list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LDFLAGS_OTHER})
         list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LDFLAGS_OTHER})
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND TARGET_LINK_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND TARGET_LINK_LIBS ${OPENGL_LIBRARIES})
+        endif()
     endif()
 
     # CURL
@@ -321,6 +338,7 @@ if(SDL)
     list(APPEND CLIKE_SOURCES
         src/backend_ast/sdl.c
         src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
 endif()
@@ -374,6 +392,11 @@ if(SDL)
         ${PC_SDL2_MIXER_LDFLAGS_OTHER}
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND CLIKE_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND CLIKE_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
     list(REMOVE_DUPLICATES CLIKE_SDL_LIBS)
     target_link_libraries(clike PRIVATE ${CLIKE_SDL_LIBS})
     target_compile_definitions(clike PRIVATE SDL)
@@ -420,6 +443,7 @@ if(SDL)
     list(APPEND REA_SOURCES
         src/backend_ast/sdl.c
         src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
 endif()
@@ -460,6 +484,11 @@ if(SDL)
         ${PC_SDL2_MIXER_LDFLAGS_OTHER}
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND REA_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND REA_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
     list(REMOVE_DUPLICATES REA_SDL_LIBS)
     target_link_libraries(rea PRIVATE ${REA_SDL_LIBS})
     target_compile_definitions(rea PRIVATE SDL)
@@ -496,7 +525,7 @@ set(JSON2BC_SOURCES
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
-    src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/audio.c
+    src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/gl.c src/backend_ast/audio.c
     src/symbol/symbol.c
     src/vm/vm.c
     src/Pascal/globals.c
@@ -533,6 +562,11 @@ if(SDL)
         ${PC_SDL2_MIXER_LDFLAGS_OTHER}
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND JSON2BC_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND JSON2BC_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
     list(REMOVE_DUPLICATES JSON2BC_SDL_LIBS)
     target_link_libraries(pscaljson2bc PRIVATE ${JSON2BC_SDL_LIBS})
     target_compile_definitions(pscaljson2bc PRIVATE SDL)
