@@ -5,6 +5,7 @@
 #include <stdio.h>  // For fprintf, stderr
 #include <stdlib.h> // For exit, EXIT_FAILURE
 #include <pthread.h> // For mutex guarding of global tables
+#include <stdatomic.h> // For atomic flags shared across threads
 
 #include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
 #ifdef SDL
@@ -74,7 +75,7 @@ extern int dumpExec;
 extern List *inserted_global_names;
 #endif
 
-extern int break_requested;
+extern atomic_int break_requested;
 extern int exit_requested; // Flag set by builtin 'exit' to unwind the current routine
 extern int pascal_semantic_error_count; // Count of semantic/type errors during analysis
 extern int pascal_parser_error_count;   // Count of parser (syntax) errors

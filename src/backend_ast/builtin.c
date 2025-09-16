@@ -1503,7 +1503,7 @@ Value vmBuiltinQuitrequested(VM* vm, int arg_count, Value* args) {
         return makeBoolean(false);
     }
     // Access the global flag and return it as a Pscal boolean
-    return makeBoolean(break_requested != 0);
+    return makeBoolean(atomic_load(&break_requested) != 0);
 }
 
 Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {

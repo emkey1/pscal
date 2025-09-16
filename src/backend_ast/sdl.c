@@ -999,11 +999,11 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_QUIT) {
-            break_requested = 1;
+            atomic_store(&break_requested, 1);
             return makeInt(0);
         } else if (event.type == SDL_KEYDOWN) {
             if (event.key.keysym.sym == SDLK_q) {
-                break_requested = 1;
+                atomic_store(&break_requested, 1);
             }
             return makeInt((int)event.key.keysym.sym);
         }
@@ -1136,7 +1136,7 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
              * code can process them on the next iteration.
              */
             if (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_QUIT, SDL_QUIT) > 0) {
-                break_requested = 1;
+                atomic_store(&break_requested, 1);
                 return makeVoid();
             }
 
