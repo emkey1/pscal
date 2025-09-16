@@ -3754,6 +3754,29 @@ void registerSdlGlBuiltins(void) {
 void registerAllBuiltins(void) {
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
+    /*
+     * Core numeric conversion helpers.  These mirror the small "C-like"
+     * casting helpers exposed by several front ends (Rea, CLike, etc.).
+     * Historically each front end registered these manually which made the
+     * setup fragile—forgetting to do so caused the compiler to fall back to
+     * emitting indirect calls and the VM would later report missing globals
+     * such as "float".  Register them here so every front end shares the
+     * same canonical metadata and the compiler can always resolve their
+     * routine types.
+     */
+    registerBuiltinFunction("int",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("float",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("char",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("bool",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("byte",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("toint",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("todouble", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tofloat",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tochar",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobool",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobyte",   AST_FUNCTION_DECL, NULL);
+
     /* Graphics stubs (usable even without SDL) */
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
