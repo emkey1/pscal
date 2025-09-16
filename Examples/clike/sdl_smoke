@@ -1,5 +1,8 @@
 #!/usr/bin/env clike
 #ifdef SDL_ENABLED
+// initgraph3d(widthPixels, heightPixels, title, depthBits, stencilBits) builds
+// an OpenGL-capable SDL window. closegraph3d() or closegraph() releases the
+// GL context and any associated window/renderer state.
 int main() {
     initgraph(320, 240, "SDL Smoke");
     closegraph();

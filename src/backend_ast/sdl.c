@@ -21,6 +21,7 @@
 // SDL Global Variable Definitions
 SDL_Window* gSdlWindow = NULL;
 SDL_Renderer* gSdlRenderer = NULL;
+SDL_GLContext gSdlGLContext = NULL;
 SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
 bool gSdlInitialized = false;
 int gSdlWidth = 0;
@@ -39,6 +40,36 @@ void initializeTextureSystem(void) {
         gSdlTextureWidths[i] = 0;
         gSdlTextureHeights[i] = 0;
     }
+}
+
+void cleanupSdlWindowResources(void) {
+    if (gSdlGLContext) {
+        SDL_GL_DeleteContext(gSdlGLContext);
+        gSdlGLContext = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_GL_DeleteContext successful.\n");
+        #endif
+    }
+    if (gSdlRenderer) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyRenderer successful.\n");
+        #endif
+    }
+    if (gSdlWindow) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyWindow successful.\n");
+        #endif
+    }
+    gSdlWidth = 0;
+    gSdlHeight = 0;
+    gSdlCurrentColor.r = 255;
+    gSdlCurrentColor.g = 255;
+    gSdlCurrentColor.b = 255;
+    gSdlCurrentColor.a = 255;
 }
 
 // Helper to find a free texture slot or return an error ID
@@ -119,20 +150,7 @@ void sdlCleanupAtExit(void) {
         }
     }
  */
-    if (gSdlRenderer) {
-        SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
-        #endif
-    }
-    if (gSdlWindow) {
-        SDL_DestroyWindow(gSdlWindow);
-        gSdlWindow = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_DestroyWindow successful.\n");
-        #endif
-    }
+    cleanupSdlWindowResources();
     if (gSdlInitialized) {
         SDL_Quit();
         gSdlInitialized = false;
@@ -164,10 +182,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     }
 
-    if (gSdlWindow || gSdlRenderer) {
-        if(gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-        if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-    }
+    cleanupSdlWindowResources();
 
     int width = (int)AS_INTEGER(args[0]);
     int height = (int)AS_INTEGER(args[1]);
@@ -194,8 +209,9 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    gSdlGLContext = NULL;
     initializeTextureSystem();
-    
+
     SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderPresent(gSdlRenderer);
@@ -206,14 +222,13 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 #endif
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
-    
+
     return makeVoid();
 }
 
 Value vmBuiltinClosegraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "CloseGraph expects 0 arguments.");
-    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+    cleanupSdlWindowResources();
     return makeVoid();
 }
 

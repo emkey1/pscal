@@ -220,7 +220,7 @@ The Pascal front end exposes the PSCAL VM's built-ins, including:
 - Memory: `New`, `Dispose`.
 - Console/text: `GotoXY`, `TextColor`, `TextBackground`, `ClrScr`, `WhereX`, `WhereY`.
 - Concurrency (see below): `spawn`, `join`, `mutex`, `rcmutex`, `lock`, `unlock`, `destroy`.
-- SDL-based graphics/sound (when built with `-DSDL=ON`): e.g., `InitGraph`, `CloseGraph`, `UpdateScreen`, `SetRGBColor`, `DrawLine`, `FillRect`, `FillCircle`, `CreateTexture`, `UpdateTexture`, `DestroyTexture`, text helpers like `InitTextSystem(FontFileName, FontSize)`, `OutTextXY`, and audio: `InitSoundSystem`, `LoadSound`, `PlaySound`, `IsSoundPlaying`, `FreeSound`, `QuitSoundSystem`.
+- SDL-based graphics/sound (when built with `-DSDL=ON`): e.g., `InitGraph`, `InitGraph3D`, `CloseGraph`, `CloseGraph3D`, `UpdateScreen`, `SetRGBColor`, `DrawLine`, `FillRect`, `FillCircle`, `CreateTexture`, `UpdateTexture`, `DestroyTexture`, text helpers like `InitTextSystem(FontFileName, FontSize)`, `OutTextXY`, and audio: `InitSoundSystem`, `LoadSound`, `PlaySound`, `IsSoundPlaying`, `FreeSound`, `QuitSoundSystem`.
 
 Note: SDL built-ins are available only in SDL-enabled builds. Headless CI typically skips these routines.
 

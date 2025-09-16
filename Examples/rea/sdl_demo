@@ -1,5 +1,8 @@
 #!/usr/bin/env rea
 // Rea SDL demo (requires building with -DSDL=ON)
+// InitGraph3D(widthPixels, heightPixels, title, depthBits, stencilBits) creates
+// an SDL window backed by an OpenGL context. CloseGraph3D() (or CloseGraph())
+// releases that context along with the window.
 
 writeln("Starting Rea SDL demo (initializing text system)...");
 InitGraph(1, 1, "Rea SDL demo");
