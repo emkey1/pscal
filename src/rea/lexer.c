@@ -259,6 +259,18 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             advance(lexer);
             while (isDigit(peek(lexer))) advance(lexer);
         }
+        if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+            size_t exponent_start = lexer->pos;
+            advance(lexer);
+            if (peek(lexer) == '+' || peek(lexer) == '-') {
+                advance(lexer);
+            }
+            if (isDigit(peek(lexer))) {
+                while (isDigit(peek(lexer))) advance(lexer);
+            } else {
+                lexer->pos = exponent_start;
+            }
+        }
         return makeToken(lexer, REA_TOKEN_NUMBER, start);
     }
 
