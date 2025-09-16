@@ -2,14 +2,19 @@
 == Disassembly: Tests/rea/writeln_format.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    1 CONSTANT            0 '1'
-0002    | CONSTANT            1 '3.141590'
-0004    | FORMAT_VALUE     width:0 prec:2
-0007    | CALL_BUILTIN         2 'write' (2 args)
-0011    0 HALT
+0000    0 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007    1 CONSTANT            3 '1'
+0009    | CONSTANT            4 '3.141590'
+0011    | FORMAT_VALUE     width:0 prec:2
+0014    | CALL_BUILTIN         5 'write' (2 args)
+0018    0 HALT
 == End Disassembly: Tests/rea/writeln_format.rea ==
 
-Constants (3):\n  0000: INT   1
-  0001: REAL  3.141590
-  0002: STR   "write"
+Constants (6):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: INT   1
+  0004: REAL  3.141590
+  0005: STR   "write"
 
