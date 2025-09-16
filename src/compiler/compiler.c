@@ -161,6 +161,16 @@ static void ensureMyselfGlobalDefined(BytecodeChunk* chunk, int line) {
     int myself_idx = ensureMyselfGlobalNameIndex(chunk);
     emitConstant(chunk, addNilConstant(chunk), line);
     emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, myself_idx, line);
+    // Declare the implicit "myself" variable as a generic pointer with a
+    // placeholder type name.  The VM's DEFINE_GLOBAL handler expects every
+    // global definition to include the declared VarType and an associated
+    // type-name constant index.  Previously we omitted these operands, which
+    // caused the VM to misinterpret the bytecode stream for the first
+    // statement following the implicit declaration (often a WRITELN), leading
+    // to stack underflows at runtime.
+    writeBytecodeChunk(chunk, (uint8_t)TYPE_POINTER, line);
+    int pointer_type_name_idx = addStringConstant(chunk, "");
+    emitConstantIndex16(chunk, pointer_type_name_idx, line);
     compiler_defined_myself_global = true;
 }
 
