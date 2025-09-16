@@ -163,6 +163,7 @@ set(PSCAL_SOURCES
 if(SDL)
     list(APPEND PSCAL_SOURCES
         src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
         src/backend_ast/audio.c
     )
 endif()
@@ -319,6 +320,7 @@ list(APPEND CLIKE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 if(SDL)
     list(APPEND CLIKE_SOURCES
         src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
         src/backend_ast/audio.c
     )
 endif()
@@ -417,6 +419,7 @@ list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 if(SDL)
     list(APPEND REA_SOURCES
         src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
         src/backend_ast/audio.c
     )
 endif()
@@ -493,7 +496,7 @@ set(JSON2BC_SOURCES
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
-    src/backend_ast/sdl.c src/backend_ast/audio.c
+    src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/audio.c
     src/symbol/symbol.c
     src/vm/vm.c
     src/Pascal/globals.c

@@ -205,7 +205,9 @@ These built-ins are available when Pscal is built with SDL support.
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
 | initgraph | (width: Integer, height: Integer) | void | Initialize graphics. |
+| initgraph3d | (width: Integer, height: Integer, title: String, depthBits: Integer, stencilBits: Integer) | void | Initialize an OpenGL-backed SDL window with the requested depth and stencil buffer sizes. |
 | closegraph | () | void | Close graphics. |
+| closegraph3d | () | void | Close the OpenGL window and delete its context. |
 | graphloop | () | void | Poll events and delay. |
 | updatescreen | () | void | Present renderer. |
 | cleardevice | () | void | Clear renderer. |

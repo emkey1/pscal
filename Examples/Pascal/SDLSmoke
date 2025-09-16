@@ -1,6 +1,9 @@
 #!/usr/bin/env pascal
 program SDLSmoke;
 begin
+  // InitGraph3D(WindowWidth, WindowHeight, Title, DepthBits, StencilBits)
+  // creates an SDL window with an OpenGL context. Use CloseGraph or
+  // CloseGraph3D to tear it down when finished.
   InitGraph(320, 240, 'SDL Smoke');
   CloseGraph;
 end.

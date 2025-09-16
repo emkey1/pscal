@@ -226,6 +226,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"close", vmBuiltinClose},
 #ifdef SDL
     {"closegraph", vmBuiltinClosegraph},
+    {"closegraph3d", vmBuiltinClosegraph3d},
 #endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
@@ -301,6 +302,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"inc", vmBuiltinInc},
 #ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
+    {"initgraph3d", vmBuiltinInitgraph3d},
 #endif
 #ifdef SDL
     {"initsoundsystem", vmBuiltinInitsoundsystem},
