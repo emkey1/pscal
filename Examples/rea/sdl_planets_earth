@@ -4,7 +4,7 @@
 // scaled to its actual radius relative to astronomical units.
 
 const int NumPlanets = 3;
-const float OrbitSpeedScale = 0.25;
+const float OrbitSpeedScale = 0.10;
 
 bool quit = false;
 int posMutex = mutex();
