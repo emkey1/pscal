@@ -84,6 +84,14 @@ class Planet {
       }
       fillcircle(trunc(myself.posX), trunc(myself.posY), drawRadius);
     }
+
+    float getPosX() {
+      return myself.posX;
+    }
+
+    float getPosY() {
+      return myself.posY;
+    }
   }
 
 class SolarSystemApp {
@@ -172,8 +180,8 @@ class SolarSystemApp {
       // Update and draw Earth's Moon
       myself.moonAngle = myself.moonAngle + myself.moonSpeed;
       if (myself.moonAngle >= 6.283185307179586) myself.moonAngle = myself.moonAngle - 6.283185307179586;
-      mx = myself.planets[3].posX + cos(myself.moonAngle) * myself.moonOrbit;
-      my = myself.planets[3].posY + sin(myself.moonAngle) * myself.moonOrbit;
+      mx = myself.planets[3].getPosX() + cos(myself.moonAngle) * myself.moonOrbit;
+      my = myself.planets[3].getPosY() + sin(myself.moonAngle) * myself.moonOrbit;
       setrgbcolor(200, 200, 200);
       moonDrawRadius = round(myself.moonSize * PlanetVisualScale);
       if (moonDrawRadius < 1) moonDrawRadius = 1;
