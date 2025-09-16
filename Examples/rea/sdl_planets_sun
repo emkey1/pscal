@@ -161,36 +161,31 @@ class SolarSystemApp {
     }
   }
 
-    void draw() {
-      int i;
-      float mx;
-      float my;
-      int moonDrawRadius;
-      str monthStr;
-
-      lock(posMutex);
-      cleardevice();
-      setrgbcolor(255, 255, 0); // Sun
-      fillcircle(myself.centerX, myself.centerY, myself.sunRadius);
-      i = 1;
-      while (i <= NumPlanets) {
-        myself.planets[i].draw();
-        i = i + 1;
-      }
-      // Update and draw Earth's Moon
-      myself.moonAngle = myself.moonAngle + myself.moonSpeed;
-      if (myself.moonAngle >= 6.283185307179586) myself.moonAngle = myself.moonAngle - 6.283185307179586;
-      mx = myself.planets[3].getPosX() + cos(myself.moonAngle) * myself.moonOrbit;
-      my = myself.planets[3].getPosY() + sin(myself.moonAngle) * myself.moonOrbit;
-      setrgbcolor(200, 200, 200);
-      moonDrawRadius = round(myself.moonSize * PlanetVisualScale);
-      if (moonDrawRadius < 1) moonDrawRadius = 1;
-      fillcircle(trunc(mx), trunc(my), moonDrawRadius);
-      monthStr = "Earth months elapsed: " + inttostr(trunc(earthMonths));
-      outtextxy(getmaxx() - 220, 16, monthStr);
-      unlock(posMutex);
-      updatescreen();
+  void draw() {
+    lock(posMutex);
+    cleardevice();
+    setrgbcolor(255, 255, 0); // Sun
+    fillcircle(myself.centerX, myself.centerY, myself.sunRadius);
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].draw();
+      i = i + 1;
     }
+    // Update and draw Earth's Moon
+    myself.moonAngle = myself.moonAngle + myself.moonSpeed;
+    if (myself.moonAngle >= 6.283185307179586) myself.moonAngle = myself.moonAngle - 6.283185307179586;
+    setrgbcolor(200, 200, 200);
+    int moonDrawRadius = round(myself.moonSize * PlanetVisualScale);
+    if (moonDrawRadius < 1) moonDrawRadius = 1;
+    fillcircle(
+      trunc(myself.planets[3].getPosX() + cos(myself.moonAngle) * myself.moonOrbit),
+      trunc(myself.planets[3].getPosY() + sin(myself.moonAngle) * myself.moonOrbit),
+      moonDrawRadius);
+    str monthStr = "Earth months elapsed: " + inttostr(trunc(earthMonths));
+    outtextxy(getmaxx() - 220, 16, monthStr);
+    unlock(posMutex);
+    updatescreen();
+  }
 
   void joinThreads() {
     int i = 1;
