@@ -1315,11 +1315,10 @@ static bool builtinUsesGlobalStructures(const char* name) {
         "erase",          "gotoxy",        "hidecursor",    "highvideo",
         "ioresult",       "insline",       "invertcolors",  "lowvideo",
         "normvideo",      "normalcolors",  "paramcount",    "paramstr",
-        "quitrequested",  "read",          "readln",        "rename",
-        "reset",          "rewrite",       "screenrows",    "screencols",
-        "showcursor",     "textbackground", "textbackgrounde","textcolor",
-        "textcolore",     "underlinetext", "window",        "wherex",
-        "wherey",
+        "read",           "readln",        "rename",        "reset",
+        "rewrite",        "screenrows",    "screencols",    "showcursor",
+        "textbackground", "textbackgrounde","textcolor",     "textcolore",
+        "underlinetext",  "window",        "wherex",        "wherey",
     };
 
     for (size_t i = 0; i < sizeof(needs_lock)/sizeof(needs_lock[0]); i++) {
