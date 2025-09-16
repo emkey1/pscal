@@ -77,6 +77,8 @@ void getmousestate(int* x, int* y, int* buttons);
 int getpixelcolor();
 int gettextsize();
 int getticks();
+int glsetswapinterval();
+int glswapwindow();
 int gotoxy();
 int graphloop();
 int halt();

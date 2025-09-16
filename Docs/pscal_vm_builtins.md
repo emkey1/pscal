@@ -200,7 +200,8 @@ Numeric builtins preserve integer types when all inputs are integral. In particu
 
 ## SDL graphics and audio
 
-These built-ins are available when Pscal is built with SDL support.
+These built-ins are available when Pscal is built with SDL support and can be
+imported from each front end (Pascal, CLike, and Rea).
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
@@ -209,6 +210,8 @@ These built-ins are available when Pscal is built with SDL support.
 | closegraph | () | void | Close graphics. |
 | closegraph3d | () | void | Close the OpenGL window and delete its context. |
 | graphloop | () | void | Poll events and delay. |
+| glsetswapinterval | (interval: Integer) | void | Set the OpenGL swap interval (0 disables vsync, 1 enables it). |
+| glswapwindow | () | void | Swap the OpenGL window buffers to present the rendered frame. |
 | updatescreen | () | void | Present renderer. |
 | cleardevice | () | void | Clear renderer. |
 | setcolor | (color: Integer) | void | Set drawing color. |
@@ -248,6 +251,31 @@ These built-ins are available when Pscal is built with SDL support.
 | getmousestate | (var x: Integer, var y: Integer, var buttons: Integer) | void | Query mouse position and buttons. |
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
+
+### Basic OpenGL render loop
+
+```pascal
+program SwapDemo;
+var
+  frame: Integer;
+begin
+  InitGraph3D(640, 480, 'Swap Demo', 24, 8);
+  GLSetSwapInterval(1); { enable vsync }
+
+  for frame := 0 to 599 do
+  begin
+    { Issue your OpenGL rendering here }
+
+    if frame = 300 then
+      GLSetSwapInterval(0); { drop vsync after five seconds }
+
+    GLSwapWindow;          { present the frame }
+    GraphLoop(1);          { keep SDL responsive without busy waiting }
+  end;
+
+  CloseGraph3D;
+end.
+```
 
 ## Examples
 

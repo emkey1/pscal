@@ -64,6 +64,8 @@ Value vmBuiltinSetalphablend(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRendertexttotexture(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFillcircle(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGraphloop(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlsetswapinterval(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlswapwindow(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPutpixel(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCreatetargettexture(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCreatetexture(struct VM_s* vm, int arg_count, Value* args);

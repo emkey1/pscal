@@ -92,4 +92,36 @@ Value vmBuiltinClosegraph3d(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinGlsetswapinterval(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "GLSetSwapInterval expects 1 integer argument.");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
+        runtimeError(vm, "Runtime error: GLSetSwapInterval requires an active OpenGL window. Call InitGraph3D first.");
+        return makeVoid();
+    }
+
+    int interval = (int)AS_INTEGER(args[0]);
+    if (SDL_GL_SetSwapInterval(interval) != 0) {
+        runtimeError(vm, "Runtime error: SDL_GL_SetSwapInterval failed: %s", SDL_GetError());
+    }
+
+    return makeVoid();
+}
+
+Value vmBuiltinGlswapwindow(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "GLSwapWindow expects 0 arguments.");
+        return makeVoid();
+    }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
+        runtimeError(vm, "Runtime error: GLSwapWindow requires an active OpenGL window. Call InitGraph3D first.");
+        return makeVoid();
+    }
+
+    SDL_GL_SwapWindow(gSdlWindow);
+    return makeVoid();
+}
+
 #endif // SDL
