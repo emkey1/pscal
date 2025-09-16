@@ -597,13 +597,13 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 // expect a receiver of pointer type type-check correctly.
                 if (strcasecmp(varName, "myself") == 0) {
                     node->var_type = TYPE_POINTER;
-                    // Try to infer the class type from the current scope's name: Class_Method
+                    // Try to infer the class type from the current scope's name: Class.Method
                     AST* clsType = NULL;
                     if (childScopeNode && childScopeNode->token && childScopeNode->token->value) {
                         const char* fn = childScopeNode->token->value;
-                        const char* us = strchr(fn, '_');
-                        if (us && us != fn) {
-                            size_t len = (size_t)(us - fn);
+                        const char* dot = strchr(fn, '.');
+                        if (dot && dot != fn) {
+                            size_t len = (size_t)(dot - fn);
                             char cname[MAX_SYMBOL_LENGTH];
                             if (len >= sizeof(cname)) len = sizeof(cname) - 1;
                             memcpy(cname, fn, len);
@@ -658,9 +658,9 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                         const char* clsName = NULL;
                         if (scope && scope->token && scope->token->value) {
                             const char* fn = scope->token->value;
-                            const char* us = strchr(fn, '_');
-                            if (us) {
-                                size_t len = (size_t)(us - fn);
+                            const char* dot = strchr(fn, '.');
+                            if (dot) {
+                                size_t len = (size_t)(dot - fn);
                                 char tmp[MAX_SYMBOL_LENGTH];
                                 if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
                                 memcpy(tmp, fn, len);

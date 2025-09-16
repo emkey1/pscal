@@ -7,7 +7,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0007    | SET_GLOBAL          0 'd'
 0009    3 JUMP               24 (to 0036)
 
---- Procedure dummy_test (at 0012) ---
+--- Procedure dummy.test (at 0012) ---
 0012    4 GET_LOCAL           0 (slot)
 0014    | GET_FIELD_OFFSET    2 (index)
 0016    | GET_INDIRECT

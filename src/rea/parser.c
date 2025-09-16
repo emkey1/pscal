@@ -553,11 +553,11 @@ static AST *parseFactor(ReaParser *p) {
                 }
                 if (p->current.type == REA_TOKEN_RIGHT_PAREN) reaAdvance(p);
             }
-            // Build mangled name Parent_Method
+            // Build mangled name Parent.Method
             size_t ln = strlen(p->currentParentClassName) + 1 + strlen(mlex) + 1;
             char *mangled = (char*)malloc(ln);
             if (!mangled) { free(mlex); return NULL; }
-            snprintf(mangled, ln, "%s_%s", p->currentParentClassName, mlex);
+            snprintf(mangled, ln, "%s.%s", p->currentParentClassName, mlex);
             free(mlex);
             Token *nameTok = newToken(TOKEN_IDENTIFIER, mangled, supTok.line, 0);
             free(mangled);
@@ -834,7 +834,7 @@ static AST *parseFactor(ReaParser *p) {
                         size_t ln = strlen(cls) + 1 + strlen(nameTok->value) + 1;
                         char *m = (char*)malloc(ln);
                         if (m) {
-                            snprintf(m, ln, "%s_%s", cls, nameTok->value);
+                            snprintf(m, ln, "%s.%s", cls, nameTok->value);
                             free(nameTok->value);
                             nameTok->value = m;
                         }
@@ -1393,12 +1393,12 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     p->currentFunctionType = vtype;
     p->functionDepth++;
 
-    // If inside a class, mangle function name to ClassName_method
+    // If inside a class, mangle function name to ClassName.method
     if (p->currentClassName && nameTok && nameTok->value) {
         size_t ln = strlen(p->currentClassName) + 1 + strlen(nameTok->value) + 1;
         char *m = (char*)malloc(ln);
         if (m) {
-            snprintf(m, ln, "%s_%s", p->currentClassName, nameTok->value);
+            snprintf(m, ln, "%s.%s", p->currentClassName, nameTok->value);
             free(nameTok->value);
             nameTok->value = m;
             nameTok->length = strlen(m); // keep token length in sync with new name
@@ -1540,9 +1540,9 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
 
     // If inside a class, also add a bare-name alias so 'obj.method(...)' can resolve.
     if (p->currentClassName && sym && sym->name) {
-        const char* us2 = strchr(sym->name, '_');
+        const char* dot = strchr(sym->name, '.');
         const char* bare = NULL;
-        if (us2 && *(us2+1)) bare = us2 + 1;
+        if (dot && *(dot + 1)) bare = dot + 1;
         if (bare) {
             Symbol* alias2 = (Symbol*)malloc(sizeof(Symbol));
             if (alias2) {
@@ -1560,12 +1560,12 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
 
     // If this is a constructor (method name equals class name), add alias 'ClassName' -> real symbol
     if (p->currentClassName && nameTok && nameTok->value) {
-        const char* us = strchr(nameTok->value, '_');
-        if (us) {
-            // Check if name is ClassName_ClassName
-            size_t cls_len = (size_t)(us - nameTok->value);
+        const char* dot = strchr(nameTok->value, '.');
+        if (dot) {
+            // Check if name is ClassName.ClassName
+            size_t cls_len = (size_t)(dot - nameTok->value);
             if (strlen(p->currentClassName) == cls_len && strncasecmp(nameTok->value, p->currentClassName, cls_len) == 0) {
-                const char* after = us + 1;
+                const char* after = dot + 1;
                 if (strncasecmp(after, p->currentClassName, cls_len) == 0 && after[cls_len] == '\0') {
                     Symbol* alias = (Symbol*)malloc(sizeof(Symbol));
                     if (alias) {

@@ -7,26 +7,26 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0007    | SET_GLOBAL          0 'c'
 0009    1 JUMP                1 (to 0013)
 
---- Procedure base_base (at 0012) ---
+--- Procedure base.base (at 0012) ---
 0012    | RETURN
 0013    | JUMP                9 (to 0025)
 
---- Procedure base_speak (at 0016) ---
+--- Procedure base.speak (at 0016) ---
 0016    | CONSTANT            2 '1'
 0018    | CONSTANT            3 'base'
 0020    | CALL_BUILTIN         4 'write' (2 args)
 0024    | RETURN
 0025    2 JUMP                9 (to 0037)
 
---- Procedure child_child (at 0028) ---
+--- Procedure child.child (at 0028) ---
 0028    | GET_LOCAL           0 (slot)
-0030    | CALL             0012 (Base_Base) (1 args)
+0030    | CALL             0012 (Base.Base) (1 args)
 0036    | RETURN
 0037    | JUMP                9 (to 0049)
 
---- Procedure child_speak (at 0040) ---
+--- Procedure child.speak (at 0040) ---
 0040    | GET_LOCAL           0 (slot)
-0042    | CALL             0016 (Base_speak) (1 args)
+0042    | CALL             0016 (Base.speak) (1 args)
 0048    | RETURN
 0049    0 CONSTANT            7 'Value type ARRAY'
 0051    | DEFINE_GLOBAL    NameIdx:8   'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
@@ -57,8 +57,8 @@ Constants (13):\n  0000: STR   "c"
   0002: INT   1
   0003: STR   "base"
   0004: STR   "write"
-  0005: STR   "Base_Base"
-  0006: STR   "Base_speak"
+  0005: STR   "Base.Base"
+  0006: STR   "Base.speak"
   0007: Value type ARRAY
   0008: STR   "child_vtable"
   0009: INT   0

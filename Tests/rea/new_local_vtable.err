@@ -4,7 +4,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    1 JUMP                1 (to 0004)
 
---- Procedure mixedcase_hi (at 0003) ---
+--- Procedure mixedcase.hi (at 0003) ---
 0003    | RETURN
 0004    2 JUMP               15 (to 0022)
 
