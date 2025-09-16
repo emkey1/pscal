@@ -297,12 +297,14 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"glcolor3f", vmBuiltinGlcolor3f},
     {"gldepthtest", vmBuiltinGldepthtest},
     {"glend", vmBuiltinGlend},
+    {"glfrustum", vmBuiltinGlfrustum},
     {"glloadidentity", vmBuiltinGlloadidentity},
     {"glmatrixmode", vmBuiltinGlmatrixmode},
     {"glpopmatrix", vmBuiltinGlpopmatrix},
     {"glpushmatrix", vmBuiltinGlpushmatrix},
     {"glrotatef", vmBuiltinGlrotatef},
     {"glscalef", vmBuiltinGlscalef},
+    {"glperspective", vmBuiltinGlperspective},
     {"glsetswapinterval", vmBuiltinGlsetswapinterval},
     {"glswapwindow", vmBuiltinGlswapwindow},
     {"gltranslatef", vmBuiltinGltranslatef},
@@ -366,6 +368,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"playsound", vmBuiltinPlaysound},
     {"pollkey", vmBuiltinPollkey},
+    {"iskeydown", vmBuiltinIskeydown},
 #endif
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
@@ -3726,6 +3729,7 @@ static const char *const sdl_gl_builtin_names[] = {
     "GLColor3f",
     "GLDepthTest",
     "GLEnd",
+    "GLFrustum",
     "GLLoadIdentity",
     "GLMatrixMode",
     "GLPopMatrix",
@@ -3735,6 +3739,7 @@ static const char *const sdl_gl_builtin_names[] = {
     "GLSetSwapInterval",
     "GLSwapWindow",
     "GLTranslatef",
+    "GLPerspective",
     "GLVertex3f",
     "GLViewport",
 };
@@ -3786,6 +3791,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("IsKeyDown", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitTextSystem", AST_PROCEDURE_DECL, NULL);

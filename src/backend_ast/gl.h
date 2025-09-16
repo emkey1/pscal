@@ -23,6 +23,8 @@ Value vmBuiltinGlpopmatrix(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlpushmatrix(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlrotatef(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlscalef(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlfrustum(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlperspective(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGltranslatef(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlvertex3f(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlviewport(struct VM_s* vm, int arg_count, Value* args);

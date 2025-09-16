@@ -223,6 +223,8 @@ imported from each front end (Pascal, CLike, and Rea).
 | glpushmatrix | () | void | Push a copy of the current matrix onto the stack. |
 | glrotatef | (angle: Real, x: Real, y: Real, z: Real) | void | Apply a rotation (degrees) about the supplied axis. |
 | glscalef | (x: Real, y: Real, z: Real) | void | Apply a non-uniform scale to the current matrix. |
+| glfrustum | (left: Real, right: Real, bottom: Real, top: Real, near: Real, far: Real) | void | Configure a perspective frustum using `glFrustum`. |
+| glperspective | (fovY: Real, aspect: Real, near: Real, far: Real) | void | Convenience helper that computes a symmetric frustum from a field of view and aspect ratio. |
 | glsetswapinterval | (interval: Integer) | void | Set the OpenGL swap interval (0 disables vsync, 1 enables it). |
 | glswapwindow | () | void | Swap the OpenGL window buffers to present the rendered frame. |
 | gltranslatef | (x: Real, y: Real, z: Real) | void | Apply a translation to the current matrix. |
@@ -267,6 +269,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | getmousestate | (var x: Integer, var y: Integer, var buttons: Integer) | void | Query mouse position and buttons. |
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
+| iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |
 
 ### Basic OpenGL render loop
 
