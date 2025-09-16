@@ -699,9 +699,9 @@ static Value peek(VM* vm, int distance) { // Using your original name 'peek'
 
 // --- Host Function C Implementations ---
 static Value vmHostQuitRequested(VM* vm) {
-    // break_requested is extern int from globals.h, defined in globals.c
+    // break_requested is an atomic flag from globals.h/globals.c
     // makeBoolean is from core/utils.h
-    return makeBoolean(break_requested);
+    return makeBoolean(atomic_load(&break_requested));
 }
 
 static Value vmHostCreateThreadAddr(VM* vm) {
@@ -1319,7 +1319,7 @@ static bool builtinUsesGlobalStructures(const char* name) {
         "reset",          "rewrite",       "screenrows",    "screencols",
         "showcursor",     "textbackground", "textbackgrounde","textcolor",
         "textcolore",     "underlinetext", "window",        "wherex",
-        "wherey", "pollkey", "waitkeyevent", "graphloop", 
+        "wherey",
     };
 
     for (size_t i = 0; i < sizeof(needs_lock)/sizeof(needs_lock[0]); i++) {
