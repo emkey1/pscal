@@ -105,6 +105,7 @@ static bool compiling_global_var_init = false;
 static int global_init_new_depth = 0;
 
 static bool compiler_defined_myself_global = false;
+static int compiler_myself_global_name_idx = -1;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
@@ -146,6 +147,21 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     int index = addConstantToChunk(chunk, &val);
     // No freeValue needed for simple boolean types.
     return index;
+}
+
+static int ensureMyselfGlobalNameIndex(BytecodeChunk* chunk) {
+    if (compiler_myself_global_name_idx < 0) {
+        compiler_myself_global_name_idx = addStringConstant(chunk, "myself");
+    }
+    return compiler_myself_global_name_idx;
+}
+
+static void ensureMyselfGlobalDefined(BytecodeChunk* chunk, int line) {
+    if (compiler_defined_myself_global) return;
+    int myself_idx = ensureMyselfGlobalNameIndex(chunk);
+    emitConstant(chunk, addNilConstant(chunk), line);
+    emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, myself_idx, line);
+    compiler_defined_myself_global = true;
 }
 
 // Determine if a variable declaration node resides in the true global scope.
@@ -1761,6 +1777,9 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     compiler_had_error = false;
     current_function_compiler = NULL;
     compiler_defined_myself_global = false;
+    compiler_myself_global_name_idx = -1;
+
+    ensureMyselfGlobalDefined(outputChunk, rootNode ? getLine(rootNode) : 0);
 
     current_procedure_table = procedure_table;
 
@@ -3505,12 +3524,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             // (Argument compilation logic remains the same...)
             if (usesReceiverGlobal && node->child_count > 0) {
-                int myself_idx = addStringConstant(chunk, "myself");
-                if (!compiler_defined_myself_global) {
-                    emitConstant(chunk, addNilConstant(chunk), line);
-                    emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, myself_idx, line);
-                    compiler_defined_myself_global = true;
-                }
+                int myself_idx = ensureMyselfGlobalNameIndex(chunk);
                 AST* recv_node = node->children[0];
                 compileRValue(recv_node, chunk, getLine(recv_node));
                 emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
@@ -4505,12 +4519,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (call_arg_count < 0) call_arg_count = 0;
 
             if (usesReceiverGlobal && node->child_count > 0) {
-                int myself_idx = addStringConstant(chunk, "myself");
-                if (!compiler_defined_myself_global) {
-                    emitConstant(chunk, addNilConstant(chunk), line);
-                    emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, myself_idx, line);
-                    compiler_defined_myself_global = true;
-                }
+                int myself_idx = ensureMyselfGlobalNameIndex(chunk);
                 AST* recv_node = node->children[0];
                 compileRValue(recv_node, chunk, getLine(recv_node));
                 emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
