@@ -111,7 +111,7 @@ Rea code can call any PSCAL VM built‑in, including I/O (`writeln`, `printf`),
 string helpers, math functions, and threading primitives such as `spawn`,
 `join`, `mutex`, `lock`, and `unlock`.
 
-When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLVertex3f`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
+When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLPerspective`, `GLFrustum`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLVertex3f`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
 
 ```rea
 int main() {
@@ -154,7 +154,9 @@ int main() {
 
 The repository includes `Examples/rea/sdl_demo`, which expands this into a
 complete rotating cube rendered with per-face colors, depth testing, and periodic
-swap-interval toggling.
+swap-interval toggling. `Examples/rea/sdl_landscape` builds on the same helpers
+to generate a seeded terrain height field and lets you roam it with `IsKeyDown`
+and `GLPerspective` for a first-person view.
 
 ### **Example**
 

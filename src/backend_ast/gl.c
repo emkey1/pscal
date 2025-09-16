@@ -7,6 +7,11 @@
 #include <SDL2/SDL_opengl.h>
 #include <stdbool.h>
 #include <strings.h>
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static bool ensureGlContext(VM* vm, const char* name) {
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
@@ -283,6 +288,76 @@ Value vmBuiltinGlscalef(VM* vm, int arg_count, Value* args) {
     }
 
     glScalef(vals[0], vals[1], vals[2]);
+    return makeVoid();
+}
+
+Value vmBuiltinGlfrustum(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 6) {
+        runtimeError(vm, "GLFrustum expects 6 numeric arguments (left, right, bottom, top, near, far).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLFrustum")) return makeVoid();
+
+    double vals[6];
+    for (int i = 0; i < 6; ++i) {
+        if (!valueToDouble(args[i], &vals[i])) {
+            runtimeError(vm, "GLFrustum argument %d must be numeric.", i + 1);
+            return makeVoid();
+        }
+    }
+
+    if (vals[4] <= 0.0 || vals[5] <= 0.0 || vals[4] >= vals[5]) {
+        runtimeError(vm, "GLFrustum requires near > 0, far > 0, and far > near.");
+        return makeVoid();
+    }
+
+#ifdef GL_ES_VERSION_2_0
+    glFrustumf((GLfloat)vals[0], (GLfloat)vals[1], (GLfloat)vals[2], (GLfloat)vals[3], (GLfloat)vals[4], (GLfloat)vals[5]);
+#else
+    glFrustum(vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
+#endif
+    return makeVoid();
+}
+
+Value vmBuiltinGlperspective(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) {
+        runtimeError(vm, "GLPerspective expects 4 numeric arguments (fovY, aspect, near, far).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLPerspective")) return makeVoid();
+
+    double fovY, aspect, nearPlane, farPlane;
+    if (!valueToDouble(args[0], &fovY) || !valueToDouble(args[1], &aspect) ||
+        !valueToDouble(args[2], &nearPlane) || !valueToDouble(args[3], &farPlane)) {
+        runtimeError(vm, "GLPerspective arguments must be numeric.");
+        return makeVoid();
+    }
+
+    if (aspect == 0.0) {
+        runtimeError(vm, "GLPerspective aspect ratio cannot be zero.");
+        return makeVoid();
+    }
+    if (nearPlane <= 0.0 || farPlane <= 0.0 || nearPlane >= farPlane) {
+        runtimeError(vm, "GLPerspective requires near > 0, far > 0, and far > near.");
+        return makeVoid();
+    }
+
+    if (fovY <= 0.0 || fovY >= 180.0) {
+        runtimeError(vm, "GLPerspective fovY must be between 0 and 180 degrees.");
+        return makeVoid();
+    }
+
+    double f = tan((fovY * 0.5) * (M_PI / 180.0));
+    double top = nearPlane * f;
+    double bottom = -top;
+    double right = top * aspect;
+    double left = -right;
+
+#ifdef GL_ES_VERSION_2_0
+    glFrustumf((GLfloat)left, (GLfloat)right, (GLfloat)bottom, (GLfloat)top, (GLfloat)nearPlane, (GLfloat)farPlane);
+#else
+    glFrustum(left, right, bottom, top, nearPlane, farPlane);
+#endif
     return makeVoid();
 }
 

@@ -81,6 +81,7 @@ Value vmBuiltinRendercopyex(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetrendertarget(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPollkey(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinIskeydown(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWaitkeyevent(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args);
 
