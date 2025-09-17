@@ -3447,11 +3447,15 @@ comparison_error_label:
                     // the underlying data to prevent invalidating VAR arguments.
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
-                            // The actual Value structs are on the stack and will be overwritten,
-                            // but we need to free any heap data they point to (like strings).
-                            freeValue(&args[i]);
+                        if (args[i].type == TYPE_POINTER) {
+                            // Pointer arguments reference caller-managed memory; do not dereference here.
+                            continue;
                         }
+
+                        // Arrays are copied when arguments are evaluated, so the VM owns the
+                        // temporary buffer on the stack.  Free it now to avoid leaking large
+                        // allocations (e.g., texture pixel buffers) on every builtin call.
+                        freeValue(&args[i]);
                     }
 
                     if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
@@ -3464,9 +3468,10 @@ comparison_error_label:
                     // Cleanup stack even on error, preserving caller-owned arrays/pointers
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
-                            freeValue(&args[i]);
+                        if (args[i].type == TYPE_POINTER) {
+                            continue;
                         }
+                        freeValue(&args[i]);
                     }
                     return INTERPRET_RUNTIME_ERROR;
                 }
