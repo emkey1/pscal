@@ -3,124 +3,93 @@
 #include "clike/errors.h"
 #include "clike/builtins.h"
 #include "clike/parser.h"
+#include "backend_ast/builtin.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
+static int builtinMatches(const char *name, const char *const *candidates, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        if (strcasecmp(name, candidates[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static VarType builtinReturnType(const char* name) {
     if (!name) return TYPE_VOID;
 
-    if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
-    if (strcasecmp(name, "ord")  == 0) return TYPE_INT32;
-    if (strcasecmp(name, "byte") == 0 || strcasecmp(name, "tobyte") == 0) return TYPE_BYTE;
-
-    if (strcasecmp(name, "sqrt") == 0) return TYPE_LONG_DOUBLE;
-
-    if (strcasecmp(name, "cos")  == 0 ||
-        strcasecmp(name, "sin")  == 0 ||
-        strcasecmp(name, "tan")  == 0 ||
-        strcasecmp(name, "ln")   == 0 ||
-        strcasecmp(name, "exp")  == 0 ||
-        strcasecmp(name, "real") == 0) {
-        return TYPE_DOUBLE;
-    }
-
-    if (strcasecmp(name, "chudnovsky") == 0) return TYPE_LONG_DOUBLE;
-
-    if (strcasecmp(name, "paramcount") == 0) {
-        /* Return a wide integer to match the builtin implementation. */
-        return TYPE_INT64;
-    }
-
-    if (strcasecmp(name, "getpid") == 0) {
-        return TYPE_INT32;
-    }
-
-    if (strcasecmp(name, "round")     == 0 ||
-        strcasecmp(name, "trunc")     == 0 ||
-        strcasecmp(name, "random")    == 0 ||
-        strcasecmp(name, "ioresult")  == 0 ||
-        strcasecmp(name, "atoi")      == 0 ||
-        strcasecmp(name, "length")    == 0 ||
-        strcasecmp(name, "strlen")    == 0 ||
-        strcasecmp(name, "pos")       == 0 ||
-        strcasecmp(name, "screencols")== 0 ||
-        strcasecmp(name, "screenrows")== 0 ||
-        strcasecmp(name, "wherex")    == 0 ||
-        strcasecmp(name, "wherey")    == 0 ||
-        strcasecmp(name, "getmaxx")   == 0 ||
-        strcasecmp(name, "getmaxy")   == 0) {
-        return TYPE_INT32;
-    }
-
-    if (strcasecmp(name, "inttostr")  == 0 ||
-        strcasecmp(name, "realtostr") == 0 ||
-        strcasecmp(name, "paramstr")  == 0 ||
-        strcasecmp(name, "copy")      == 0) {
-        return TYPE_STRING;
-    }
-
-    // DOS/OS directory helpers return filenames as strings
-    if (strcasecmp(name, "findfirst") == 0 ||
-        strcasecmp(name, "findnext")  == 0 ||
-        strcasecmp(name, "dosfindfirst") == 0 ||
-        strcasecmp(name, "dosfindnext")  == 0) {
-        return TYPE_STRING;
-    }
-
-    if (strcasecmp(name, "readkey") == 0 ||
-        strcasecmp(name, "upcase")  == 0 ||
-        strcasecmp(name, "toupper")  == 0) {
+    static const char *const charFuncs[] = {
+        "chr", "readkey", "upcase", "toupper", "char", "tochar"
+    };
+    if (builtinMatches(name, charFuncs, sizeof(charFuncs) / sizeof(charFuncs[0]))) {
         return TYPE_CHAR;
     }
 
-    if (strcasecmp(name, "mstreamloadfromfile") == 0) {
+    static const char *const booleanFuncs[] = {
+        "bool", "tobool", "keypressed", "issoundplaying", "quitrequested",
+        "eof", "mstreamloadfromfile"
+    };
+    if (builtinMatches(name, booleanFuncs, sizeof(booleanFuncs) / sizeof(booleanFuncs[0]))) {
         return TYPE_BOOLEAN;
     }
 
-    if (strcasecmp(name, "createtexture") == 0 ||
-        strcasecmp(name, "createtargettexture") == 0 ||
-        strcasecmp(name, "loadimagetotexture") == 0 ||
-        strcasecmp(name, "loadsound") == 0 ||
-        strcasecmp(name, "getticks") == 0 ||
-        strcasecmp(name, "pollkey") == 0) {
-        return TYPE_INT32;
-    }
-
-    if (strcasecmp(name, "keypressed") == 0 ||
-        strcasecmp(name, "issoundplaying") == 0) {
-        return TYPE_BOOLEAN;
-    }
-
-    /* Socket / DNS helpers */
-    if (strcasecmp(name, "socketcreate") == 0 ||
-        strcasecmp(name, "socketclose") == 0 ||
-        strcasecmp(name, "socketconnect") == 0 ||
-        strcasecmp(name, "socketbind") == 0 ||
-        strcasecmp(name, "socketbindaddr") == 0 ||
-        strcasecmp(name, "socketlisten") == 0 ||
-        strcasecmp(name, "socketaccept") == 0 ||
-        strcasecmp(name, "socketsend") == 0 ||
-        strcasecmp(name, "socketsetblocking") == 0 ||
-        strcasecmp(name, "socketpoll") == 0 ||
-        strcasecmp(name, "socketlasterror") == 0) {
-        return TYPE_INT32;
-    }
-    if (strcasecmp(name, "socketreceive") == 0) {
-        return TYPE_MEMORYSTREAM;
-    }
-    if (strcasecmp(name, "dnslookup") == 0) {
+    static const char *const stringFuncs[] = {
+        "inttostr", "realtostr", "paramstr", "copy", "getenv", "dosgetenv",
+        "findfirst", "findnext", "dosfindfirst", "dosfindnext", "mstreambuffer",
+        "dnslookup", "apireceive", "jsonget", "httpgetheader",
+        "httpgetlastheaders", "httplasterror"
+    };
+    if (builtinMatches(name, stringFuncs, sizeof(stringFuncs) / sizeof(stringFuncs[0]))) {
         return TYPE_STRING;
     }
-    if (strcasecmp(name, "fopen") == 0) {
+
+    static const char *const memoryStreamFuncs[] = {
+        "apisend", "socketreceive", "mstreamcreate"
+    };
+    if (builtinMatches(name, memoryStreamFuncs, sizeof(memoryStreamFuncs) / sizeof(memoryStreamFuncs[0]))) {
+        return TYPE_MEMORYSTREAM;
+    }
+
+    static const char *const pointerFuncs[] = { "newobj" };
+    if (builtinMatches(name, pointerFuncs, sizeof(pointerFuncs) / sizeof(pointerFuncs[0]))) {
+        return TYPE_POINTER;
+    }
+
+    static const char *const fileFuncs[] = { "fopen" };
+    if (builtinMatches(name, fileFuncs, sizeof(fileFuncs) / sizeof(fileFuncs[0]))) {
         return TYPE_FILE;
     }
-    if (strcasecmp(name, "fprintf") == 0) {
-        return TYPE_INT32;
+
+    static const char *const byteFuncs[] = { "byte", "tobyte" };
+    if (builtinMatches(name, byteFuncs, sizeof(byteFuncs) / sizeof(byteFuncs[0]))) {
+        return TYPE_BYTE;
     }
-    if (strcasecmp(name, "fclose") == 0) {
-        return TYPE_VOID;
+
+    static const char *const floatFuncs[] = { "float", "tofloat" };
+    if (builtinMatches(name, floatFuncs, sizeof(floatFuncs) / sizeof(floatFuncs[0]))) {
+        return TYPE_FLOAT;
+    }
+
+    static const char *const doubleFuncs[] = {
+        "cos", "sin", "tan", "ln", "exp", "real", "cosh", "sinh", "tanh",
+        "cotan", "arccos", "arcsin", "arctan", "double", "todouble"
+    };
+    if (builtinMatches(name, doubleFuncs, sizeof(doubleFuncs) / sizeof(doubleFuncs[0]))) {
+        return TYPE_DOUBLE;
+    }
+
+    static const char *const longDoubleFuncs[] = { "sqrt", "chudnovsky" };
+    if (builtinMatches(name, longDoubleFuncs, sizeof(longDoubleFuncs) / sizeof(longDoubleFuncs[0]))) {
+        return TYPE_LONG_DOUBLE;
+    }
+
+    static const char *const int64Funcs[] = { "paramcount" };
+    if (builtinMatches(name, int64Funcs, sizeof(int64Funcs) / sizeof(int64Funcs[0]))) {
+        /* Return a wide integer to match the builtin implementation. */
+        return TYPE_INT64;
     }
 
     return TYPE_VOID;
@@ -504,10 +473,15 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             }
 
             VarType t = getFunctionType(name);
+            BuiltinRoutineType builtinKind = BUILTIN_TYPE_NONE;
             if (t == TYPE_UNKNOWN) {
                 int bid = clikeGetBuiltinID(name);
                 if (bid != -1) {
                     t = builtinReturnType(name);
+                    builtinKind = getBuiltinType(name);
+                    if ((t == TYPE_VOID || t == TYPE_UNKNOWN) && builtinKind == BUILTIN_TYPE_FUNCTION) {
+                        t = TYPE_INT32;
+                    }
                 } else {
                     // Known VM builtins not in clike's local map (HTTP helpers):
                     if (strcasecmp(name, "httpsession") == 0 || strcasecmp(name, "httprequest") == 0) {
