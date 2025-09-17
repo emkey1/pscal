@@ -8,7 +8,7 @@ const int Width = 1200;
 const int Height = 900;
 const int MaxIterations = 200;
 const int BytesPerPixel = 4;
-const int ScreenUpdateInterval = 16;
+const int ScreenUpdateInterval = 1; /* update every row for responsiveness */
 const double ZoomFactor = 2.0;
 const int ThreadCount = 4;
 const int ButtonLeft = 1;
@@ -210,26 +210,23 @@ int main() {
 
             y = 0;
             while (y < Height && !getQuit()) {
-                int done, update;
+                int done = 0;
+                int update = 0;
                 lock(rowMutex);
-                done = rowDone[y];
-                /*
-                 * "done" is stored as an integer in rowDone[y].  The logical
-                 * operators in CLike require both operands to be of the same
-                 * type (either both integers or both booleans).  The expression
-                 * on the right-hand side produces a boolean result, so we
-                 * explicitly compare "done" against zero to convert it to a
-                 * boolean before using the && operator.  This avoids a runtime
-                 * type error when mixing INTEGER and BOOLEAN values.
-                 */
-                update = ((done != 0) && (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1)) ? 1 : 0;
-                if (update)
-                    updatetexture(textureID, pixelData);
-                if (done)
-                    y++;
+                if (rowDone[y]) {
+                    done = 1;
+                    if (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1) {
+                        update = 1;
+                    }
+                }
                 unlock(rowMutex);
 
+                if (done)
+                    y++;
+
                 if (update) {
+                    /* Upload pixels after releasing rowMutex so worker threads stay busy. */
+                    updatetexture(textureID, pixelData);
                     cleardevice();
                     rendercopy(textureID);
                     updatescreen();
