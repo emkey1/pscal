@@ -496,10 +496,6 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
-/* Weak hook that external modules can override to register additional
- * built-ins.  The default implementation does nothing. */
-__attribute__((weak)) void registerExtendedBuiltins(void) {}
-
 // This function now comes AFTER the table and comparison function it uses.
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
     if (!name) return NULL;

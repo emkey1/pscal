@@ -530,6 +530,7 @@ set(JSON2BC_SOURCES
     src/vm/vm.c
     src/Pascal/globals.c
 )
+list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 add_executable(pscaljson2bc ${JSON2BC_SOURCES})
 if(TARGET CURL::libcurl)
     target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)
