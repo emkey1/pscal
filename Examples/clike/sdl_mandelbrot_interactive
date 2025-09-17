@@ -155,6 +155,8 @@ int main() {
     int textReady;
     const int fontSize = 18;
     str envFontPath;
+    double reStep, imStep, centerRe, centerIm, zoomScale, newWidth, newHeight;
+    int keyCode;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
@@ -232,8 +234,8 @@ int main() {
                     updatescreen();
                 }
                 if (keypressed()) {
-                    char c = readkey();
-                    if (toupper(c) == 'Q') setQuit(1);
+                    keyCode = readkey();
+                    if (toupper(keyCode) == 'Q') setQuit(1);
                 }
                 if (!done || update)
                     pollMouse();
@@ -281,15 +283,15 @@ int main() {
 
         if (clickButton == ButtonLeft || clickButton == ButtonRight) {
             /* Map pixel -> complex plane using current ranges (center of pixel). */
-            double reStep = (maxRe - minRe) / (Width - 1);
-            double imStep = (maxIm - minIm) / (Height - 1);
-            double centerRe = minRe + (clickX + 0.5) * reStep;
-            double centerIm = maxIm - (clickY + 0.5) * imStep;
-            double zoomScale = (clickButton == ButtonLeft)
-                                   ? (1.0 / ZoomFactor)
-                                   : ZoomFactor;
-            double newWidth = (maxRe - minRe) * zoomScale;
-            double newHeight = (maxIm - minIm) * zoomScale;
+            reStep = (maxRe - minRe) / (Width - 1);
+            imStep = (maxIm - minIm) / (Height - 1);
+            centerRe = minRe + (clickX + 0.5) * reStep;
+            centerIm = maxIm - (clickY + 0.5) * imStep;
+            zoomScale = (clickButton == ButtonLeft)
+                           ? (1.0 / ZoomFactor)
+                           : ZoomFactor;
+            newWidth = (maxRe - minRe) * zoomScale;
+            newHeight = (maxIm - minIm) * zoomScale;
 
             printf("DBG zoom: button=%s click=(%d,%d) reStep=%0.9f imStep=%0.9f\n",
                    (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY,
