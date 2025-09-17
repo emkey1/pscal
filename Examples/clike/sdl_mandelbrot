@@ -4,13 +4,19 @@
  * Press Q in the console to quit after rendering.
  */
 
+const int WindowWidth = 1024;
+const int WindowHeight = 768;
+const int MaxIterations = 128;
+const float MinRe = -2.0;
+const float MaxRe = 1.0;
+const int ScreenUpdateInterval = 1;
+const int MandelBytesPerPixel = 4;
+const int FontSize = 18;
+
+byte pixelData[WindowWidth * WindowHeight * MandelBytesPerPixel];
+
 int main() {
 #ifdef SDL_ENABLED
-    int WindowWidth;
-    int WindowHeight;
-    int MaxIterations;
-    float MinRe;
-    float MaxRe;
     float MinIm;
     float MaxIm;
     float ImRange;
@@ -31,28 +37,15 @@ int main() {
     int G;
     int B;
     int quit;
-    int ScreenUpdateInterval;
-    int MandelBytesPerPixel;
     int textureID;
     int bufferBaseIdx;
-    int FontSize;
     int TextReady;
     str systemFontPath;
     str repoFontPath1;
     str repoFontPath2;
-    byte pixelData[1024 * 768 * 4];
 
-    WindowWidth = 1024;
-    WindowHeight = 768;
-    MaxIterations = 128;
-    MinRe = -2.0;
-    MaxRe = 1.0;
-
-    ScreenUpdateInterval = 1;
-    MandelBytesPerPixel = 4;
-    FontSize = 18;
     TextReady = 0;
-    systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    systemFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
     repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
     repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
 

@@ -103,7 +103,7 @@ int main() {
     printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
     textReady = 0;
-    systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    systemFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
     repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
     repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
     if (fileexists(systemFontPath)) {
