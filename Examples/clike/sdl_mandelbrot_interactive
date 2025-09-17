@@ -55,7 +55,12 @@ void setQuit(int v) {
 }
 
 int tryInitFont(str path, int fontSize) {
-    if (path == NULL) return 0;
+    /*
+     * getenv() in the VM returns an empty string when the variable is not
+     * present.  Comparing the string directly against NULL triggers a runtime
+     * type error because strings cannot be compared with NIL in CLike.  Treat
+     * an empty string as "not available" instead.
+     */
     if (strlen(path) == 0) return 0;
     if (!fileexists(path)) return 0;
     inittextsystem(path, fontSize);
