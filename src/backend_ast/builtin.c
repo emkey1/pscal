@@ -40,6 +40,62 @@ static _Thread_local unsigned int rand_seed = 1;
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
 
+#ifndef SDL
+static Value sdlStubVoidBuiltin(VM* vm, int arg_count, Value* args, const char* name) {
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm,
+                 "The built-in '%s' requires SDL support. Reconfigure CMake with -DSDL=ON to enable graphics features.",
+                 name);
+    return makeVoid();
+}
+
+static Value sdlStubIntBuiltin(VM* vm, int arg_count, Value* args, const char* name) {
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm,
+                 "The built-in '%s' requires SDL support. Reconfigure CMake with -DSDL=ON to enable graphics features.",
+                 name);
+    return makeInt(0);
+}
+
+static Value vmBuiltinCleardevice(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "cleardevice");
+}
+
+static Value vmBuiltinClosegraph(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "closegraph");
+}
+
+static Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "fillcircle");
+}
+
+static Value vmBuiltinGetmaxx(VM* vm, int arg_count, Value* args) {
+    return sdlStubIntBuiltin(vm, arg_count, args, "getmaxx");
+}
+
+static Value vmBuiltinGetmaxy(VM* vm, int arg_count, Value* args) {
+    return sdlStubIntBuiltin(vm, arg_count, args, "getmaxy");
+}
+
+static Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "graphloop");
+}
+
+static Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "initgraph");
+}
+
+static Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "setrgbcolor");
+}
+
+static Value vmBuiltinUpdatescreen(VM* vm, int arg_count, Value* args) {
+    return sdlStubVoidBuiltin(vm, arg_count, args, "updatescreen");
+}
+#endif
+
 // ---- CLike-style conversion helpers (Phase 1) ----
 static Value vmBuiltinToInt(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
@@ -218,15 +274,11 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"ceil", vmBuiltinCeil},
     {"char", vmBuiltinToChar},
     {"chr", vmBuiltinChr},
-#ifdef SDL
     {"cleardevice", vmBuiltinCleardevice},
-#endif
     {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
-#ifdef SDL
     {"closegraph", vmBuiltinClosegraph},
-#endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
     {"cosh", vmBuiltinCosh},
@@ -266,8 +318,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
-#ifdef SDL
     {"fillcircle", vmBuiltinFillcircle},
+#ifdef SDL
     {"fillrect", vmBuiltinFillrect},
 #endif
     {"findfirst", vmBuiltinDosFindfirst},
@@ -281,27 +333,23 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"getenv", vmBuiltinGetenv},
     {"getenvint", vmBuiltinGetenvint},
     {"getfattr", vmBuiltinDosGetfattr},
-#ifdef SDL
     {"getmaxx", vmBuiltinGetmaxx},
     {"getmaxy", vmBuiltinGetmaxy},
+#ifdef SDL
     {"getmousestate", vmBuiltinGetmousestate},
     {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
 #endif
     {"gettime", vmBuiltinDosGettime},
-#ifdef SDL
     {"graphloop", vmBuiltinGraphloop},
-#endif
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
     {"hidecursor", vmBuiltinHidecursor},
     {"high", vmBuiltinHigh},
     {"highvideo", vmBuiltinHighvideo},
     {"inc", vmBuiltinInc},
-#ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
-#endif
 #ifdef SDL
     {"initsoundsystem", vmBuiltinInitsoundsystem},
     {"inittextsystem", vmBuiltinInittextsystem},
@@ -390,9 +438,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"setcolor", vmBuiltinSetcolor}, // Moved
     {"setrendertarget", vmBuiltinSetrendertarget}, // Moved
 #endif
-#ifdef SDL
     {"setrgbcolor", vmBuiltinSetrgbcolor},
-#endif
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sinh", vmBuiltinSinh},
@@ -422,8 +468,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
     {"toupper", vmBuiltinUpcase},
-#ifdef SDL
     {"updatescreen", vmBuiltinUpdatescreen},
+#ifdef SDL
     {"updatetexture", vmBuiltinUpdatetexture},
 #endif
     {"val", vmBuiltinVal},
