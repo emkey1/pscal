@@ -85,7 +85,7 @@ int highvideo();
 int inc();
 int initgraph();
 int initsoundsystem();
-int inittextsystem();
+int inittextsystem(str fontPath, int fontSize);
 int insline();
 int inttostr();
 int invertcolors();

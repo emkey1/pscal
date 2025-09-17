@@ -94,10 +94,30 @@ void waitForQuit() {
 int main() {
 #ifdef SDL_ENABLED
     int i, startY, endY, rowsPerThread, extra, tid[5], y, quit;
+    int textReady;
+    const int fontSize = 18;
+    str systemFontPath;
+    str repoFontPath1;
+    str repoFontPath2;
 
     printf("Calculating Mandelbrot set with threads. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Threaded Mandelbrot (mandelbrotrow)");
-    inittextsystem();
+    textReady = 0;
+    systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+    repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+    if (fileexists(systemFontPath)) {
+        inittextsystem(systemFontPath, fontSize);
+        textReady = 1;
+    } else if (fileexists(repoFontPath1)) {
+        inittextsystem(repoFontPath1, fontSize);
+        textReady = 1;
+    } else if (fileexists(repoFontPath2)) {
+        inittextsystem(repoFontPath2, fontSize);
+        textReady = 1;
+    } else {
+        printf("Warning: Unable to locate Roboto font. Text rendering disabled.\n");
+    }
     textureID = createtexture(WindowWidth, WindowHeight);
     if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
     cleardevice(); updatescreen();
@@ -137,7 +157,9 @@ int main() {
                 updatetexture(textureID, pixelData);
                 cleardevice();
                 rendercopy(textureID);
-                outtextxy(8, 8, "Rendering...");
+                if (textReady) {
+                    outtextxy(8, 8, "Rendering...");
+                }
                 updatescreen();
                 graphloop(0);
             }
@@ -155,7 +177,11 @@ int main() {
         graphloop(16);
 
     join tid[4];
-    destroytexture(textureID); quittextsystem(); closegraph();
+    destroytexture(textureID);
+    if (textReady) {
+        quittextsystem();
+    }
+    closegraph();
     return 0;
 #else
     printf("SDL support not enabled.\n");
