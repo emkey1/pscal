@@ -280,29 +280,29 @@ int main() {
         }
 
         if (clickButton == ButtonLeft || clickButton == ButtonRight) {
-            /* Map pixel -> complex plane using current factors (center of pixel) */
-            double centerRe = minRe + (clickX + 0.5) * reFactor;
-            double centerIm = maxIm - (clickY + 0.5) * imFactor;
-            double widthRe  = (maxRe - minRe);
-            double heightIm = (maxIm - minIm);
+            /* Map pixel -> complex plane using current ranges (center of pixel). */
+            double reStep = (maxRe - minRe) / (Width - 1);
+            double imStep = (maxIm - minIm) / (Height - 1);
+            double centerRe = minRe + (clickX + 0.5) * reStep;
+            double centerIm = maxIm - (clickY + 0.5) * imStep;
+            double zoomScale = (clickButton == ButtonLeft)
+                                   ? (1.0 / ZoomFactor)
+                                   : ZoomFactor;
+            double newWidth = (maxRe - minRe) * zoomScale;
+            double newHeight = (maxIm - minIm) * zoomScale;
 
-            printf("DBG zoom: button=%s click=(%d,%d) reFactor=%0.9f imFactor=%0.9f\n",
-                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY, reFactor, imFactor);
+            printf("DBG zoom: button=%s click=(%d,%d) reStep=%0.9f imStep=%0.9f\n",
+                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY,
+                   reStep, imStep);
             printf("DBG zoom: before minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
                    minRe, maxRe, minIm, maxIm);
-            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f widthRe=%0.9f heightIm=%0.9f\n",
-                   centerRe, centerIm, widthRe, heightIm);
+            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f newWidth=%0.9f newHeight=%0.9f scale=%0.9f\n",
+                   centerRe, centerIm, newWidth, newHeight, zoomScale);
 
-            if (clickButton == ButtonLeft) {
-                widthRe  /= ZoomFactor;
-                heightIm /= ZoomFactor;
-            } else {
-                widthRe  *= ZoomFactor;
-                heightIm *= ZoomFactor;
-            }
-            minRe = centerRe - widthRe / 2.0;
-            maxRe = centerRe + widthRe / 2.0;
-            minIm = centerIm - heightIm / 2.0;
+            minRe = centerRe - newWidth / 2.0;
+            maxRe = centerRe + newWidth / 2.0;
+            minIm = centerIm - newHeight / 2.0;
+            maxIm = centerIm + newHeight / 2.0;
             printf("DBG zoom: after  minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
                    minRe, maxRe, minIm, maxIm);
 
