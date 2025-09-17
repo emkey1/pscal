@@ -105,7 +105,7 @@ int inc();
 int initgraph();
 int initgraph3d();
 int initsoundsystem();
-int inittextsystem();
+int inittextsystem(str fontPath, int fontSize);
 int insline();
 int inttostr();
 int invertcolors();

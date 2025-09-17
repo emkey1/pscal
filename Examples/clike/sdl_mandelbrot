@@ -35,6 +35,11 @@ int main() {
     int MandelBytesPerPixel;
     int textureID;
     int bufferBaseIdx;
+    int FontSize;
+    int TextReady;
+    str systemFontPath;
+    str repoFontPath1;
+    str repoFontPath2;
     byte pixelData[1024 * 768 * 4];
 
     WindowWidth = 1024;
@@ -45,10 +50,26 @@ int main() {
 
     ScreenUpdateInterval = 1;
     MandelBytesPerPixel = 4;
+    FontSize = 18;
+    TextReady = 0;
+    systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+    repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(WindowWidth, WindowHeight, "Mandelbrot in CLike (No Acceleration)");
-    inittextsystem();
+    if (fileexists(systemFontPath)) {
+        inittextsystem(systemFontPath, FontSize);
+        TextReady = 1;
+    } else if (fileexists(repoFontPath1)) {
+        inittextsystem(repoFontPath1, FontSize);
+        TextReady = 1;
+    } else if (fileexists(repoFontPath2)) {
+        inittextsystem(repoFontPath2, FontSize);
+        TextReady = 1;
+    } else {
+        printf("Warning: Unable to locate Roboto font. Text rendering disabled.\n");
+    }
     textureID = createtexture(WindowWidth, WindowHeight);
     if (textureID < 0) {
         printf("Error: unable to create texture.\n");
@@ -104,7 +125,9 @@ int main() {
             updatetexture(textureID, pixelData);
             cleardevice();
             rendercopy(textureID);
-            outtextxy(8, 8, "Rendering...");
+            if (TextReady) {
+                outtextxy(8, 8, "Rendering...");
+            }
             updatescreen();
             graphloop(0);
         }
@@ -128,7 +151,9 @@ int main() {
         graphloop(16);
     }
     destroytexture(textureID);
-    quittextsystem();
+    if (TextReady) {
+        quittextsystem();
+    }
     closegraph();
     return 0;
 #else
