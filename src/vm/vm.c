@@ -104,6 +104,7 @@ static void* threadStart(void* arg) {
     frame->return_address = NULL;
     frame->slots = vm->stack;
     frame->function_symbol = proc_symbol;
+    frame->slotCount = 0;
     frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
     frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
     frame->upvalues = NULL;
@@ -122,6 +123,7 @@ static void* threadStart(void* arg) {
     // If the callee expects parameters, push the provided start_arg as the first argument.
     // Push up to the number of expected parameters; coerce basic types as needed.
     int expected = proc_symbol && proc_symbol->type_def ? proc_symbol->type_def->child_count : argc;
+    int pushed_args = 0;
     for (int i = 0; i < expected && i < argc && i < 8; i++) {
         Value v = local_args[i];
         if (proc_symbol && proc_symbol->type_def) {
@@ -135,10 +137,17 @@ static void* threadStart(void* arg) {
             }
         }
         push(vm, v);
+        pushed_args++;
     }
 
     for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
         push(vm, makeNil());
+    }
+
+    if (proc_symbol) {
+        frame->slotCount = (uint16_t)(pushed_args + proc_symbol->locals_count);
+    } else {
+        frame->slotCount = (uint16_t)pushed_args;
     }
 
     interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
@@ -1060,6 +1069,7 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
 
     vm->ip = currentFrame->return_address;
     vm->stackTop = currentFrame->slots;
+    currentFrame->slotCount = 0;
 
     if (currentFrame->upvalues) {
         free(currentFrame->upvalues);
@@ -1374,6 +1384,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         baseFrame->return_address = NULL;
         baseFrame->slots = vm->stack;
         baseFrame->function_symbol = NULL;
+        baseFrame->slotCount = 0;
         baseFrame->locals_count = 0;
         baseFrame->upvalue_count = 0;
         baseFrame->upvalues = NULL;
@@ -1747,9 +1758,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case GET_LOCAL_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                size_t frame_window = (size_t)(vm->stackTop - frame->slots); // args + locals
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
                 if (slot >= frame_window) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makePointer(&frame->slots[slot], NULL));
@@ -2933,9 +2947,12 @@ comparison_error_label:
             case GET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
                 if (slot >= frame_window) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makeCopyOfValue(&frame->slots[slot]));
@@ -2944,9 +2961,12 @@ comparison_error_label:
             case SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
                 if (slot >= frame_window) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value* target_slot = &frame->slots[slot];
@@ -3505,6 +3525,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
 
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
@@ -3566,6 +3587,8 @@ comparison_error_label:
                     push(vm, makeNil());
                 }
 
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
@@ -3595,6 +3618,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
 
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
@@ -3655,6 +3679,8 @@ comparison_error_label:
                     push(vm, makeNil());
                 }
 
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
@@ -3704,6 +3730,7 @@ comparison_error_label:
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity - 1;
                 frame->vtable = vtable_arr;
+                frame->slotCount = 0;
 
                 Symbol* method_symbol = NULL;
                 const char* className = NULL;
@@ -3770,6 +3797,8 @@ comparison_error_label:
                     push(vm, makeNil());
                 }
 
+                frame->slotCount = (uint16_t)(declared_arity + 1 + method_symbol->locals_count);
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
@@ -3800,6 +3829,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
 
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
@@ -3857,6 +3887,8 @@ comparison_error_label:
                 for (int i = 0; i < proc_symbol->locals_count; i++) {
                     push(vm, makeNil());
                 }
+
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
 
                 vm->ip = vm->chunk->code + target_address;
 
