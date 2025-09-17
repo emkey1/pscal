@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <curl/curl.h>
 #include <pthread.h>
 #ifdef _WIN32
@@ -75,6 +76,309 @@ static void sleep_ms(long ms) {
 #else
     usleep(ms * 1000);
 #endif
+}
+
+typedef struct DataUrlPayload_s {
+    unsigned char* data;
+    size_t length;
+    char* content_type;
+} DataUrlPayload;
+
+static void dataUrlPayloadFree(DataUrlPayload* payload) {
+    if (!payload) return;
+    if (payload->data) {
+        free(payload->data);
+        payload->data = NULL;
+    }
+    if (payload->content_type) {
+        free(payload->content_type);
+        payload->content_type = NULL;
+    }
+    payload->length = 0;
+}
+
+static int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = (char)tolower((unsigned char)c);
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static int decodePercentEncoded(const char* input, size_t len, unsigned char** out, size_t* out_len) {
+    if (!out || !out_len) return -1;
+    *out = NULL;
+    *out_len = 0;
+    size_t capacity = len + 1;
+    if (capacity == 0) capacity = 1;
+    unsigned char* buffer = (unsigned char*)malloc(capacity);
+    if (!buffer) return -1;
+    size_t pos = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        if (c == '%') {
+            if (i + 2 >= len) {
+                free(buffer);
+                return -2;
+            }
+            int hi = hexValue(input[i + 1]);
+            int lo = hexValue(input[i + 2]);
+            if (hi < 0 || lo < 0) {
+                free(buffer);
+                return -2;
+            }
+            buffer[pos++] = (unsigned char)((hi << 4) | lo);
+            i += 2;
+        } else {
+            buffer[pos++] = c;
+        }
+    }
+    buffer[pos] = '\0';
+    *out = buffer;
+    *out_len = pos;
+    return 0;
+}
+
+static int base64Value(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+' || c == '-') return 62;
+    if (c == '/' || c == '_') return 63;
+    return -1;
+}
+
+static int base64DecodeBuffer(const char* input, size_t len, unsigned char** out, size_t* out_len) {
+    if (!out || !out_len) return -1;
+    *out = NULL;
+    *out_len = 0;
+    char* clean = (char*)malloc(len + 1);
+    if (!clean) return -1;
+    size_t clean_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        if (c == '\r' || c == '\n' || c == '\t' || c == ' ') continue;
+        clean[clean_len++] = (char)c;
+    }
+    clean[clean_len] = '\0';
+    if (clean_len == 0) {
+        unsigned char* buffer = (unsigned char*)malloc(1);
+        if (!buffer) {
+            free(clean);
+            return -1;
+        }
+        buffer[0] = '\0';
+        *out = buffer;
+        *out_len = 0;
+        free(clean);
+        return 0;
+    }
+    if (clean_len % 4 != 0) {
+        free(clean);
+        return -2;
+    }
+    size_t out_cap = ((clean_len + 3) / 4) * 3 + 1;
+    unsigned char* buffer = (unsigned char*)malloc(out_cap);
+    if (!buffer) {
+        free(clean);
+        return -1;
+    }
+    size_t pos = 0;
+    for (size_t i = 0; i < clean_len; i += 4) {
+        char c0 = clean[i];
+        char c1 = clean[i + 1];
+        char c2 = clean[i + 2];
+        char c3 = clean[i + 3];
+        int v0 = base64Value(c0);
+        int v1 = base64Value(c1);
+        if (v0 < 0 || v1 < 0) {
+            free(buffer);
+            free(clean);
+            return -3;
+        }
+        int v2 = (c2 == '=') ? -2 : base64Value(c2);
+        int v3 = (c3 == '=') ? -2 : base64Value(c3);
+        if ((v2 < 0 && v2 != -2) || (v3 < 0 && v3 != -2)) {
+            free(buffer);
+            free(clean);
+            return -3;
+        }
+        buffer[pos++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+        if (v2 == -2) {
+            if (v3 != -2 || i + 4 != clean_len) {
+                free(buffer);
+                free(clean);
+                return -3;
+            }
+            break;
+        }
+        buffer[pos++] = (unsigned char)(((v1 & 0xF) << 4) | (v2 >> 2));
+        if (v3 == -2) {
+            if (i + 4 != clean_len) {
+                free(buffer);
+                free(clean);
+                return -3;
+            }
+            break;
+        }
+        buffer[pos++] = (unsigned char)(((v2 & 0x3) << 6) | v3);
+    }
+    buffer[pos] = '\0';
+    *out = buffer;
+    *out_len = pos;
+    free(clean);
+    return 0;
+}
+
+static int parseDataUrl(const char* url, DataUrlPayload* payload, char** err_out) {
+    if (!payload) return -1;
+    if (err_out) *err_out = NULL;
+    payload->data = NULL;
+    payload->length = 0;
+    payload->content_type = NULL;
+    if (!url) {
+        if (err_out) *err_out = strdup("invalid data URL");
+        return -1;
+    }
+    if (strncasecmp(url, "data:", 5) != 0) {
+        if (err_out) *err_out = strdup("invalid data URL");
+        return -1;
+    }
+    const char* comma = strchr(url + 5, ',');
+    if (!comma) {
+        if (err_out) *err_out = strdup("invalid data URL (missing comma)");
+        return -1;
+    }
+    size_t meta_len = (size_t)(comma - (url + 5));
+    size_t data_len = strlen(comma + 1);
+    char* metadata = NULL;
+    if (meta_len > 0) {
+        metadata = (char*)malloc(meta_len + 1);
+        if (!metadata) {
+            if (err_out) *err_out = strdup("out of memory");
+            return -1;
+        }
+        memcpy(metadata, url + 5, meta_len);
+        metadata[meta_len] = '\0';
+    }
+
+    int base64_flag = 0;
+    char* content_type_buf = NULL;
+    int mediatype_set = 0;
+    if (metadata) {
+        char* cursor = metadata;
+        while (1) {
+            char* next = strchr(cursor, ';');
+            if (next) *next = '\0';
+            if (*cursor) {
+                if (strcasecmp(cursor, "base64") == 0) {
+                    base64_flag = 1;
+                } else if (!mediatype_set && strchr(cursor, '/')) {
+                    size_t token_len = strlen(cursor);
+                    content_type_buf = (char*)malloc(token_len + 1);
+                    if (!content_type_buf) {
+                        if (err_out) *err_out = strdup("out of memory");
+                        free(metadata);
+                        return -1;
+                    }
+                    memcpy(content_type_buf, cursor, token_len + 1);
+                    mediatype_set = 1;
+                } else {
+                    if (!mediatype_set) {
+                        const char* def_media = "text/plain";
+                        size_t def_len = strlen(def_media);
+                        content_type_buf = (char*)malloc(def_len + 1);
+                        if (!content_type_buf) {
+                            if (err_out) *err_out = strdup("out of memory");
+                            free(metadata);
+                            return -1;
+                        }
+                        memcpy(content_type_buf, def_media, def_len + 1);
+                        mediatype_set = 1;
+                    }
+                    size_t old_len = strlen(content_type_buf);
+                    size_t token_len = strlen(cursor);
+                    char* newbuf = (char*)realloc(content_type_buf, old_len + 1 + token_len + 1);
+                    if (!newbuf) {
+                        if (err_out) *err_out = strdup("out of memory");
+                        free(metadata);
+                        free(content_type_buf);
+                        return -1;
+                    }
+                    newbuf[old_len] = ';';
+                    memcpy(newbuf + old_len + 1, cursor, token_len + 1);
+                    content_type_buf = newbuf;
+                }
+            }
+            if (!next) break;
+            cursor = next + 1;
+        }
+    }
+    if (!mediatype_set) {
+        const char* def_ct = "text/plain;charset=US-ASCII";
+        content_type_buf = strdup(def_ct);
+        if (!content_type_buf) {
+            if (err_out) *err_out = strdup("out of memory");
+            if (metadata) free(metadata);
+            return -1;
+        }
+        mediatype_set = 1;
+    }
+
+    unsigned char* percent_buf = NULL;
+    size_t percent_len = 0;
+    unsigned char* final_buf = NULL;
+    size_t final_len = 0;
+    int rc;
+    const char* data_part = comma + 1;
+
+    if (base64_flag) {
+        rc = decodePercentEncoded(data_part, data_len, &percent_buf, &percent_len);
+        if (rc == -1) {
+            if (err_out) *err_out = strdup("out of memory");
+            goto fail;
+        } else if (rc != 0) {
+            if (err_out) *err_out = strdup("invalid percent-encoding in data URL");
+            goto fail;
+        }
+        rc = base64DecodeBuffer((const char*)percent_buf, percent_len, &final_buf, &final_len);
+        if (rc == -1) {
+            if (err_out) *err_out = strdup("out of memory");
+            goto fail;
+        } else if (rc != 0) {
+            if (err_out) *err_out = strdup("invalid base64 content in data URL");
+            goto fail;
+        }
+    } else {
+        rc = decodePercentEncoded(data_part, data_len, &final_buf, &final_len);
+        if (rc == -1) {
+            if (err_out) *err_out = strdup("out of memory");
+            goto fail;
+        } else if (rc != 0) {
+            if (err_out) *err_out = strdup("invalid percent-encoding in data URL");
+            goto fail;
+        }
+    }
+
+    if (percent_buf) {
+        free(percent_buf);
+        percent_buf = NULL;
+    }
+
+    payload->data = final_buf;
+    payload->length = final_len;
+    payload->content_type = content_type_buf;
+    if (metadata) free(metadata);
+    return 0;
+
+fail:
+    if (metadata) free(metadata);
+    if (content_type_buf) free(content_type_buf);
+    if (percent_buf) free(percent_buf);
+    if (final_buf) free(final_buf);
+    if (err_out && !*err_out) {
+        *err_out = strdup("invalid data URL");
+    }
+    return -1;
 }
 
 /* Callback for libcurl: writes received data into a MStream */
@@ -552,6 +856,83 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         s->last_status = 200;
         return makeInt(200);
     }
+    else if (url && strncasecmp(url, "data:", 5) == 0) {
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        s->last_error_code = 0;
+
+        DataUrlPayload payload = {0};
+        char* err_msg = NULL;
+        if (parseDataUrl(url, &payload, &err_msg) != 0) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = err_msg ? err_msg : strdup("invalid data URL");
+            if (!s->last_error_msg) s->last_error_msg = strdup("invalid data URL");
+            runtimeError(vm, "httpRequest: %s", s->last_error_msg ? s->last_error_msg : "invalid data URL");
+            dataUrlPayloadFree(&payload);
+            return makeInt(-1);
+        }
+
+        size_t required = payload.length + 1;
+        if (required == 0) required = 1;
+        if (args[4].mstream->capacity < (int)required || !args[4].mstream->buffer) {
+            unsigned char* newbuf = (unsigned char*)realloc(args[4].mstream->buffer, required);
+            if (!newbuf) {
+                dataUrlPayloadFree(&payload);
+                if (err_msg) free(err_msg);
+                s->last_error_code = 2;
+                s->last_error_msg = strdup("out of memory");
+                runtimeError(vm, "httpRequest: out of memory handling data URL");
+                return makeInt(-1);
+            }
+            args[4].mstream->buffer = newbuf;
+            args[4].mstream->capacity = (int)required;
+        }
+        if (!args[4].mstream->buffer) {
+            dataUrlPayloadFree(&payload);
+            if (err_msg) free(err_msg);
+            s->last_error_code = 2;
+            s->last_error_msg = strdup("out of memory");
+            runtimeError(vm, "httpRequest: out of memory handling data URL");
+            return makeInt(-1);
+        }
+
+        if (payload.length > 0) {
+            memcpy(args[4].mstream->buffer, payload.data, payload.length);
+        }
+        args[4].mstream->size = (int)payload.length;
+        args[4].mstream->buffer[payload.length] = '\0';
+
+        if (s->out_file && s->out_file[0]) {
+            FILE* of = fopen(s->out_file, "wb");
+            if (of) {
+                if (payload.length > 0) fwrite(payload.data, 1, payload.length, of);
+                fclose(of);
+            } else {
+                if (s->last_error_msg) free(s->last_error_msg);
+                s->last_error_msg = strdup("cannot open out_file");
+                s->last_error_code = 2;
+            }
+        }
+
+        const char* content_type = payload.content_type ? payload.content_type : "text/plain;charset=US-ASCII";
+        int hdrlen = snprintf(NULL, 0,
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              payload.length, content_type);
+        if (hdrlen >= 0) {
+            s->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (s->last_headers) {
+                snprintf(s->last_headers, (size_t)hdrlen + 1,
+                         "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                         payload.length, content_type);
+            }
+        }
+
+        s->last_status = 200;
+        dataUrlPayloadFree(&payload);
+        if (err_msg) free(err_msg);
+        return makeInt(200);
+    }
 
     // Prepare CURL easy handle
     curl_easy_reset(s->curl);
@@ -880,6 +1261,48 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
             if (s->last_headers) memcpy(s->last_headers, hdr, (size_t)hdrlen + 1);
         }
         s->last_status = 200;
+        return makeInt(200);
+    } else if (url && strncasecmp(url, "data:", 5) == 0) {
+        DataUrlPayload payload = {0};
+        char* err_msg = NULL;
+        if (parseDataUrl(url, &payload, &err_msg) != 0) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = err_msg ? err_msg : strdup("invalid data URL");
+            if (!s->last_error_msg) s->last_error_msg = strdup("invalid data URL");
+            runtimeError(vm, "httpRequestToFile: %s", s->last_error_msg ? s->last_error_msg : "invalid data URL");
+            dataUrlPayloadFree(&payload);
+            return makeInt(-1);
+        }
+
+        FILE* out = fopen(out_path, "wb");
+        if (!out) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = strdup("cannot open out file");
+            runtimeError(vm, "httpRequestToFile: cannot open out file '%s'", out_path);
+            dataUrlPayloadFree(&payload);
+            if (err_msg) free(err_msg);
+            return makeInt(-1);
+        }
+        if (payload.length > 0) fwrite(payload.data, 1, payload.length, out);
+        fclose(out);
+
+        const char* content_type = payload.content_type ? payload.content_type : "text/plain;charset=US-ASCII";
+        int hdrlen = snprintf(NULL, 0,
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              payload.length, content_type);
+        if (hdrlen >= 0) {
+            s->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (s->last_headers) {
+                snprintf(s->last_headers, (size_t)hdrlen + 1,
+                         "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                         payload.length, content_type);
+            }
+        }
+        s->last_status = 200;
+        dataUrlPayloadFree(&payload);
+        if (err_msg) free(err_msg);
         return makeInt(200);
     }
 
@@ -1702,6 +2125,73 @@ static void* httpAsyncThread(void* arg) {
         int hdrlen = snprintf(hdr, sizeof(hdr), "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n", total, content_type);
         if (hdrlen > 0) { job->last_headers = strndup(hdr, (size_t)hdrlen); }
         job->status = 200;
+        job->done = 1;
+        return NULL;
+    } else if (job->url && strncasecmp(job->url, "data:", 5) == 0) {
+        DataUrlPayload payload = {0};
+        char* err_msg = NULL;
+        if (parseDataUrl(job->url, &payload, &err_msg) != 0) {
+            const char* msg = err_msg ? err_msg : "invalid data URL";
+            job->status = -1;
+            job->last_error_code = 2;
+            job->error = strdup(msg);
+            job->last_error_msg = strdup(msg);
+            if (err_msg) free(err_msg);
+            dataUrlPayloadFree(&payload);
+            job->done = 1;
+            return NULL;
+        }
+
+        size_t required = payload.length + 1;
+        if (required == 0) required = 1;
+        if (job->result->capacity < (int)required || !job->result->buffer) {
+            unsigned char* newbuf = (unsigned char*)realloc(job->result->buffer, required);
+            if (!newbuf) {
+                const char* msg = "out of memory";
+                job->status = -1;
+                job->last_error_code = 2;
+                job->error = strdup(msg);
+                job->last_error_msg = strdup(msg);
+                dataUrlPayloadFree(&payload);
+                if (err_msg) free(err_msg);
+                job->done = 1;
+                return NULL;
+            }
+            job->result->buffer = newbuf;
+            job->result->capacity = (int)required;
+        }
+        if (payload.length > 0) {
+            memcpy(job->result->buffer, payload.data, payload.length);
+        }
+        job->result->size = (int)payload.length;
+        job->result->buffer[payload.length] = '\0';
+
+        if (job->out_file && job->out_file[0]) {
+            FILE* of = fopen(job->out_file, "wb");
+            if (of) {
+                if (payload.length > 0) fwrite(payload.data, 1, payload.length, of);
+                fclose(of);
+            }
+        }
+
+        const char* content_type = payload.content_type ? payload.content_type : "text/plain;charset=US-ASCII";
+        int hdrlen = snprintf(NULL, 0,
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              payload.length, content_type);
+        if (hdrlen >= 0) {
+            job->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (job->last_headers) {
+                snprintf(job->last_headers, (size_t)hdrlen + 1,
+                         "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                         payload.length, content_type);
+            }
+        }
+        job->status = 200;
+        job->last_error_code = 0;
+        job->dl_now = (long long)payload.length;
+        job->dl_total = (long long)payload.length;
+        dataUrlPayloadFree(&payload);
+        if (err_msg) free(err_msg);
         job->done = 1;
         return NULL;
     }
