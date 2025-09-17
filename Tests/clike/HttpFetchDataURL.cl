@@ -1,0 +1,18 @@
+int main() {
+    int s = httpsession();
+    if (s < 0) {
+        printf("session error\n");
+        return 1;
+    }
+    mstream out;
+    out = mstreamcreate();
+    int code = httprequest(s, "GET", "data:text/plain,hello%20world", NULL, out);
+    if (code >= 0) {
+        printf("%s\n", mstreambuffer(out));
+    } else {
+        printf("http error\n");
+    }
+    mstreamfree(&out);
+    httpclose(s);
+    return 0;
+}
