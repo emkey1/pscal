@@ -54,6 +54,14 @@ void setQuit(int v) {
     unlock(quitMutex);
 }
 
+int tryInitFont(str path, int fontSize) {
+    if (path == NULL) return 0;
+    if (strlen(path) == 0) return 0;
+    if (!fileexists(path)) return 0;
+    inittextsystem(path, fontSize);
+    return 1;
+}
+
 /*
  * Poll SDL briefly and detect a fresh left/right click that occurred inside
  * the window. Click coordinates are clamped to [0..Width-1]/[0..Height-1].
@@ -141,26 +149,22 @@ int main() {
     int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
     int textReady;
     const int fontSize = 18;
-    str systemFontPath;
-    str repoFontPath1;
-    str repoFontPath2;
+    str envFontPath;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
     textReady = 0;
-    systemFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
-    repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
-    repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
-    if (fileexists(systemFontPath)) {
-        inittextsystem(systemFontPath, fontSize);
-        textReady = 1;
-    } else if (fileexists(repoFontPath1)) {
-        inittextsystem(repoFontPath1, fontSize);
-        textReady = 1;
-    } else if (fileexists(repoFontPath2)) {
-        inittextsystem(repoFontPath2, fontSize);
-        textReady = 1;
-    } else {
+    envFontPath = getenv("PSCAL_FONT_PATH");
+    if (!textReady) textReady = tryInitFont(envFontPath, fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/share/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/share/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/Library/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("../fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("../../fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) {
         printf("Warning: Unable to locate Roboto font. Text rendering disabled.\n");
     }
     textureID = createtexture(Width, Height);
