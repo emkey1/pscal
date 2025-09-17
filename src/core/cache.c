@@ -48,6 +48,63 @@ char* buildCachePath(const char* source_path) {
     return full;
 }
 
+static char* resolveExecutablePath(const char* executable) {
+    if (!executable || !*executable) return NULL;
+
+#ifdef _WIN32
+    if (strchr(executable, '/') || strchr(executable, '\\')) {
+        return realpath(executable, NULL);
+    }
+#else
+    if (strchr(executable, '/')) {
+        return realpath(executable, NULL);
+    }
+#endif
+
+#ifdef _WIN32
+    const char path_sep = ';';
+    const char dir_sep = '\\';
+#else
+    const char path_sep = ':';
+    const char dir_sep = '/';
+#endif
+
+    const char* path_env = getenv("PATH");
+    if (!path_env || !*path_env) return NULL;
+
+    size_t exe_len = strlen(executable);
+    const char* segment_start = path_env;
+    while (segment_start && *segment_start) {
+        const char* separator = strchr(segment_start, path_sep);
+        size_t segment_len = separator ? (size_t)(separator - segment_start) : strlen(segment_start);
+        size_t alloc_len = (segment_len ? segment_len + 1 : 0) + exe_len + 1;
+        char* candidate = (char*)malloc(alloc_len);
+        if (!candidate) {
+            return NULL;
+        }
+        if (segment_len > 0) {
+            memcpy(candidate, segment_start, segment_len);
+            candidate[segment_len] = dir_sep;
+            memcpy(candidate + segment_len + 1, executable, exe_len + 1);
+        } else {
+            memcpy(candidate, executable, exe_len + 1);
+        }
+
+        char* resolved = realpath(candidate, NULL);
+        free(candidate);
+        if (resolved) {
+            return resolved;
+        }
+
+        if (!separator) {
+            break;
+        }
+        segment_start = separator + 1;
+    }
+
+    return NULL;
+}
+
 static bool writeSourcePath(FILE* f, const char* source_path) {
     char* abs = realpath(source_path, NULL);
     const char* src = abs ? abs : source_path;
@@ -399,21 +456,38 @@ bool loadBytecodeFromCache(const char* source_path,
         free(cache_path);
         return false;
     }
+    char* resolved_frontend = NULL;
+    const char* frontend_for_cache = NULL;
+    if (frontend_path && frontend_path[0]) {
+        struct stat frontend_stat;
+        if (stat(frontend_path, &frontend_stat) == 0) {
+            frontend_for_cache = frontend_path;
+        } else {
+            resolved_frontend = resolveExecutablePath(frontend_path);
+            if (resolved_frontend) {
+                frontend_for_cache = resolved_frontend;
+            }
+        }
+    }
+#define CLEANUP_AND_RETURN_FALSE() \
+    do { \
+        if (resolved_frontend) { free(resolved_frontend); resolved_frontend = NULL; } \
+        free(cache_path); \
+        return false; \
+    } while (0)
     bool ok = false;
     int const_count = 0;
     int read_consts = 0;
 
     if (!isCacheFresh(cache_path, source_path) ||
-        (frontend_path && !isCacheFresh(cache_path, frontend_path))) {
+        (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache))) {
         unlink(cache_path);
-        free(cache_path);
-        return false;
+        CLEANUP_AND_RETURN_FALSE();
     }
     for (int i = 0; dependencies && i < dep_count; ++i) {
         if (!isCacheFresh(cache_path, dependencies[i])) {
             unlink(cache_path);
-            free(cache_path);
-            return false;
+            CLEANUP_AND_RETURN_FALSE();
         }
     }
 
@@ -432,8 +506,7 @@ bool loadBytecodeFromCache(const char* source_path,
                                 "Cached bytecode requires VM version %u but current VM version is %u\\n",
                                 ver, vm_ver);
                         fclose(f);
-                        free(cache_path);
-                        return false;
+                        CLEANUP_AND_RETURN_FALSE();
                     } else {
                         fprintf(stderr,
                                 "Warning: cached bytecode targets VM version %u but running version is %u\\n",
@@ -443,8 +516,7 @@ bool loadBytecodeFromCache(const char* source_path,
                 chunk->version = ver;
                 if (!verifySourcePath(f, source_path)) {
                     fclose(f);
-                    free(cache_path);
-                    return false;
+                    CLEANUP_AND_RETURN_FALSE();
                 }
                 int count = 0;
                 if (fread(&count, sizeof(count), 1, f) == 1 &&
@@ -571,7 +643,9 @@ bool loadBytecodeFromCache(const char* source_path,
             }
             fclose(f);
         }
+    if (resolved_frontend) free(resolved_frontend);
     free(cache_path);
+#undef CLEANUP_AND_RETURN_FALSE
     if (!ok) {
         for (int i = 0; i < read_consts; ++i) {
             freeValue(&chunk->constants[i]);
