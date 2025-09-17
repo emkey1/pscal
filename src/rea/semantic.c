@@ -299,18 +299,23 @@ static void collectMethods(AST *node) {
                  */
                 AST *parent = node->parent;
                 for (int i = 0; i < parent->child_count; i++) {
-                    if (parent->children[i] == node && i > 0) {
-                        AST *prev = parent->children[i - 1];
-                        if (prev && prev->type == AST_VAR_DECL) {
-                            addChild(node, prev);
-                            for (int j = i - 1; j < parent->child_count - 1; j++) {
-                                parent->children[j] = parent->children[j + 1];
-                            }
-                            parent->child_count--;
-                            param = node->children[0];
+                    if (parent->children[i] != node) continue;
+                    for (int j = i - 1; j >= 0; j--) {
+                        AST *prev = parent->children[j];
+                        if (!prev || prev->type != AST_VAR_DECL) continue;
+                        AST *decl_var = (prev->child_count > 0) ? prev->children[0] : NULL;
+                        const char *decl_name = (decl_var && decl_var->token) ? decl_var->token->value : NULL;
+                        if (!decl_name || strcasecmp(decl_name, "myself") != 0) continue;
+
+                        addChild(node, prev);
+                        for (int k = j; k < parent->child_count - 1; k++) {
+                            parent->children[k] = parent->children[k + 1];
                         }
+                        parent->child_count--;
+                        param = node->children[0];
                         break;
                     }
+                    break;
                 }
             }
             if (param && param->type == AST_VAR_DECL) {
