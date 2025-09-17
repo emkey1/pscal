@@ -116,6 +116,42 @@ void pollMouse() {
     prevButtons = b;
 }
 
+void handleKeyEvent(int keyCode, int allowPan) {
+    if (keyCode == 0) return;
+
+    if (keyCode == 'q' || keyCode == 'Q') {
+        setQuit(1);
+        return;
+    }
+
+    if (!allowPan) return;
+
+    double widthRe = (maxRe - minRe);
+    double heightIm = (maxIm - minIm);
+    double dx = widthRe * 0.5;
+    double dy = heightIm * 0.5;
+
+    if (keyCode == KEY_LEFT) {
+        minRe -= dx;
+        maxRe -= dx;
+        redraw = 1;
+    } else if (keyCode == KEY_RIGHT) {
+        minRe += dx;
+        maxRe += dx;
+        redraw = 1;
+    } else if (keyCode == KEY_UP) {
+        /* Move view up in complex plane: increase both Im bounds */
+        minIm += dy;
+        maxIm += dy;
+        redraw = 1;
+    } else if (keyCode == KEY_DOWN) {
+        /* Move view down: decrease both Im bounds */
+        minIm -= dy;
+        maxIm -= dy;
+        redraw = 1;
+    }
+}
+
 void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
     double c_im;
@@ -181,6 +217,10 @@ int main() {
 
     while (!getQuit()) {
         pollMouse();
+        if (quitrequested()) {
+            setQuit(1);
+            break;
+        }
 
         if (redraw) {
             maxIm = minIm + (maxRe - minRe) * Height / Width;
@@ -231,9 +271,13 @@ int main() {
                     rendercopy(textureID);
                     updatescreen();
                 }
+                if (quitrequested()) {
+                    setQuit(1);
+                    break;
+                }
                 if (keypressed()) {
-                    char c = readkey();
-                    if (toupper(c) == 'Q') setQuit(1);
+                    int keyCode = readkey();
+                    handleKeyEvent(keyCode, 0);
                 }
                 if (!done || update)
                     pollMouse();
@@ -256,27 +300,12 @@ int main() {
         /* Keyboard controls: Q to quit, arrows to pan by half a screen */
         {
             int key = pollkey();
-            if (key != 0) {
-                if (key == 'q' || key == 'Q') {
-                    setQuit(1);
-                    continue;
-                }
-                double widthRe = (maxRe - minRe);
-                double heightIm = (maxIm - minIm);
-                double dx = widthRe * 0.5;
-                double dy = heightIm * 0.5;
-                if (key == KEY_LEFT) {
-                    minRe -= dx; maxRe -= dx; redraw = 1;
-                } else if (key == KEY_RIGHT) {
-                    minRe += dx; maxRe += dx; redraw = 1;
-                } else if (key == KEY_UP) {
-                    /* Move view up in complex plane: increase both Im bounds */
-                    minIm += dy; maxIm += dy; redraw = 1;
-                } else if (key == KEY_DOWN) {
-                    /* Move view down: decrease both Im bounds */
-                    minIm -= dy; maxIm -= dy; redraw = 1;
-                }
+            while (key != 0 && !getQuit()) {
+                handleKeyEvent(key, 1);
+                key = pollkey();
             }
+            if (getQuit())
+                continue;
         }
 
         if (clickButton == ButtonLeft || clickButton == ButtonRight) {
