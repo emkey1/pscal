@@ -11,18 +11,6 @@ const
   GAME_WIDTH = 60;
   GAME_HEIGHT = 25;
 
-  // Color constants
-  Black        = 0;
-  Blue         = 1;
-  Green        = 2;
-  Cyan         = 3;
-  Red          = 4;
-  LightGray    = 7;
-  LightGreen   = 10;
-  LightRed     = 12;
-  Yellow       = 14;
-  White        = 15;
-
 type
   TDiceArray = array[1..NUM_DICE] of integer;
   TKeepArray = array[1..NUM_DICE] of boolean;
