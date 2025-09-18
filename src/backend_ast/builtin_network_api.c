@@ -24,6 +24,7 @@
 #include "Pascal/globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "vm/string_sentinels.h"
 
 #ifdef _WIN32
 static void ensure_winsock(void) {
@@ -47,6 +48,27 @@ typedef struct SocketInfo_s {
 } SocketInfo;
 
 static SocketInfo* g_socket_info_list = NULL;
+
+static int valueIsStringLike(const Value* value) {
+    if (!value) return 0;
+    if (value->type == TYPE_STRING) return 1;
+    if (value->type == TYPE_POINTER && value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+    return 0;
+}
+
+static const char* valueToCStringLike(const Value* value) {
+    if (!value) return NULL;
+    if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
+    if (value->type == TYPE_POINTER && value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        return (const char*)value->ptr_val;
+    }
+    return NULL;
+}
+
+static int valueIsNullCharPointer(const Value* value) {
+    return value && value->type == TYPE_POINTER &&
+           value->base_type_node == STRING_CHAR_PTR_SENTINEL && value->ptr_val == NULL;
+}
 
 static void registerSocketInfo(int fd, int family, int socktype) {
     SocketInfo* info = (SocketInfo*)malloc(sizeof(SocketInfo));
@@ -1831,12 +1853,17 @@ Value vmBuiltinSocketClose(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || !IS_INTLIKE(args[2])) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !valueIsStringLike(&args[1]) || !IS_INTLIKE(args[2])) {
         runtimeError(vm, "socketConnect expects (socket, host, port).");
         return makeInt(-1);
     }
+    if (valueIsNullCharPointer(&args[1])) {
+        runtimeError(vm, "socketConnect host pointer is NULL.");
+        return makeInt(-1);
+    }
     int s = (int)AS_INTEGER(args[0]);
-    const char* host = args[1].s_val;
+    const char* host = valueToCStringLike(&args[1]);
+    if (!host) host = "";
     int port = (int)AS_INTEGER(args[2]);
     char portstr[16]; snprintf(portstr, sizeof(portstr), "%d", port);
     int family = AF_INET;
@@ -1997,12 +2024,13 @@ Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
 
 // socketBindAddr(socket, host:string, port:int)
 Value vmBuiltinSocketBindAddr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || !IS_INTLIKE(args[2])) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !valueIsStringLike(&args[1]) || !IS_INTLIKE(args[2])) {
         runtimeError(vm, "socketBindAddr expects (socket:int, host:string, port:int).");
         return makeInt(-1);
     }
     int s = (int)AS_INTEGER(args[0]);
-    const char* host = args[1].s_val ? args[1].s_val : "127.0.0.1";
+    const char* host = valueToCStringLike(&args[1]);
+    if (!host) host = "127.0.0.1";
     int port = (int)AS_INTEGER(args[2]);
     int family = AF_INET;
     lookupSocketInfo(s, &family, NULL);
@@ -2115,9 +2143,13 @@ Value vmBuiltinSocketSend(VM* vm, int arg_count, Value* args) {
     int s = (int)AS_INTEGER(args[0]);
     const char* data = NULL;
     size_t len = 0;
-    if (args[1].type == TYPE_STRING && args[1].s_val) {
-        data = args[1].s_val;
-        len = strlen(data);
+    if (valueIsStringLike(&args[1])) {
+        if (valueIsNullCharPointer(&args[1])) {
+            runtimeError(vm, "socketSend data pointer is NULL.");
+            return makeInt(-1);
+        }
+        data = valueToCStringLike(&args[1]);
+        len = data ? strlen(data) : 0;
     } else if (args[1].type == TYPE_MEMORYSTREAM && args[1].mstream) {
         data = (const char*)args[1].mstream->buffer;
         len = args[1].mstream->size;
