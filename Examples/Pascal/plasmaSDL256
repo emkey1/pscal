@@ -60,7 +60,7 @@ BEGIN
       ELSE IF finalVal > 255 THEN
         ColorIndex := 255
       ELSE
-        ColorIndex := Trunc(finalVal);
+        ColorIndex := byte(Trunc(finalVal));
 
       // Optional: Avoid pure black if you want, or map specific indices
       // IF (ColorIndex = 0) THEN ColorIndex := 16; // Example: map black to dark grey

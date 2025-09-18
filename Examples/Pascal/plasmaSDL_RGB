@@ -55,9 +55,9 @@ BEGIN
       // Then Sin wave for color, Pi * value maps 0..1 to 0..Pi (half a sine wave)
       // We scale and shift Sin output (-1..1) to 0..255
 
-      R := Trunc( (Sin( Pi * ( (plasmaValue + 1.0) / 2.0 )                  ) + 1.0) * 127.5 );
-      G := Trunc( (Sin( Pi * ( (plasmaValue + 1.0) / 2.0 ) + 2.0 * Pi / 3.0 ) + 1.0) * 127.5 ); // Phase shift G by 2*Pi/3
-      B := Trunc( (Sin( Pi * ( (plasmaValue + 1.0) / 2.0 ) + 4.0 * Pi / 3.0 ) + 1.0) * 127.5 ); // Phase shift B by 4*Pi/3
+      R := byte(Trunc( (Sin( Pi * ( (plasmaValue + 1.0) / 2.0 )                  ) + 1.0) * 127.5 ));
+      G := byte(Trunc( (Sin( Pi * ( (plasmaValue + 1.0) / 2.0 ) + 2.0 * Pi / 3.0 ) + 1.0) * 127.5 )); // Phase shift G by 2*Pi/3
+      B := byte(Trunc( (Sin( Pi * ( (plasmaValue + 1.0) / 2.0 ) + 4.0 * Pi / 3.0 ) + 1.0) * 127.5 )); // Phase shift B by 4*Pi/3
 
       // Clamp values just in case (though Trunc usually handles it if input to Sin is bounded)
       IF R < 0 THEN R := 0 ELSE IF R > 255 THEN R := 255;
