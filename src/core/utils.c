@@ -2229,12 +2229,15 @@ int map16BgColorToAnsi(int pscalColorCode) {
 }
 
 bool applyCurrentTextAttributes(FILE* stream) {
+    bool stream_is_stdout = (stream == stdout);
     bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
                              !gCurrentTextBold && !gCurrentTextUnderline &&
                              !gCurrentTextBlink && !gCurrentColorIsExt &&
                              !gCurrentBgIsExt);
 
-    if (is_default_state) return false;
+    if (is_default_state && (!stream_is_stdout || !gConsoleAttrDirty)) {
+        return false;
+    }
 
     char escape_sequence[64] = "\x1B[";
     char code_str[64];
@@ -2271,9 +2274,67 @@ bool applyCurrentTextAttributes(FILE* stream) {
     strcat(escape_sequence, code_str);
     strcat(escape_sequence, "m");
     fprintf(stream, "%s", escape_sequence);
+    if (stream_is_stdout) {
+        gConsoleAttrDirty = false;
+    }
     return true;
 }
 
 void resetTextAttributes(FILE* stream) {
     fprintf(stream, "\x1B[0m");
+    if (stream == stdout) {
+        gConsoleAttrDirty = true;
+    }
+}
+
+static Symbol* lookupTextAttrSymbol(void) {
+    if (!globalSymbols) {
+        return NULL;
+    }
+    return hashTableLookup(globalSymbols, "textattr");
+}
+
+uint8_t computeCurrentTextAttr(void) {
+    uint8_t fg = (uint8_t)(gCurrentTextColor & 0x0F);
+
+    if (gCurrentTextBold && fg < 8) {
+        fg |= 0x08;
+    }
+
+    uint8_t bg = (uint8_t)(gCurrentTextBackground & 0x07);
+
+    uint8_t attr = (uint8_t)((bg << 4) | (fg & 0x0F));
+    if (gCurrentTextBlink) {
+        attr |= 0x80;
+    }
+    return attr;
+}
+
+void syncTextAttrSymbol(void) {
+    Symbol* sym = lookupTextAttrSymbol();
+    if (!sym || !sym->value) {
+        return;
+    }
+    sym->value->type = TYPE_BYTE;
+    SET_INT_VALUE(sym->value, computeCurrentTextAttr());
+}
+
+void markTextAttrDirty(void) {
+    gConsoleAttrDirty = true;
+}
+
+void setCurrentTextAttrFromByte(uint8_t attr) {
+    uint8_t fg = (uint8_t)(attr & 0x0F);
+    uint8_t bg = (uint8_t)((attr >> 4) & 0x07);
+    bool blink = (attr & 0x80) != 0;
+
+    gCurrentTextColor = fg;
+    gCurrentTextBold = (fg & 0x08) != 0;
+    gCurrentColorIsExt = false;
+    gCurrentTextBackground = bg;
+    gCurrentBgIsExt = false;
+    gCurrentTextBlink = blink;
+
+    markTextAttrDirty();
+    syncTextAttrSymbol();
 }

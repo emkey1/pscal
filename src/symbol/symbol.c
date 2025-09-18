@@ -826,22 +826,22 @@ void updateSymbol(const char *name, Value val) {
 
     // --- Perform Assignment ---
     // Use a switch on the TARGET symbol's type to handle assignments correctly.
-      switch (sym->type) {
-          case TYPE_INTEGER:
-              if (isIntlikeType(val.type)) {
-                  SET_INT_VALUE(sym->value, asI64(val));
-              } else if (isRealType(val.type)) {
-                  SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
-              }
-              break;
+    switch (sym->type) {
+        case TYPE_INTEGER:
+            if (isIntlikeType(val.type)) {
+                SET_INT_VALUE(sym->value, asI64(val));
+            } else if (isRealType(val.type)) {
+                SET_INT_VALUE(sym->value, (long long)AS_REAL(val)); // Implicit Truncation
+            }
+            break;
 
-          case TYPE_INT64:
-              if (isIntlikeType(val.type)) {
-                  SET_INT_VALUE(sym->value, asI64(val));
-              } else if (isRealType(val.type)) {
-                  SET_INT_VALUE(sym->value, (long long)AS_REAL(val));
-              }
-              break;
+        case TYPE_INT64:
+            if (isIntlikeType(val.type)) {
+                SET_INT_VALUE(sym->value, asI64(val));
+            } else if (isRealType(val.type)) {
+                SET_INT_VALUE(sym->value, (long long)AS_REAL(val));
+            }
+            break;
 
         case TYPE_REAL:
             if (isRealType(val.type) || isIntlikeType(val.type)) {
@@ -976,6 +976,11 @@ void updateSymbol(const char *name, Value val) {
                     varTypeToString(sym->type), name);
             EXIT_FAILURE_HANDLER();
             break;
+    }
+
+    if (sym->name && strcmp(sym->name, "textattr") == 0) {
+        uint8_t attr_byte = (uint8_t)(sym->value->i_val & 0xFF);
+        setCurrentTextAttrFromByte(attr_byte);
     }
 
     // Free the incoming temporary Value's contents now that its data has been used.
