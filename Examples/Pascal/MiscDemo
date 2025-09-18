@@ -21,6 +21,7 @@ var
 
 procedure WaitKey;
 begin
+  TextBackground(Black);
   TextColor(LightGray);
   writeln;
   writeln('Press any key to continue...');
@@ -31,6 +32,7 @@ end;
 
 procedure ShowMenu;
 begin
+  TextBackground(Black);
   ClrScr;
   TextColor(LightGreen);
   writeln('--- Pscal Demo ---');
@@ -128,6 +130,8 @@ end;
 
 procedure DemoBase64;
 begin
+  TextBackground(Black);
+  TextColor(White);
   write('Enter text to encode: ');
   readln(input);
   encoded := EncodeStringBase64(input);
@@ -165,9 +169,12 @@ begin
 end;
 
 begin
+  TextBackground(Black);
+  TextColor(White);
   repeat
     ShowMenu;
     readln(choice);
+    TextBackground(Black);
     ClrScr;
     case choice of
       1: DemoDateTime;
