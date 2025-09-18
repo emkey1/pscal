@@ -7,20 +7,39 @@ int main() {
     return 1;
   }
 
-  if (socketconnect(s, "echo.websocket.events", 80) != 0) {
-    printf("socketconnect failed: %d\n", socketlasterror());
-    socketclose(s);
-    return 1;
+  str host = "echo.websocket.events";
+  int port = 80;
+  str path = "/";
+
+  if (socketconnect(s, host, port) != 0) {
+    int err = socketlasterror();
+    if (err == 5) {
+      printf("DNS lookup for %s failed (error %d), trying fallback...\n", host, err);
+      host = "demos.kaazing.com";
+      path = "/echo";
+      port = 80;
+      if (socketconnect(s, host, port) != 0) {
+        printf("socketconnect failed for fallback host: %d\n", socketlasterror());
+        socketclose(s);
+        return 1;
+      }
+    } else {
+      printf("socketconnect failed: %d\n", err);
+      socketclose(s);
+      return 1;
+    }
   }
 
-  if (socketsend(s,
-        "GET / HTTP/1.1\r\n"
-        "Host: echo.websocket.events\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Version: 13\r\n"
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-        "\r\n") < 0) {
+  printf("Connected to %s:%d\n", host, port);
+
+  str request = "GET " + path + " HTTP/1.1\r\n";
+  request = request + "Host: " + host + "\r\n";
+  request = request + "Upgrade: websocket\r\n";
+  request = request + "Connection: Upgrade\r\n";
+  request = request + "Sec-WebSocket-Version: 13\r\n";
+  request = request + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+
+  if (socketsend(s, request) < 0) {
     printf("failed to send handshake: %d\n", socketlasterror());
     socketclose(s);
     return 1;
@@ -33,8 +52,8 @@ int main() {
     return 1;
   }
 
-  str handshake = mstreambuffer(resp);
-  printf("handshake:\n%s\n", handshake);
+  str handshakeResp = mstreambuffer(resp);
+  printf("handshake:\n%s\n", handshakeResp);
   mstreamfree(&resp);
 
   // send masked text frame "hi"
