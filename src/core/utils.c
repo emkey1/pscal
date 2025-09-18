@@ -2277,3 +2277,50 @@ bool applyCurrentTextAttributes(FILE* stream) {
 void resetTextAttributes(FILE* stream) {
     fprintf(stream, "\x1B[0m");
 }
+
+static Symbol* lookupTextAttrSymbol(void) {
+    if (!globalSymbols) {
+        return NULL;
+    }
+    return hashTableLookup(globalSymbols, "textattr");
+}
+
+uint8_t computeCurrentTextAttr(void) {
+    uint8_t fg = (uint8_t)(gCurrentTextColor & 0x0F);
+
+    if (gCurrentTextBold && fg < 8) {
+        fg |= 0x08;
+    }
+
+    uint8_t bg = (uint8_t)(gCurrentTextBackground & 0x07);
+
+    uint8_t attr = (uint8_t)((bg << 4) | (fg & 0x0F));
+    if (gCurrentTextBlink) {
+        attr |= 0x80;
+    }
+    return attr;
+}
+
+void syncTextAttrSymbol(void) {
+    Symbol* sym = lookupTextAttrSymbol();
+    if (!sym || !sym->value) {
+        return;
+    }
+    sym->value->type = TYPE_BYTE;
+    SET_INT_VALUE(sym->value, computeCurrentTextAttr());
+}
+
+void setCurrentTextAttrFromByte(uint8_t attr) {
+    uint8_t fg = (uint8_t)(attr & 0x0F);
+    uint8_t bg = (uint8_t)((attr >> 4) & 0x07);
+    bool blink = (attr & 0x80) != 0;
+
+    gCurrentTextColor = fg;
+    gCurrentTextBold = (fg & 0x08) != 0;
+    gCurrentColorIsExt = false;
+    gCurrentTextBackground = bg;
+    gCurrentBgIsExt = false;
+    gCurrentTextBlink = blink;
+
+    syncTextAttrSymbol();
+}

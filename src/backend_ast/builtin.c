@@ -1552,6 +1552,7 @@ Value vmBuiltinTextcolor(VM* vm, int arg_count, Value* args) {
     gCurrentTextColor = (int)(colorCode % 16);
     gCurrentTextBold = (colorCode >= 8 && colorCode <= 15);
     gCurrentColorIsExt = false;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1562,6 +1563,7 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
     gCurrentBgIsExt = false;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
@@ -1572,6 +1574,7 @@ Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
     gCurrentTextColor = (int)AS_INTEGER(args[0]);
     gCurrentTextBold = false;
     gCurrentColorIsExt = true;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1582,6 +1585,7 @@ Value vmBuiltinTextbackgrounde(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)AS_INTEGER(args[0]);
     gCurrentBgIsExt = true;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1592,6 +1596,7 @@ Value vmBuiltinBoldtext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBold = true;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1612,6 +1617,7 @@ Value vmBuiltinBlinktext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBlink = true;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1622,6 +1628,8 @@ Value vmBuiltinLowvideo(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBold = false;
+    gCurrentTextColor &= 0x07;
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1640,6 +1648,7 @@ Value vmBuiltinNormvideo(VM* vm, int arg_count, Value* args) {
     gCurrentTextBlink = false;
     printf("\x1B[0m");
     fflush(stdout);
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1753,6 +1762,7 @@ Value vmBuiltinNormalcolors(VM* vm, int arg_count, Value* args) {
     gCurrentTextBlink = false;
     printf("\x1B[0m");
     fflush(stdout);
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
