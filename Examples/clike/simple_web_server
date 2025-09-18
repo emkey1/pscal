@@ -2,7 +2,7 @@
 
 // Simple CLike web server
 // - Listens on port 5555 by default
-// - Creates /tmp/clike_htdocs.[PID] and writes index.html
+// - Creates /tmp/htdocs.[PID] and populates it with default assets
 // - Multithreaded: spawns a handler thread per connection
 // - Note: current socketBind binds all interfaces; by default we only advertise
 //   localhost. Serving is minimal and for demo/testing.
@@ -125,6 +125,53 @@ str timestamp() {
   str ts = inttostr(yr) + "-" + pad2(mo) + "-" + pad2(dy)
            + " " + pad2(hh) + ":" + pad2(mi) + ":" + pad2(ss);
   return ts;
+}
+
+int isDirectory(str path) {
+  int attr = getfattr(path);
+  return (attr & 16) != 0 ? 1 : 0;
+}
+
+int copyFile(str src, str dst) {
+  mstream ms = mstreamcreate();
+  int loaded = mstreamloadfromfile(&ms, src);
+  if (!loaded) {
+    mstreamfree(&ms);
+    return 0;
+  }
+  mstreamsavetofile(&ms, dst);
+  mstreamfree(&ms);
+  return 1;
+}
+
+int copyDirectory(str src, str dst) {
+  if (!isDirectory(src)) return 0;
+  mkdir(dst);
+  str entries = "";
+  str name = findfirst(src);
+  while (name != "") {
+    entries = entries + name + "\n";
+    name = findnext();
+  }
+  int idx = 1;
+  int success = 1;
+  while (idx <= length(entries)) {
+    int j = idx;
+    while (j <= length(entries) && copy(entries, j, 1) != "\n") j = j + 1;
+    int segLen = j - idx;
+    if (segLen > 0) {
+      str entry = copy(entries, idx, segLen);
+      str srcPath = src + "/" + entry;
+      str dstPath = dst + "/" + entry;
+      if (isDirectory(srcPath)) {
+        if (!copyDirectory(srcPath, dstPath)) success = 0;
+      } else {
+        if (!copyFile(srcPath, dstPath)) success = 0;
+      }
+    }
+    idx = j + 1;
+  }
+  return success;
 }
 
 void serveConn(int c) {
@@ -323,12 +370,17 @@ void heartbeat() {
 void initFiles() {
   int pid = getpid();
   str pidStr = inttostr(pid);
-  RootDir = "/tmp/clike_htdocs." + pidStr;
+  RootDir = "/tmp/htdocs." + pidStr;
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  // Create an index.html file if it does not exist yet
-  if (!fileexists(IndexPath)) {
+  str source = "/usr/local/pscal/misc/htdocs";
+  int copied = 0;
+  if (isDirectory(source)) {
+    copied = copyDirectory(source, RootDir);
+  }
+  // Fallback: ensure at least a basic index exists if copy failed or missing.
+  if (!copied || !fileexists(IndexPath)) {
     GFile = fopen(IndexPath, "w");
     fprintf(GFile, "%s\n", Body);
     fclose(GFile);
