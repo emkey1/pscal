@@ -19,16 +19,12 @@
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "ast/ast.h"
+#include "vm/string_sentinels.h"
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
-
-// Special sentinel values used in pointer.base_type_node to signal
-// non-standard dereference behavior in GET_INDIRECT.
-#define STRING_CHAR_PTR_SENTINEL   ((AST*)0xDEADBEEF)
-#define STRING_LENGTH_SENTINEL     ((AST*)0xFEEDBEEF)
 
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
