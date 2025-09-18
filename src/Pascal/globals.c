@@ -42,6 +42,7 @@ bool gCurrentColorIsExt    = false;   // Flag for extended 256-color foreground 
 bool gCurrentBgIsExt       = false;   // Flag for extended 256-color background mode.
 bool gCurrentTextUnderline = false;   // Default underline state.
 bool gCurrentTextBlink     = false;   // Default blink state.
+bool gConsoleAttrDirty     = true;    // Force the initial console colors to be applied.
 int gWindowLeft            = 1;
 int gWindowTop             = 1;
 int gWindowRight           = 80;

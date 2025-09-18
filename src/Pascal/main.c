@@ -56,6 +56,9 @@ void initSymbolSystem(void) {
     }
     DEBUG_PRINT("[DEBUG MAIN] Created global symbol table %p.\n", (void*)globalSymbols);
 
+    insertGlobalSymbol("TextAttr", TYPE_BYTE, NULL);
+    syncTextAttrSymbol();
+
     constGlobalSymbols = createHashTable();
     if (!constGlobalSymbols) {
         fprintf(stderr, "FATAL: Failed to create constant symbol hash table.\n");
