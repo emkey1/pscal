@@ -176,7 +176,8 @@ int main() {
 
 The VM also exposes thin wrappers over BSD sockets:
 
-- `socketcreate(type)` – create TCP (`0`) or UDP (`1`) sockets.
+- `socketcreate(type[, family])` – create TCP (`0`) or UDP (`1`) sockets.
+  Pass `6` (or an `AF_INET6` constant) for IPv6 sockets; the default is IPv4.
 - `socketconnect(s, host, port)` – connect to a remote host/port.
 - `socketbind(s, port)`, `socketlisten(s, backlog)`, `socketaccept(s)` – server helpers.
 - `socketsend(s, data)` and `socketreceive(s, maxlen)` – send or receive strings or memory streams.

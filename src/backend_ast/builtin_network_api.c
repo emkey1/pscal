@@ -39,6 +39,70 @@ static void ensure_winsock(void) {
 static int g_socket_last_error = 0;
 static char g_socket_last_error_msg[256];
 
+typedef struct SocketInfo_s {
+    int fd;
+    int family;
+    int socktype;
+    struct SocketInfo_s* next;
+} SocketInfo;
+
+static SocketInfo* g_socket_info_list = NULL;
+
+static void registerSocketInfo(int fd, int family, int socktype) {
+    SocketInfo* info = (SocketInfo*)malloc(sizeof(SocketInfo));
+    if (!info) {
+        // Allocation failure should not abort socket creation; fall back to
+        // treating the socket as IPv4-only in lookups.
+        return;
+    }
+    info->fd = fd;
+    info->family = family;
+    info->socktype = socktype;
+    info->next = g_socket_info_list;
+    g_socket_info_list = info;
+}
+
+static void unregisterSocketInfo(int fd) {
+    SocketInfo* prev = NULL;
+    SocketInfo* cur = g_socket_info_list;
+    while (cur) {
+        if (cur->fd == fd) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                g_socket_info_list = cur->next;
+            }
+            free(cur);
+            return;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+}
+
+static int lookupSocketInfo(int fd, int* family_out, int* socktype_out) {
+    for (SocketInfo* cur = g_socket_info_list; cur; cur = cur->next) {
+        if (cur->fd == fd) {
+            if (family_out) *family_out = cur->family;
+            if (socktype_out) *socktype_out = cur->socktype;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+#ifdef AF_INET6
+static void mapIpv4ToIpv6(const struct sockaddr_in* in4, struct sockaddr_in6* out6) {
+    memset(out6, 0, sizeof(*out6));
+    out6->sin6_family = AF_INET6;
+    out6->sin6_port = in4->sin_port;
+    unsigned char* addr_bytes = (unsigned char*)&out6->sin6_addr;
+    addr_bytes[10] = 0xff;
+    addr_bytes[11] = 0xff;
+    memcpy(addr_bytes + 12, &in4->sin_addr, sizeof(in4->sin_addr));
+}
+#endif
+
 static int mapSocketError(int err) {
 #ifdef _WIN32
     switch(err) {
@@ -1693,17 +1757,34 @@ Value vmBuiltinSocketLastError(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSocketCreate(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        runtimeError(vm, "socketCreate expects 1 integer argument (0=TCP,1=UDP).");
+    if (arg_count < 1 || arg_count > 2 || !IS_INTLIKE(args[0]) ||
+        (arg_count == 2 && !IS_INTLIKE(args[1]))) {
+        runtimeError(vm, "socketCreate expects (type[, family]).");
         return makeInt(-1);
     }
     int type = (int)AS_INTEGER(args[0]);
+    int family = AF_INET;
+    if (arg_count == 2) {
+        int fam_arg = (int)AS_INTEGER(args[1]);
+        if (fam_arg == AF_INET || fam_arg == 0 || fam_arg == 4) {
+            family = AF_INET;
+        }
+#ifdef AF_INET6
+        else if (fam_arg == AF_INET6 || fam_arg == 6) {
+            family = AF_INET6;
+        }
+#endif
+        else {
+            runtimeError(vm, "socketCreate family must be 4 (IPv4) or 6 (IPv6).");
+            return makeInt(-1);
+        }
+    }
 #ifdef _WIN32
     ensure_winsock();
 #endif
     int socktype = (type == 1) ? SOCK_DGRAM : SOCK_STREAM;
     int proto = (type == 1) ? IPPROTO_UDP : IPPROTO_TCP;
-    int s = (int)socket(AF_INET, socktype, proto);
+    int s = (int)socket(family, socktype, proto);
     if (s < 0) {
 #ifdef _WIN32
         setSocketError(WSAGetLastError());
@@ -1712,6 +1793,20 @@ Value vmBuiltinSocketCreate(VM* vm, int arg_count, Value* args) {
 #endif
         return makeInt(-1);
     }
+#ifdef AF_INET6
+    if (family == AF_INET6) {
+#ifdef IPV6_V6ONLY
+#ifdef _WIN32
+        DWORD off = 0;
+        setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&off, sizeof(off));
+#else
+        int off = 0;
+        setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+#endif
+#endif
+    }
+#endif
+    registerSocketInfo(s, family, socktype);
     g_socket_last_error = 0;
     return makeInt(s);
 }
@@ -1730,6 +1825,7 @@ Value vmBuiltinSocketClose(VM* vm, int arg_count, Value* args) {
     if (r != 0) setSocketError(errno);
 #endif
     if (r != 0) return makeInt(-1);
+    unregisterSocketInfo(s);
     g_socket_last_error = 0;
     return makeInt(0);
 }
@@ -1743,10 +1839,16 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     const char* host = args[1].s_val;
     int port = (int)AS_INTEGER(args[2]);
     char portstr[16]; snprintf(portstr, sizeof(portstr), "%d", port);
+    int family = AF_INET;
+    int socktype = SOCK_STREAM;
+    lookupSocketInfo(s, &family, &socktype);
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM; // default
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = socktype;
+#ifdef AI_ADDRCONFIG
+    hints.ai_flags |= AI_ADDRCONFIG;
+#endif
     int gai_err = getaddrinfo(host, portstr, &hints, &res);
     if (gai_err != 0) {
         if (res) freeaddrinfo(res);
@@ -1766,14 +1868,53 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     int last_err = 0;
     for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
         if (!rp->ai_addr) continue;
-        if (rp->ai_family != AF_INET) continue;
+        if (family == AF_INET) {
+            if (rp->ai_family != AF_INET) continue;
 #ifdef _WIN32
-        if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+            if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
 #else
-        if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+            if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
 #endif
-            connected = 1;
-            break;
+                connected = 1;
+                break;
+            }
+        }
+#ifdef AF_INET6
+        else if (family == AF_INET6) {
+            if (rp->ai_family == AF_INET6) {
+#ifdef _WIN32
+                if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#else
+                if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+#endif
+                    connected = 1;
+                    break;
+                }
+            } else if (rp->ai_family == AF_INET) {
+                struct sockaddr_in6 mapped;
+                mapIpv4ToIpv6((struct sockaddr_in*)rp->ai_addr, &mapped);
+#ifdef _WIN32
+                if (connect(s, (struct sockaddr*)&mapped, sizeof(mapped)) == 0) {
+#else
+                if (connect(s, (struct sockaddr*)&mapped, (socklen_t)sizeof(mapped)) == 0) {
+#endif
+                    connected = 1;
+                    break;
+                }
+            } else {
+                continue;
+            }
+        }
+#endif
+        else {
+#ifdef _WIN32
+            if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#else
+            if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+#endif
+                connected = 1;
+                break;
+            }
         }
 #ifdef _WIN32
         last_err = WSAGetLastError();
@@ -1804,12 +1945,27 @@ Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
     }
     int s = (int)AS_INTEGER(args[0]);
     int port = (int)AS_INTEGER(args[1]);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons((unsigned short)port);
-    int r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    int family = AF_INET;
+    lookupSocketInfo(s, &family, NULL);
+    int r = -1;
+#ifdef AF_INET6
+    if (family == AF_INET6) {
+        struct sockaddr_in6 addr6;
+        memset(&addr6, 0, sizeof(addr6));
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_port = htons((unsigned short)port);
+        addr6.sin6_addr = in6addr_any;
+        r = bind(s, (struct sockaddr*)&addr6, sizeof(addr6));
+    } else
+#endif
+    {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons((unsigned short)port);
+        r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    }
     if (r != 0) {
 #ifdef _WIN32
         setSocketError(WSAGetLastError());
@@ -1831,20 +1987,54 @@ Value vmBuiltinSocketBindAddr(VM* vm, int arg_count, Value* args) {
     int s = (int)AS_INTEGER(args[0]);
     const char* host = args[1].s_val ? args[1].s_val : "127.0.0.1";
     int port = (int)AS_INTEGER(args[2]);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((unsigned short)port);
-    int p = inet_pton(AF_INET, host, &addr.sin_addr);
-    if (p != 1) {
+    int family = AF_INET;
+    lookupSocketInfo(s, &family, NULL);
+    int r = -1;
+#ifdef AF_INET6
+    if (family == AF_INET6) {
+        struct sockaddr_in6 addr6;
+        memset(&addr6, 0, sizeof(addr6));
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_port = htons((unsigned short)port);
+        if (!host || !*host) {
+            addr6.sin6_addr = in6addr_any;
+        } else if (inet_pton(AF_INET6, host, &addr6.sin6_addr) != 1) {
+            struct in_addr addr4;
+            if (inet_pton(AF_INET, host, &addr4) == 1) {
+                struct sockaddr_in tmp4;
+                memset(&tmp4, 0, sizeof(tmp4));
+                tmp4.sin_family = AF_INET;
+                tmp4.sin_port = htons((unsigned short)port);
+                tmp4.sin_addr = addr4;
+                mapIpv4ToIpv6(&tmp4, &addr6);
+            } else {
 #ifdef _WIN32
-        setSocketError(WSAEINVAL);
+                setSocketError(WSAEINVAL);
 #else
-        setSocketError(EINVAL);
+                setSocketError(EINVAL);
 #endif
-        return makeInt(-1);
+                return makeInt(-1);
+            }
+        }
+        r = bind(s, (struct sockaddr*)&addr6, sizeof(addr6));
+    } else
+#endif
+    {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons((unsigned short)port);
+        int p = inet_pton(AF_INET, host, &addr.sin_addr);
+        if (p != 1) {
+#ifdef _WIN32
+            setSocketError(WSAEINVAL);
+#else
+            setSocketError(EINVAL);
+#endif
+            return makeInt(-1);
+        }
+        r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
     }
-    int r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
     if (r != 0) {
 #ifdef _WIN32
         setSocketError(WSAGetLastError());
@@ -1883,6 +2073,9 @@ Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     int s = (int)AS_INTEGER(args[0]);
+    int parent_family = AF_INET;
+    int parent_type = SOCK_STREAM;
+    lookupSocketInfo(s, &parent_family, &parent_type);
     int r = (int)accept(s, NULL, NULL);
     if (r < 0) {
 #ifdef _WIN32
@@ -1892,6 +2085,7 @@ Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
 #endif
         return makeInt(-1);
     }
+    registerSocketInfo(r, parent_family, parent_type);
     g_socket_last_error = 0;
     return makeInt(r);
 }
@@ -2027,7 +2221,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #endif
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     int e = getaddrinfo(host, NULL, &hints, &res);
     if (e != 0) {
         if (res) freeaddrinfo(res);
@@ -2042,12 +2236,36 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #endif
         return makeString("");
     }
-    char buf[INET_ADDRSTRLEN];
-    struct sockaddr_in* addr = (struct sockaddr_in*)res->ai_addr;
-    const char* ip = inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof(buf));
+    struct addrinfo* first_v4 = NULL;
+    struct addrinfo* first_v6 = NULL;
+    for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
+        if (!rp->ai_addr) continue;
+        if (!first_v4 && rp->ai_family == AF_INET) first_v4 = rp;
+#ifdef AF_INET6
+        if (!first_v6 && rp->ai_family == AF_INET6) first_v6 = rp;
+#endif
+    }
+    char buf[INET6_ADDRSTRLEN];
+    const char* ip = NULL;
+    if (first_v4) {
+        struct sockaddr_in* addr4 = (struct sockaddr_in*)first_v4->ai_addr;
+        ip = inet_ntop(AF_INET, &addr4->sin_addr, buf, sizeof(buf));
+    }
+#ifdef AF_INET6
+    else if (first_v6) {
+        struct sockaddr_in6* addr6 = (struct sockaddr_in6*)first_v6->ai_addr;
+        ip = inet_ntop(AF_INET6, &addr6->sin6_addr, buf, sizeof(buf));
+    }
+#endif
     freeaddrinfo(res);
     if (!ip) {
-        setSocketError(errno);
+#ifdef EAI_NONAME
+        setSocketAddrInfoError(EAI_NONAME);
+#elif defined(_WIN32)
+        setSocketError(WSAHOST_NOT_FOUND);
+#else
+        setSocketError(errno != 0 ? errno : ENOENT);
+#endif
         return makeString("");
     }
     g_socket_last_error = 0;
