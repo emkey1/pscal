@@ -211,7 +211,29 @@ MStream *createMStream(void) {
     ms->buffer = NULL;
     ms->size = 0;
     ms->capacity = 0;
+    ms->refcount = 1;
     return ms;
+}
+
+void retainMStream(MStream* ms) {
+    if (!ms) return;
+    if (ms->refcount < INT_MAX) {
+        ms->refcount++;
+    }
+}
+
+void releaseMStream(MStream* ms) {
+    if (!ms) return;
+    if (ms->refcount > 0) {
+        ms->refcount--;
+    }
+    if (ms->refcount <= 0) {
+        if (ms->buffer) {
+            free(ms->buffer);
+            ms->buffer = NULL;
+        }
+        free(ms);
+    }
 }
 
 FieldValue *copyRecord(FieldValue *orig) {
@@ -1194,21 +1216,12 @@ void freeValue(Value *v) {
         case TYPE_MEMORYSTREAM:
               if (v->mstream) {
 #ifdef DEBUG
-                  fprintf(stderr, "[DEBUG freeValue] Freeing MStream structure and its buffer for Value* %p. MStream* %p, Buffer* %p\n",
-                          (void*)v, (void*)v->mstream, (void*)(v->mstream ? v->mstream->buffer : NULL));
+                  fprintf(stderr, "[DEBUG freeValue] Releasing MStream for Value* %p. MStream* %p (refcount=%d)\n",
+                          (void*)v, (void*)v->mstream, v->mstream->refcount);
                   fflush(stderr);
 #endif
-                  if (v->mstream->buffer) {
-                      free(v->mstream->buffer);
-                      v->mstream->buffer = NULL;
-                  }
-                  free(v->mstream);
+                  releaseMStream(v->mstream);
                   v->mstream = NULL;
-              } else {
-#ifdef DEBUG
-                  fprintf(stderr, "[DEBUG freeValue] MStream pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
-                  fflush(stderr);
-#endif
               }
               break;
         case TYPE_SET: // Added case for freeing set values
@@ -1998,10 +2011,12 @@ Value makeCopyOfValue(const Value *src) {
                     fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream)\n");
                     EXIT_FAILURE_HANDLER();
                 }
+                v.mstream->buffer = NULL;
                 v.mstream->size = src->mstream->size;
+                v.mstream->capacity = 0;
+                v.mstream->refcount = 1;
                 if (src->mstream->buffer && src->mstream->size >= 0) {
                     size_t copy_size = (size_t)src->mstream->size + 1;
-                    v.mstream->capacity = copy_size;
                     v.mstream->buffer = malloc(copy_size);
                     if (!v.mstream->buffer) {
                         free(v.mstream);
@@ -2009,11 +2024,9 @@ Value makeCopyOfValue(const Value *src) {
                         EXIT_FAILURE_HANDLER();
                     }
                     memcpy(v.mstream->buffer, src->mstream->buffer, copy_size);
-                } else {
-                    v.mstream->buffer = NULL;
-                    v.mstream->capacity = 0;
+                    v.mstream->capacity = (int)copy_size;
                 }
-                }
+            }
             break;
         case TYPE_SET:
             v.set_val.set_values = NULL;

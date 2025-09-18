@@ -34,10 +34,12 @@ double imFactor;
 int textureID;
 int rowMutex;
 int quitMutex;
+int abortMutex;
 int quit = 0;
 int redraw = 1;
 int prevButtons = 0;
 int clickButton = 0, clickX = 0, clickY = 0;
+int abortRender = 0;
 
 #ifdef SDL_ENABLED
 int getQuit() {
@@ -52,6 +54,20 @@ void setQuit(int v) {
     lock(quitMutex);
     quit = v;
     unlock(quitMutex);
+}
+
+int getAbortRender() {
+    int a;
+    lock(abortMutex);
+    a = abortRender;
+    unlock(abortMutex);
+    return a;
+}
+
+void setAbortRender(int v) {
+    lock(abortMutex);
+    abortRender = v;
+    unlock(abortMutex);
 }
 
 int tryInitFont(str path, int fontSize) {
@@ -120,6 +136,7 @@ void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
     double c_im;
     for (y = startY; y <= endY && !getQuit(); y++) {
+        if (getAbortRender()) break;
         c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
@@ -155,6 +172,8 @@ int main() {
     int textReady;
     const int fontSize = 18;
     str envFontPath;
+    double reStep, imStep, centerRe, centerIm, zoomScale, newWidth, newHeight;
+    int keyCode;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
@@ -178,11 +197,13 @@ int main() {
 
     rowMutex = mutex();
     quitMutex = mutex();
+    abortMutex = mutex();
 
     while (!getQuit()) {
         pollMouse();
 
         if (redraw) {
+            setAbortRender(0);
             maxIm = minIm + (maxRe - minRe) * Height / Width;
             reFactor = (maxRe - minRe) / (Width - 1);
             imFactor = (maxIm - minIm) / (Height - 1);
@@ -210,6 +231,7 @@ int main() {
 
             y = 0;
             while (y < Height && !getQuit()) {
+                if (getAbortRender()) break;
                 int done = 0;
                 int update = 0;
                 lock(rowMutex);
@@ -232,25 +254,34 @@ int main() {
                     updatescreen();
                 }
                 if (keypressed()) {
-                    char c = readkey();
-                    if (toupper(c) == 'Q') setQuit(1);
+                    keyCode = readkey();
+                    if (keyCode == 'q' || keyCode == 'Q') setQuit(1);
                 }
                 if (!done || update)
                     pollMouse();
+                if ((clickButton == ButtonLeft || clickButton == ButtonRight) && !getAbortRender()) {
+                    setAbortRender(1);
+                    break;
+                }
             }
 
             for (i = 0; i < ThreadCount; i++)
                 join tid[i];
 
-            if (!getQuit()) {
-                updatetexture(textureID, pixelData);
-                cleardevice();
-                rendercopy(textureID);
-                if (textReady) {
-                    outtextxy(8, 8, "Rendering...");
+            {
+                int aborted = getAbortRender();
+                setAbortRender(0);
+
+                if (!getQuit() && !aborted) {
+                    updatetexture(textureID, pixelData);
+                    cleardevice();
+                    rendercopy(textureID);
+                    if (textReady) {
+                        outtextxy(8, 8, "Rendering...");
+                    }
+                    updatescreen();
+                    redraw = 0;
                 }
-                updatescreen();
-                redraw = 0;
             }
         }
         /* Keyboard controls: Q to quit, arrows to pan by half a screen */
@@ -280,29 +311,29 @@ int main() {
         }
 
         if (clickButton == ButtonLeft || clickButton == ButtonRight) {
-            /* Map pixel -> complex plane using current factors (center of pixel) */
-            double centerRe = minRe + (clickX + 0.5) * reFactor;
-            double centerIm = maxIm - (clickY + 0.5) * imFactor;
-            double widthRe  = (maxRe - minRe);
-            double heightIm = (maxIm - minIm);
+            /* Map pixel -> complex plane using current ranges (center of pixel). */
+            reStep = (maxRe - minRe) / (Width - 1);
+            imStep = (maxIm - minIm) / (Height - 1);
+            centerRe = minRe + (clickX + 0.5) * reStep;
+            centerIm = maxIm - (clickY + 0.5) * imStep;
+            zoomScale = (clickButton == ButtonLeft)
+                           ? (1.0 / ZoomFactor)
+                           : ZoomFactor;
+            newWidth = (maxRe - minRe) * zoomScale;
+            newHeight = (maxIm - minIm) * zoomScale;
 
-            printf("DBG zoom: button=%s click=(%d,%d) reFactor=%0.9f imFactor=%0.9f\n",
-                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY, reFactor, imFactor);
+            printf("DBG zoom: button=%s click=(%d,%d) reStep=%0.9f imStep=%0.9f\n",
+                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY,
+                   reStep, imStep);
             printf("DBG zoom: before minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
                    minRe, maxRe, minIm, maxIm);
-            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f widthRe=%0.9f heightIm=%0.9f\n",
-                   centerRe, centerIm, widthRe, heightIm);
+            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f newWidth=%0.9f newHeight=%0.9f scale=%0.9f\n",
+                   centerRe, centerIm, newWidth, newHeight, zoomScale);
 
-            if (clickButton == ButtonLeft) {
-                widthRe  /= ZoomFactor;
-                heightIm /= ZoomFactor;
-            } else {
-                widthRe  *= ZoomFactor;
-                heightIm *= ZoomFactor;
-            }
-            minRe = centerRe - widthRe / 2.0;
-            maxRe = centerRe + widthRe / 2.0;
-            minIm = centerIm - heightIm / 2.0;
+            minRe = centerRe - newWidth / 2.0;
+            maxRe = centerRe + newWidth / 2.0;
+            minIm = centerIm - newHeight / 2.0;
+            maxIm = centerIm + newHeight / 2.0;
             printf("DBG zoom: after  minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
                    minRe, maxRe, minIm, maxIm);
 

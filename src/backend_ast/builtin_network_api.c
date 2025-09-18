@@ -1548,14 +1548,14 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     }
 
     // Initialize response stream
-    MStream *response_stream = malloc(sizeof(MStream));
+    MStream *response_stream = createMStream();
     if (!response_stream) {
         runtimeError(vm, "apiSend: Memory allocation error for response stream structure.");
         return makeVoid();
     }
     response_stream->buffer = malloc(16); // Initial small buffer
     if (!response_stream->buffer) {
-        free(response_stream);
+        releaseMStream(response_stream);
         runtimeError(vm, "apiSend: Memory allocation error for response stream buffer.");
         return makeVoid();
     }
@@ -1566,8 +1566,7 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     CURL *curl = curl_easy_init();
     if (!curl) {
         runtimeError(vm, "apiSend: curl initialization failed.");
-        free(response_stream->buffer);
-        free(response_stream);
+        releaseMStream(response_stream);
         return makeVoid();
     }
 
@@ -1597,14 +1596,12 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     if (res != CURLE_OK) {
         runtimeError(vm, "apiSend: curl_easy_perform() failed: %s", curl_easy_strerror(res));
         // Free response_stream here as it's an error condition
-        if (response_stream->buffer) free(response_stream->buffer);
-        free(response_stream);
+        releaseMStream(response_stream);
         return makeVoid();
     }
     if (http_code >= 400) {
         runtimeError(vm, "apiSend: HTTP request failed with code %ld. Response (partial):\n%s", http_code, response_stream->buffer ? (char*)response_stream->buffer : "(empty)");
-        if (response_stream->buffer) free(response_stream->buffer);
-        free(response_stream);
+        releaseMStream(response_stream);
         return makeVoid();
     }
 
@@ -1860,10 +1857,13 @@ Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
     int s = (int)AS_INTEGER(args[0]);
     int maxlen = (int)AS_INTEGER(args[1]);
     if (maxlen <= 0) maxlen = 4096;
-    MStream* ms = malloc(sizeof(MStream));
+    MStream* ms = createMStream();
     if (!ms) return makeMStream(NULL);
     ms->buffer = malloc(maxlen+1);
-    if (!ms->buffer) { free(ms); return makeMStream(NULL); }
+    if (!ms->buffer) {
+        releaseMStream(ms);
+        return makeMStream(NULL);
+    }
     int n = (int)recv(s, ms->buffer, maxlen, 0);
     if (n < 0) {
 #ifdef _WIN32
@@ -1872,7 +1872,8 @@ Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
 #else
         if (errno != EWOULDBLOCK && errno != EAGAIN) setSocketError(errno); else g_socket_last_error = 0;
 #endif
-        free(ms->buffer); free(ms); return makeMStream(NULL);
+        releaseMStream(ms);
+        return makeMStream(NULL);
     }
     ms->size = n;
     ms->buffer[n] = '\0';
@@ -2077,7 +2078,7 @@ static void* httpAsyncThread(void* arg) {
         return NULL;
     }
     // Set up output mstream
-    job->result = (MStream*)malloc(sizeof(MStream));
+    job->result = createMStream();
     if (!job->result) {
         job->status = -1;
         job->error = strdup("malloc failed");
@@ -2086,7 +2087,8 @@ static void* httpAsyncThread(void* arg) {
     }
     job->result->buffer = (unsigned char*)malloc(16);
     if (!job->result->buffer) {
-        free(job->result); job->result = NULL;
+        releaseMStream(job->result);
+        job->result = NULL;
         job->status = -1; job->error = strdup("malloc failed"); job->done = 1; return NULL;
     }
     job->result->buffer[0] = '\0'; job->result->size = 0; job->result->capacity = 16;

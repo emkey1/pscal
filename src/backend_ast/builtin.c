@@ -3343,14 +3343,11 @@ Value vmBuiltinMstreamcreate(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "MStreamCreate expects no arguments.");
         return makeVoid();
     }
-    MStream *ms = malloc(sizeof(MStream));
+    MStream *ms = createMStream();
     if (!ms) {
         runtimeError(vm, "Memory allocation error for MStream structure in MStreamCreate.");
         return makeVoid();
     }
-    ms->buffer = NULL;
-    ms->size = 0;
-    ms->capacity = 0;
     return makeMStream(ms);
 }
 
@@ -3481,11 +3478,7 @@ Value vmBuiltinMstreamfree(VM* vm, int arg_count, Value* args) {
     MStream* ms = ms_value_ptr->mstream;
 
     if (ms) { // Only free if MStream struct itself exists
-        if (ms->buffer) {
-            free(ms->buffer);
-            ms->buffer = NULL;
-        }
-        free(ms); // Free the MStream struct
+        releaseMStream(ms);
         ms_value_ptr->mstream = NULL; // Crucial: Set the MStream pointer in the variable's Value struct to NULL
     }
     // If ms was NULL, it's a no-op, which is fine.
