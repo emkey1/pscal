@@ -1552,6 +1552,9 @@ Value vmBuiltinTextcolor(VM* vm, int arg_count, Value* args) {
     gCurrentTextColor = (int)(colorCode % 16);
     gCurrentTextBold = (colorCode >= 8 && colorCode <= 15);
     gCurrentColorIsExt = false;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1563,6 +1566,9 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
     gCurrentBgIsExt = false;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1574,6 +1580,9 @@ Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
     gCurrentTextColor = (int)AS_INTEGER(args[0]);
     gCurrentTextBold = false;
     gCurrentColorIsExt = true;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1585,6 +1594,9 @@ Value vmBuiltinTextbackgrounde(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)AS_INTEGER(args[0]);
     gCurrentBgIsExt = true;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1596,6 +1608,9 @@ Value vmBuiltinBoldtext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBold = true;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1607,6 +1622,7 @@ Value vmBuiltinUnderlinetext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextUnderline = true;
+    markTextAttrDirty();
     return makeVoid();
 }
 
@@ -1617,6 +1633,9 @@ Value vmBuiltinBlinktext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBlink = true;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1629,6 +1648,9 @@ Value vmBuiltinLowvideo(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBold = false;
     gCurrentTextColor &= 0x07;
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1648,6 +1670,9 @@ Value vmBuiltinNormvideo(VM* vm, int arg_count, Value* args) {
     gCurrentTextBlink = false;
     printf("\x1B[0m");
     fflush(stdout);
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }
@@ -1762,6 +1787,9 @@ Value vmBuiltinNormalcolors(VM* vm, int arg_count, Value* args) {
     gCurrentTextBlink = false;
     printf("\x1B[0m");
     fflush(stdout);
+
+    markTextAttrDirty();
+
     syncTextAttrSymbol();
     return makeVoid();
 }

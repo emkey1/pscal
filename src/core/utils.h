@@ -243,6 +243,9 @@ bool applyCurrentTextAttributes(FILE* stream);
 void resetTextAttributes(FILE* stream);
 uint8_t computeCurrentTextAttr(void);
 void syncTextAttrSymbol(void);
+
+void markTextAttrDirty(void);
+
 void setCurrentTextAttrFromByte(uint8_t attr);
 
 // Arrays
