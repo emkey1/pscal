@@ -3,10 +3,6 @@ PROGRAM ColorPalette256Demo;
 
 USES Crt; // Assumes CRT contains ClrScr, GotoXY, TextColorE, TextColor, Write, WriteLn, ReadKey, NormVideo
 
-CONST
-  // Define standard colors for resetting text easily
-  LightGray = 7;
-
 VAR
   row, col   : Integer; // Loop counters for grid
   colorIndex : Byte;    // Use Byte for 0-255 range
