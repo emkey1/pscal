@@ -4,6 +4,8 @@
 #include <math.h>
 #include <ctype.h>
 #include <strings.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h" // For isBuiltin
@@ -338,6 +340,101 @@ static int intTypeRank(VarType t) {
         default:
             return 0;
     }
+}
+
+static bool isUnsignedIntVarType(VarType t) {
+    switch (t) {
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool constantFitsInIntType(AST* expr, VarType targetType) {
+    if (!expr || !isIntlikeType(targetType)) return false;
+
+    Value const_val = evaluateCompileTimeValue(expr);
+    bool fits = false;
+
+    if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+        freeValue(&const_val);
+        return false;
+    }
+
+    bool hasOrdinal = false;
+    long long sval = 0;
+    unsigned long long uval = 0;
+    bool value_is_unsigned = false;
+
+    if (const_val.type == TYPE_ENUM) {
+        sval = const_val.enum_val.ordinal;
+        uval = (unsigned long long)const_val.enum_val.ordinal;
+        hasOrdinal = true;
+        value_is_unsigned = (const_val.enum_val.ordinal >= 0);
+    } else if (isIntlikeType(const_val.type)) {
+        sval = const_val.i_val;
+        uval = const_val.u_val;
+        hasOrdinal = true;
+        value_is_unsigned = isUnsignedIntVarType(const_val.type) ||
+                            const_val.type == TYPE_BOOLEAN ||
+                            const_val.type == TYPE_CHAR;
+    }
+
+    if (!hasOrdinal) {
+        freeValue(&const_val);
+        return false;
+    }
+
+    switch (targetType) {
+        case TYPE_BOOLEAN:
+            fits = (sval == 0 || sval == 1);
+            break;
+        case TYPE_CHAR:
+            fits = (sval >= 0 && uval <= UCHAR_MAX);
+            break;
+        case TYPE_INT8:
+            fits = (sval >= INT8_MIN && sval <= INT8_MAX);
+            break;
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+            fits = ((value_is_unsigned || sval >= 0) && uval <= UINT8_MAX);
+            break;
+        case TYPE_INT16:
+            fits = (sval >= INT16_MIN && sval <= INT16_MAX);
+            break;
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            fits = ((value_is_unsigned || sval >= 0) && uval <= UINT16_MAX);
+            break;
+        case TYPE_INT32:
+            fits = (sval >= INT32_MIN && sval <= INT32_MAX);
+            break;
+        case TYPE_UINT32:
+            fits = ((value_is_unsigned || sval >= 0) && uval <= UINT32_MAX);
+            break;
+        case TYPE_INT64:
+            if (value_is_unsigned && uval > (unsigned long long)LLONG_MAX) {
+                fits = false;
+            } else {
+                fits = (sval >= LLONG_MIN && sval <= LLONG_MAX);
+            }
+            break;
+        case TYPE_UINT64:
+            fits = (value_is_unsigned || sval >= 0);
+            break;
+        default:
+            fits = false;
+            break;
+    }
+
+    freeValue(&const_val);
+    return fits;
 }
 
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
@@ -3030,7 +3127,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
                 int lrank = intTypeRank(lvalue->var_type);
                 int rrank = intTypeRank(rvalue->var_type);
-                if (rrank > lrank) {
+                if (rrank > lrank && !constantFitsInIntType(rvalue, lvalue->var_type)) {
                     fprintf(stderr, "L%d: Compiler warning: assigning %s to %s may lose precision.\n",
                             line, varTypeToString(rvalue->var_type), varTypeToString(lvalue->var_type));
                 }
@@ -4049,7 +4146,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
                 int lrank = intTypeRank(lvalue->var_type);
                 int rrank = intTypeRank(rvalue->var_type);
-                if (rrank > lrank) {
+                if (rrank > lrank && !constantFitsInIntType(rvalue, lvalue->var_type)) {
                     fprintf(stderr, "L%d: Compiler warning: assigning %s to %s may lose precision.\n",
                             line, varTypeToString(rvalue->var_type), varTypeToString(lvalue->var_type));
                 }
