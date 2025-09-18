@@ -659,6 +659,22 @@ void runtimeError(VM* vm, const char* format, ...) {
     // ... (rest of runtimeError function, calls EXIT_FAILURE_HANDLER()) ...
 }
 
+static Value copyValueForStack(const Value* src) {
+    if (!src) {
+        return makeNil();
+    }
+
+    if (src->type == TYPE_MEMORYSTREAM) {
+        Value alias = *src;
+        if (alias.mstream) {
+            retainMStream(alias.mstream);
+        }
+        return alias;
+    }
+
+    return makeCopyOfValue(src);
+}
+
 static void push(VM* vm, Value value) { // Using your original name 'push'
     if (vm->stackTop - vm->stack >= VM_STACK_MAX) {
         runtimeError(vm, "VM Error: Stack overflow.");
@@ -1059,7 +1075,7 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
             return INTERPRET_RUNTIME_ERROR;
         }
         Value returnValue = pop(vm);
-        safeReturnValue = makeCopyOfValue(&returnValue);
+        safeReturnValue = copyValueForStack(&returnValue);
         freeValue(&returnValue);
     }
 
@@ -1414,12 +1430,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         /* String/char concatenation for ADD */ \
         if (current_instruction_code == ADD) { \
             while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
-                Value tmp = makeCopyOfValue(a_val_popped.ptr_val); \
+                Value tmp = copyValueForStack(a_val_popped.ptr_val); \
                 freeValue(&a_val_popped); \
                 a_val_popped = tmp; \
             } \
             while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
-                Value tmp = makeCopyOfValue(b_val_popped.ptr_val); \
+                Value tmp = copyValueForStack(b_val_popped.ptr_val); \
                 freeValue(&b_val_popped); \
                 b_val_popped = tmp; \
             } \
@@ -1641,7 +1657,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             }
             case CONSTANT: {
                 Value constant = READ_CONSTANT();
-                push(vm, makeCopyOfValue(&constant));
+                push(vm, copyValueForStack(&constant));
                 break;
             }
                 
@@ -1651,7 +1667,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Constant index %u out of bounds for CONSTANT16.", idx);
                    return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(&vm->chunk->constants[idx]));
+                push(vm, copyValueForStack(&vm->chunk->constants[idx]));
                 break;
             }
 
@@ -1836,7 +1852,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Stack underflow (dup from empty stack).");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(&vm->stackTop[-1]));
+                push(vm, copyValueForStack(&vm->stackTop[-1]));
                 break;
             }
             case AND:
@@ -2745,7 +2761,7 @@ comparison_error_label:
                         runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    push(vm, makeCopyOfValue(target_lvalue_ptr));
+                    push(vm, copyValueForStack(target_lvalue_ptr));
                 }
                 freeValue(&pointer_val);
                 break;
@@ -2825,7 +2841,7 @@ comparison_error_label:
                 if (vm->vmConstGlobalSymbols) {
                     sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
                     if (sym && sym->value) {
-                        push(vm, makeCopyOfValue(sym->value));
+                        push(vm, copyValueForStack(sym->value));
                         break;
                     }
                 }
@@ -2838,7 +2854,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, makeCopyOfValue(sym->value));
+                push(vm, copyValueForStack(sym->value));
                 break;
             }
             case GET_GLOBAL16: {
@@ -2858,7 +2874,7 @@ comparison_error_label:
                 if (vm->vmConstGlobalSymbols) {
                     sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
                     if (sym && sym->value) {
-                        push(vm, makeCopyOfValue(sym->value));
+                        push(vm, copyValueForStack(sym->value));
                         break;
                     }
                 }
@@ -2871,7 +2887,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, makeCopyOfValue(sym->value));
+                push(vm, copyValueForStack(sym->value));
                 break;
             }
             case SET_GLOBAL: {
@@ -2955,7 +2971,7 @@ comparison_error_label:
                                  slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(&frame->slots[slot]));
+                push(vm, copyValueForStack(&frame->slots[slot]));
                 break;
             }
             case SET_LOCAL: {
@@ -3054,7 +3070,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Upvalue index out of range.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(frame->upvalues[slot]));
+                push(vm, copyValueForStack(frame->upvalues[slot]));
                 break;
             }
             case SET_UPVALUE: {

@@ -175,6 +175,8 @@ void dumpSymbolTable(void);
 void dumpSymbol(Symbol *sym);
 
 MStream *createMStream(void);
+void retainMStream(MStream* ms);
+void releaseMStream(MStream* ms);
 FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
 void freeFieldValue(FieldValue *fv);
