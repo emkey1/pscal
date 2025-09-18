@@ -211,6 +211,7 @@ MStream *createMStream(void) {
     ms->buffer = NULL;
     ms->size = 0;
     ms->capacity = 0;
+    ms->ref_count = 1;
     return ms;
 }
 
@@ -1192,25 +1193,30 @@ void freeValue(Value *v) {
             }
             break; // Break from the switch statement
         case TYPE_MEMORYSTREAM:
-              if (v->mstream) {
+            if (v->mstream) {
+                if (v->mstream->ref_count > 0) {
+                    v->mstream->ref_count--;
+                }
+                if (v->mstream->ref_count == 0) {
 #ifdef DEBUG
-                  fprintf(stderr, "[DEBUG freeValue] Freeing MStream structure and its buffer for Value* %p. MStream* %p, Buffer* %p\n",
-                          (void*)v, (void*)v->mstream, (void*)(v->mstream ? v->mstream->buffer : NULL));
-                  fflush(stderr);
+                    fprintf(stderr, "[DEBUG freeValue] Freeing MStream structure and its buffer for Value* %p. MStream* %p, Buffer* %p\n",
+                            (void*)v, (void*)v->mstream, (void*)(v->mstream ? v->mstream->buffer : NULL));
+                    fflush(stderr);
 #endif
-                  if (v->mstream->buffer) {
-                      free(v->mstream->buffer);
-                      v->mstream->buffer = NULL;
-                  }
-                  free(v->mstream);
-                  v->mstream = NULL;
-              } else {
+                    if (v->mstream->buffer) {
+                        free(v->mstream->buffer);
+                        v->mstream->buffer = NULL;
+                    }
+                    free(v->mstream);
+                }
+                v->mstream = NULL;
+            } else {
 #ifdef DEBUG
-                  fprintf(stderr, "[DEBUG freeValue] MStream pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
-                  fflush(stderr);
+                fprintf(stderr, "[DEBUG freeValue] MStream pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
+                fflush(stderr);
 #endif
-              }
-              break;
+            }
+            break;
         case TYPE_SET: // Added case for freeing set values
             if (v->set_val.set_values) {
 #ifdef DEBUG
@@ -1991,29 +1997,10 @@ Value makeCopyOfValue(const Value *src) {
             v.max_length = 1;
             break;
         case TYPE_MEMORYSTREAM:
-            v.mstream = NULL;
-            if (src->mstream) {
-                v.mstream = malloc(sizeof(MStream));
-                if (!v.mstream) {
-                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream)\n");
-                    EXIT_FAILURE_HANDLER();
-                }
-                v.mstream->size = src->mstream->size;
-                if (src->mstream->buffer && src->mstream->size >= 0) {
-                    size_t copy_size = (size_t)src->mstream->size + 1;
-                    v.mstream->capacity = copy_size;
-                    v.mstream->buffer = malloc(copy_size);
-                    if (!v.mstream->buffer) {
-                        free(v.mstream);
-                        fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream buffer)\n");
-                        EXIT_FAILURE_HANDLER();
-                    }
-                    memcpy(v.mstream->buffer, src->mstream->buffer, copy_size);
-                } else {
-                    v.mstream->buffer = NULL;
-                    v.mstream->capacity = 0;
-                }
-                }
+            v.mstream = src->mstream;
+            if (v.mstream) {
+                v.mstream->ref_count++;
+            }
             break;
         case TYPE_SET:
             v.set_val.set_values = NULL;

@@ -3463,12 +3463,12 @@ comparison_error_label:
                     if (needs_lock) pthread_mutex_unlock(&globals_mutex);
 
                     // Pop arguments from the stack and free their contents when safe.
-                    // Arrays and pointers reference caller-managed memory, so avoid freeing
+                    // Pointer arguments reference caller-managed memory, so avoid freeing
                     // the underlying data to prevent invalidating VAR arguments.
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
                         if (args[i].type == TYPE_POINTER) {
-                            // Pointer arguments reference caller-managed memory; do not dereference here.
+                            // Pointer arguments reference caller-managed memory.
                             continue;
                         }
 

@@ -3331,6 +3331,7 @@ Value vmBuiltinMstreamcreate(VM* vm, int arg_count, Value* args) {
     ms->buffer = NULL;
     ms->size = 0;
     ms->capacity = 0;
+    ms->ref_count = 1;
     return makeMStream(ms);
 }
 

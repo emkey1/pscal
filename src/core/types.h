@@ -74,6 +74,7 @@ typedef struct MStream {
     unsigned char *buffer;
     int size;
     int capacity;
+    int ref_count;
 } MStream;
 
 // Definition of Type struct for enum metadata

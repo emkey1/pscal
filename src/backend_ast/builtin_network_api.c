@@ -1562,6 +1562,7 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     response_stream->buffer[0] = '\0';
     response_stream->size = 0;
     response_stream->capacity = 16;
+    response_stream->ref_count = 1;
 
     CURL *curl = curl_easy_init();
     if (!curl) {
@@ -1877,6 +1878,7 @@ Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
     ms->size = n;
     ms->buffer[n] = '\0';
     ms->capacity = maxlen+1;
+    ms->ref_count = 1;
     g_socket_last_error = 0;
     return makeMStream(ms);
 }
@@ -2089,7 +2091,7 @@ static void* httpAsyncThread(void* arg) {
         free(job->result); job->result = NULL;
         job->status = -1; job->error = strdup("malloc failed"); job->done = 1; return NULL;
     }
-    job->result->buffer[0] = '\0'; job->result->size = 0; job->result->capacity = 16;
+    job->result->buffer[0] = '\0'; job->result->size = 0; job->result->capacity = 16; job->result->ref_count = 1;
     // file:// fast-path
     if (job->url && strncasecmp(job->url, "file://", 7) == 0) {
         const char* path = job->url + 7;
