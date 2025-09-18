@@ -1865,11 +1865,13 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     }
 
     int connected = 0;
+    int attempted = 0;
     int last_err = 0;
     for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
         if (!rp->ai_addr) continue;
         if (family == AF_INET) {
             if (rp->ai_family != AF_INET) continue;
+            attempted = 1;
 #ifdef _WIN32
             if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
 #else
@@ -1882,6 +1884,7 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
 #ifdef AF_INET6
         else if (family == AF_INET6) {
             if (rp->ai_family == AF_INET6) {
+                attempted = 1;
 #ifdef _WIN32
                 if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
 #else
@@ -1893,6 +1896,7 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
             } else if (rp->ai_family == AF_INET) {
                 struct sockaddr_in6 mapped;
                 mapIpv4ToIpv6((struct sockaddr_in*)rp->ai_addr, &mapped);
+                attempted = 1;
 #ifdef _WIN32
                 if (connect(s, (struct sockaddr*)&mapped, sizeof(mapped)) == 0) {
 #else
@@ -1907,6 +1911,7 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
         }
 #endif
         else {
+            attempted = 1;
 #ifdef _WIN32
             if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
 #else
@@ -1924,14 +1929,26 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     }
     freeaddrinfo(res);
     if (!connected) {
-        if (last_err == 0) {
-#ifdef _WIN32
-            last_err = WSAECONNREFUSED;
+        if (!attempted) {
+#if defined(EAI_NONAME)
+            setSocketAddrInfoError(EAI_NONAME);
+#elif defined(EAI_NODATA)
+            setSocketAddrInfoError(EAI_NODATA);
+#elif defined(_WIN32)
+            setSocketAddrInfoError(WSAHOST_NOT_FOUND);
 #else
-            last_err = ECONNREFUSED;
+            setSocketError(errno != 0 ? errno : ENOENT);
 #endif
+        } else {
+            if (last_err == 0) {
+#ifdef _WIN32
+                last_err = WSAECONNREFUSED;
+#else
+                last_err = ECONNREFUSED;
+#endif
+            }
+            setSocketError(last_err);
         }
-        setSocketError(last_err);
         return makeInt(-1);
     }
     g_socket_last_error = 0;
