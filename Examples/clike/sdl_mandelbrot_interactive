@@ -34,10 +34,12 @@ double imFactor;
 int textureID;
 int rowMutex;
 int quitMutex;
+int abortMutex;
 int quit = 0;
 int redraw = 1;
 int prevButtons = 0;
 int clickButton = 0, clickX = 0, clickY = 0;
+int abortRender = 0;
 
 #ifdef SDL_ENABLED
 int getQuit() {
@@ -52,6 +54,20 @@ void setQuit(int v) {
     lock(quitMutex);
     quit = v;
     unlock(quitMutex);
+}
+
+int getAbortRender() {
+    int a;
+    lock(abortMutex);
+    a = abortRender;
+    unlock(abortMutex);
+    return a;
+}
+
+void setAbortRender(int v) {
+    lock(abortMutex);
+    abortRender = v;
+    unlock(abortMutex);
 }
 
 int tryInitFont(str path, int fontSize) {
@@ -120,6 +136,7 @@ void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
     double c_im;
     for (y = startY; y <= endY && !getQuit(); y++) {
+        if (getAbortRender()) break;
         c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
@@ -180,11 +197,13 @@ int main() {
 
     rowMutex = mutex();
     quitMutex = mutex();
+    abortMutex = mutex();
 
     while (!getQuit()) {
         pollMouse();
 
         if (redraw) {
+            setAbortRender(0);
             maxIm = minIm + (maxRe - minRe) * Height / Width;
             reFactor = (maxRe - minRe) / (Width - 1);
             imFactor = (maxIm - minIm) / (Height - 1);
@@ -212,6 +231,7 @@ int main() {
 
             y = 0;
             while (y < Height && !getQuit()) {
+                if (getAbortRender()) break;
                 int done = 0;
                 int update = 0;
                 lock(rowMutex);
@@ -239,20 +259,29 @@ int main() {
                 }
                 if (!done || update)
                     pollMouse();
+                if ((clickButton == ButtonLeft || clickButton == ButtonRight) && !getAbortRender()) {
+                    setAbortRender(1);
+                    break;
+                }
             }
 
             for (i = 0; i < ThreadCount; i++)
                 join tid[i];
 
-            if (!getQuit()) {
-                updatetexture(textureID, pixelData);
-                cleardevice();
-                rendercopy(textureID);
-                if (textReady) {
-                    outtextxy(8, 8, "Rendering...");
+            {
+                int aborted = getAbortRender();
+                setAbortRender(0);
+
+                if (!getQuit() && !aborted) {
+                    updatetexture(textureID, pixelData);
+                    cleardevice();
+                    rendercopy(textureID);
+                    if (textReady) {
+                        outtextxy(8, 8, "Rendering...");
+                    }
+                    updatescreen();
+                    redraw = 0;
                 }
-                updatescreen();
-                redraw = 0;
             }
         }
         /* Keyboard controls: Q to quit, arrows to pan by half a screen */
