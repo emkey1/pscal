@@ -34,10 +34,12 @@ double imFactor;
 int textureID;
 int rowMutex;
 int quitMutex;
+int abortMutex;
 int quit = 0;
 int redraw = 1;
 int prevButtons = 0;
 int clickButton = 0, clickX = 0, clickY = 0;
+int abortRender = 0;
 
 #ifdef SDL_ENABLED
 int getQuit() {
@@ -52,6 +54,20 @@ void setQuit(int v) {
     lock(quitMutex);
     quit = v;
     unlock(quitMutex);
+}
+
+int getAbortRender() {
+    int a;
+    lock(abortMutex);
+    a = abortRender;
+    unlock(abortMutex);
+    return a;
+}
+
+void setAbortRender(int v) {
+    lock(abortMutex);
+    abortRender = v;
+    unlock(abortMutex);
 }
 
 int tryInitFont(str path, int fontSize) {
@@ -116,46 +132,11 @@ void pollMouse() {
     prevButtons = b;
 }
 
-void handleKeyEvent(int keyCode, int allowPan) {
-    if (keyCode == 0) return;
-
-    if (keyCode == 'q' || keyCode == 'Q') {
-        setQuit(1);
-        return;
-    }
-
-    if (!allowPan) return;
-
-    double widthRe = (maxRe - minRe);
-    double heightIm = (maxIm - minIm);
-    double dx = widthRe * 0.5;
-    double dy = heightIm * 0.5;
-
-    if (keyCode == KEY_LEFT) {
-        minRe -= dx;
-        maxRe -= dx;
-        redraw = 1;
-    } else if (keyCode == KEY_RIGHT) {
-        minRe += dx;
-        maxRe += dx;
-        redraw = 1;
-    } else if (keyCode == KEY_UP) {
-        /* Move view up in complex plane: increase both Im bounds */
-        minIm += dy;
-        maxIm += dy;
-        redraw = 1;
-    } else if (keyCode == KEY_DOWN) {
-        /* Move view down: decrease both Im bounds */
-        minIm -= dy;
-        maxIm -= dy;
-        redraw = 1;
-    }
-}
-
 void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
     double c_im;
     for (y = startY; y <= endY && !getQuit(); y++) {
+        if (getAbortRender()) break;
         c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
@@ -191,6 +172,8 @@ int main() {
     int textReady;
     const int fontSize = 18;
     str envFontPath;
+    double reStep, imStep, centerRe, centerIm, zoomScale, newWidth, newHeight;
+    int keyCode;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
@@ -214,15 +197,13 @@ int main() {
 
     rowMutex = mutex();
     quitMutex = mutex();
+    abortMutex = mutex();
 
     while (!getQuit()) {
         pollMouse();
-        if (quitrequested()) {
-            setQuit(1);
-            break;
-        }
 
         if (redraw) {
+            setAbortRender(0);
             maxIm = minIm + (maxRe - minRe) * Height / Width;
             reFactor = (maxRe - minRe) / (Width - 1);
             imFactor = (maxIm - minIm) / (Height - 1);
@@ -250,6 +231,7 @@ int main() {
 
             y = 0;
             while (y < Height && !getQuit()) {
+                if (getAbortRender()) break;
                 int done = 0;
                 int update = 0;
                 lock(rowMutex);
@@ -271,54 +253,74 @@ int main() {
                     rendercopy(textureID);
                     updatescreen();
                 }
-                if (quitrequested()) {
-                    setQuit(1);
-                    break;
-                }
                 if (keypressed()) {
-                    int keyCode = readkey();
-                    handleKeyEvent(keyCode, 0);
+                    keyCode = readkey();
+                    if (keyCode == 'q' || keyCode == 'Q') setQuit(1);
                 }
                 if (!done || update)
                     pollMouse();
+                if ((clickButton == ButtonLeft || clickButton == ButtonRight) && !getAbortRender()) {
+                    setAbortRender(1);
+                    break;
+                }
             }
 
             for (i = 0; i < ThreadCount; i++)
                 join tid[i];
 
-            if (!getQuit()) {
-                updatetexture(textureID, pixelData);
-                cleardevice();
-                rendercopy(textureID);
-                if (textReady) {
-                    outtextxy(8, 8, "Rendering...");
+            {
+                int aborted = getAbortRender();
+                setAbortRender(0);
+
+                if (!getQuit() && !aborted) {
+                    updatetexture(textureID, pixelData);
+                    cleardevice();
+                    rendercopy(textureID);
+                    if (textReady) {
+                        outtextxy(8, 8, "Rendering...");
+                    }
+                    updatescreen();
+                    redraw = 0;
                 }
-                updatescreen();
-                redraw = 0;
             }
         }
         /* Keyboard controls: Q to quit, arrows to pan by half a screen */
         {
             int key = pollkey();
-            while (key != 0 && !getQuit()) {
-                handleKeyEvent(key, 1);
-                key = pollkey();
+            if (key != 0) {
+                if (key == 'q' || key == 'Q') {
+                    setQuit(1);
+                    continue;
+                }
+                double widthRe = (maxRe - minRe);
+                double heightIm = (maxIm - minIm);
+                double dx = widthRe * 0.5;
+                double dy = heightIm * 0.5;
+                if (key == KEY_LEFT) {
+                    minRe -= dx; maxRe -= dx; redraw = 1;
+                } else if (key == KEY_RIGHT) {
+                    minRe += dx; maxRe += dx; redraw = 1;
+                } else if (key == KEY_UP) {
+                    /* Move view up in complex plane: increase both Im bounds */
+                    minIm += dy; maxIm += dy; redraw = 1;
+                } else if (key == KEY_DOWN) {
+                    /* Move view down: decrease both Im bounds */
+                    minIm -= dy; maxIm -= dy; redraw = 1;
+                }
             }
-            if (getQuit())
-                continue;
         }
 
         if (clickButton == ButtonLeft || clickButton == ButtonRight) {
             /* Map pixel -> complex plane using current ranges (center of pixel). */
-            double reStep = (maxRe - minRe) / (Width - 1);
-            double imStep = (maxIm - minIm) / (Height - 1);
-            double centerRe = minRe + (clickX + 0.5) * reStep;
-            double centerIm = maxIm - (clickY + 0.5) * imStep;
-            double zoomScale = (clickButton == ButtonLeft)
-                                   ? (1.0 / ZoomFactor)
-                                   : ZoomFactor;
-            double newWidth = (maxRe - minRe) * zoomScale;
-            double newHeight = (maxIm - minIm) * zoomScale;
+            reStep = (maxRe - minRe) / (Width - 1);
+            imStep = (maxIm - minIm) / (Height - 1);
+            centerRe = minRe + (clickX + 0.5) * reStep;
+            centerIm = maxIm - (clickY + 0.5) * imStep;
+            zoomScale = (clickButton == ButtonLeft)
+                           ? (1.0 / ZoomFactor)
+                           : ZoomFactor;
+            newWidth = (maxRe - minRe) * zoomScale;
+            newHeight = (maxIm - minIm) * zoomScale;
 
             printf("DBG zoom: button=%s click=(%d,%d) reStep=%0.9f imStep=%0.9f\n",
                    (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY,
