@@ -2166,6 +2166,34 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     comparison_succeeded = true;
                 }
+                // Memory stream and NIL comparison
+                else if ((a_val.type == TYPE_MEMORYSTREAM || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_MEMORYSTREAM || b_val.type == TYPE_NIL)) {
+                    MStream* ms_a = (a_val.type == TYPE_MEMORYSTREAM) ? a_val.mstream : NULL;
+                    MStream* ms_b = (b_val.type == TYPE_MEMORYSTREAM) ? b_val.mstream : NULL;
+                    bool streams_equal = false;
+                    if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
+                        streams_equal = true;
+                    } else if (a_val.type == TYPE_NIL) {
+                        streams_equal = (ms_b == NULL);
+                    } else if (b_val.type == TYPE_NIL) {
+                        streams_equal = (ms_a == NULL);
+                    } else {
+                        streams_equal = (ms_a == ms_b);
+                    }
+
+                    if (instruction_val == EQUAL) {
+                        result_val = makeBoolean(streams_equal);
+                    } else if (instruction_val == NOT_EQUAL) {
+                        result_val = makeBoolean(!streams_equal);
+                    } else {
+                        runtimeError(vm,
+                                     "Runtime Error: Invalid operator for memory stream comparison. Only '=' and '<>' are allowed. Got opcode %d.",
+                                     instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
                 // Pointer and NIL comparison
                 else if ((a_val.type == TYPE_POINTER || a_val.type == TYPE_NIL) &&
                          (b_val.type == TYPE_POINTER || b_val.type == TYPE_NIL)) {
