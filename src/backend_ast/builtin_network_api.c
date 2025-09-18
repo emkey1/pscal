@@ -70,6 +70,59 @@ static void setSocketError(int err) {
 #endif
 }
 
+static void setSocketAddrInfoError(int err) {
+#ifdef _WIN32
+    switch (err) {
+#ifdef EAI_AGAIN
+        case EAI_AGAIN:
+#endif
+#ifdef WSATRY_AGAIN
+        case WSATRY_AGAIN:
+#endif
+            g_socket_last_error = 3; // temporary failure
+            break;
+#ifdef EAI_NONAME
+        case EAI_NONAME:
+#endif
+#ifdef EAI_NODATA
+        case EAI_NODATA:
+#endif
+        case WSAHOST_NOT_FOUND:
+        case WSANO_DATA:
+            g_socket_last_error = 5; // host not found
+            break;
+        default:
+            g_socket_last_error = 1;
+            break;
+    }
+    const char* msg = gai_strerrorA(err);
+    if (!msg) msg = "name resolution failure";
+    snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "%s", msg);
+#else
+    switch (err) {
+#ifdef EAI_AGAIN
+        case EAI_AGAIN:
+            g_socket_last_error = 3; // try again later
+            break;
+#endif
+#ifdef EAI_NONAME
+        case EAI_NONAME:
+#endif
+#ifdef EAI_NODATA
+        case EAI_NODATA:
+#endif
+            g_socket_last_error = 5; // host not found
+            break;
+        default:
+            g_socket_last_error = 1;
+            break;
+    }
+    const char* msg = gai_strerror(err);
+    if (!msg) msg = "name resolution failure";
+    snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "%s", msg);
+#endif
+}
+
 static void sleep_ms(long ms) {
 #ifdef _WIN32
     Sleep(ms);
@@ -1694,26 +1747,52 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM; // default
-    if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
-#else
-        setSocketError(errno);
-#endif
+    int gai_err = getaddrinfo(host, portstr, &hints, &res);
+    if (gai_err != 0) {
         if (res) freeaddrinfo(res);
+        setSocketAddrInfoError(gai_err);
         return makeInt(-1);
     }
-    int r = connect(s, res->ai_addr, res->ai_addrlen);
-    if (r != 0) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
+    if (!res) {
+#ifdef EAI_FAIL
+        setSocketAddrInfoError(EAI_FAIL);
 #else
-        setSocketError(errno);
+        setSocketAddrInfoError(-1);
 #endif
-        freeaddrinfo(res);
         return makeInt(-1);
+    }
+
+    int connected = 0;
+    int last_err = 0;
+    for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
+        if (!rp->ai_addr) continue;
+        if (rp->ai_family != AF_INET) continue;
+#ifdef _WIN32
+        if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#else
+        if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+#endif
+            connected = 1;
+            break;
+        }
+#ifdef _WIN32
+        last_err = WSAGetLastError();
+#else
+        last_err = errno;
+#endif
     }
     freeaddrinfo(res);
+    if (!connected) {
+        if (last_err == 0) {
+#ifdef _WIN32
+            last_err = WSAECONNREFUSED;
+#else
+            last_err = ECONNREFUSED;
+#endif
+        }
+        setSocketError(last_err);
+        return makeInt(-1);
+    }
     g_socket_last_error = 0;
     return makeInt(0);
 }
@@ -1950,13 +2029,17 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     int e = getaddrinfo(host, NULL, &hints, &res);
-    if (e != 0 || !res) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
-#else
-        setSocketError(errno);
-#endif
+    if (e != 0) {
         if (res) freeaddrinfo(res);
+        setSocketAddrInfoError(e);
+        return makeString("");
+    }
+    if (!res) {
+#ifdef EAI_FAIL
+        setSocketAddrInfoError(EAI_FAIL);
+#else
+        setSocketAddrInfoError(-1);
+#endif
         return makeString("");
     }
     char buf[INET_ADDRSTRLEN];
