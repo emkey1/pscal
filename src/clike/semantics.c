@@ -260,6 +260,10 @@ static char *tokenToCString(ClikeToken t) {
 
 static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes);
 
+static int isCharPointerDecl(const ASTNodeClike *decl) {
+    return decl && decl->var_type == TYPE_POINTER && decl->element_type == TYPE_CHAR;
+}
+
 static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
     if (!node) return TYPE_UNKNOWN;
     switch (node->type) {
@@ -379,13 +383,26 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_ASSIGN: {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
+            int allowStringToCharPointer = 0;
+            if (lt == TYPE_POINTER && rt == TYPE_STRING) {
+                ASTNodeClike *lhsDecl = NULL;
+                if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                    char *lhsName = tokenToCString(node->left->token);
+                    lhsDecl = ssGetDecl(scopes, lhsName);
+                    free(lhsName);
+                }
+                if (isCharPointerDecl(lhsDecl)) {
+                    allowStringToCharPointer = 1;
+                }
+            }
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
             if (lt != rt &&
                 !(isRealType(lt) && isRealType(rt)) &&
                 !(isRealType(lt) && isIntlikeType(rt)) &&
                 !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
                 !(isIntlikeType(lt) && isIntlikeType(rt)) &&
-                !(isIntlikeType(lt) && rt == TYPE_POINTER)) {
+                !(isIntlikeType(lt) && rt == TYPE_POINTER) &&
+                !allowStringToCharPointer) {
                 fprintf(stderr,
                         "Type error: cannot assign %s to %s at line %d, column %d\n",
                         varTypeToString(rt), varTypeToString(lt),
@@ -828,7 +845,8 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                         !(isRealType(declType) && isRealType(initType)) &&
                         !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
                         !(isIntlikeType(declType) && isIntlikeType(initType)) &&
-                        !(isIntlikeType(declType) && initType == TYPE_POINTER)) {
+                        !(isIntlikeType(declType) && initType == TYPE_POINTER) &&
+                        !(isCharPointerDecl(node) && initType == TYPE_STRING)) {
                         fprintf(stderr,
                                 "Type error: cannot assign %s to %s at line %d, column %d\n",
                                 varTypeToString(initType), varTypeToString(declType),
