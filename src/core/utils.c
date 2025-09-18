@@ -1360,46 +1360,111 @@ bool isUnitDocumented(const char *unit_name) {
 }
 
 char *findUnitFile(const char *unit_name) {
-    // 1. Determine the library search path in a safe, writable buffer.
-    char lib_path[PATH_MAX];
+    const char *default_install_dir = "/usr/local/pscal/pascal/lib";
+    const char *relative_fallbacks[] = {
+        "./lib/pascal",
+        "../lib/pascal",
+        "../../lib/pascal"
+    };
+    const size_t relative_count = sizeof(relative_fallbacks) / sizeof(relative_fallbacks[0]);
+
+    const char *candidates[2 + sizeof(relative_fallbacks) / sizeof(relative_fallbacks[0])];
+    size_t candidate_count = 0;
+
     const char *env_path = getenv("PASCAL_LIB_DIR");
-
-    if (env_path != NULL && *env_path != '\0') {
-        // An override path was provided, so use it.
-        strncpy(lib_path, env_path, PATH_MAX - 1);
-        lib_path[PATH_MAX - 1] = '\0'; // Ensure null-termination
-    } else {
-        // Fall back to the default hard-coded path.
-        strncpy(lib_path, "/usr/local/pscal/pascal/lib", PATH_MAX - 1);
-        lib_path[PATH_MAX - 1] = '\0';
+    if (env_path && *env_path) {
+        candidates[candidate_count++] = env_path;
     }
 
-    // 2. Check if the resolved library directory actually exists.
-    struct stat dir_info;
-    if (stat(lib_path, &dir_info) != 0 || !S_ISDIR(dir_info.st_mode)) {
-        fprintf(stderr, "Error: Pascal library directory not found. Searched path: %s\n", lib_path);
-        EXIT_FAILURE_HANDLER();
+    candidates[candidate_count++] = default_install_dir;
+    for (size_t i = 0; i < relative_count; ++i) {
+        candidates[candidate_count++] = relative_fallbacks[i];
     }
 
-    // 3. Allocate enough space for the full file path.
-    //    (path + '/' + unit_name + ".pl" + null)
-    size_t required_len = strlen(lib_path) + 1 + strlen(unit_name) + 3 + 1;
-    char *file_name = malloc(required_len);
-    if (!file_name) {
+    size_t error_buf_size = (PATH_MAX + 64) * candidate_count;
+    char *error_buf = malloc(error_buf_size);
+    if (!error_buf) {
         fprintf(stderr, "Memory allocation error in findUnitFile\n");
         EXIT_FAILURE_HANDLER();
     }
+    error_buf[0] = '\0';
+    size_t error_len = 0;
 
-    // 4. Compose the full path using the resolved base path.
-    snprintf(file_name, required_len, "%s/%s.pl", lib_path, unit_name);
+    for (size_t i = 0; i < candidate_count; ++i) {
+        const char *base_dir = candidates[i];
+        if (!base_dir || !*base_dir) {
+            continue;
+        }
 
-    // 5. Check if the file exists and return it, otherwise clean up.
-    if (access(file_name, F_OK) == 0) {
-        return file_name; // Success: Caller takes ownership and must free() this memory.
+        struct stat dir_info;
+        if (stat(base_dir, &dir_info) != 0 || !S_ISDIR(dir_info.st_mode)) {
+            char status[PATH_MAX + 64];
+            int written = snprintf(status, sizeof(status), "  - %s (directory not found)\n", base_dir);
+            if (written > 0) {
+                size_t copy_len = (size_t)written;
+                if (error_len + copy_len >= error_buf_size) {
+                    if (error_len + 1 >= error_buf_size) {
+                        copy_len = 0;
+                    } else {
+                        copy_len = error_buf_size - error_len - 1;
+                    }
+                }
+                if (copy_len > 0) {
+                    memcpy(error_buf + error_len, status, copy_len);
+                    error_len += copy_len;
+                    error_buf[error_len] = '\0';
+                }
+            }
+            continue;
+        }
+
+        size_t dir_len = strlen(base_dir);
+        size_t required_len = dir_len + 1 + strlen(unit_name) + 3 + 1;
+        char *file_name = malloc(required_len);
+        if (!file_name) {
+            free(error_buf);
+            fprintf(stderr, "Memory allocation error in findUnitFile\n");
+            EXIT_FAILURE_HANDLER();
+        }
+
+        if (dir_len > 0 && base_dir[dir_len - 1] == '/') {
+            snprintf(file_name, required_len, "%s%s.pl", base_dir, unit_name);
+        } else {
+            snprintf(file_name, required_len, "%s/%s.pl", base_dir, unit_name);
+        }
+
+        if (access(file_name, F_OK) == 0) {
+            free(error_buf);
+            return file_name;
+        }
+
+        char status[PATH_MAX + 64];
+        int written = snprintf(status, sizeof(status), "  - %s (missing %s.pl)\n", base_dir, unit_name);
+        if (written > 0) {
+            size_t copy_len = (size_t)written;
+            if (error_len + copy_len >= error_buf_size) {
+                if (error_len + 1 >= error_buf_size) {
+                    copy_len = 0;
+                } else {
+                    copy_len = error_buf_size - error_len - 1;
+                }
+            }
+            if (copy_len > 0) {
+                memcpy(error_buf + error_len, status, copy_len);
+                error_len += copy_len;
+                error_buf[error_len] = '\0';
+            }
+        }
+
+        free(file_name);
     }
 
-    free(file_name);
-    return NULL; // Not found.
+    fprintf(stderr, "Error: Pascal unit '%s' not found. Searched paths:\n%s",
+            unit_name,
+            error_len > 0 ? error_buf : "  (no search paths available)\n");
+    free(error_buf);
+    EXIT_FAILURE_HANDLER();
+    return NULL;
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {
