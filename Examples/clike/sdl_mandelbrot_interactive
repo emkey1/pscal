@@ -255,7 +255,7 @@ int main() {
                 }
                 if (keypressed()) {
                     keyCode = readkey();
-                    if (toupper(keyCode) == 'Q') setQuit(1);
+                    if (keyCode == 'q' || keyCode == 'Q') setQuit(1);
                 }
                 if (!done || update)
                     pollMouse();
