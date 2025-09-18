@@ -24,7 +24,7 @@ var
   PlaybackThreadID : Integer;   // Handle for the background playback thread
   InputChar : Char;             // Stores the last key pressed by the user when polling
 
-procedure SoundPlaybackThread(UserData: Pointer);
+procedure SoundPlaybackThread;
 begin
   PlaySound(SoundID);
   writeln('PlaySound called (background thread).');
@@ -94,7 +94,7 @@ begin
     PlaybackFinished := False;
     PlaybackCompleted := False;
 
-    PlaybackThreadID := CreateThread(@SoundPlaybackThread, nil);
+    PlaybackThreadID := CreateThread(@SoundPlaybackThread);
 
     if PlaybackThreadID = -1 then
     begin
