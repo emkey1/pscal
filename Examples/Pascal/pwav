@@ -1,6 +1,8 @@
 #!/usr/bin/env pascal
 program PlayWaveFile;
 
+uses CRT;
+
 {
   This program plays a specified WAV audio file.
   The filename must be provided as the first command-line argument
@@ -16,6 +18,8 @@ program PlayWaveFile;
 var
   WaveFileName : String;    // Variable to store the filename from the command line
   SoundID : Integer;        // Variable to hold the ID of the loaded sound
+  QuitRequested : Boolean;  // Flag to track if the user asked to quit early
+  InputChar : Char;         // Stores the last key pressed by the user
   // DelayDurationMs : Integer; // No longer needed for fixed delay
 
 
@@ -59,22 +63,43 @@ begin
     PlaySound(SoundID);
     writeln('PlaySound called.');
 
-    // <<< MODIFICATION START >>>
-    // Wait until the sound finishes playing by checking if any channel is still active.
+    // Allow the user to interrupt playback.
+    QuitRequested := False;
+
     writeln('Waiting for sound to finish playing...');
-    // The loop continues as long as IsSoundPlaying() returns True.
-    while IsSoundPlaying() do
+    writeln('Press Q to quit playback early.');
+
+    // Loop until the sound stops playing or the user presses Q/q.
+    while IsSoundPlaying() and (not QuitRequested) do
     begin
       // Add a small delay to prevent the loop from consuming 100% CPU (busy-waiting).
       Delay(10); // Wait for 10 milliseconds before checking again
-    end;
-    writeln('Sound finished playing.');
-    // <<< MODIFICATION END >>>
 
-    // Free the loaded sound from memory when done.
-    writeln('Freeing sound...');
-    FreeSound(SoundID);
-    writeln('Sound freed.');
+      if KeyPressed then
+      begin
+        InputChar := ReadKey;
+
+        if UpCase(InputChar) = 'Q' then
+        begin
+          QuitRequested := True;
+          writeln('Q pressed. Stopping playback early.');
+        end;
+      end;
+    end;
+
+    if QuitRequested then
+    begin
+      writeln('Playback interrupted by user.');
+    end
+    else
+    begin
+      writeln('Sound finished playing.');
+
+      // Free the loaded sound from memory when done.
+      writeln('Freeing sound...');
+      FreeSound(SoundID);
+      writeln('Sound freed.');
+    end;
   end; // end if/else checking SoundID
 
   // Shut down the Sound System.
