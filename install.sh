@@ -36,7 +36,7 @@ if [ -d "lib/rea" ]; then
 fi
 
 # Install misc library if present
-mkdir -p /usr/local/misc
+mkdir -p /usr/local/pscal/misc
 if [ -d "lib/misc" ]; then
     cp -r lib/misc/* /usr/local/pscal/misc
 fi
