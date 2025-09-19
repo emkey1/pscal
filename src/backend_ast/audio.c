@@ -208,6 +208,19 @@ void audioFreeSound(int soundID) {
     DEBUG_PRINT("[DEBUG AUDIO] Sound ID %d freed successfully.\n", soundID);
 }
 
+// Stop all currently playing sounds (including music) without tearing down the
+// sound system. Safe to call even if nothing is playing.
+void audioStopAllSounds(void) {
+    if (!gSoundSystemInitialized) {
+        DEBUG_PRINT("[DEBUG AUDIO] Sound system not initialized. Skipping StopAllSounds.\n");
+        return;
+    }
+
+    Mix_HaltGroup(-1);
+    Mix_HaltMusic();
+    DEBUG_PRINT("[DEBUG AUDIO] StopAllSounds halted all channels and music.\n");
+}
+
 // Shut down SDL_mixer and the SDL audio subsystem
 void audioQuitSystem(void) {
     if (!gSoundSystemInitialized) {
@@ -272,6 +285,15 @@ Value vmBuiltinFreesound(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "FreeSound expects 1 integer argument.");
     } else {
         audioFreeSound((int)AS_INTEGER(args[0]));
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinStopallsounds(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "StopAllSounds expects 0 arguments.");
+    } else {
+        audioStopAllSounds();
     }
     return makeVoid();
 }

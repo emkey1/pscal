@@ -240,6 +240,7 @@ These built-ins are available when Pscal is built with SDL support.
 | loadsound | (file: String) | Sound | Load sound file. |
 | freesound | (sound: Sound) | void | Free a loaded sound. |
 | playsound | (sound: Sound) | void | Play sound. |
+| stopallsounds | () | void | Halt all playing sounds immediately. |
 | issoundplaying | (sound: Sound) | Boolean | Query if sound playing. |
 | inittextsystem | (fontPath: String, fontSize: Integer) | void | Initialize text subsystem with a TTF font. |
 | quittextsystem | () | void | Shut down text subsystem. |
