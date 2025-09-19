@@ -72,7 +72,7 @@ begin
   NextRandomRange := raw mod maxValue;
 end;
 
-function Fibonacci(n: integer): longint;
+function Fibonacci(n: integer): longint; // override builtin fibonacci
 begin
   if n <= 1 then
     Fibonacci := n
@@ -80,7 +80,7 @@ begin
     Fibonacci := Fibonacci(n - 1) + Fibonacci(n - 2);
 end;
 
-function Factorial(n: integer): longint;
+function Factorial(n: integer): longint; // override builtin factorial
 begin
   if n <= 1 then
     Factorial := 1
@@ -101,7 +101,7 @@ begin
     end;
 end;
 
-procedure MultiplyMatrices(const a, b: TMatrix; var result: TMatrix);
+procedure MultiplyMatrices(var a, b: TMatrix; var result: TMatrix);
 var
   i, j, k: integer;
   sum: real;
@@ -162,13 +162,13 @@ begin
   end;
 end;
 
-procedure QuickSort(var arr: TIntArray; low, high: integer);
+procedure QuickSort(var arr: TIntArray; lowIndex, highIndex: integer);
 var
   i, j, pivot, temp: integer;
 begin
-  i := low;
-  j := high;
-  pivot := arr[(low + high) div 2];
+  i := lowIndex;
+  j := highIndex;
+  pivot := arr[(lowIndex + highIndex) div 2];
   repeat
     while arr[i] < pivot do
       i := i + 1;
@@ -184,10 +184,10 @@ begin
     end;
   until i > j;
 
-  if low < j then
-    QuickSort(arr, low, j);
-  if i < high then
-    QuickSort(arr, i, high);
+  if lowIndex < j then
+    QuickSort(arr, lowIndex, j);
+  if i < highIndex then
+    QuickSort(arr, i, highIndex);
 end;
 
 function RunSortingBenchmark(var arr: TIntArray): longint;
@@ -232,6 +232,68 @@ begin
     n := n div 10;
   end;
   IntToString := digits;
+end;
+
+function StringToInteger(const s: string): longint;
+var
+  idx: integer;
+  sign: longint;
+  value: longint;
+begin
+  idx := 1;
+  value := 0;
+  sign := 1;
+
+  while (idx <= length(s)) and (s[idx] = ' ') do
+    idx := idx + 1;
+
+  if idx <= length(s) then
+  begin
+    if s[idx] = '-' then
+    begin
+      sign := -1;
+      idx := idx + 1;
+    end
+    else if s[idx] = '+' then
+      idx := idx + 1;
+  end;
+
+  while idx <= length(s) do
+  begin
+    if (s[idx] >= '0') and (s[idx] <= '9') then
+    begin
+      value := value * 10 + (ord(s[idx]) - ord('0'));
+      idx := idx + 1;
+    end
+    else
+      break;
+  end;
+
+  StringToInteger := sign * value;
+end;
+
+procedure RemoveSubstring(var s: string; index, count: integer);
+var
+  prefix, suffix: string;
+  suffixIndex: integer;
+begin
+  if index < 1 then
+    index := 1;
+  if count <= 0 then
+    exit;
+  if index > length(s) then
+    exit;
+  if index + count > length(s) + 1 then
+    count := length(s) - index + 1;
+
+  prefix := copy(s, 1, index - 1);
+  suffixIndex := index + count;
+  if suffixIndex <= length(s) then
+    suffix := copy(s, suffixIndex, length(s) - suffixIndex + 1)
+  else
+    suffix := '';
+
+  s := prefix + suffix;
 end;
 
 procedure BuildPeople(var people: TPersonArray);
@@ -307,12 +369,12 @@ begin
     base := temp + base;
 
     if length(base) > 120 then
-      delete(base, 10, 5);
+      RemoveSubstring(base, 10, 5);
 
     idx := 1;
     repeat
       if (idx < length(base)) and (base[idx] = base[idx + 1]) then
-        delete(base, idx, 1)
+        RemoveSubstring(base, idx, 1)
       else
         idx := idx + 1;
     until idx >= length(base);
@@ -321,18 +383,42 @@ begin
   end;
 end;
 
+procedure AddColorToSet(var colors: TColorSet; color: TColor);
+begin
+  case color of
+    clRed: colors := colors + [clRed];
+    clGreen: colors := colors + [clGreen];
+    clBlue: colors := colors + [clBlue];
+    clYellow: colors := colors + [clYellow];
+    clCyan: colors := colors + [clCyan];
+    clMagenta: colors := colors + [clMagenta];
+  end;
+end;
+
+procedure RemoveColorFromSet(var colors: TColorSet; color: TColor);
+begin
+  case color of
+    clRed: colors := colors - [clRed];
+    clGreen: colors := colors - [clGreen];
+    clBlue: colors := colors - [clBlue];
+    clYellow: colors := colors - [clYellow];
+    clCyan: colors := colors - [clCyan];
+    clMagenta: colors := colors - [clMagenta];
+  end;
+end;
+
 function RunSetBenchmark(iterations: integer): integer;
 var
   colors: TColorSet;
-  round: integer;
+  roundIndex: integer;
   color: TColor;
 begin
   colors := [];
   RunSetBenchmark := 0;
 
-  for round := 1 to iterations do
+  for roundIndex := 1 to iterations do
   begin
-    case round mod 6 of
+    case roundIndex mod 6 of
       0: color := clRed;
       1: color := clGreen;
       2: color := clBlue;
@@ -342,19 +428,19 @@ begin
       color := clMagenta;
     end;
 
-    if (round mod 2) = 0 then
-      colors := colors + [color]
+    if (roundIndex mod 2) = 0 then
+      AddColorToSet(colors, color)
     else
-      colors := colors - [color];
+      RemoveColorFromSet(colors, color);
 
     if color in colors then
       RunSetBenchmark := RunSetBenchmark + ord(color) + 1
     else
       RunSetBenchmark := RunSetBenchmark - ord(color);
 
-    if (round mod 11) = 0 then
+    if (roundIndex mod 11) = 0 then
       colors := colors + [clRed, clBlue];
-    if (round mod 13) = 0 then
+    if (roundIndex mod 13) = 0 then
       colors := colors - [clGreen];
   end;
 
@@ -441,8 +527,9 @@ end;
 function RunFileIOBenchmark(const fileName: string; const data: TIntArray): longint;
 var
   f: text;
-  i, value: integer;
-  checksum: longint;
+  i: integer;
+  valueLine: string;
+  parsedValue, checksum: longint;
 begin
   assign(f, fileName);
   rewrite(f);
@@ -455,8 +542,9 @@ begin
   checksum := 0;
   while not eof(f) do
   begin
-    readln(f, value);
-    checksum := checksum + value;
+    readln(f, valueLine);
+    parsedValue := StringToInteger(valueLine);
+    checksum := checksum + parsedValue;
   end;
   close(f);
 
@@ -492,9 +580,11 @@ var
   listChecksum: longint;
   fileChecksum: longint;
   combined: real;
+  initialSeed: longint;
 begin
   writeln('--- PSCAL VM Performance Benchmark ---');
-  InitializeRng(12345);
+  initialSeed := 12345;
+  InitializeRng(initialSeed);
 
   FillMatrix(matrixA, 0.75);
   FillMatrix(matrixB, 1.25);

@@ -648,7 +648,7 @@ void errorParser(Parser *parser, const char *msg) {
     EXIT_FAILURE_HANDLER();
 }
 
-void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc, HashTable *proc_table_param) {
+void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc, HashTable *proc_table_param) {
     // Create the name for the symbol table. This might involve mangling
     // with unit_context_name_param_for_addproc if it's not NULL.
     // For simplicity, let's assume for now the name is directly from the token,
@@ -658,11 +658,17 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     char *proc_name_original = proc_decl_ast_original->token->value;
 
     if (isBuiltin(proc_name_original)) {
+        bool suppress_override_warning = false;
+        if (parser && parser->lexer) {
+            suppress_override_warning = lexerConsumeOverrideBuiltinDirective(parser->lexer, proc_name_original);
+        }
+        if (!suppress_override_warning) {
         const char* kind = (proc_decl_ast_original->type == AST_FUNCTION_DECL) ?
                            "function" : "procedure";
         fprintf(stderr,
                 "Warning: user-defined %s '%s' overrides builtin of the same name.\n",
                 kind, proc_name_original);
+        }
     }
 
     char *name_for_table = strdup(proc_name_original); // Start with a copy
@@ -1138,7 +1144,7 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         node->symbol_table = (Symbol*)my_table;
         popProcedureTable(false);
     }
-    addProcedure(node, parser->current_unit_name_context, outer_table);
+    addProcedure(parser, node, parser->current_unit_name_context, outer_table);
     if (copiedProcNameToken)
         freeToken(copiedProcNameToken);
 
@@ -1837,7 +1843,7 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
         popProcedureTable(false);
     }
 
-    addProcedure(node, parser->current_unit_name_context, outer_table); // Registers the function
+    addProcedure(parser, node, parser->current_unit_name_context, outer_table); // Registers the function
     
     // copiedFuncNameToken was used by newASTNode which made its own copy if needed,
     // or took ownership if newASTNode doesn't copy.
