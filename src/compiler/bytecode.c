@@ -372,6 +372,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case MOD:           fprintf(stderr, "MOD\n"); return offset + 1;
         case AND:           fprintf(stderr, "AND\n"); return offset + 1;
         case OR:            fprintf(stderr, "OR\n"); return offset + 1;
+        case XOR:           fprintf(stderr, "XOR\n"); return offset + 1;
         case SHL:           fprintf(stderr, "SHL\n"); return offset + 1;
         case SHR:           fprintf(stderr, "SHR\n"); return offset + 1;
 

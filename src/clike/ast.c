@@ -216,6 +216,8 @@ static const char* clikeTokenTypeToPascalString(ClikeTokenType type) {
         case CLIKE_TOKEN_BIT_AND_EQUAL:return "AND";
         case CLIKE_TOKEN_BIT_OR:       return "OR";
         case CLIKE_TOKEN_BIT_OR_EQUAL: return "OR";
+        case CLIKE_TOKEN_BIT_XOR:      return "XOR";
+        case CLIKE_TOKEN_BIT_XOR_EQUAL:return "XOR";
         case CLIKE_TOKEN_SHL:          return "SHL";
         case CLIKE_TOKEN_SHL_EQUAL:    return "SHL";
         case CLIKE_TOKEN_SHR:          return "SHR";

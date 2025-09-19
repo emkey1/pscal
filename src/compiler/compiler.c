@@ -4327,6 +4327,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 patchShort(chunk, jump_to_end + 1, chunk->count - (jump_to_end + 3));
                 }
             }
+            else if (node_token && node_token->type == TOKEN_XOR) {
+                compileRValue(node->left, chunk, getLine(node->left));
+                compileRValue(node->right, chunk, getLine(node->right));
+                writeBytecodeChunk(chunk, XOR, line);
+            }
             else { // Original logic for all other operators
                 compileRValue(node->left, chunk, getLine(node->left));
                 compileRValue(node->right, chunk, getLine(node->right));

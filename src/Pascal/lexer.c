@@ -32,7 +32,7 @@ static Keyword keywords[] = {
     {"to", TOKEN_TO}, {"true", TOKEN_TRUE}, {"type", TOKEN_TYPE},
     {"unit", TOKEN_UNIT}, {"until", TOKEN_UNTIL}, {"uses", TOKEN_USES},
     {"var", TOKEN_VAR}, {"while", TOKEN_WHILE}, {"write", TOKEN_WRITE},
-    {"writeln", TOKEN_WRITELN}
+    {"writeln", TOKEN_WRITELN}, {"xor", TOKEN_XOR}
 };
 
 #define NUM_KEYWORDS (sizeof(keywords)/sizeof(Keyword))

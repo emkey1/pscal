@@ -2697,10 +2697,10 @@ AST *simpleExpression(Parser *parser) {
         node = unaryNode; // Update main node pointer
     }
 
-    // Loop for additive operators (+, -, OR) - Add XOR later if needed
+    // Loop for additive operators (+, -, OR, XOR)
     while (parser->current_token && (
            parser->current_token->type == TOKEN_PLUS || parser->current_token->type == TOKEN_MINUS ||
-           parser->current_token->type == TOKEN_OR /* || TOKEN_XOR */ ))
+           parser->current_token->type == TOKEN_OR || parser->current_token->type == TOKEN_XOR ))
     {
         Token *opOriginal = parser->current_token;
         Token *opCopied = copyToken(opOriginal); // Copy token before eating

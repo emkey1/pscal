@@ -61,6 +61,7 @@ static AST* foldBinary(AST* node) {
         case TOKEN_GREATER_EQUAL: res = (lv >= rv); result_is_bool = 1; break;
         case TOKEN_AND: res = ((lv != 0) && (rv != 0)); result_is_bool = 1; break;
         case TOKEN_OR: res = ((lv != 0) || (rv != 0)); result_is_bool = 1; break;
+        case TOKEN_XOR: res = ((lv != 0) != (rv != 0)); result_is_bool = 1; break;
         default: return node;
     }
 

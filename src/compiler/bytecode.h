@@ -33,6 +33,7 @@ typedef enum {
     MOD,
     AND,
     OR,
+    XOR,
     SHL,           // Bit Shift Left
     SHR,           // Bit Shift Right
 

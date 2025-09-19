@@ -230,6 +230,10 @@ ClikeToken clikeNextToken(ClikeLexer *lexer) {
                 if (match(lexer,'=')) return makeToken(lexer, CLIKE_TOKEN_BIT_OR_EQUAL, start, 2, startColumn);
                 return makeToken(lexer, CLIKE_TOKEN_BIT_OR, start, 1, startColumn);
             }
+            case '^': {
+                if (match(lexer,'=')) return makeToken(lexer, CLIKE_TOKEN_BIT_XOR_EQUAL, start, 2, startColumn);
+                return makeToken(lexer, CLIKE_TOKEN_BIT_XOR, start, 1, startColumn);
+            }
               case '?': return makeToken(lexer, CLIKE_TOKEN_QUESTION, start, 1, startColumn);
               case ':': return makeToken(lexer, CLIKE_TOKEN_COLON, start, 1, startColumn);
               case '.': return makeToken(lexer, CLIKE_TOKEN_DOT, start, 1, startColumn);
@@ -292,6 +296,8 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_BIT_AND_EQUAL: return "&=";
         case CLIKE_TOKEN_BIT_OR: return "|";
         case CLIKE_TOKEN_BIT_OR_EQUAL: return "|=";
+        case CLIKE_TOKEN_BIT_XOR: return "^";
+        case CLIKE_TOKEN_BIT_XOR_EQUAL: return "^=";
         case CLIKE_TOKEN_SHL: return "<<";
         case CLIKE_TOKEN_SHL_EQUAL: return "<<=";
         case CLIKE_TOKEN_SHR: return ">>";
