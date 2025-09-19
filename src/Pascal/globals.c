@@ -2,7 +2,7 @@
 // This file defines and initializes the global variables used throughout the Pscal interpreter.
 
 // Include the globals header file, which declares the global variables.
-#include "globals.h" // This now includes symbol.h and defines HashTable
+#include "globals.h"
 #include <pthread.h>
 
 
@@ -20,8 +20,6 @@ HashTable *localSymbols = NULL;  // Current local symbol table (initialized to N
 HashTable *constGlobalSymbols = NULL; // Table of global constants (read-only at runtime)
 
 // Pointer to the Symbol representing the currently executing function (for 'result' variable).
-// <<< REMOVE THE DUPLICATE DEFINITION OF current_function_symbol >>>
-// Symbol *current_function_symbol = NULL; // This line should be removed if it's defined again below.
 
 // Procedure table for storing information about declared procedures and functions.
 // This remains a linked list of Procedure structs.
@@ -63,13 +61,7 @@ int pascal_parser_error_count = 0;
 int dumpExec = 1;  // Set to 1 by default in debug mode.
 #endif
 
-// --- ADDED: Place the single definition here if it wasn't at the top ---
-// Based on the error message, the definition might be present here as well.
-// Ensure this is the *only* definition in the file.
-// <<< ENSURE ONLY ONE DEFINITION OF current_function_symbol EXISTS IN THIS FILE >>>
-// If there was a definition at line 8 (as per your error message), remove that one
-// and keep this one, or vice-versa. Make sure only one remains.
-Symbol *current_function_symbol = NULL; // Define the global variable here.
+Symbol *current_function_symbol = NULL;
 
 // Note: Other global SDL/Audio variables declared in globals.h are typically
 // defined and initialized in their respective .c files (sdl.c, audio.c).
