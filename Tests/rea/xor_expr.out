@@ -1,0 +1,284 @@
+{
+
+  "node_type": "PROGRAM",
+  "var_type_annotated": "VOID",
+  "main_block": 
+  {
+
+    "node_type": "BLOCK",
+    "var_type_annotated": "VOID",
+    "is_global_scope": false,
+    "declarations": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "INT64",
+          "left": 
+          {
+
+            "node_type": "BINARY_OP",
+            "token": {
+                "type": "XOR",
+                "value": "^"
+            },
+            "var_type_annotated": "INT64",
+            "left": 
+            {
+
+              "node_type": "NUMBER",
+              "token": {
+                  "type": "INTEGER_CONST",
+                  "value": "5"
+              },
+              "var_type_annotated": "INT64",
+              "i_val": 0
+            }
+,
+            "right": 
+            {
+
+              "node_type": "NUMBER",
+              "token": {
+                  "type": "INTEGER_CONST",
+                  "value": "3"
+              },
+              "var_type_annotated": "INT64",
+              "i_val": 0
+            }
+
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_IDENTIFIER",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "int"
+            },
+            "var_type_annotated": "INT64"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "bits"
+              },
+              "var_type_annotated": "INT64"
+            }
+          ]
+        },
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "BOOLEAN",
+          "left": 
+          {
+
+            "node_type": "BINARY_OP",
+            "token": {
+                "type": "XOR",
+                "value": "xor"
+            },
+            "var_type_annotated": "BOOLEAN",
+            "left": 
+            {
+
+              "node_type": "BOOLEAN",
+              "token": {
+                  "type": "TRUE",
+                  "value": "true"
+              },
+              "var_type_annotated": "BOOLEAN"
+            }
+,
+            "right": 
+            {
+
+              "node_type": "BOOLEAN",
+              "token": {
+                  "type": "FALSE",
+                  "value": "false"
+              },
+              "var_type_annotated": "BOOLEAN"
+            }
+
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_IDENTIFIER",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "bool"
+            },
+            "var_type_annotated": "BOOLEAN"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "flag"
+              },
+              "var_type_annotated": "BOOLEAN"
+            }
+          ]
+        }
+      ]
+    }
+,
+    "body": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "ASSIGN",
+          "token": {
+              "type": "ASSIGN",
+              "value": "="
+          },
+          "var_type_annotated": "UNKNOWN_VAR_TYPE",
+          "left": 
+          {
+
+            "node_type": "VARIABLE",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "bits"
+            },
+            "var_type_annotated": "INT64"
+          }
+,
+          "right": 
+          {
+
+            "node_type": "BINARY_OP",
+            "token": {
+                "type": "XOR",
+                "value": "^"
+            },
+            "var_type_annotated": "INT64",
+            "left": 
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "bits"
+              },
+              "var_type_annotated": "INT64"
+            }
+,
+            "right": 
+            {
+
+              "node_type": "NUMBER",
+              "token": {
+                  "type": "INTEGER_CONST",
+                  "value": "2"
+              },
+              "var_type_annotated": "INT64",
+              "i_val": 0
+            }
+
+          }
+
+        },
+        {
+
+          "node_type": "ASSIGN",
+          "token": {
+              "type": "ASSIGN",
+              "value": "="
+          },
+          "var_type_annotated": "UNKNOWN_VAR_TYPE",
+          "left": 
+          {
+
+            "node_type": "VARIABLE",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "flag"
+            },
+            "var_type_annotated": "BOOLEAN"
+          }
+,
+          "right": 
+          {
+
+            "node_type": "BINARY_OP",
+            "token": {
+                "type": "XOR",
+                "value": "xor"
+            },
+            "var_type_annotated": "INTEGER",
+            "left": 
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "flag"
+              },
+              "var_type_annotated": "BOOLEAN"
+            }
+,
+            "right": 
+            {
+
+              "node_type": "BINARY_OP",
+              "token": {
+                  "type": "EQUAL",
+                  "value": "=="
+              },
+              "var_type_annotated": "BOOLEAN",
+              "left": 
+              {
+
+                "node_type": "VARIABLE",
+                "token": {
+                    "type": "IDENTIFIER",
+                    "value": "bits"
+                },
+                "var_type_annotated": "INT64"
+              }
+,
+              "right": 
+              {
+
+                "node_type": "NUMBER",
+                "token": {
+                    "type": "INTEGER_CONST",
+                    "value": "4"
+                },
+                "var_type_annotated": "INT64",
+                "i_val": 0
+              }
+
+            }
+
+          }
+
+        }
+      ]
+    }
+
+  }
+
+}
+

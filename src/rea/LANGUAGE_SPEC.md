@@ -29,7 +29,8 @@ The Rea language is a strongly typed, class-based, object-oriented language.
       `default`, `break`, `continue`, `return`.
     * **Other:** `const`, `#import`.
 * **Operators:** Common arithmetic and comparison operators are supported,
-  including `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, and `>=`.
+  including `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, and
+  bitwise exclusive-or via `^` (or the `xor` keyword).
 * **Literals:** Integer, floating-point, character, and string literals follow
   C-Like rules. Characters use single quotes (e.g., `'a'`) while strings use
   double quotes (e.g., "hi"); both forms support standard escape sequences

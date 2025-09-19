@@ -1898,7 +1898,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case AND:
-            case OR: {
+            case OR:
+            case XOR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 Value result_val;
@@ -1908,19 +1909,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     bool bb = AS_BOOLEAN(b_val);
                     if (instruction_val == AND) {
                         result_val = makeBoolean(ba && bb);
-                    } else {
+                    } else if (instruction_val == OR) {
                         result_val = makeBoolean(ba || bb);
+                    } else {
+                        result_val = makeBoolean(ba ^ bb);
                     }
                 } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val))  {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (instruction_val == AND) {
                         result_val = makeInt(ia & ib);
-                    } else {
+                    } else if (instruction_val == OR) {
                         result_val = makeInt(ia | ib);
+                    } else {
+                        result_val = makeInt(ia ^ ib);
                     }
                 } else {
-                    runtimeError(vm, "Runtime Error: Operands for AND/OR must be both Boolean or both Integer. Got %s and %s.",
+                    runtimeError(vm, "Runtime Error: Operands for AND/OR/XOR must be both Boolean or both Integer. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;

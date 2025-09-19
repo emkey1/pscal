@@ -67,9 +67,9 @@ The following is a complete list of opcodes supported by the Pscal VM, as define
 * **`NOT`**:
     * **Operands:** None.
     * **Action:** Pops one boolean value, inverts it, and pushes the result.
-* **`AND`**, **`OR`**, **`SHL`**, **`SHR`**:
+* **`AND`**, **`OR`**, **`XOR`**, **`SHL`**, **`SHR`**:
     * **Operands:** None.
-    * **Action:** Pop two integer values, perform the specified bitwise operation, and push the result. `AND` and `OR` also support logical operations on booleans.
+    * **Action:** Pop two integer values, perform the specified bitwise operation, and push the result. `AND`, `OR`, and `XOR` also support logical operations on booleans.
 * **`EQUAL`**, **`NOT_EQUAL`**, **`GREATER`**, **`GREATER_EQUAL`**, **`LESS`**, **`LESS_EQUAL`**:
     * **Operands:** None.
     * **Action:** Pop two values, perform the specified comparison, and push the boolean result (`true` or `false`).

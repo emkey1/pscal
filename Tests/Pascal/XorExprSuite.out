@@ -1,0 +1,4 @@
+5 xor 3 = 6
+true xor false = TRUE
+true xor true = FALSE
+false xor false = FALSE

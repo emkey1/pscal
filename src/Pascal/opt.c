@@ -61,6 +61,25 @@ static AST* foldBinary(AST* node) {
         case TOKEN_GREATER_EQUAL: res = (lv >= rv); result_is_bool = 1; break;
         case TOKEN_AND: res = ((lv != 0) && (rv != 0)); result_is_bool = 1; break;
         case TOKEN_OR: res = ((lv != 0) || (rv != 0)); result_is_bool = 1; break;
+        case TOKEN_XOR: {
+            if (lf || rf) return node; // No folding for real operands
+            int left_is_bool = node->left &&
+                (node->left->type == AST_BOOLEAN || node->left->var_type == TYPE_BOOLEAN);
+            int right_is_bool = node->right &&
+                (node->right->type == AST_BOOLEAN || node->right->var_type == TYPE_BOOLEAN);
+            if (left_is_bool && right_is_bool) {
+                res = ((lv != 0) != (rv != 0));
+                result_is_bool = 1;
+            } else if (!left_is_bool && !right_is_bool) {
+                long long li = (long long)lv;
+                long long ri = (long long)rv;
+                res = (double)(li ^ ri);
+                result_is_float = 0;
+            } else {
+                return node; // Mixed boolean/integer types; leave for runtime
+            }
+            break;
+        }
         default: return node;
     }
 

@@ -111,6 +111,7 @@ static ASTNodeClike* conditional(ParserClike *p);
 static ASTNodeClike* logicalOr(ParserClike *p);
 static ASTNodeClike* logicalAnd(ParserClike *p);
 static ASTNodeClike* bitwiseOr(ParserClike *p);
+static ASTNodeClike* bitwiseXor(ParserClike *p);
 static ASTNodeClike* bitwiseAnd(ParserClike *p);
 static ASTNodeClike* equality(ParserClike *p);
 static ASTNodeClike* relational(ParserClike *p);
@@ -998,8 +999,8 @@ static ASTNodeClike* assignment(ParserClike *p) {
         t == CLIKE_TOKEN_PLUS_EQUAL || t == CLIKE_TOKEN_MINUS_EQUAL ||
         t == CLIKE_TOKEN_STAR_EQUAL || t == CLIKE_TOKEN_SLASH_EQUAL ||
         t == CLIKE_TOKEN_PERCENT_EQUAL || t == CLIKE_TOKEN_BIT_AND_EQUAL ||
-        t == CLIKE_TOKEN_BIT_OR_EQUAL || t == CLIKE_TOKEN_SHL_EQUAL ||
-        t == CLIKE_TOKEN_SHR_EQUAL
+        t == CLIKE_TOKEN_BIT_OR_EQUAL || t == CLIKE_TOKEN_BIT_XOR_EQUAL ||
+        t == CLIKE_TOKEN_SHL_EQUAL || t == CLIKE_TOKEN_SHR_EQUAL
     ) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *right = assignment(p);
@@ -1019,6 +1020,8 @@ static ASTNodeClike* assignment(ParserClike *p) {
                 binTok.type = CLIKE_TOKEN_BIT_AND; binTok.lexeme = "&"; binTok.length = 1; break;
             case CLIKE_TOKEN_BIT_OR_EQUAL:
                 binTok.type = CLIKE_TOKEN_BIT_OR; binTok.lexeme = "|"; binTok.length = 1; break;
+            case CLIKE_TOKEN_BIT_XOR_EQUAL:
+                binTok.type = CLIKE_TOKEN_BIT_XOR; binTok.lexeme = "^"; binTok.length = 1; break;
             case CLIKE_TOKEN_SHL_EQUAL:
                 binTok.type = CLIKE_TOKEN_SHL; binTok.lexeme = "<<"; binTok.length = 2; break;
             case CLIKE_TOKEN_SHR_EQUAL:
@@ -1080,8 +1083,21 @@ static ASTNodeClike* logicalAnd(ParserClike *p) {
 }
 
 static ASTNodeClike* bitwiseOr(ParserClike *p) {
-    ASTNodeClike *node = bitwiseAnd(p);
+    ASTNodeClike *node = bitwiseXor(p);
     while (p->current.type == CLIKE_TOKEN_BIT_OR) {
+        ClikeToken op = p->current; advanceParser(p);
+        ASTNodeClike *rhs = bitwiseXor(p);
+        ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, op);
+        setLeftClike(bin, node);
+        setRightClike(bin, rhs);
+        node = bin;
+    }
+    return node;
+}
+
+static ASTNodeClike* bitwiseXor(ParserClike *p) {
+    ASTNodeClike *node = bitwiseAnd(p);
+    while (p->current.type == CLIKE_TOKEN_BIT_XOR) {
         ClikeToken op = p->current; advanceParser(p);
         ASTNodeClike *rhs = bitwiseAnd(p);
         ASTNodeClike *bin = newASTNodeClike(TCAST_BINOP, op);

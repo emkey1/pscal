@@ -929,6 +929,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 case CLIKE_TOKEN_OR_OR: writeBytecodeChunk(chunk, OR, node->token.line); break;
                 case CLIKE_TOKEN_BIT_AND: writeBytecodeChunk(chunk, AND, node->token.line); break;
                 case CLIKE_TOKEN_BIT_OR: writeBytecodeChunk(chunk, OR, node->token.line); break;
+                case CLIKE_TOKEN_BIT_XOR: writeBytecodeChunk(chunk, XOR, node->token.line); break;
                 case CLIKE_TOKEN_SHL: writeBytecodeChunk(chunk, SHL, node->token.line); break;
                 case CLIKE_TOKEN_SHR: writeBytecodeChunk(chunk, SHR, node->token.line); break;
                 default: break;
