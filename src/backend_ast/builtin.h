@@ -15,6 +15,8 @@ typedef struct {
 } VmBuiltinMapping;
 
 VmBuiltinFn getVmBuiltinHandler(const char* name);
+VmBuiltinFn getVmBuiltinHandlerById(int id);
+const char* getVmBuiltinNameById(int id);
 void registerVmBuiltin(const char *name, VmBuiltinFn handler);
 
 /* Optional hook for externally linked built-ins.  The weak

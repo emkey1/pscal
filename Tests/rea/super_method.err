@@ -11,47 +11,47 @@ Offset Line Opcode           Operand  Value / Target (Args)
 
 --- Procedure base.base (at 0019) ---
 0019    | RETURN
-0020    | JUMP                9 (to 0032)
+0020    | JUMP               11 (to 0034)
 
 --- Procedure base.speak (at 0023) ---
 0023    | CONSTANT            5 '1'
 0025    | CONSTANT            6 'base'
-0027    | CALL_BUILTIN         7 'write' (2 args)
-0031    | RETURN
-0032    2 JUMP                9 (to 0044)
+0027    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0033    | RETURN
+0034    2 JUMP                9 (to 0046)
 
---- Procedure child.child (at 0035) ---
-0035    | GET_LOCAL           0 (slot)
-0037    | CALL             0019 (base.base) (1 args)
-0043    | RETURN
-0044    | JUMP                9 (to 0056)
+--- Procedure child.child (at 0037) ---
+0037    | GET_LOCAL           0 (slot)
+0039    | CALL             0019 (base.base) (1 args)
+0045    | RETURN
+0046    | JUMP                9 (to 0058)
 
---- Procedure child.speak (at 0047) ---
-0047    | GET_LOCAL           0 (slot)
-0049    | CALL             0023 (base.speak) (1 args)
-0055    | RETURN
-0056    0 CONSTANT           10 'Value type ARRAY'
-0058    | DEFINE_GLOBAL    NameIdx:11  'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0068    | SET_GLOBAL         11 'child_vtable'
-0070    | CONSTANT           14 'Value type ARRAY'
-0072    | DEFINE_GLOBAL    NameIdx:15  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0082    | SET_GLOBAL         15 'base_vtable'
-0084    | GET_GLOBAL          3 'c'
-0086    | DUP
-0087    | GET_FIELD_OFFSET    0 (index)
-0089    | GET_GLOBAL_ADDRESS   11 'child_vtable'
-0091    | SET_INDIRECT
-0092    | POP
-0093    4 GET_GLOBAL          3 'c'
-0095    | DUP
-0096    | GET_FIELD_OFFSET    0 (index)
-0098    | GET_INDIRECT
-0099    | CONSTANT            5 '1'
-0101    | SWAP
-0102    | GET_ELEMENT_ADDRESS    1 (dims)
-0104    | GET_INDIRECT
-0105    | PROC_CALL_INDIRECT (args=1)
-0107    0 HALT
+--- Procedure child.speak (at 0049) ---
+0049    | GET_LOCAL           0 (slot)
+0051    | CALL             0023 (base.speak) (1 args)
+0057    | RETURN
+0058    0 CONSTANT           10 'Value type ARRAY'
+0060    | DEFINE_GLOBAL    NameIdx:11  'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0070    | SET_GLOBAL         11 'child_vtable'
+0072    | CONSTANT           14 'Value type ARRAY'
+0074    | DEFINE_GLOBAL    NameIdx:15  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0084    | SET_GLOBAL         15 'base_vtable'
+0086    | GET_GLOBAL          3 'c'
+0088    | DUP
+0089    | GET_FIELD_OFFSET    0 (index)
+0091    | GET_GLOBAL_ADDRESS   11 'child_vtable'
+0093    | SET_INDIRECT
+0094    | POP
+0095    4 GET_GLOBAL          3 'c'
+0097    | DUP
+0098    | GET_FIELD_OFFSET    0 (index)
+0100    | GET_INDIRECT
+0101    | CONSTANT            5 '1'
+0103    | SWAP
+0104    | GET_ELEMENT_ADDRESS    1 (dims)
+0106    | GET_INDIRECT
+0107    | PROC_CALL_INDIRECT (args=1)
+0109    0 HALT
 == End Disassembly: Tests/rea/super_method.rea ==
 
 Constants (16):\n  0000: STR   "myself"

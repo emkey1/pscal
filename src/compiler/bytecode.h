@@ -96,7 +96,7 @@ typedef enum {
     CALL_BUILTIN,  // Placeholder for calling built-in functions
                       // Operands: 2-byte name index, 1-byte argument count
     
-    CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
+    CALL_BUILTIN_PROC, // For void built-in procedures. Operands: 2-byte builtin_id, 2-byte name index, 1-byte arg count
     CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
 
     CALL_HOST,
