@@ -221,10 +221,6 @@ The Pascal front end exposes the PSCAL VM's built-ins, including:
 - Console/text: `GotoXY`, `TextColor`, `TextBackground`, `ClrScr`, `WhereX`, `WhereY`.
 - Concurrency (see below): `spawn`, `join`, `mutex`, `rcmutex`, `lock`, `unlock`, `destroy`.
 - SDL-based graphics/sound (when built with `-DSDL=ON`): e.g., `InitGraph`, `InitGraph3D`, `CloseGraph`, `CloseGraph3D`, `UpdateScreen`, `GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLVertex3f`, `GLViewport`, `GLDepthTest`, `GLSwapWindow`, `GLSetSwapInterval`, `SetRGBColor`, `DrawLine`, `FillRect`, `FillCircle`, `CreateTexture`, `UpdateTexture`, `DestroyTexture`, text helpers like `InitTextSystem(FontFileName, FontSize)`, `OutTextXY`, and audio: `InitSoundSystem`, `LoadSound`, `PlaySound`, `IsSoundPlaying`, `FreeSound`, `QuitSoundSystem`.
-
-See `Examples/Pascal/SDLGLCube` for a complete rotating cube demo that showcases
-the 3D helpers in action.
-
 Note: SDL built-ins are available only in SDL-enabled builds. Headless CI typically skips these routines.
 
 ### **Threading and Synchronization**

@@ -87,9 +87,9 @@ begin
       Bricks[r,c].Width := BrickWidth - BrickGap;
       Bricks[r,c].Height := BrickHeight - BrickGap;
       Bricks[r,c].IsVisible := True;
-      Bricks[r,c].ColorR := (100 + colorSeed + c*10) mod 256;
-      Bricks[r,c].ColorG := (50 + colorSeed + c*5) mod 256;
-      Bricks[r,c].ColorB := (150 + colorSeed + c*15) mod 256;
+      Bricks[r,c].ColorR := byte((100 + colorSeed + c*10) mod 256);
+      Bricks[r,c].ColorG := byte((50 + colorSeed + c*5) mod 256);
+      Bricks[r,c].ColorB := byte((150 + colorSeed + c*15) mod 256);
     end;
   end;
 

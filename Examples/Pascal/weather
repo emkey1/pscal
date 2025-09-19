@@ -110,10 +110,12 @@ begin
   if keyPos > 0 then
   begin
     valueStartPos := startSearchPos + keyPos + length(searchPattern) - 1;
-    // Skip leading spaces after colon
-    while (valueStartPos <= length(jsonString)) and (jsonString[valueStartPos] = ' ') do
+    // Skip leading spaces after colon without relying on short-circuit evaluation
+    while valueStartPos <= length(jsonString) do
     begin
-       inc(valueStartPos);
+      if jsonString[valueStartPos] <> ' ' then
+        break;
+      inc(valueStartPos);
     end;
 
     // Use min for safety when searching for end delimiter
@@ -142,54 +144,92 @@ end;
 // Returns position of error (1-based) in code, or 0 on success.
 function StrToReal(s: string; var code: integer): real;
 var
-  i: integer;
+  i, lenS: integer;
   negative: boolean;
   intPart, fracPart: real;
   divisor: real;
+  ch: char;
+  digitsFound: boolean;
 begin
+  lenS := length(s);
   code := 0;
   i := 1;
   negative := False;
   intPart := 0;
   fracPart := 0;
   divisor := 1;
+  digitsFound := False;
 
-  if length(s) = 0 then
+  if lenS = 0 then
   begin
     code := 1;
     StrToReal := 0;
     exit;
   end;
 
-  if s[i] = '-' then
+  if i <= lenS then
   begin
-    negative := True;
-    inc(i);
-  end
-  else if s[i] = '+' then
-    inc(i);
+    ch := s[i];
+    if ch = '-' then
+    begin
+      negative := True;
+      inc(i);
+    end
+    else if ch = '+' then
+      inc(i);
+  end;
 
   // Parse integer part
-  while (i <= length(s)) and (s[i] >= '0') and (s[i] <= '9') do
+  while i <= lenS do
   begin
-    intPart := intPart * 10 + (Ord(s[i]) - Ord('0'));
+    ch := s[i];
+    if (ch < '0') or (ch > '9') then
+      break;
+    intPart := intPart * 10 + (Ord(ch) - Ord('0'));
     inc(i);
+    digitsFound := True;
+    if i > lenS then
+      break;
   end;
 
   // Parse fractional part
-  if (i <= length(s)) and (s[i] = '.') then
+  if i <= lenS then
   begin
-    inc(i);
-    while (i <= length(s)) and (s[i] >= '0') and (s[i] <= '9') do
+    if s[i] = '.' then
     begin
-      fracPart := fracPart * 10 + (Ord(s[i]) - Ord('0'));
-      divisor := divisor * 10;
       inc(i);
+      while i <= lenS do
+      begin
+        ch := s[i];
+        if (ch < '0') or (ch > '9') then
+          break;
+        fracPart := fracPart * 10 + (Ord(ch) - Ord('0'));
+        divisor := divisor * 10;
+        inc(i);
+        digitsFound := True;
+        if i > lenS then
+          break;
+      end;
     end;
   end;
 
+  if not digitsFound then
+  begin
+    code := i;
+    StrToReal := 0;
+    exit;
+  end;
+
+  // Skip any trailing spaces without triggering out-of-bounds access
+  while i <= lenS do
+  begin
+    if s[i] <> ' ' then
+      break;
+    inc(i);
+  end;
+
   // If there are leftover characters, report position of error
-  if i <= length(s) then
+  if i <= lenS then
     code := i
   else
     code := 0;
