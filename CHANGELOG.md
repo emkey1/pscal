@@ -1,20 +1,25 @@
 # Changelog
 
-## Unreleased
+## v2.2 – 2025-09-18
 
 Enhancements
 - Pascal: Introduced address-of operator `@` for routines and first-class procedure/function pointer types.
 - Pascal: Added indirect procedure-pointer calls in both expression and statement contexts.
-- Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1-arg form.
-- VM: Implemented indirect call opcodes and end-to-end support for passing an initial pointer argument to new threads.
-- Tools: Added standalone bytecode decompiler `pscald` matching `--dump-bytecode-only` output.
+- Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1‑arg form.
+- VM: Implemented indirect call opcodes and support for passing an initial pointer argument to new threads.
+- Tools: Added standalone bytecode decompiler `pscald` and AST JSON → Bytecode compiler `pscaljson2bc` (with optional Bash/Zsh completions).
 
 Stability and correctness
-- Pointer metadata propagation: Pointer locals/globals now carry base-type metadata end-to-end so `new(p)` and `p^` dereferences work reliably.
-- Parser: Supports named parameter syntax in function/procedure pointer types (e.g., `function(x: Integer): Integer`).
+- Pointer metadata propagation: pointer locals/globals now carry base‑type metadata end‑to‑end so `new(p)` and `p^` dereferences work reliably.
+- Parser: supports named parameter syntax in procedure/function pointer types (e.g., `function(x: Integer): Integer`).
+- Cache: improved staleness detection when source/cache mtimes match; cache invalidates when the binary is newer.
 
 Developer experience
-- Documentation updated to cover `@`, procedure/function pointer types, indirect calls, and `CreateThread`/`WaitForThread` usage with examples.
+- Documentation updated for `@`, procedure/function pointers, indirect calls, thread APIs, AST JSON pipeline, and HTTP security.
+- Build: macOS SDK auto‑detect; opt‑in `-DPSCAL_USE_BREW_CURL=ON` to prefer Homebrew curl; clean `-Wall` builds.
+
+Fixed
+- Installer: ensure `/usr/local/pscal/misc` exists before copying misc assets.
 
 All notable changes to this project will be documented in this file.
 
