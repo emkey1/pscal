@@ -13,6 +13,13 @@ Date: 2025-09-18
 - Pascal
   - Address-of (`@`) for routines; first-class procedure/function pointer types.
   - Indirect pointer calls in both expression and statement contexts.
+- Rea front end (experimental)
+  - New object-oriented language targeting the PSCAL VM with class-based syntax.
+  - Classes, fields, methods, constructors, and single inheritance via `extends`.
+  - Virtual dispatch for methods; `my`/`myself` for instance access; `super` for parent calls.
+  - Familiar control flow and expressions (C-like precedence), plus access to VM built-ins.
+  - Docs: `Docs/rea_overview.md`, `Docs/rea_language_reference.md`, `Docs/rea_tutorial.md`.
+  - Examples: `Examples/rea/hello`, `showcase`, `method_demo`, plus SDL demos (`sdl_*`).
 - VM/Threads
   - Indirect call opcodes; thread entry supports an initial pointer argument.
 - Tools
@@ -66,4 +73,3 @@ Date: 2025-09-18
 ## Known Notes
 - Rea remains experimental; some OO tests are skipped in CI via `REA_SKIP_TESTS`.
 - SDL tests require real drivers; otherwise skipped under dummy drivers.
-
