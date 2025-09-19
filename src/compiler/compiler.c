@@ -159,16 +159,19 @@ static int ensureMyselfGlobalNameIndex(BytecodeChunk* chunk) {
 }
 
 static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* name, uint8_t arg_count, int line) {
+    if (!name) name = "";
+
+    char normalized_name[MAX_SYMBOL_LENGTH];
+    strncpy(normalized_name, name, sizeof(normalized_name) - 1);
+    normalized_name[sizeof(normalized_name) - 1] = '\0';
+    toLowerString(normalized_name);
+
+    int name_index = addStringConstant(chunk, normalized_name);
     int builtin_id = getBuiltinIDForCompiler(name);
     if (builtin_id < 0) {
         fprintf(stderr, "L%d: Compiler Error: Unknown built-in procedure '%s'.\n", line, name);
         compiler_had_error = true;
 
-        char normalized_name[MAX_SYMBOL_LENGTH];
-        strncpy(normalized_name, name, sizeof(normalized_name) - 1);
-        normalized_name[sizeof(normalized_name) - 1] = '\0';
-        toLowerString(normalized_name);
-        int name_index = addStringConstant(chunk, normalized_name);
         writeBytecodeChunk(chunk, CALL_BUILTIN, line);
         emitShort(chunk, (uint16_t)name_index, line);
         writeBytecodeChunk(chunk, arg_count, line);
@@ -177,6 +180,7 @@ static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* name, uin
 
     writeBytecodeChunk(chunk, CALL_BUILTIN_PROC, line);
     emitShort(chunk, (uint16_t)builtin_id, line);
+    emitShort(chunk, (uint16_t)name_index, line);
     writeBytecodeChunk(chunk, arg_count, line);
 }
 

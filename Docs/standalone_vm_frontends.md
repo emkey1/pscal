@@ -176,10 +176,13 @@ functions and procedures. The VM exposes a large catalog of routines described i
 To invoke a builtin from generated code:
 
 1. Add the builtin name as a string constant.
-2. Emit `CALL_BUILTIN` for functions or `CALL_BUILTIN_PROC` for procedures,
-   passing the constant index and argument count.
-3. At runtime the VM resolves the name and dispatches to the builtin
-   implementation.
+2. Emit `CALL_BUILTIN` for functions, passing the constant index and argument
+   count.
+3. For procedures, look up the builtin's numeric ID with
+   `getBuiltinIDForCompiler` and emit `CALL_BUILTIN_PROC`, writing the 16-bit
+   builtin ID, the string constant index, and the argument count. The VM uses
+   the ID for fast dispatch but retains the encoded name for compatibility with
+   future table changes.
 
 Example: call the `random` function which returns an integer.
 
@@ -207,7 +210,9 @@ Python:
 
 ```python
 halt_idx = builder.add_constant(TYPE_STRING, "halt")
+halt_id = get_builtin_id("halt")
 builder.emit(opcodes["CALL_BUILTIN_PROC"])
+builder.emit_short(halt_id)
 builder.emit_short(halt_idx)
 builder.emit(0)  # no arguments; no return value
 ```
@@ -216,7 +221,9 @@ C:
 
 ```c
 int halt_idx = addStringConstant(&chunk, "halt");
+int halt_id = getBuiltinIDForCompiler("halt");
 writeBytecodeChunk(&chunk, CALL_BUILTIN_PROC, line);
+emitShort(&chunk, (uint16_t)halt_id, line);
 emitShort(&chunk, (uint16_t)halt_idx, line);
 writeBytecodeChunk(&chunk, 0, line); /* no arguments */
 ```

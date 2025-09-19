@@ -65,12 +65,19 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
 static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
                                     uint8_t arg_count, int line) {
     if (!vmName) vmName = "";
+
+    const char* dispatch_name = clikeCanonicalBuiltinName(vmName);
+    char normalized_name[MAX_SYMBOL_LENGTH];
+    strncpy(normalized_name, dispatch_name, sizeof(normalized_name) - 1);
+    normalized_name[sizeof(normalized_name) - 1] = '\0';
+    toLowerString(normalized_name);
+
+    int nameIndex = addStringConstant(chunk, normalized_name);
     int builtin_id = clikeGetBuiltinID(vmName);
     if (builtin_id < 0) {
         fprintf(stderr,
                 "L%d: Compiler Error: Unknown built-in procedure '%s'.\n",
                 line, vmName);
-        int nameIndex = addStringConstant(chunk, vmName);
         writeBytecodeChunk(chunk, CALL_BUILTIN, line);
         emitShort(chunk, (uint16_t)nameIndex, line);
         writeBytecodeChunk(chunk, arg_count, line);
@@ -79,6 +86,7 @@ static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
 
     writeBytecodeChunk(chunk, CALL_BUILTIN_PROC, line);
     emitShort(chunk, (uint16_t)builtin_id, line);
+    emitShort(chunk, (uint16_t)nameIndex, line);
     writeBytecodeChunk(chunk, arg_count, line);
 }
 

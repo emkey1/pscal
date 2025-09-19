@@ -8,12 +8,13 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0009    | CONSTANT            4 '3.141590'
 0011    | FORMAT_VALUE     width:0 prec:2
 0014    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0018    0 HALT
+0020    0 HALT
 == End Disassembly: Tests/rea/writeln_format.rea ==
 
-Constants (5):\n  0000: STR   "myself"
+Constants (6):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: INT   1
   0004: REAL  3.141590
+  0005: STR   "write"
 

@@ -3478,6 +3478,7 @@ comparison_error_label:
             }
             case CALL_BUILTIN_PROC: {
                 uint16_t builtin_id = READ_SHORT(vm);
+                uint16_t name_const_idx = READ_SHORT(vm);
                 uint8_t arg_count = READ_BYTE();
 
                 if (vm->stackTop - vm->stack < arg_count) {
@@ -3485,14 +3486,48 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                const char* encoded_name = NULL;
+                if (name_const_idx < vm->chunk->constants_count) {
+                    Value* name_val = &vm->chunk->constants[name_const_idx];
+                    if (name_val->type == TYPE_STRING && name_val->s_val) {
+                        encoded_name = name_val->s_val;
+                    }
+                }
+
                 Value* args = vm->stackTop - arg_count;
                 const char* builtin_name = getVmBuiltinNameById((int)builtin_id);
                 VmBuiltinFn handler = getVmBuiltinHandlerById((int)builtin_id);
 
+                char lookup_name[MAX_ID_LENGTH + 1];
+                lookup_name[0] = '\0';
+                if (encoded_name && *encoded_name) {
+                    strncpy(lookup_name, encoded_name, MAX_ID_LENGTH);
+                    lookup_name[MAX_ID_LENGTH] = '\0';
+                    toLowerString(lookup_name);
+                } else if (builtin_name) {
+                    strncpy(lookup_name, builtin_name, MAX_ID_LENGTH);
+                    lookup_name[MAX_ID_LENGTH] = '\0';
+                    toLowerString(lookup_name);
+                }
+
+                if (!handler && lookup_name[0] != '\0') {
+                    handler = getVmBuiltinHandler(lookup_name);
+                    if (!builtin_name && encoded_name && *encoded_name) {
+                        builtin_name = encoded_name;
+                    }
+                }
+
+                const char* effective_name = builtin_name;
+                if (!effective_name && encoded_name && *encoded_name) {
+                    effective_name = encoded_name;
+                } else if (!effective_name && lookup_name[0] != '\0') {
+                    effective_name = lookup_name;
+                }
+
                 if (!handler) {
-                    if (builtin_name) {
+                    if (effective_name && *effective_name) {
                         runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' (id %u) called.",
-                                     builtin_name, builtin_id);
+                                     effective_name, builtin_id);
                     } else {
                         runtimeError(vm, "VM Error: Unknown built-in id %u called.", builtin_id);
                     }
@@ -3506,7 +3541,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                bool needs_lock = builtin_name ? builtinUsesGlobalStructures(builtin_name) : false;
+                bool needs_lock = (lookup_name[0] != '\0') ? builtinUsesGlobalStructures(lookup_name) : false;
                 if (needs_lock) pthread_mutex_lock(&globals_mutex);
                 Value result = handler(vm, arg_count, args);
                 if (needs_lock) pthread_mutex_unlock(&globals_mutex);
@@ -3519,7 +3554,7 @@ comparison_error_label:
                     freeValue(&args[i]);
                 }
 
-                BuiltinRoutineType builtin_type = builtin_name ? getBuiltinType(builtin_name) : BUILTIN_TYPE_NONE;
+                BuiltinRoutineType builtin_type = effective_name ? getBuiltinType(effective_name) : BUILTIN_TYPE_NONE;
                 if (builtin_type == BUILTIN_TYPE_FUNCTION) {
                     push(vm, result);
                 } else {

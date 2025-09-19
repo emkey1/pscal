@@ -8,17 +8,18 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0009    | CONSTANT            4 'A'
 0011    | CONSTANT            3 '1'
 0013    | CALL_BUILTIN_PROC   176 'write' (3 args)
-0017    2 CONSTANT            5 '0'
-0019    | CONSTANT            6 'B'
-0021    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0025    0 HALT
+0019    2 CONSTANT            6 '0'
+0021    | CONSTANT            7 'B'
+0023    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0029    0 HALT
 == End Disassembly: Tests/rea/write_sugar.rea ==
 
-Constants (7):\n  0000: STR   "myself"
+Constants (8):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: INT   1
   0004: CHAR  'A'
-  0005: INT   0
-  0006: CHAR  'B'
+  0005: STR   "write"
+  0006: INT   0
+  0007: CHAR  'B'
 

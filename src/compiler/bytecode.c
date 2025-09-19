@@ -190,6 +190,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 3; // 1-byte opcode + 2-byte operand
         case CALL_BUILTIN:
             return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
+        case CALL_BUILTIN_PROC:
+            return 6; // 1-byte opcode + 2-byte builtin id + 2-byte name idx + 1-byte arg count
         case CALL:
             return 6; // 1-byte opcode + 2-byte name_idx + 2-byte addr + 1-byte arity
         case EXIT:
@@ -690,17 +692,27 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     "CALL_BUILTIN", name_index, name, arg_count);
             return offset + 4;
         }
-        
+
         // These are not currently used in your compiler but are in the enum
         case CALL_BUILTIN_PROC: {
             uint16_t builtin_id = (uint16_t)((chunk->code[offset + 1] << 8) |
                                              chunk->code[offset + 2]);
-            uint8_t arg_count = chunk->code[offset + 3];
-            const char* name = getVmBuiltinNameById((int)builtin_id);
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 3] << 8) |
+                                             chunk->code[offset + 4]);
+            uint8_t arg_count = chunk->code[offset + 5];
+            const char* name = NULL;
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[name_index])) {
+                name = AS_STRING(chunk->constants[name_index]);
+            }
+            if (!name) {
+                name = getVmBuiltinNameById((int)builtin_id);
+            }
             if (!name) name = "<UNKNOWN>";
             fprintf(stderr, "%-16s %5u '%s' (%u args)\n",
                     "CALL_BUILTIN_PROC", builtin_id, name, arg_count);
-            return offset + 4;
+            return offset + 6;
         }
         case CALL_USER_PROC:
              fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_USER_PROC");
