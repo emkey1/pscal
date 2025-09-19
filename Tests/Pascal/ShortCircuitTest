@@ -1,0 +1,28 @@
+program ShortCircuitTest;
+
+function RHS1: boolean;
+begin
+  writeln('R1');
+  RHS1 := true;
+end;
+
+function RHS0: boolean;
+begin
+  writeln('R0');
+  RHS0 := false;
+end;
+
+var
+  r0, r1, r2, r3, r4: boolean;
+begin
+  if false and RHS1 then writeln('A triggered') else writeln('A skipped');
+  if true or RHS1 then writeln('B taken') else writeln('B skipped');
+
+  r0 := false and RHS1;
+  r1 := true or RHS1;
+  r2 := true and RHS1;
+  r3 := false or RHS0;
+  r4 := false or RHS1;
+
+  writeln('vals:', ord(r0), ' ', ord(r1), ' ', ord(r2), ' ', ord(r3), ' ', ord(r4));
+end.

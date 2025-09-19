@@ -55,6 +55,35 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   out_file="$SCRIPT_DIR/rea/$test_name.out"
   err_file="$SCRIPT_DIR/rea/$test_name.err"
   src_rel=${src#$ROOT_DIR/}
+  disasm_file="$SCRIPT_DIR/rea/$test_name.disasm"
+  disasm_stdout=""
+  disasm_stderr=""
+
+  if [ -f "$disasm_file" ]; then
+    disasm_stdout=$(mktemp)
+    disasm_stderr=$(mktemp)
+    set +e
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --dump-bytecode-only "$src_rel" \
+      > "$disasm_stdout" 2> "$disasm_stderr"
+    disasm_status=$?
+    set -e
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    rel_src="Tests/rea/$test_name.rea"
+    sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
+    rm -f "$disasm_stderr.bak"
+    if [ $disasm_status -ne 0 ]; then
+      echo "Disassembly run exited with $disasm_status: $test_name" >&2
+      cat "$disasm_stderr"
+      EXIT_CODE=1
+    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
+  fi
+
   args_file="$SCRIPT_DIR/rea/$test_name.args"
   if [ -f "$args_file" ]; then
     if ! read -r args < "$args_file"; then
@@ -110,6 +139,8 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
     EXIT_CODE=1
   fi
 
+  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
+  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
   rm -f "$actual_out" "$actual_err"
   echo
   echo

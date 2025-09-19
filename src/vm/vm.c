@@ -47,6 +47,33 @@ static Value* resolveRecord(Value* base, bool* invalid_type) {
     return current;
 }
 
+static bool coerceValueToBoolean(const Value* value, bool* out_truth) {
+    if (!value || !out_truth) {
+        return false;
+    }
+    if (IS_BOOLEAN(*value)) {
+        *out_truth = AS_BOOLEAN(*value);
+        return true;
+    }
+    if (IS_INTLIKE(*value)) {
+        *out_truth = AS_INTEGER(*value) != 0;
+        return true;
+    }
+    if (IS_REAL(*value)) {
+        *out_truth = AS_REAL(*value) != 0.0;
+        return true;
+    }
+    if (IS_CHAR(*value)) {
+        *out_truth = AS_CHAR(*value) != '\0';
+        return true;
+    }
+    if (value->type == TYPE_NIL) {
+        *out_truth = false;
+        return true;
+    }
+    return false;
+}
+
 // --- Class method registration helpers ---
 void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol) {
     if (!vm || !vm->procedureTable || !className || !methodSymbol) return;
@@ -1852,29 +1879,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case NOT: {
                 Value val_popped = pop(vm);
                 bool condition_truth = false;
-                bool value_valid = true;
-
-                if (IS_BOOLEAN(val_popped)) {
-                    condition_truth = AS_BOOLEAN(val_popped);
-                } else if (IS_INTLIKE(val_popped)) {
-                    condition_truth = AS_INTEGER(val_popped) != 0;
-                } else if (IS_REAL(val_popped)) {
-                    condition_truth = AS_REAL(val_popped) != 0.0;
-                } else if (IS_CHAR(val_popped)) {
-                    condition_truth = AS_CHAR(val_popped) != '\0';
-                } else if (val_popped.type == TYPE_NIL) {
-                    condition_truth = false;
-                } else {
-                    value_valid = false;
-                }
-
-                if (!value_valid) {
-                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or numeric.");
+                if (!coerceValueToBoolean(&val_popped, &condition_truth)) {
+                    runtimeError(vm, "Runtime Error: Operand for boolean conversion must be boolean or numeric.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
                 push(vm, makeBoolean(!condition_truth));
+                freeValue(&val_popped);
+                break;
+            }
+            case TO_BOOL: {
+                Value val_popped = pop(vm);
+                bool condition_truth = false;
+                if (!coerceValueToBoolean(&val_popped, &condition_truth)) {
+                    runtimeError(vm, "Runtime Error: Operand for boolean conversion must be boolean or numeric.");
+                    freeValue(&val_popped);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeBoolean(condition_truth));
                 freeValue(&val_popped);
                 break;
             }

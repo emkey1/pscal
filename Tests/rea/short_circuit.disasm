@@ -1,0 +1,147 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Tests/rea/short_circuit.rea ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    0 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007   23 DEFINE_GLOBAL    NameIdx:3   'r0' Type:BOOLEAN ('bool')
+0012    | CONSTANT            5 'false'
+0014    | JUMP_IF_FALSE       8 (to 0025)
+0017    | CALL_USER_PROC       6 'rhs_true' @0120 (0 args)
+0021    | TO_BOOL
+0022    | JUMP                2 (to 0027)
+0025    | CONSTANT            7 'false'
+0027    | SET_GLOBAL          3 'r0'
+0029   24 DEFINE_GLOBAL    NameIdx:8   'r1' Type:BOOLEAN ('bool')
+0034    | CONSTANT            9 'true'
+0036    | JUMP_IF_FALSE       5 (to 0044)
+0039    | CONSTANT           10 'true'
+0041    | JUMP                5 (to 0049)
+0044    | CALL_USER_PROC       6 'rhs_true' @0120 (0 args)
+0048    | TO_BOOL
+0049    | SET_GLOBAL          8 'r1'
+0051   25 DEFINE_GLOBAL    NameIdx:11  'r2' Type:BOOLEAN ('bool')
+0056    | CONSTANT           12 'true'
+0058    | JUMP_IF_FALSE       8 (to 0069)
+0061    | CALL_USER_PROC       6 'rhs_true' @0120 (0 args)
+0065    | TO_BOOL
+0066    | JUMP                2 (to 0071)
+0069    | CONSTANT           13 'false'
+0071    | SET_GLOBAL         11 'r2'
+0073   26 DEFINE_GLOBAL    NameIdx:14  'r3' Type:BOOLEAN ('bool')
+0078    | CONSTANT           15 'false'
+0080    | JUMP_IF_FALSE       5 (to 0088)
+0083    | CONSTANT           16 'true'
+0085    | JUMP                5 (to 0093)
+0088    | CALL_USER_PROC      17 'rhs_false' @0139 (0 args)
+0092    | TO_BOOL
+0093    | SET_GLOBAL         14 'r3'
+0095   27 DEFINE_GLOBAL    NameIdx:18  'r4' Type:BOOLEAN ('bool')
+0100    | CONSTANT           19 'false'
+0102    | JUMP_IF_FALSE       5 (to 0110)
+0105    | CONSTANT           20 'true'
+0107    | JUMP                5 (to 0115)
+0110    | CALL_USER_PROC       6 'rhs_true' @0120 (0 args)
+0114    | TO_BOOL
+0115    | SET_GLOBAL         18 'r4'
+0117    1 JUMP               16 (to 0136)
+
+--- Function rhs_true (at 0120) ---
+0120    2 CONSTANT           21 '1'
+0122    | CONSTANT           22 'R1'
+0124    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0130    3 CONSTANT           24 'true'
+0132    | RETURN
+0133    1 GET_LOCAL           0 (slot)
+0135    | RETURN
+0136    6 JUMP               16 (to 0155)
+
+--- Function rhs_false (at 0139) ---
+0139    7 CONSTANT           21 '1'
+0141    | CONSTANT           25 'R0'
+0143    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0149    8 CONSTANT           26 'false'
+0151    | RETURN
+0152    6 GET_LOCAL           0 (slot)
+0154    | RETURN
+0155   11 CONSTANT           27 'false'
+0157    | JUMP_IF_FALSE       8 (to 0168)
+0160    | CALL_USER_PROC       6 'rhs_true' @0120 (0 args)
+0164    | TO_BOOL
+0165    | JUMP                2 (to 0170)
+0168    | CONSTANT           28 'false'
+0170    | JUMP_IF_FALSE      13 (to 0186)
+0173   12 CONSTANT           21 '1'
+0175    | CONSTANT           29 'A hit'
+0177    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0183   11 JUMP               10 (to 0196)
+0186   14 CONSTANT           21 '1'
+0188    | CONSTANT           30 'A skip'
+0190    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0196   17 CONSTANT           31 'true'
+0198    | JUMP_IF_FALSE       5 (to 0206)
+0201    | CONSTANT           32 'true'
+0203    | JUMP                5 (to 0211)
+0206    | CALL_USER_PROC       6 'rhs_true' @0120 (0 args)
+0210    | TO_BOOL
+0211    | JUMP_IF_FALSE      13 (to 0227)
+0214   18 CONSTANT           21 '1'
+0216    | CONSTANT           33 'B hit'
+0218    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0224   17 JUMP               10 (to 0237)
+0227   20 CONSTANT           21 '1'
+0229    | CONSTANT           34 'B skip'
+0231    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0237   29 CONSTANT           21 '1'
+0239    | CONSTANT           35 'vals:'
+0241    | GET_GLOBAL          3 'r0'
+0243    | CONSTANT           36 ' '
+0245    | GET_GLOBAL          8 'r1'
+0247    | CONSTANT           36 ' '
+0249    | GET_GLOBAL         11 'r2'
+0251    | CONSTANT           36 ' '
+0253    | GET_GLOBAL         14 'r3'
+0255    | CONSTANT           36 ' '
+0257    | GET_GLOBAL         18 'r4'
+0259    | CALL_BUILTIN_PROC   176 'write' (11 args)
+0265    0 HALT
+== End Disassembly: Tests/rea/short_circuit.rea ==
+
+Constants (37):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: STR   "r0"
+  0004: STR   "bool"
+  0005: BOOL  false
+  0006: STR   "rhs_true"
+  0007: BOOL  false
+  0008: STR   "r1"
+  0009: BOOL  true
+  0010: BOOL  true
+  0011: STR   "r2"
+  0012: BOOL  true
+  0013: BOOL  false
+  0014: STR   "r3"
+  0015: BOOL  false
+  0016: BOOL  true
+  0017: STR   "rhs_false"
+  0018: STR   "r4"
+  0019: BOOL  false
+  0020: BOOL  true
+  0021: INT   1
+  0022: STR   "R1"
+  0023: STR   "write"
+  0024: BOOL  true
+  0025: STR   "R0"
+  0026: BOOL  false
+  0027: BOOL  false
+  0028: BOOL  false
+  0029: STR   "A hit"
+  0030: STR   "A skip"
+  0031: BOOL  true
+  0032: BOOL  true
+  0033: STR   "B hit"
+  0034: STR   "B skip"
+  0035: STR   "vals:"
+  0036: CHAR  ' '
+
