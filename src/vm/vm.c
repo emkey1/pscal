@@ -34,6 +34,9 @@ static void resetStack(VM* vm) {
 // Resolve a value to its underlying record by chasing pointer chains.
 // Returns NULL if a nil pointer is encountered.  If the original value is
 // neither a pointer nor a record, *invalid_type is set to true.
+static void push(VM* vm, Value value);
+static Value copyValueForStack(const Value* src);
+
 static Value* resolveRecord(Value* base, bool* invalid_type) {
     if (invalid_type) *invalid_type = false;
     if (base->type != TYPE_POINTER && base->type != TYPE_RECORD) {
@@ -45,6 +48,67 @@ static Value* resolveRecord(Value* base, bool* invalid_type) {
         current = current->ptr_val;
     }
     return current;
+}
+
+static Value* resolveRecordForField(VM* vm, Value* base_val_ptr) {
+    bool invalid_type = false;
+    Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+    if (invalid_type) {
+        runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+        return NULL;
+    }
+    if (record_struct_ptr == NULL) {
+        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+        return NULL;
+    }
+    if (record_struct_ptr->type != TYPE_RECORD) {
+        runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+        return NULL;
+    }
+    return record_struct_ptr;
+}
+
+static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_index) {
+    Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
+    if (!record_struct_ptr) {
+        return false;
+    }
+
+    FieldValue* current = record_struct_ptr->record_val;
+    for (uint16_t i = 0; i < field_index && current; i++) {
+        current = current->next;
+    }
+    if (!current) {
+        runtimeError(vm, "VM Error: Field index out of range.");
+        return false;
+    }
+
+    push(vm, copyValueForStack(&current->value));
+    return true;
+}
+
+static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_name) {
+    if (!field_name) {
+        runtimeError(vm, "VM Error: Field name constant is invalid or NULL.");
+        return false;
+    }
+
+    Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
+    if (!record_struct_ptr) {
+        return false;
+    }
+
+    FieldValue* current = record_struct_ptr->record_val;
+    while (current) {
+        if (current->name && strcmp(current->name, field_name) == 0) {
+            push(vm, copyValueForStack(&current->value));
+            return true;
+        }
+        current = current->next;
+    }
+
+    runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+    return false;
 }
 
 static bool coerceValueToBoolean(const Value* value, bool* out_truth) {
@@ -2426,6 +2490,22 @@ comparison_error_label:
                 push(vm, makePointer(&current->value, NULL));
                 break;
             }
+            case LOAD_FIELD_VALUE: {
+                uint8_t field_index = READ_BYTE();
+                Value base_val = pop(vm);
+                bool ok = pushFieldValueByOffset(vm, &base_val, field_index);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
+            }
+            case LOAD_FIELD_VALUE16: {
+                uint16_t field_index = READ_SHORT(vm);
+                Value base_val = pop(vm);
+                bool ok = pushFieldValueByOffset(vm, &base_val, field_index);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
+            }
             case GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
@@ -2491,6 +2571,34 @@ comparison_error_label:
 
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
+            }
+            case LOAD_FIELD_VALUE_BY_NAME: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value base_val = pop(vm);
+                const Value* name_val = (field_name_idx < vm->chunk->constants_count)
+                                        ? &vm->chunk->constants[field_name_idx]
+                                        : NULL;
+                const char* field_name = (name_val && name_val->type == TYPE_STRING)
+                                          ? AS_STRING(*name_val)
+                                          : NULL;
+                bool ok = pushFieldValueByName(vm, &base_val, field_name);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
+            }
+            case LOAD_FIELD_VALUE_BY_NAME16: {
+                uint16_t field_name_idx = READ_SHORT(vm);
+                Value base_val = pop(vm);
+                const Value* name_val = (field_name_idx < vm->chunk->constants_count)
+                                        ? &vm->chunk->constants[field_name_idx]
+                                        : NULL;
+                const char* field_name = (name_val && name_val->type == TYPE_STRING)
+                                          ? AS_STRING(*name_val)
+                                          : NULL;
+                bool ok = pushFieldValueByName(vm, &base_val, field_name);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
             }
             case GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
@@ -2613,7 +2721,7 @@ comparison_error_label:
                 int total_size = calculateArrayTotalSize(array_val_ptr);
                 if (offset < 0 || offset >= total_size) {
                     runtimeError(vm, "VM Error: Array element index out of bounds.");
-                    if (operand.type == TYPE_POINTER) freeValue(&operand);
+                    freeValue(&operand);
                     if (using_wrapper) {
                         free(temp_wrapper.lower_bounds);
                         free(temp_wrapper.upper_bounds);
@@ -2626,6 +2734,145 @@ comparison_error_label:
                 if (operand.type == TYPE_POINTER) {
                     freeValue(&operand);
                 }
+                if (using_wrapper) {
+                    free(temp_wrapper.lower_bounds);
+                    free(temp_wrapper.upper_bounds);
+                }
+
+                break;
+            }
+            case LOAD_ELEMENT_VALUE: {
+                uint8_t dimension_count = READ_BYTE();
+
+                Value operand = pop(vm);
+
+                if (dimension_count == 1 && operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        Value index_val = pop(vm);
+                        if (!isIntlikeType(index_val.type)) {
+                            runtimeError(vm, "VM Error: String index must be an integer.");
+                            freeValue(&index_val);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        long long pscal_index = index_val.i_val;
+                        freeValue(&index_val);
+
+                        size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
+                        if (pscal_index == 0) {
+                            push(vm, makeInt((long long)len));
+                            freeValue(&operand);
+                            break;
+                        }
+                        if (pscal_index < 1 || (size_t)pscal_index > len) {
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                                         pscal_index, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        char ch = base_val->s_val ? base_val->s_val[pscal_index - 1] : '\0';
+                        push(vm, makeChar(ch));
+                        freeValue(&operand);
+                        break;
+                    }
+                }
+
+                int* indices = malloc(sizeof(int) * dimension_count);
+                if (!indices) {
+                    runtimeError(vm, "VM Error: Malloc failed for array indices.");
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    Value index_val = pop(vm);
+                    if (isIntlikeType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    } else if (isRealType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
+                    } else {
+                        runtimeError(vm, "VM Error: Array index must be an integer.");
+                        free(indices);
+                        freeValue(&index_val);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    freeValue(&index_val);
+                }
+
+                Value* array_val_ptr = NULL;
+                Value temp_wrapper;
+                temp_wrapper.lower_bounds = NULL;
+                temp_wrapper.upper_bounds = NULL;
+                bool using_wrapper = false;
+
+                if (operand.type == TYPE_POINTER) {
+                    Value* candidate = (Value*)operand.ptr_val;
+                    if (candidate && candidate->type == TYPE_ARRAY) {
+                        array_val_ptr = candidate;
+                    } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                        AST* arrayType = operand.base_type_node;
+                        int dims = arrayType->child_count;
+                        temp_wrapper.type = TYPE_ARRAY;
+                        temp_wrapper.dimensions = dims;
+                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
+                        temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
+                        if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
+                            runtimeError(vm, "VM Error: Malloc failed for temporary array wrapper bounds.");
+                            if (temp_wrapper.lower_bounds) free(temp_wrapper.lower_bounds);
+                            if (temp_wrapper.upper_bounds) free(temp_wrapper.upper_bounds);
+                            free(indices);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        for (int i = 0; i < dims; i++) {
+                            int lb = 0, ub = -1;
+                            AST* sub = arrayType->children[i];
+                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
+                                lb = sub->left->i_val;
+                                ub = sub->right->i_val;
+                            }
+                            temp_wrapper.lower_bounds[i] = lb;
+                            temp_wrapper.upper_bounds[i] = ub;
+                        }
+                        array_val_ptr = &temp_wrapper;
+                        using_wrapper = true;
+                    } else {
+                        runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                        free(indices);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (operand.type == TYPE_ARRAY) {
+                    array_val_ptr = &operand;
+                } else {
+                    runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
+                    free(indices);
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int offset = computeFlatOffset(array_val_ptr, indices);
+                free(indices);
+
+                int total_size = calculateArrayTotalSize(array_val_ptr);
+                if (offset < 0 || offset >= total_size) {
+                    runtimeError(vm, "VM Error: Array element index out of bounds.");
+                    if (operand.type == TYPE_POINTER) freeValue(&operand);
+                    if (using_wrapper) {
+                        free(temp_wrapper.lower_bounds);
+                        free(temp_wrapper.upper_bounds);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, copyValueForStack(&array_val_ptr->array_val[offset]));
+
+                freeValue(&operand);
                 if (using_wrapper) {
                     free(temp_wrapper.lower_bounds);
                     free(temp_wrapper.upper_bounds);

@@ -1095,8 +1095,31 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
             break;
         }
         case TCAST_ARRAY_ACCESS:
-            compileLValue(node, chunk, ctx);
-            writeBytecodeChunk(chunk, GET_INDIRECT, node->token.line);
+            for (int i = 0; i < node->child_count; ++i) {
+                compileExpression(node->children[i], chunk, ctx);
+            }
+            if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                char* name = tokenToCString(node->left->token);
+                int idx = resolveLocal(ctx, name);
+                if (idx >= 0) {
+                    writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, node->left->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
+                } else {
+                    int nameIdx = getGlobalNameConstIndex(chunk, name);
+                    if (nameIdx < 256) {
+                        writeBytecodeChunk(chunk, GET_GLOBAL_ADDRESS, node->left->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->left->token.line);
+                    } else {
+                        writeBytecodeChunk(chunk, GET_GLOBAL_ADDRESS16, node->left->token.line);
+                        emitShort(chunk, (uint16_t)nameIdx, node->left->token.line);
+                    }
+                }
+                free(name);
+            } else {
+                compileExpression(node->left, chunk, ctx);
+            }
+            writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             break;
         case TCAST_MEMBER:
             compileExpression(node->left, chunk, ctx);
@@ -1104,15 +1127,14 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 char *fname = tokenToCString(node->right->token);
                 int idx = addStringConstant(chunk, fname);
                 if (idx < 256) {
-                    writeBytecodeChunk(chunk, GET_FIELD_ADDRESS, node->token.line);
+                    writeBytecodeChunk(chunk, LOAD_FIELD_VALUE_BY_NAME, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 } else {
-                    writeBytecodeChunk(chunk, GET_FIELD_ADDRESS16, node->token.line);
+                    writeBytecodeChunk(chunk, LOAD_FIELD_VALUE_BY_NAME16, node->token.line);
                     emitShort(chunk, (uint16_t)idx, node->token.line);
                 }
                 free(fname);
             }
-            writeBytecodeChunk(chunk, GET_INDIRECT, node->token.line);
             break;
         case TCAST_THREAD_SPAWN: {
             ASTNodeClike *call = node->left;

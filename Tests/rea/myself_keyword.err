@@ -7,42 +7,41 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0007    8 DEFINE_GLOBAL    NameIdx:3   'd' Type:POINTER ('Dummy')
 0012    | ALLOC_OBJECT        3 (fields)
 0014    | SET_GLOBAL          3 'd'
-0016    3 JUMP               24 (to 0043)
+0016    3 JUMP               23 (to 0042)
 
 --- Procedure dummy.test (at 0019) ---
 0019    4 GET_LOCAL           0 (slot)
-0021    | GET_FIELD_OFFSET    2 (index)
-0023    | GET_INDIRECT
-0024    | CONSTANT            5 '0'
-0026    | EQUAL
-0027    | SET_LOCAL           1 (slot)
-0029    5 GET_LOCAL           1 (slot)
-0031    | JUMP_IF_FALSE       8 (to 0042)
-0034    | CONSTANT            6 '1'
-0036    | GET_LOCAL           0 (slot)
-0038    | GET_FIELD_OFFSET    2 (index)
-0040    | SWAP
-0041    | SET_INDIRECT
-0042    3 RETURN
-0043    0 CONSTANT            7 'Value type ARRAY'
-0045    | DEFINE_GLOBAL    NameIdx:8   'dummy_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
-0055    | SET_GLOBAL          8 'dummy_vtable'
-0057    | GET_GLOBAL          3 'd'
-0059    | DUP
-0060    | GET_FIELD_OFFSET    0 (index)
-0062    | GET_GLOBAL_ADDRESS    8 'dummy_vtable'
-0064    | SET_INDIRECT
-0065    | POP
-0066    9 GET_GLOBAL          3 'd'
-0068    | DUP
-0069    | GET_FIELD_OFFSET    0 (index)
-0071    | GET_INDIRECT
-0072    | CONSTANT            5 '0'
-0074    | SWAP
-0075    | GET_ELEMENT_ADDRESS    1 (dims)
-0077    | GET_INDIRECT
-0078    | PROC_CALL_INDIRECT (args=1)
-0080    0 HALT
+0021    | LOAD_FIELD_VALUE    2 (index)
+0023    | CONSTANT            5 '0'
+0025    | EQUAL
+0026    | SET_LOCAL           1 (slot)
+0028    5 GET_LOCAL           1 (slot)
+0030    | JUMP_IF_FALSE       8 (to 0041)
+0033    | CONSTANT            6 '1'
+0035    | GET_LOCAL           0 (slot)
+0037    | GET_FIELD_OFFSET    2 (index)
+0039    | SWAP
+0040    | SET_INDIRECT
+0041    3 RETURN
+0042    0 CONSTANT            7 'Value type ARRAY'
+0044    | DEFINE_GLOBAL    NameIdx:8   'dummy_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
+0054    | SET_GLOBAL          8 'dummy_vtable'
+0056    | GET_GLOBAL          3 'd'
+0058    | DUP
+0059    | GET_FIELD_OFFSET    0 (index)
+0061    | GET_GLOBAL_ADDRESS    8 'dummy_vtable'
+0063    | SET_INDIRECT
+0064    | POP
+0065    9 GET_GLOBAL          3 'd'
+0067    | DUP
+0068    | GET_FIELD_OFFSET    0 (index)
+0070    | GET_INDIRECT
+0071    | CONSTANT            5 '0'
+0073    | SWAP
+0074    | GET_ELEMENT_ADDRESS    1 (dims)
+0076    | GET_INDIRECT
+0077    | PROC_CALL_INDIRECT (args=1)
+0079    0 HALT
 == End Disassembly: Tests/rea/myself_keyword.rea ==
 
 Constants (10):\n  0000: STR   "myself"

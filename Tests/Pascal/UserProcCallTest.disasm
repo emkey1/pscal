@@ -51,18 +51,17 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0101    | GET_GLOBAL          7 'i'
 0103    | CONSTANT            5 '3'
 0105    | LESS_EQUAL
-0106    | JUMP_IF_FALSE      21 (to 0130)
+0106    | JUMP_IF_FALSE      20 (to 0129)
 0109   25 GET_GLOBAL          7 'i'
 0111    | GET_GLOBAL_ADDRESS    3 'data'
-0113    | GET_ELEMENT_ADDRESS    1 (dims)
-0115    | GET_INDIRECT
-0116    | CALL_USER_PROC      15 'printvalue' @0038 (1 args)
-0120   24 GET_GLOBAL          7 'i'
-0122    | CONSTANT            4 '1'
-0124    | ADD
-0125    | SET_GLOBAL          7 'i'
-0127    | JUMP              -29 (to 0101)
-0130    1 HALT
+0113    | LOAD_ELEMENT_VALUE    1 (dims)
+0115    | CALL_USER_PROC      15 'printvalue' @0038 (1 args)
+0119   24 GET_GLOBAL          7 'i'
+0121    | CONSTANT            4 '1'
+0123    | ADD
+0124    | SET_GLOBAL          7 'i'
+0126    | JUMP              -28 (to 0101)
+0129    1 HALT
 == End Disassembly: Pascal/UserProcCallTest ==
 
 Constants (16):\n  0000: STR   "myself"

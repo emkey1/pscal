@@ -206,9 +206,18 @@ This sequence uses `JUMP_IF_FALSE` to exit the loop and `JUMP` to repeat.
 * **`GET_FIELD_ADDRESS`** / **`GET_FIELD_ADDRESS16`**:
     * **Operands:** Constant index for the field's name.
     * **Action:** Pops a record or a pointer to a record from the stack and pushes a pointer to the specified field's `Value` struct.
+* **`LOAD_FIELD_VALUE`** / **`LOAD_FIELD_VALUE16`**:
+    * **Operands:** Field offset (1-byte or 2-byte).
+    * **Action:** Pops a record or pointer to a record (including chained pointers), resolves the field by offset—respecting hidden vtable slots—and pushes a copy of the field's value onto the stack.
+* **`LOAD_FIELD_VALUE_BY_NAME`** / **`LOAD_FIELD_VALUE_BY_NAME16`**:
+    * **Operands:** Constant index of the field name (1-byte or 2-byte).
+    * **Action:** Pops a record or pointer to a record, locates the named field, and pushes a copy of its value. Emits a runtime error if the field does not exist.
 * **`GET_ELEMENT_ADDRESS`**:
     * **Operands:** 1-byte dimension count.
     * **Action:** Pops an array or pointer to an array, and then pops the indices for each dimension. Pushes a pointer to the specified element's `Value` struct.
+* **`LOAD_ELEMENT_VALUE`**:
+    * **Operands:** 1-byte dimension count.
+    * **Action:** Pops an array (or pointer to an array) and the indices for each dimension, checks bounds, and pushes a copy of the addressed element's value. Handles Pascal strings specially so that `s[0]` yields the length and `s[i]` yields the character value.
 * **`GET_CHAR_ADDRESS`**:
     * **Operands:** None.
     * **Action:** Pops an index and a pointer to a string. Pushes a pointer to the character at that index within the string.
