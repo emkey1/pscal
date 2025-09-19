@@ -37,11 +37,39 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   err_file="$SCRIPT_DIR/clike/$test_name.err"
   actual_out=$(mktemp)
   actual_err=$(mktemp)
+  disasm_file="$SCRIPT_DIR/clike/$test_name.disasm"
+  disasm_stdout=""
+  disasm_stderr=""
   # Skip SDL-dependent clike tests unless RUN_SDL=1 forces them
   if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ] && [ "$test_name" = "graphics" ]; then
     echo "Skipping $test_name (SDL dummy driver)"
     echo
     continue
+  fi
+
+  if [ -f "$disasm_file" ]; then
+    disasm_stdout=$(mktemp)
+    disasm_stderr=$(mktemp)
+    set +e
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" --dump-bytecode-only "$src" \
+      > "$disasm_stdout" 2> "$disasm_stderr"
+    disasm_status=$?
+    set -e
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    rel_src="Tests/clike/$test_name.cl"
+    sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
+    rm -f "$disasm_stderr.bak"
+    if [ $disasm_status -ne 0 ]; then
+      echo "Disassembly run exited with $disasm_status: $test_name" >&2
+      cat "$disasm_stderr"
+      EXIT_CODE=1
+    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
   fi
 
   # Skip network-labeled tests unless RUN_NET_TESTS=1
@@ -124,6 +152,8 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
     wait "$server_pid" 2>/dev/null || true
   fi
 
+  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
+  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
   rm -f "$actual_out" "$actual_err"
   echo
   echo

@@ -4272,7 +4272,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_BINARY_OP: {
             if (node_token && node_token->type == TOKEN_AND) {
                 // Check annotated type to decide between bitwise and logical AND
-                if (node->left && isIntlikeType(node->left->var_type)) {
+                if (node->var_type != TYPE_BOOLEAN && node->left && isIntlikeType(node->left->var_type)) {
                     // Bitwise AND for integer types
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
@@ -4286,6 +4286,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                     // If A was true, result is B.
                     compileRValue(node->right, chunk, getLine(node->right)); // stack: [B]
+                    writeBytecodeChunk(chunk, TO_BOOL, line);
                     int jump_over_false_case = chunk->count;
                     writeBytecodeChunk(chunk, JUMP, line);
                     emitShort(chunk, 0xFFFF, line);
@@ -4299,7 +4300,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             } else if (node_token && node_token->type == TOKEN_OR) {
                 // Check annotated type for bitwise vs. logical OR
-                if (node->left && isIntlikeType(node->left->var_type)) {
+                if (node->var_type != TYPE_BOOLEAN && node->left && isIntlikeType(node->left->var_type)) {
                     // Bitwise OR for integer types
                     compileRValue(node->left, chunk, getLine(node->left));
                     compileRValue(node->right, chunk, getLine(node->right));
@@ -4322,6 +4323,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 // The result of the expression is the result of B.
                 patchShort(chunk, jump_if_false + 1, chunk->count - (jump_if_false + 3));
                 compileRValue(node->right, chunk, getLine(node->right));
+                writeBytecodeChunk(chunk, TO_BOOL, line);
 
                 // The end for both paths.
                 patchShort(chunk, jump_to_end + 1, chunk->count - (jump_to_end + 3));

@@ -1,0 +1,29 @@
+bool rhs_true() {
+  writeln("R1");
+  return true;
+}
+
+bool rhs_false() {
+  writeln("R0");
+  return false;
+}
+
+if (false && rhs_true()) {
+  writeln("A hit");
+} else {
+  writeln("A skip");
+}
+
+if (true || rhs_true()) {
+  writeln("B hit");
+} else {
+  writeln("B skip");
+}
+
+bool r0 = false && rhs_true();
+bool r1 = true || rhs_true();
+bool r2 = true && rhs_true();
+bool r3 = false || rhs_false();
+bool r4 = false || rhs_true();
+
+writeln("vals:", r0, " ", r1, " ", r2, " ", r3, " ", r4);

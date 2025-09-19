@@ -23,6 +23,7 @@ typedef enum {
     DIVIDE,        // Pop two values, divide, push result (handle integer/real later)
     NEGATE,        // Pop one value, negate it, push result (for unary minus)
     NOT,           // Pop one value (boolean), invert, push result
+    TO_BOOL,       // Pop one value, coerce using truthiness rules, push boolean result
     EQUAL,
     NOT_EQUAL,
     GREATER,

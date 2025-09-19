@@ -854,8 +854,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 int jFalse = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 compileExpression(node->right, chunk, ctx);
                 // coerce to boolean
-                writeBytecodeChunk(chunk, NOT, node->token.line);
-                writeBytecodeChunk(chunk, NOT, node->token.line);
+                writeBytecodeChunk(chunk, TO_BOOL, node->token.line);
                 writeBytecodeChunk(chunk, JUMP, node->token.line);
                 int jEnd = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 // false path target
@@ -885,8 +884,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 patchShort(chunk, jEvalRight, offEval);
                 compileExpression(node->right, chunk, ctx);
                 // coerce to boolean
-                writeBytecodeChunk(chunk, NOT, node->token.line);
-                writeBytecodeChunk(chunk, NOT, node->token.line);
+                writeBytecodeChunk(chunk, TO_BOOL, node->token.line);
                 uint16_t offEnd2 = (uint16_t)(chunk->count - (jEnd2 + 2));
                 patchShort(chunk, jEnd2, offEnd2);
                 break;

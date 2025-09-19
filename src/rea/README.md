@@ -9,6 +9,12 @@ layout below sketches the path toward a full compiler.
 Numeric literals default to 64-bit integers or doubles, preserving the full
 range and precision of source values.
 
+Logical expressions use the VM's dedicated `TO_BOOL` opcode, so `&&` and `||`
+short-circuit their right-hand sides and always produce canonical boolean
+results (`TRUE` or `FALSE`) without the double `NOT` sequences older builds
+required. This mirrors the behavior of the Pascal and C-like front ends and
+ensures consistent truthiness across the toolchain.
+
 ## Running
 
 The `rea` front end supports a few diagnostic options:
