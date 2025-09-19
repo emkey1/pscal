@@ -1677,10 +1677,13 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
 
     // Arg 1: RequestBody (String or MStream)
     const char* request_body_content = NULL;
+    size_t request_body_length = 0;
     if (args[1].type == TYPE_STRING) {
         request_body_content = args[1].s_val ? args[1].s_val : "";
+        request_body_length = strlen(request_body_content);
     } else if (args[1].type == TYPE_MEMORYSTREAM && args[1].mstream != NULL) {
-        request_body_content = (char*)args[1].mstream->buffer;
+        request_body_content = (const char*)args[1].mstream->buffer;
+        request_body_length = args[1].mstream->size;
     } else {
         runtimeError(vm, "apiSend: Request body must be a string or memory stream.");
         return makeVoid();
@@ -1719,10 +1722,10 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
 
     // Check if request_body_content is provided; if so, assume POST.
     // If it's an empty string or NULL, it defaults to GET.
-    if (request_body_content && strlen(request_body_content) > 0) {
+    if (request_body_content && request_body_length > 0) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_body_content);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(request_body_content));
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)request_body_length);
     }
 
     CURLcode res = curl_easy_perform(curl);

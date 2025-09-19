@@ -3704,8 +3704,9 @@ typedef struct {
     BuiltinRoutineType type;
 } RegisteredBuiltin;
 
-static RegisteredBuiltin builtin_registry[256];
+static RegisteredBuiltin* builtin_registry = NULL;
 static int builtin_registry_count = 0;
+static int builtin_registry_capacity = 0;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
@@ -3719,9 +3720,15 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType, const char*
             return;
         }
     }
-    if (builtin_registry_count >= 256) {
-        pthread_mutex_unlock(&builtin_registry_mutex);
-        return;
+    if (builtin_registry_count >= builtin_registry_capacity) {
+        int new_capacity = builtin_registry_capacity < 64 ? 64 : builtin_registry_capacity * 2;
+        RegisteredBuiltin* new_registry = realloc(builtin_registry, sizeof(RegisteredBuiltin) * new_capacity);
+        if (!new_registry) {
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return;
+        }
+        builtin_registry = new_registry;
+        builtin_registry_capacity = new_capacity;
     }
     builtin_registry[builtin_registry_count].name = strdup(name);
     builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?

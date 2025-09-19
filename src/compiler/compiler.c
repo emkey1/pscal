@@ -1869,6 +1869,78 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
     }
 }
 
+static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int line) {
+    if (!lvalue || lvalue->type != AST_VARIABLE || !lvalue->token || !lvalue->token->value) {
+        return false;
+    }
+
+    VarType target_type = lvalue->var_type;
+    if (target_type == TYPE_UNKNOWN) {
+        Symbol* sym = lookupGlobalSymbol(lvalue->token->value);
+        if (sym) {
+            target_type = sym->type;
+        }
+    }
+
+    bool type_is_safe = false;
+    if (target_type != TYPE_UNKNOWN) {
+        if (isRealType(target_type)) {
+            type_is_safe = true;
+        } else if (target_type == TYPE_BOOLEAN) {
+            type_is_safe = true;
+        }
+    }
+
+    if (!type_is_safe) {
+        return false;
+    }
+
+    if (line <= 0) {
+        line = getLine(lvalue);
+    }
+    if (line <= 0) {
+        line = 0;
+    }
+
+    const char* varName = lvalue->token->value;
+
+    if (current_function_compiler) {
+        int local_slot = -1;
+        if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+            local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
+        } else {
+            local_slot = resolveLocal(current_function_compiler, varName);
+        }
+
+        if (local_slot != -1) {
+            if (current_function_compiler->locals[local_slot].is_ref) {
+                return false;
+            }
+            writeBytecodeChunk(chunk, SET_LOCAL, line);
+            writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
+            return true;
+        }
+
+        int upvalue_slot = resolveUpvalue(current_function_compiler, varName);
+        if (upvalue_slot != -1) {
+            if (current_function_compiler->upvalues[upvalue_slot].is_ref) {
+                return false;
+            }
+            writeBytecodeChunk(chunk, SET_UPVALUE, line);
+            writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
+            return true;
+        }
+    }
+
+    if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
+        return false;
+    }
+
+    int nameIdx = addStringConstant(chunk, varName);
+    emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, line);
+    return true;
+}
+
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
@@ -3159,9 +3231,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         compiler_had_error = true;
                     }
                 } else {
-                    compileLValue(lvalue, chunk, getLine(lvalue));
-                    writeBytecodeChunk(chunk, SWAP, line);
-                    writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                    int store_line = getLine(lvalue);
+                    if (!emitDirectStoreForVariable(lvalue, chunk, store_line)) {
+                        compileLValue(lvalue, chunk, store_line);
+                        writeBytecodeChunk(chunk, SWAP, line);
+                        writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                    }
                 }
             }
             break;
@@ -4181,9 +4256,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         compiler_had_error = true;
                     }
                 } else {
-                    compileLValue(lvalue, chunk, getLine(lvalue));
-                    writeBytecodeChunk(chunk, SWAP, line);
-                    writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                    int store_line = getLine(lvalue);
+                    if (!emitDirectStoreForVariable(lvalue, chunk, store_line)) {
+                        compileLValue(lvalue, chunk, store_line);
+                        writeBytecodeChunk(chunk, SWAP, line);
+                        writeBytecodeChunk(chunk, SET_INDIRECT, line);
+                    }
                 }
             }
             break;
