@@ -158,6 +158,28 @@ static int ensureMyselfGlobalNameIndex(BytecodeChunk* chunk) {
     return compiler_myself_global_name_idx;
 }
 
+static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* name, uint8_t arg_count, int line) {
+    int builtin_id = getBuiltinIDForCompiler(name);
+    if (builtin_id < 0) {
+        fprintf(stderr, "L%d: Compiler Error: Unknown built-in procedure '%s'.\n", line, name);
+        compiler_had_error = true;
+
+        char normalized_name[MAX_SYMBOL_LENGTH];
+        strncpy(normalized_name, name, sizeof(normalized_name) - 1);
+        normalized_name[sizeof(normalized_name) - 1] = '\0';
+        toLowerString(normalized_name);
+        int name_index = addStringConstant(chunk, normalized_name);
+        writeBytecodeChunk(chunk, CALL_BUILTIN, line);
+        emitShort(chunk, (uint16_t)name_index, line);
+        writeBytecodeChunk(chunk, arg_count, line);
+        return;
+    }
+
+    writeBytecodeChunk(chunk, CALL_BUILTIN_PROC, line);
+    emitShort(chunk, (uint16_t)builtin_id, line);
+    writeBytecodeChunk(chunk, arg_count, line);
+}
+
 static void ensureMyselfGlobalDefined(BytecodeChunk* chunk, int line) {
     if (compiler_defined_myself_global) return;
     int myself_idx = ensureMyselfGlobalNameIndex(chunk);
@@ -2841,10 +2863,7 @@ static void compilePrintf(AST* node, BytecodeChunk* chunk, int line) {
                 write_arg_count++;
             }
 
-            int nameIndex = addStringConstant(chunk, "write");
-            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)nameIndex, line);
-            writeBytecodeChunk(chunk, (uint8_t)write_arg_count, line);
+            emitBuiltinProcedureCall(chunk, "write", (uint8_t)write_arg_count, line);
 
             Value zero = makeInt(0);
             int zidx = addConstantToChunk(chunk, &zero);
@@ -2966,10 +2985,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             for (int i = 0; i < argCount; i++) {
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
-            int nameIndex = addStringConstant(chunk, "write");
-            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)nameIndex, line);
-            writeBytecodeChunk(chunk, (uint8_t)(argCount + 1), line);
+            emitBuiltinProcedureCall(chunk, "write", (uint8_t)(argCount + 1), line);
             break;
         }
         case AST_WHILE: {
@@ -3146,10 +3162,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // Call built-in 'read'
-            int nameIndex = addStringConstant(chunk, "read");
-            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)nameIndex, line);
-            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+            emitBuiltinProcedureCall(chunk, "read", (uint8_t)node->child_count, line);
             break;
         }
         case AST_READLN: {
@@ -3170,11 +3183,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileLValue(arg_node, chunk, getLine(arg_node));
             }
 
-            // Call the built-in `readln` function. This part is correct.
-            int nameIndex = addStringConstant(chunk, "readln");
-            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)nameIndex, line);
-            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+            // Call the built-in `readln` procedure.
+            emitBuiltinProcedureCall(chunk, "readln", (uint8_t)node->child_count, line);
             break;
         }
         case AST_WRITE: {
@@ -3186,10 +3196,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             for (int i = 0; i < argCount; i++) {
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
-            int nameIndex = addStringConstant(chunk, "write");
-            writeBytecodeChunk(chunk, CALL_BUILTIN, line);
-            emitShort(chunk, (uint16_t)nameIndex, line);
-            writeBytecodeChunk(chunk, (uint8_t)(argCount + 1), line);
+            emitBuiltinProcedureCall(chunk, "write", (uint8_t)(argCount + 1), line);
             break;
         }
         case AST_ASSIGN: {
@@ -3769,7 +3776,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     writeBytecodeChunk(chunk, EXIT, line);
                 } else {
                     BuiltinRoutineType type = getBuiltinType(calleeName);
-                    if (type == BUILTIN_TYPE_PROCEDURE || type == BUILTIN_TYPE_FUNCTION) {
+                    if (type == BUILTIN_TYPE_PROCEDURE) {
+                        emitBuiltinProcedureCall(chunk, calleeName, (uint8_t)call_arg_count, line);
+                    } else if (type == BUILTIN_TYPE_FUNCTION) {
                         char normalized_name[MAX_SYMBOL_LENGTH];
                         strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
                         normalized_name[sizeof(normalized_name) - 1] = '\0';
@@ -3778,9 +3787,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
                         writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
-                        if (type == BUILTIN_TYPE_FUNCTION) {
-                            writeBytecodeChunk(chunk, POP, line);
-                        }
+                        writeBytecodeChunk(chunk, POP, line);
                     } else {
                         // This case handles if a name is in the isBuiltin list but not in getBuiltinType,
                         // which would be an internal inconsistency.

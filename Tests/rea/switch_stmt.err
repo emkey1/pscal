@@ -15,7 +15,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0025    | POP
 0026    4 CONSTANT            6 '1'
 0028    | CONSTANT            6 '1'
-0030    | CALL_BUILTIN         7 'write' (2 args)
+0030    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0034    2 JUMP               28 (to 0065)
 0037    | DUP
 0038    6 CONSTANT            5 '2'
@@ -24,22 +24,21 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0044    | POP
 0045    7 CONSTANT            6 '1'
 0047    | CONSTANT            5 '2'
-0049    | CALL_BUILTIN         7 'write' (2 args)
+0049    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0053    2 JUMP                9 (to 0065)
 0056    | POP
 0057   10 CONSTANT            6 '1'
-0059    | CONSTANT            8 '3'
-0061    | CALL_BUILTIN         7 'write' (2 args)
+0059    | CONSTANT            7 '3'
+0061    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0065    0 HALT
 == End Disassembly: Tests/rea/switch_stmt.rea ==
 
-Constants (9):\n  0000: STR   "myself"
+Constants (8):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: STR   "x"
   0004: STR   "int"
   0005: INT   2
   0006: INT   1
-  0007: STR   "write"
-  0008: INT   3
+  0007: INT   3
 

@@ -3476,6 +3476,65 @@ comparison_error_label:
                 freeValue(&popped_val);
                 break;
             }
+            case CALL_BUILTIN_PROC: {
+                uint16_t builtin_id = READ_SHORT(vm);
+                uint8_t arg_count = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < arg_count) {
+                    runtimeError(vm, "VM Error: Stack underflow for built-in arguments.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* args = vm->stackTop - arg_count;
+                const char* builtin_name = getVmBuiltinNameById((int)builtin_id);
+                VmBuiltinFn handler = getVmBuiltinHandlerById((int)builtin_id);
+
+                if (!handler) {
+                    if (builtin_name) {
+                        runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' (id %u) called.",
+                                     builtin_name, builtin_id);
+                    } else {
+                        runtimeError(vm, "VM Error: Unknown built-in id %u called.", builtin_id);
+                    }
+                    vm->stackTop -= arg_count;
+                    for (int i = 0; i < arg_count; i++) {
+                        if (args[i].type == TYPE_POINTER) {
+                            continue;
+                        }
+                        freeValue(&args[i]);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                bool needs_lock = builtin_name ? builtinUsesGlobalStructures(builtin_name) : false;
+                if (needs_lock) pthread_mutex_lock(&globals_mutex);
+                Value result = handler(vm, arg_count, args);
+                if (needs_lock) pthread_mutex_unlock(&globals_mutex);
+
+                vm->stackTop -= arg_count;
+                for (int i = 0; i < arg_count; i++) {
+                    if (args[i].type == TYPE_POINTER) {
+                        continue;
+                    }
+                    freeValue(&args[i]);
+                }
+
+                BuiltinRoutineType builtin_type = builtin_name ? getBuiltinType(builtin_name) : BUILTIN_TYPE_NONE;
+                if (builtin_type == BUILTIN_TYPE_FUNCTION) {
+                    push(vm, result);
+                } else {
+                    freeValue(&result);
+                }
+
+                if (vm->exit_requested) {
+                    vm->exit_requested = false;
+                    bool halted = false;
+                    InterpretResult res = returnFromCall(vm, &halted);
+                    if (res != INTERPRET_OK) return res;
+                    if (halted) return INTERPRET_OK;
+                }
+                break;
+            }
             case CALL_BUILTIN: {
                 uint16_t name_const_idx = READ_SHORT(vm);
                 uint8_t arg_count = READ_BYTE();

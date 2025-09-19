@@ -9,6 +9,7 @@
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in CALL_HOST cast)
 #include "Pascal/globals.h"
+#include "backend_ast/builtin.h"
 #include "core/version.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
@@ -691,9 +692,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         
         // These are not currently used in your compiler but are in the enum
-        case CALL_BUILTIN_PROC:
-             fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_BUILTIN_PROC");
-             return offset + 3;
+        case CALL_BUILTIN_PROC: {
+            uint16_t builtin_id = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            uint8_t arg_count = chunk->code[offset + 3];
+            const char* name = getVmBuiltinNameById((int)builtin_id);
+            if (!name) name = "<UNKNOWN>";
+            fprintf(stderr, "%-16s %5u '%s' (%u args)\n",
+                    "CALL_BUILTIN_PROC", builtin_id, name, arg_count);
+            return offset + 4;
+        }
         case CALL_USER_PROC:
              fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_USER_PROC");
              return offset + 3;

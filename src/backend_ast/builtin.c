@@ -520,6 +520,40 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
     return NULL;
 }
 
+VmBuiltinFn getVmBuiltinHandlerById(int id) {
+    if (id < 0) return NULL;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+    VmBuiltinFn handler = NULL;
+    if ((size_t)id < num_vm_builtins) {
+        handler = vmBuiltinDispatchTable[id].handler;
+    } else {
+        size_t extra_index = (size_t)id - num_vm_builtins;
+        if (extra_index < num_extra_vm_builtins) {
+            handler = extra_vm_builtins[extra_index].handler;
+        }
+    }
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return handler;
+}
+
+const char* getVmBuiltinNameById(int id) {
+    if (id < 0) return NULL;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+    const char* name = NULL;
+    if ((size_t)id < num_vm_builtins) {
+        name = vmBuiltinDispatchTable[id].name;
+    } else {
+        size_t extra_index = (size_t)id - num_vm_builtins;
+        if (extra_index < num_extra_vm_builtins) {
+            name = extra_vm_builtins[extra_index].name;
+        }
+    }
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return name;
+}
+
 Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "Sqr expects 1 argument.");

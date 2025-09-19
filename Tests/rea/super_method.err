@@ -16,7 +16,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Procedure base.speak (at 0023) ---
 0023    | CONSTANT            5 '1'
 0025    | CONSTANT            6 'base'
-0027    | CALL_BUILTIN         7 'write' (2 args)
+0027    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0031    | RETURN
 0032    2 JUMP                9 (to 0044)
 
@@ -30,16 +30,16 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0047    | GET_LOCAL           0 (slot)
 0049    | CALL             0023 (base.speak) (1 args)
 0055    | RETURN
-0056    0 CONSTANT           10 'Value type ARRAY'
-0058    | DEFINE_GLOBAL    NameIdx:11  'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0068    | SET_GLOBAL         11 'child_vtable'
-0070    | CONSTANT           14 'Value type ARRAY'
-0072    | DEFINE_GLOBAL    NameIdx:15  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0082    | SET_GLOBAL         15 'base_vtable'
+0056    0 CONSTANT            9 'Value type ARRAY'
+0058    | DEFINE_GLOBAL    NameIdx:10  'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0068    | SET_GLOBAL         10 'child_vtable'
+0070    | CONSTANT           13 'Value type ARRAY'
+0072    | DEFINE_GLOBAL    NameIdx:14  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0082    | SET_GLOBAL         14 'base_vtable'
 0084    | GET_GLOBAL          3 'c'
 0086    | DUP
 0087    | GET_FIELD_OFFSET    0 (index)
-0089    | GET_GLOBAL_ADDRESS   11 'child_vtable'
+0089    | GET_GLOBAL_ADDRESS   10 'child_vtable'
 0091    | SET_INDIRECT
 0092    | POP
 0093    4 GET_GLOBAL          3 'c'
@@ -54,20 +54,19 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0107    0 HALT
 == End Disassembly: Tests/rea/super_method.rea ==
 
-Constants (16):\n  0000: STR   "myself"
+Constants (15):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: STR   "c"
   0004: STR   "Child"
   0005: INT   1
   0006: STR   "base"
-  0007: STR   "write"
-  0008: STR   "base.base"
-  0009: STR   "base.speak"
-  0010: Value type ARRAY
-  0011: STR   "child_vtable"
-  0012: INT   0
-  0013: STR   "integer"
-  0014: Value type ARRAY
-  0015: STR   "base_vtable"
+  0007: STR   "base.base"
+  0008: STR   "base.speak"
+  0009: Value type ARRAY
+  0010: STR   "child_vtable"
+  0011: INT   0
+  0012: STR   "integer"
+  0013: Value type ARRAY
+  0014: STR   "base_vtable"
 

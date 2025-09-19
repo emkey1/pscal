@@ -62,6 +62,26 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
+static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
+                                    uint8_t arg_count, int line) {
+    if (!vmName) vmName = "";
+    int builtin_id = clikeGetBuiltinID(vmName);
+    if (builtin_id < 0) {
+        fprintf(stderr,
+                "L%d: Compiler Error: Unknown built-in procedure '%s'.\n",
+                line, vmName);
+        int nameIndex = addStringConstant(chunk, vmName);
+        writeBytecodeChunk(chunk, CALL_BUILTIN, line);
+        emitShort(chunk, (uint16_t)nameIndex, line);
+        writeBytecodeChunk(chunk, arg_count, line);
+        return;
+    }
+
+    writeBytecodeChunk(chunk, CALL_BUILTIN_PROC, line);
+    emitShort(chunk, (uint16_t)builtin_id, line);
+    writeBytecodeChunk(chunk, arg_count, line);
+}
+
 static char* tokenToCString(ClikeToken t) {
     char* s = (char*)malloc(t.length + 1);
     memcpy(s, t.lexeme, t.length);
@@ -1263,10 +1283,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                     compileExpression(node->children[arg_index], chunk, ctx);
                     write_arg_count++;
                 }
-                int nameIndex = addStringConstant(chunk, "write");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)write_arg_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "write",
+                                         (uint8_t)write_arg_count,
+                                         node->token.line);
                 Value zero = makeInt(0);
                 int zidx = addConstantToChunk(chunk, &zero);
                 freeValue(&zero);
@@ -1279,10 +1298,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 for (int i = 0; i < node->child_count; ++i) {
                     compileLValue(node->children[i], chunk, ctx);
                 }
-                int rlIndex = addStringConstant(chunk, "readln");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)rlIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "readln",
+                                         (uint8_t)node->child_count,
+                                         node->token.line);
 
                 if (strcasecmp(name, "scanf") == 0) {
                     Value zero = makeInt(0);
@@ -1308,10 +1326,21 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 }
                 const char* vmName = name;
                 if (strcasecmp(name, "remove") == 0) vmName = "erase";
-                int fnIndex = addStringConstant(chunk, vmName);
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)fnIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                BuiltinRoutineType builtinKind = getBuiltinType(vmName);
+                if (builtinKind == BUILTIN_TYPE_NONE && strcasecmp(vmName, name) != 0) {
+                    builtinKind = getBuiltinType(name);
+                }
+                if (builtinKind == BUILTIN_TYPE_PROCEDURE) {
+                    emitBuiltinProcedureCall(chunk, vmName,
+                                             (uint8_t)node->child_count,
+                                             node->token.line);
+                } else {
+                    int fnIndex = addStringConstant(chunk, vmName);
+                    writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
+                    emitShort(chunk, (uint16_t)fnIndex, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count,
+                                       node->token.line);
+                }
             } else if (strcasecmp(name, "random") == 0) {
                 // Direct wrapper around the VM's random builtin.
                 for (int i = 0; i < node->child_count; ++i) {
@@ -1332,10 +1361,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                         compileExpression(node->children[i], chunk, ctx);
                     }
                 }
-                int strIndex = addStringConstant(chunk, "str");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)strIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "str",
+                                         (uint8_t)node->child_count,
+                                         node->token.line);
             } else if (strcasecmp(name, "strlen") == 0) {
                 // Map C's strlen to the Pascal-style length builtin.
                 for (int i = 0; i < node->child_count; ++i) {
@@ -1350,10 +1378,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
                 }
-                int hIndex = addStringConstant(chunk, "halt");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)hIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "halt",
+                                         (uint8_t)node->child_count,
+                                         node->token.line);
             } else {
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);

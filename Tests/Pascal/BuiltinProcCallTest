@@ -1,0 +1,6 @@
+program BuiltinProcCallTest;
+begin
+  Write('A');
+  Write('B');
+  Writeln('C');
+end.
