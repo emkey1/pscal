@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 typedef struct {
     char *name;
@@ -260,6 +261,7 @@ static int resolveLocal(FuncContext* ctx, const char* name) {
 }
 
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
+static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx, bool resultUsed);
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
 static int countLocalDecls(ASTNodeClike *node);
@@ -364,25 +366,33 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             if (node->left) compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, THREAD_JOIN, node->token.line);
             break;
-        case TCAST_EXPR_STMT:
-            if (node->left) {
-                compileExpression(node->left, chunk, ctx);
-                bool needPop = true;
-                if (node->left->type == TCAST_CALL) {
-                    char* name = tokenToCString(node->left->token);
-                    Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
-                    sym = resolveSymbolAlias(sym);
-                    BuiltinRoutineType btype = getBuiltinType(name);
-                    if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
-                        needPop = false;
-                    }
-                    free(name);
-                }
-                if (needPop) {
-                    writeBytecodeChunk(chunk, POP, node->token.line);
+        case TCAST_EXPR_STMT: {
+            ASTNodeClike* expr = node->left;
+            if (!expr) break;
+            if (expr->type == TCAST_ASSIGN) {
+                ASTNodeClike* lhs = expr->left;
+                if (lhs && lhs->type == TCAST_IDENTIFIER) {
+                    compileExpressionWithResult(expr, chunk, ctx, false);
+                    break;
                 }
             }
+            compileExpression(expr, chunk, ctx);
+            bool needPop = true;
+            if (expr->type == TCAST_CALL) {
+                char* name = tokenToCString(expr->token);
+                Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
+                BuiltinRoutineType btype = getBuiltinType(name);
+                if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
+                    needPop = false;
+                }
+                free(name);
+            }
+            if (needPop) {
+                writeBytecodeChunk(chunk, POP, node->token.line);
+            }
             break;
+        }
         case TCAST_IF: {
             compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, JUMP_IF_FALSE, node->token.line);
@@ -764,6 +774,9 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
     free(name);
 }
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx) {
+    compileExpressionWithResult(node, chunk, ctx, true);
+}
+static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx, bool resultUsed) {
     if (!node) return;
     switch (node->type) {
         case TCAST_NUMBER: {
@@ -968,7 +981,9 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     char* name = tokenToCString(node->left->token);
                     int idx = resolveLocal(ctx, name);
                     compileExpression(node->right, chunk, ctx);
-                    writeBytecodeChunk(chunk, DUP, node->token.line);
+                    if (resultUsed) {
+                        writeBytecodeChunk(chunk, DUP, node->token.line);
+                    }
                     if (idx >= 0) {
                         writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
                         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
