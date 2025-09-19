@@ -6,6 +6,9 @@ The Pascal front end implements a significant subset of classic Pascal.  The cod
 
 Optional SDL2 support adds graphics and audio capabilities, and built‑in networking routines use libcurl.
 
+## Forum
+- (Discord) https://discord.gg/AZM6D22CCs
+
 ## Requirements
 
 - C compiler with C11 support
