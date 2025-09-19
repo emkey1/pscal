@@ -4246,7 +4246,25 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             for (int i = 0; i < node->child_count; i++) {
                 compileRValue(node->children[i], chunk, getLine(node->children[i]));
             }
-            compileLValue(node->left, chunk, getLine(node->left));
+
+            AST* base = node->left;
+            if (!base) {
+                fprintf(stderr, "L%d: Compiler error: Array access missing base expression.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+
+            switch (base->type) {
+                case AST_VARIABLE:
+                case AST_FIELD_ACCESS:
+                case AST_ARRAY_ACCESS:
+                case AST_DEREFERENCE:
+                    compileLValue(base, chunk, getLine(base));
+                    break;
+                default:
+                    compileRValue(base, chunk, getLine(base));
+                    break;
+            }
             writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
