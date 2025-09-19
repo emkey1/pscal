@@ -1874,9 +1874,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
                 int ctorNameIdx = addStringConstant(chunk, lowerClassName);
-                writeBytecodeChunk(chunk, CALL, line);
+                writeBytecodeChunk(chunk, CALL_USER_PROC, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
-                emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
             global_init_new_depth--;
@@ -3801,14 +3800,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             } else if (proc_symbol) { // If a symbol was found (either defined or forward-declared)
                 int nameIndex = addStringConstant(chunk, calleeName);
-                writeBytecodeChunk(chunk, CALL, line);
+                writeBytecodeChunk(chunk, CALL_USER_PROC, line);
                 emitShort(chunk, (uint16_t)nameIndex, line);
-
-                if (proc_symbol->is_defined) {
-                    emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
-                } else {
-                    emitShort(chunk, 0xFFFF, line);
-                }
                 writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
 
                 // This logic for user-defined functions is already correct.
@@ -3951,9 +3944,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
                 int ctorNameIdx = addStringConstant(chunk, lowerClassName);
-                writeBytecodeChunk(chunk, CALL, line);
+                writeBytecodeChunk(chunk, CALL_USER_PROC, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
-                emitShort(chunk, 0xFFFF, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
             }
             global_init_new_depth--;
@@ -4781,14 +4773,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         emitConstant(chunk, addNilConstant(chunk), line);
                     } else {
                         int nameIndex = addStringConstant(chunk, functionName);
-                        writeBytecodeChunk(chunk, CALL, line);
+                        writeBytecodeChunk(chunk, CALL_USER_PROC, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
-
-                        if (func_symbol->is_defined) {
-                            emitShort(chunk, (uint16_t)func_symbol->bytecode_address, line);
-                        } else {
-                            emitShort(chunk, 0xFFFF, line);
-                        }
                         writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                     }
                 } else {

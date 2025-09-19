@@ -192,6 +192,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
         case CALL_BUILTIN_PROC:
             return 6; // 1-byte opcode + 2-byte builtin id + 2-byte name idx + 1-byte arg count
+        case CALL_USER_PROC:
+            return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
         case CALL:
             return 6; // 1-byte opcode + 2-byte name_idx + 2-byte addr + 1-byte arity
         case EXIT:
@@ -714,9 +716,41 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     "CALL_BUILTIN_PROC", builtin_id, name, arg_count);
             return offset + 6;
         }
-        case CALL_USER_PROC:
-             fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_USER_PROC");
-             return offset + 3;
+        case CALL_USER_PROC: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            uint8_t arg_count = chunk->code[offset + 3];
+            const char* name = NULL;
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[name_index])) {
+                name = AS_STRING(chunk->constants[name_index]);
+            }
+
+            const char* display_name = name ? name : "<INVALID>";
+            int entry_address = -1;
+            if (procedureTable && name && *name) {
+                char lookup_name[MAX_SYMBOL_LENGTH + 1];
+                strncpy(lookup_name, name, MAX_SYMBOL_LENGTH);
+                lookup_name[MAX_SYMBOL_LENGTH] = '\0';
+                toLowerString(lookup_name);
+                Symbol* sym = hashTableLookup(procedureTable, lookup_name);
+                sym = resolveSymbolAlias(sym);
+                if (sym && sym->is_defined) {
+                    entry_address = sym->bytecode_address;
+                }
+            }
+
+            if (entry_address >= 0) {
+                fprintf(stderr, "%-16s %5u '%s' @%04d (%u args)\n",
+                        "CALL_USER_PROC", name_index, display_name,
+                        (uint16_t)entry_address, arg_count);
+            } else {
+                fprintf(stderr, "%-16s %5u '%s' (%u args)\n",
+                        "CALL_USER_PROC", name_index, display_name, arg_count);
+            }
+            return offset + 4;
+        }
 
         case CALL_HOST: {
             uint8_t host_fn_id_val = chunk->code[offset + 1];

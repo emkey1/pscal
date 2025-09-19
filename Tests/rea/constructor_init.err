@@ -8,18 +8,18 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0012    | ALLOC_OBJECT        2 (fields)
 0014    | DUP
 0015    | CONSTANT            5 '5'
-0017    | CALL             0028 (point) (2 args)
-0023    | SET_GLOBAL          3 'p'
-0025    1 JUMP                9 (to 0037)
+0017    | CALL_USER_PROC       6 'point' @0026 (2 args)
+0021    | SET_GLOBAL          3 'p'
+0023    1 JUMP                9 (to 0035)
 
---- Procedure point.point (at 0028) ---
-0028    | GET_LOCAL           1 (slot)
-0030    | GET_LOCAL           0 (slot)
-0032    | GET_FIELD_OFFSET    1 (index)
-0034    | SWAP
-0035    | SET_INDIRECT
-0036    | RETURN
-0037    0 HALT
+--- Procedure point.point (at 0026) ---
+0026    | GET_LOCAL           1 (slot)
+0028    | GET_LOCAL           0 (slot)
+0030    | GET_FIELD_OFFSET    1 (index)
+0032    | SWAP
+0033    | SET_INDIRECT
+0034    | RETURN
+0035    0 HALT
 == End Disassembly: Tests/rea/constructor_init.rea ==
 
 Constants (7):\n  0000: STR   "myself"

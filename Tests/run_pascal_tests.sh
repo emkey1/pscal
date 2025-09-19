@@ -65,8 +65,31 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   err_file="$SCRIPT_DIR/Pascal/$test_name.err"
   actual_out=$(mktemp)
   actual_err=$(mktemp)
+  disasm_file="$SCRIPT_DIR/Pascal/$test_name.disasm"
+  disasm_stdout=""
+  disasm_stderr=""
 
   echo "---- $test_name ----"
+
+  if [ -f "$disasm_file" ]; then
+    disasm_stdout=$(mktemp)
+    disasm_stderr=$(mktemp)
+    set +e
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" --dump-bytecode-only "Pascal/$test_name") \
+      > "$disasm_stdout" 2> "$disasm_stderr"
+    disasm_status=$?
+    set -e
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$disasm_stderr" > "$disasm_stderr.clean" && mv "$disasm_stderr.clean" "$disasm_stderr"
+    perl -ne 'print unless /^Loaded cached byte code/' "$disasm_stderr" > "$disasm_stderr.clean" && mv "$disasm_stderr.clean" "$disasm_stderr"
+    if [ $disasm_status -ne 0 ]; then
+      echo "Disassembly run exited with $disasm_status: $test_name" >&2
+      cat "$disasm_stderr"
+      EXIT_CODE=1
+    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
+  fi
 
   set +e
   if [ "$test_name" = "SDLFeaturesTest" ]; then
@@ -122,6 +145,8 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   fi
 
   rm -f "$SCRIPT_DIR/Pascal/$test_name.dbg"
+  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
+  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
   rm -f "$actual_out" "$actual_err"
   echo
   echo
