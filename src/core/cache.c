@@ -447,6 +447,7 @@ static bool readValue(FILE* f, Value* out) {
 
 typedef struct {
     Symbol* symbol;
+    Symbol* parent;
     char* parent_name;
 } EnclosingFixup;
 
@@ -468,6 +469,30 @@ static Symbol* findProcedureSymbolDeep(HashTable* table, const char* name) {
         }
     }
     return NULL;
+}
+
+static HashTable* findProcedureScope(HashTable* table,
+                                     const char* parent_name,
+                                     Symbol** out_parent) {
+    if (out_parent) {
+        *out_parent = NULL;
+    }
+    if (!table) {
+        return NULL;
+    }
+    if (!parent_name || parent_name[0] == '\0') {
+        return table;
+    }
+
+    Symbol* parent = findProcedureSymbolDeep(table, parent_name);
+    if (!parent || !parent->type_def || !parent->type_def->symbol_table) {
+        return NULL;
+    }
+
+    if (out_parent) {
+        *out_parent = parent;
+    }
+    return (HashTable*)parent->type_def->symbol_table;
 }
 
 static void countProceduresRecursive(HashTable* table, int* count) {
@@ -526,7 +551,8 @@ static bool appendEnclosingFixup(EnclosingFixup** fixups,
                                  int* count,
                                  int* capacity,
                                  Symbol* sym,
-                                 char* parent_name) {
+                                 char* parent_name,
+                                 Symbol* parent) {
     if (!fixups || !count || !capacity || !sym) return false;
     if (*count == *capacity) {
         int new_cap = (*capacity == 0) ? 8 : (*capacity * 2);
@@ -538,6 +564,7 @@ static bool appendEnclosingFixup(EnclosingFixup** fixups,
         *capacity = new_cap;
     }
     (*fixups)[*count].symbol = sym;
+    (*fixups)[*count].parent = parent;
     (*fixups)[*count].parent_name = parent_name;
     (*count)++;
     return true;
@@ -617,9 +644,24 @@ static bool loadProceduresFromStream(FILE* f, int proc_count) {
             enclosing_name[parent_len] = '\0';
         }
 
-        Symbol* sym = findProcedureSymbolDeep(procedure_table, name);
-        if (sym && sym->is_alias && sym->real_symbol) {
-            sym = sym->real_symbol;
+        Symbol* parent_sym = NULL;
+        HashTable* scope_table = procedure_table;
+        if (has_enclosing) {
+            scope_table = findProcedureScope(procedure_table, enclosing_name, &parent_sym);
+            if (!scope_table || !parent_sym) {
+                free(name);
+                if (enclosing_name) free(enclosing_name);
+                ok = false;
+                break;
+            }
+        }
+
+        Symbol* sym = NULL;
+        if (scope_table) {
+            sym = hashTableLookup(scope_table, name);
+            if (sym) {
+                sym = resolveSymbolAlias(sym);
+            }
         }
         if (!sym) {
             sym = (Symbol*)calloc(1, sizeof(Symbol));
@@ -647,7 +689,7 @@ static bool loadProceduresFromStream(FILE* f, int proc_count) {
             sym->next = NULL;
             sym->real_symbol = NULL;
             sym->enclosing = NULL;
-            hashTableInsert(procedure_table, sym);
+            hashTableInsert(scope_table ? scope_table : procedure_table, sym);
         }
 
         sym->bytecode_address = addr;
@@ -680,7 +722,7 @@ static bool loadProceduresFromStream(FILE* f, int proc_count) {
         }
 
         if (has_enclosing) {
-            if (!appendEnclosingFixup(&fixups, &fixup_count, &fixup_capacity, sym, enclosing_name)) {
+            if (!appendEnclosingFixup(&fixups, &fixup_count, &fixup_capacity, sym, enclosing_name, parent_sym)) {
                 free(enclosing_name);
                 free(name);
                 ok = false;
@@ -695,9 +737,12 @@ static bool loadProceduresFromStream(FILE* f, int proc_count) {
 
     if (ok) {
         for (int i = 0; i < fixup_count; ++i) {
-            Symbol* parent = findProcedureSymbolDeep(procedure_table, fixups[i].parent_name);
-            if (parent && parent->is_alias && parent->real_symbol) {
-                parent = parent->real_symbol;
+            Symbol* parent = fixups[i].parent;
+            if (!parent && fixups[i].parent_name) {
+                parent = findProcedureSymbolDeep(procedure_table, fixups[i].parent_name);
+                if (parent && parent->is_alias && parent->real_symbol) {
+                    parent = parent->real_symbol;
+                }
             }
             fixups[i].symbol->enclosing = parent;
             free(fixups[i].parent_name);
