@@ -3638,6 +3638,128 @@ comparison_error_label:
                 }
                 break;
             }
+            case CALL_USER_PROC: {
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                uint16_t name_index = READ_SHORT(vm);
+                uint8_t declared_arity = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < declared_arity) {
+                    runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %u, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (!vm->chunk || name_index >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Invalid procedure name index %u for CALL_USER_PROC.", name_index);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* name_val = &vm->chunk->constants[name_index];
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "VM Error: CALL_USER_PROC requires string constant for callee name (index %u).", name_index);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* proc_name = name_val->s_val;
+                char lookup_name[MAX_SYMBOL_LENGTH + 1];
+                strncpy(lookup_name, proc_name, MAX_SYMBOL_LENGTH);
+                lookup_name[MAX_SYMBOL_LENGTH] = '\0';
+                toLowerString(lookup_name);
+
+                if (!vm->procedureTable) {
+                    runtimeError(vm, "VM Error: Procedure table not initialized when calling '%s'.", proc_name);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* proc_symbol = hashTableLookup(vm->procedureTable, lookup_name);
+                if (proc_symbol && proc_symbol->is_alias && proc_symbol->real_symbol) {
+                    proc_symbol = proc_symbol->real_symbol;
+                }
+
+                if (!proc_symbol) {
+                    runtimeError(vm, "VM Error: Procedure '%s' not found for CALL_USER_PROC.", proc_name);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (!proc_symbol->is_defined || proc_symbol->bytecode_address < 0) {
+                    runtimeError(vm, "VM Error: Procedure '%s' has no compiled body.",
+                                 proc_symbol->name ? proc_symbol->name : proc_name);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                size_t target_address = (size_t)proc_symbol->bytecode_address;
+                if (!vm->chunk || target_address >= (size_t)vm->chunk->count) {
+                    runtimeError(vm, "VM Error: Procedure '%s' bytecode address %d out of range.",
+                                 proc_symbol->name ? proc_symbol->name : proc_name,
+                                 proc_symbol->bytecode_address);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
+
+                if (proc_symbol->type_def && proc_symbol->type_def->child_count >= declared_arity) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = proc_symbol->type_def->children[i];
+                        Value* arg_val = frame->slots + i;
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
+                frame->function_symbol = proc_symbol;
+                frame->locals_count = proc_symbol->locals_count;
+                frame->upvalue_count = proc_symbol->upvalue_count;
+                frame->upvalues = NULL;
+                frame->discard_result_on_return = false;
+                frame->vtable = NULL;
+
+                if (proc_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    CallFrame* parent_frame = NULL;
+                    if (proc_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
+                        }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                        if (proc_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < proc_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+
+                vm->ip = vm->chunk->code + target_address;
+                break;
+            }
             case CALL: {
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
                     runtimeError(vm, "VM Error: Call stack overflow.");

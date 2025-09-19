@@ -1,0 +1,84 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Pascal/UserProcCallTest ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007   17 DEFINE_GLOBAL    NameIdx:3   'data' Type:ARRAY Dims:1 [1..3] of INTEGER ('integer')
+0017   18 DEFINE_GLOBAL    NameIdx:7   'i' Type:INTEGER ('integer')
+0022    6 JUMP               10 (to 0035)
+
+--- Function doubleit (at 0025) ---
+0025    8 GET_LOCAL           0 (slot)
+0027    | CONSTANT            8 '2'
+0029    | MULTIPLY
+0030    | SET_LOCAL           1 (slot)
+0032    6 GET_LOCAL           1 (slot)
+0034    | RETURN
+0035   11 JUMP               13 (to 0051)
+
+--- Procedure printvalue (at 0038) ---
+0038   13 CONSTANT            4 '1'
+0040    | CONSTANT            9 'value='
+0042    | GET_LOCAL           0 (slot)
+0044    | CALL_BUILTIN_PROC   176 'write' (3 args)
+0050   11 RETURN
+0051   20 CONSTANT            4 '1'
+0053    | CONSTANT           11 'double='
+0055    | CONSTANT           12 '5'
+0057    | CALL_USER_PROC      13 'doubleit' @0025 (1 args)
+0061    | CALL_BUILTIN_PROC   176 'write' (3 args)
+0067   21 CONSTANT            5 '3'
+0069    | CONSTANT            4 '1'
+0071    | GET_GLOBAL_ADDRESS    3 'data'
+0073    | GET_ELEMENT_ADDRESS    1 (dims)
+0075    0 SWAP
+0076    | SET_INDIRECT
+0077   22 CONSTANT           14 '4'
+0079    | CONSTANT            8 '2'
+0081    | GET_GLOBAL_ADDRESS    3 'data'
+0083    | GET_ELEMENT_ADDRESS    1 (dims)
+0085    0 SWAP
+0086    | SET_INDIRECT
+0087   23 CONSTANT           12 '5'
+0089    | CONSTANT            5 '3'
+0091    | GET_GLOBAL_ADDRESS    3 'data'
+0093    | GET_ELEMENT_ADDRESS    1 (dims)
+0095    0 SWAP
+0096    | SET_INDIRECT
+0097   24 CONSTANT            4 '1'
+0099    | SET_GLOBAL          7 'i'
+0101    | GET_GLOBAL          7 'i'
+0103    | CONSTANT            5 '3'
+0105    | LESS_EQUAL
+0106    | JUMP_IF_FALSE      21 (to 0130)
+0109   25 GET_GLOBAL          7 'i'
+0111    | GET_GLOBAL_ADDRESS    3 'data'
+0113    | GET_ELEMENT_ADDRESS    1 (dims)
+0115    | GET_INDIRECT
+0116    | CALL_USER_PROC      15 'printvalue' @0038 (1 args)
+0120   24 GET_GLOBAL          7 'i'
+0122    | CONSTANT            4 '1'
+0124    | ADD
+0125    | SET_GLOBAL          7 'i'
+0127    | JUMP              -29 (to 0101)
+0130    1 HALT
+== End Disassembly: Pascal/UserProcCallTest ==
+
+Constants (16):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: STR   "data"
+  0004: INT   1
+  0005: INT   3
+  0006: STR   "integer"
+  0007: STR   "i"
+  0008: INT   2
+  0009: STR   "value="
+  0010: STR   "write"
+  0011: STR   "double="
+  0012: INT   5
+  0013: STR   "doubleit"
+  0014: INT   4
+  0015: STR   "printvalue"
+

@@ -1129,7 +1129,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                      * discard the assignment result then wipes out the just-
                      * stored local, leaving it NIL (e.g. feeding NIL to
                      * built-ins like toupper).  Generate a wrapper that
-                     * performs a normal CALL so the callee runs with a
+                     * performs a CALL_USER_PROC so the callee runs with a
                      * proper stack frame and separate local slot storage.
                      */
                     writeBytecodeChunk(chunk, THREAD_CREATE, call->token.line);
@@ -1143,9 +1143,8 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
 
                     int wrapper_addr = chunk->count;
                     int nameIdx = addStringConstant(chunk, name);
-                    writeBytecodeChunk(chunk, CALL, call->token.line);
+                    writeBytecodeChunk(chunk, CALL_USER_PROC, call->token.line);
                     emitShort(chunk, (uint16_t)nameIdx, call->token.line);
-                    emitShort(chunk, (uint16_t)sym->bytecode_address, call->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)sym->arity, call->token.line);
                     writeBytecodeChunk(chunk, RETURN, call->token.line);
 
@@ -1397,13 +1396,8 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 sym = resolveSymbolAlias(sym);
                 int nameIndex = addStringConstant(chunk, name);
                 if (sym) {
-                    writeBytecodeChunk(chunk, CALL, node->token.line);
+                    writeBytecodeChunk(chunk, CALL_USER_PROC, node->token.line);
                     emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                    if (sym->is_defined) {
-                        emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
-                    } else {
-                        emitShort(chunk, 0xFFFF, node->token.line);
-                    }
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
                 } else {
                     // If a local variable with this name exists, treat it as an indirect call through a function pointer.
@@ -1526,33 +1520,28 @@ static void patchForwardCalls(BytecodeChunk *chunk) {
     if (!procedure_table || !chunk || !chunk->code) return;
     for (int offset = 0; offset < chunk->count; ) {
         uint8_t opcode = chunk->code[offset];
-        if (opcode == CALL) {
-            if (offset + 5 >= chunk->count) break;
-            uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
-                                          chunk->code[offset + 4]);
-            if (address == 0xFFFF) {
-                uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
-                                                 chunk->code[offset + 2]);
-                if (name_index < chunk->constants_count &&
-                    chunk->constants[name_index].type == TYPE_STRING) {
-                    const char *proc_name = AS_STRING(chunk->constants[name_index]);
+        if (opcode == CALL_USER_PROC) {
+            if (offset + 3 >= chunk->count) break;
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING) {
+                const char *proc_name = AS_STRING(chunk->constants[name_index]);
+                if (proc_name && *proc_name) {
                     char lookup[MAX_SYMBOL_LENGTH];
                     strncpy(lookup, proc_name, sizeof(lookup) - 1);
                     lookup[sizeof(lookup) - 1] = '\0';
                     toLowerString(lookup);
                     Symbol *sym = hashTableLookup(procedure_table, lookup);
                     sym = resolveSymbolAlias(sym);
-                    if (sym && sym->is_defined) {
-                        patchShort(chunk, offset + 3,
-                                   (uint16_t)sym->bytecode_address);
-                    } else {
+                    if (!sym || !sym->is_defined) {
                         fprintf(stderr,
                                 "Compiler Error: Procedure '%s' was called but never defined.\n",
                                 proc_name);
                     }
                 }
             }
-            offset += 6;
+            offset += 4;
         } else {
             offset += getInstructionLength(chunk, offset);
         }
@@ -1578,16 +1567,14 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     predeclareFunctions(program);
 
     // Emit a call to main after globals have been defined.
-    writeBytecodeChunk(chunk, CALL, 0);
+    writeBytecodeChunk(chunk, CALL_USER_PROC, 0);
     int mainNameIdx = addStringConstant(chunk, "main");
     emitShort(chunk, (uint16_t)mainNameIdx, 0);
-    int mainAddrPatch = chunk->count;
-    emitShort(chunk, 0, 0);
     int mainArityPatch = chunk->count;
     writeBytecodeChunk(chunk, 0, 0);
     writeBytecodeChunk(chunk, HALT, 0);
 
-    int mainAddress = -1;
+    bool mainDefined = false;
     uint8_t mainArity = 0;
 
     // Compile imported modules before the main program
@@ -1674,14 +1661,15 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
         if (strcmp(name, "main") == 0) {
             Symbol* sym = (Symbol*)hashTableLookup(procedure_table, name);
             sym = resolveSymbolAlias(sym);
-            mainAddress = sym->bytecode_address;
-            mainArity = sym->arity;
+            if (sym && sym->is_defined) {
+                mainDefined = true;
+                mainArity = sym->arity;
+            }
         }
         free(name);
     }
 
-    if (mainAddress >= 0) {
-        patchShort(chunk, mainAddrPatch, (uint16_t)mainAddress);
+    if (mainDefined) {
         chunk->code[mainArityPatch] = mainArity;
     }
 

@@ -8,30 +8,30 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0012    | ALLOC_OBJECT        3 (fields)
 0014    | DUP
 0015    | CONSTANT            5 '42'
-0017    | CALL             0040 (child) (2 args)
-0023    | SET_GLOBAL          3 'c'
-0025    1 JUMP                9 (to 0037)
+0017    | CALL_USER_PROC       6 'child' @0038 (2 args)
+0021    | SET_GLOBAL          3 'c'
+0023    1 JUMP                9 (to 0035)
 
---- Procedure base.base (at 0028) ---
-0028    | GET_LOCAL           1 (slot)
-0030    | GET_LOCAL           0 (slot)
-0032    | GET_FIELD_OFFSET    1 (index)
-0034    | SWAP
-0035    | SET_INDIRECT
-0036    | RETURN
-0037    2 JUMP               11 (to 0051)
+--- Procedure base.base (at 0026) ---
+0026    | GET_LOCAL           1 (slot)
+0028    | GET_LOCAL           0 (slot)
+0030    | GET_FIELD_OFFSET    1 (index)
+0032    | SWAP
+0033    | SET_INDIRECT
+0034    | RETURN
+0035    2 JUMP                9 (to 0047)
 
---- Procedure child.child (at 0040) ---
-0040    | GET_LOCAL           0 (slot)
-0042    | GET_LOCAL           1 (slot)
-0044    | CALL             0028 (base.base) (2 args)
-0050    | RETURN
-0051    4 CONSTANT            8 '1'
-0053    | GET_GLOBAL          3 'c'
-0055    | GET_FIELD_OFFSET    1 (index)
-0057    | GET_INDIRECT
-0058    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0064    0 HALT
+--- Procedure child.child (at 0038) ---
+0038    | GET_LOCAL           0 (slot)
+0040    | GET_LOCAL           1 (slot)
+0042    | CALL_USER_PROC       7 'base.base' @0026 (2 args)
+0046    | RETURN
+0047    4 CONSTANT            8 '1'
+0049    | GET_GLOBAL          3 'c'
+0051    | GET_FIELD_OFFSET    1 (index)
+0053    | GET_INDIRECT
+0054    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0060    0 HALT
 == End Disassembly: Tests/rea/super_constructor.rea ==
 
 Constants (10):\n  0000: STR   "myself"
