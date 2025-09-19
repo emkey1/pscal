@@ -1,0 +1,153 @@
+--- Compiling Main Program AST to Bytecode ---
+== Disassembly: Pascal/ShortCircuitTest ==
+Offset Line Opcode           Operand  Value / Target (Args)
+------ ---- ---------------- -------- --------------------------
+0000    1 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007   16 DEFINE_GLOBAL    NameIdx:3   'r0' Type:BOOLEAN ('boolean')
+0012    | DEFINE_GLOBAL    NameIdx:5   'r1' Type:BOOLEAN ('boolean')
+0017    | DEFINE_GLOBAL    NameIdx:6   'r2' Type:BOOLEAN ('boolean')
+0022    | DEFINE_GLOBAL    NameIdx:7   'r3' Type:BOOLEAN ('boolean')
+0027    | DEFINE_GLOBAL    NameIdx:8   'r4' Type:BOOLEAN ('boolean')
+0032    3 JUMP               17 (to 0052)
+
+--- Function rhs1 (at 0035) ---
+0035    5 CONSTANT            9 '1'
+0037    | CONSTANT           10 'R1'
+0039    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0045    6 CONSTANT           12 'true'
+0047    | SET_LOCAL           0 (slot)
+0049    3 GET_LOCAL           0 (slot)
+0051    | RETURN
+0052    9 JUMP               17 (to 0072)
+
+--- Function rhs0 (at 0055) ---
+0055   11 CONSTANT            9 '1'
+0057    | CONSTANT           13 'R0'
+0059    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0065   12 CONSTANT           14 'false'
+0067    | SET_LOCAL           0 (slot)
+0069    9 GET_LOCAL           0 (slot)
+0071    | RETURN
+0072   18 CONSTANT           15 'false'
+0074    | JUMP_IF_FALSE       8 (to 0085)
+0077    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
+0081    | TO_BOOL
+0082    | JUMP                2 (to 0087)
+0085    | CONSTANT           17 'false'
+0087    | JUMP_IF_FALSE      13 (to 0103)
+0090    | CONSTANT            9 '1'
+0092    | CONSTANT           18 'A triggered'
+0094    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0100    | JUMP               10 (to 0113)
+0103    | CONSTANT            9 '1'
+0105    | CONSTANT           19 'A skipped'
+0107    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0113   19 CONSTANT           20 'true'
+0115    | JUMP_IF_FALSE       5 (to 0123)
+0118    | CONSTANT           21 'true'
+0120    | JUMP                5 (to 0128)
+0123    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
+0127    | TO_BOOL
+0128    | JUMP_IF_FALSE      13 (to 0144)
+0131    | CONSTANT            9 '1'
+0133    | CONSTANT           22 'B taken'
+0135    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0141    | JUMP               10 (to 0154)
+0144    | CONSTANT            9 '1'
+0146    | CONSTANT           23 'B skipped'
+0148    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0154   21 CONSTANT           24 'false'
+0156    | JUMP_IF_FALSE       8 (to 0167)
+0159    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
+0163    | TO_BOOL
+0164    | JUMP                2 (to 0169)
+0167    | CONSTANT           25 'false'
+0169    | SET_GLOBAL          3 'r0'
+0171   22 CONSTANT           26 'true'
+0173    | JUMP_IF_FALSE       5 (to 0181)
+0176    | CONSTANT           27 'true'
+0178    | JUMP                5 (to 0186)
+0181    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
+0185    | TO_BOOL
+0186    | SET_GLOBAL          5 'r1'
+0188   23 CONSTANT           28 'true'
+0190    | JUMP_IF_FALSE       8 (to 0201)
+0193    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
+0197    | TO_BOOL
+0198    | JUMP                2 (to 0203)
+0201    | CONSTANT           29 'false'
+0203    | SET_GLOBAL          6 'r2'
+0205   24 CONSTANT           30 'false'
+0207    | JUMP_IF_FALSE       5 (to 0215)
+0210    | CONSTANT           31 'true'
+0212    | JUMP                5 (to 0220)
+0215    | CALL_USER_PROC      32 'rhs0' @0055 (0 args)
+0219    | TO_BOOL
+0220    | SET_GLOBAL          7 'r3'
+0222   25 CONSTANT           33 'false'
+0224    | JUMP_IF_FALSE       5 (to 0232)
+0227    | CONSTANT           34 'true'
+0229    | JUMP                5 (to 0237)
+0232    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
+0236    | TO_BOOL
+0237    | SET_GLOBAL          8 'r4'
+0239   27 CONSTANT            9 '1'
+0241    | CONSTANT           35 'vals:'
+0243    | GET_GLOBAL          3 'r0'
+0245    | CALL_BUILTIN        36 'ord' (1 args)
+0249    | CONSTANT           37 ' '
+0251    | GET_GLOBAL          5 'r1'
+0253    | CALL_BUILTIN        36 'ord' (1 args)
+0257    | CONSTANT           37 ' '
+0259    | GET_GLOBAL          6 'r2'
+0261    | CALL_BUILTIN        36 'ord' (1 args)
+0265    | CONSTANT           37 ' '
+0267    | GET_GLOBAL          7 'r3'
+0269    | CALL_BUILTIN        36 'ord' (1 args)
+0273    | CONSTANT           37 ' '
+0275    | GET_GLOBAL          8 'r4'
+0277    | CALL_BUILTIN        36 'ord' (1 args)
+0281    | CALL_BUILTIN_PROC   176 'write' (11 args)
+0287    1 HALT
+== End Disassembly: Pascal/ShortCircuitTest ==
+
+Constants (38):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: STR   "r0"
+  0004: STR   "boolean"
+  0005: STR   "r1"
+  0006: STR   "r2"
+  0007: STR   "r3"
+  0008: STR   "r4"
+  0009: INT   1
+  0010: STR   "R1"
+  0011: STR   "write"
+  0012: BOOL  true
+  0013: STR   "R0"
+  0014: BOOL  false
+  0015: BOOL  false
+  0016: STR   "rhs1"
+  0017: BOOL  false
+  0018: STR   "A triggered"
+  0019: STR   "A skipped"
+  0020: BOOL  true
+  0021: BOOL  true
+  0022: STR   "B taken"
+  0023: STR   "B skipped"
+  0024: BOOL  false
+  0025: BOOL  false
+  0026: BOOL  true
+  0027: BOOL  true
+  0028: BOOL  true
+  0029: BOOL  false
+  0030: BOOL  false
+  0031: BOOL  true
+  0032: STR   "rhs0"
+  0033: BOOL  false
+  0034: BOOL  true
+  0035: STR   "vals:"
+  0036: STR   "ord"
+  0037: CHAR  ' '
+

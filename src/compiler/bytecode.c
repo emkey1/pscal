@@ -362,6 +362,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case DIVIDE:        fprintf(stderr, "DIVIDE\n"); return offset + 1;
         case NEGATE:        fprintf(stderr, "NEGATE\n"); return offset + 1;
         case NOT:           fprintf(stderr, "NOT\n"); return offset + 1;
+        case TO_BOOL:       fprintf(stderr, "TO_BOOL\n"); return offset + 1;
         case EQUAL:         fprintf(stderr, "EQUAL\n"); return offset + 1;
         case NOT_EQUAL:     fprintf(stderr, "NOT_EQUAL\n"); return offset + 1;
         case GREATER:       fprintf(stderr, "GREATER\n"); return offset + 1;
