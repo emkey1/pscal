@@ -128,6 +128,7 @@ begin
           begin
             QuitRequested := True;
             writeln('Q pressed. Stopping playback early.');
+            StopAllSounds;
             break;
           end;
         end;
@@ -157,6 +158,7 @@ begin
           begin
             QuitRequested := True;
             writeln('Q pressed. Requesting playback thread to stop...');
+            StopAllSounds;
             break;
           end;
         end;
@@ -174,7 +176,7 @@ begin
 
       WaitForThread(PlaybackThreadID);
 
-      if (not PlaybackCompleted) and (not IsSoundPlaying()) then
+      if (not QuitRequested) and (not PlaybackCompleted) and (not IsSoundPlaying()) then
       begin
         PlaybackCompleted := True;
       end;

@@ -344,6 +344,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"paramstr", vmBuiltinParamstr},
 #ifdef SDL
     {"playsound", vmBuiltinPlaysound},
+    {"stopallsounds", vmBuiltinStopallsounds},
     {"pollkey", vmBuiltinPollkey},
 #endif
     {"popscreen", vmBuiltinPopscreen},
@@ -3763,6 +3764,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("LoadSound", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("StopAllSounds", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
