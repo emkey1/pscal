@@ -51,6 +51,21 @@ begin
   PlaybackFinished := True;
 end;
 
+procedure WaitForPlaybackToStopBeforeCleanup;
+begin
+  if not IsSoundPlaying() then
+    exit;
+
+  writeln('Waiting for sound playback to stop before cleanup...');
+
+  while IsSoundPlaying() do
+  begin
+    Delay(10);
+  end;
+
+  writeln('Playback stopped.');
+end;
+
 
 begin
   writeln('Pscal WAV Player');
@@ -164,6 +179,8 @@ begin
         PlaybackCompleted := True;
       end;
     end;
+
+    WaitForPlaybackToStopBeforeCleanup;
 
     if QuitRequested and (not PlaybackCompleted) then
     begin
