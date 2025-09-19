@@ -6,6 +6,129 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdlib.h>
+
+static void clearBuiltinOverrideDirective(Lexer *lexer) {
+    if (!lexer) {
+        return;
+    }
+    if (lexer->pending_builtin_override_names) {
+        free(lexer->pending_builtin_override_names);
+        lexer->pending_builtin_override_names = NULL;
+    }
+    lexer->has_pending_builtin_override = false;
+}
+
+static void recordBuiltinOverrideDirective(Lexer *lexer, const char *name, size_t length) {
+    if (!lexer) {
+        return;
+    }
+
+    clearBuiltinOverrideDirective(lexer);
+
+    lexer->has_pending_builtin_override = true;
+
+    if (!name || length == 0) {
+        return;
+    }
+
+    char *copy = malloc(length + 1);
+    if (!copy) {
+        fprintf(stderr, "Memory allocation failed while recording builtin override directive.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        copy[i] = (char)tolower((unsigned char)name[i]);
+    }
+    copy[length] = '\0';
+    lexer->pending_builtin_override_names = copy;
+}
+
+static void handleCommentDirective(Lexer *lexer, const char *comment_text, size_t length) {
+    if (!lexer || !comment_text || length == 0) {
+        return;
+    }
+
+    char *buffer = malloc(length + 1);
+    if (!buffer) {
+        fprintf(stderr, "Memory allocation failed while processing comment directive.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    memcpy(buffer, comment_text, length);
+    buffer[length] = '\0';
+
+    size_t start = 0;
+    while (start < length && isspace((unsigned char)buffer[start])) {
+        start++;
+    }
+
+    size_t end = length;
+    while (end > start && isspace((unsigned char)buffer[end - 1])) {
+        end--;
+    }
+
+    if (end <= start) {
+        free(buffer);
+        return;
+    }
+
+    size_t trimmed_len = end - start;
+    char *normalized = malloc(trimmed_len + 1);
+    if (!normalized) {
+        free(buffer);
+        fprintf(stderr, "Memory allocation failed while normalizing comment directive.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    for (size_t i = 0; i < trimmed_len; i++) {
+        normalized[i] = (char)tolower((unsigned char)buffer[start + i]);
+    }
+    normalized[trimmed_len] = '\0';
+
+    const char *directive = "override builtin";
+    size_t directive_len = strlen(directive);
+
+    if (trimmed_len >= directive_len && strncmp(normalized, directive, directive_len) == 0) {
+        if (trimmed_len == directive_len ||
+            normalized[directive_len] == '\0' ||
+            isspace((unsigned char)normalized[directive_len]) ||
+            normalized[directive_len] == ':' ||
+            normalized[directive_len] == '=') {
+
+            size_t offset = directive_len;
+            const char *original = buffer + start;
+
+            while (offset < trimmed_len && isspace((unsigned char)original[offset])) {
+                offset++;
+            }
+
+            if (offset < trimmed_len && (original[offset] == ':' || original[offset] == '=')) {
+                offset++;
+                while (offset < trimmed_len && isspace((unsigned char)original[offset])) {
+                    offset++;
+                }
+            }
+
+            if (offset >= trimmed_len) {
+                recordBuiltinOverrideDirective(lexer, NULL, 0);
+            } else {
+                size_t name_start = offset;
+                while (offset < trimmed_len &&
+                       !isspace((unsigned char)original[offset]) &&
+                       original[offset] != ',' &&
+                       original[offset] != ';') {
+                    offset++;
+                }
+                size_t name_len = offset - name_start;
+                recordBuiltinOverrideDirective(lexer, original + name_start, name_len);
+            }
+        }
+    }
+
+    free(normalized);
+    free(buffer);
+}
 
 static Keyword keywords[] = {
     {"and", TOKEN_AND}, {"array", TOKEN_ARRAY}, {"begin", TOKEN_BEGIN},
@@ -38,6 +161,12 @@ static Keyword keywords[] = {
 #define NUM_KEYWORDS (sizeof(keywords)/sizeof(Keyword))
 
 void initLexer(Lexer *lexer, const char *text) {
+    if (!lexer) {
+        return;
+    }
+
+    memset(lexer, 0, sizeof(*lexer));
+
     lexer->text = text;
     lexer->text_len = text ? strlen(text) : 0; // Calculate length once at the start
     lexer->pos = 0;
@@ -372,8 +501,11 @@ Token *getNextToken(Lexer *lexer) {
 
         // Skip single-line comments (// ...) — after skipping whitespace, reset start position
         if (lexer->current_char == '/' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == '/') {
+            size_t comment_start = lexer->pos + 2;
             while (lexer->current_char && lexer->current_char != '\n')
                 advance(lexer);
+            size_t comment_length = (lexer->pos > comment_start) ? (lexer->pos - comment_start) : 0;
+            handleCommentDirective(lexer, lexer->text + comment_start, comment_length);
             if (lexer->current_char == '\n') // Consume the newline as well
                 advance(lexer);
             // After skipping comment, update token start and continue scanning
@@ -385,6 +517,7 @@ Token *getNextToken(Lexer *lexer) {
         // Skip brace-delimited comments { ... }
         if (lexer->current_char == '{') {
             advance(lexer);  // Skip '{'
+            size_t comment_start = lexer->pos;
             int comment_level = 1; // Handle nested comments like (* { nested } *)
             while (lexer->current_char && comment_level > 0) {
                  if (lexer->current_char == '}') {
@@ -402,6 +535,11 @@ Token *getNextToken(Lexer *lexer) {
                   fprintf(stderr, "Lexer error at line %d, column %d: Unterminated brace comment.\n", lexer->line, lexer->column);
                   // Optionally return an error token or advance past the problematic char
              }
+            if (comment_level == 0) {
+                size_t comment_end = (lexer->pos >= 1) ? lexer->pos - 1 : 0;
+                size_t comment_length = (comment_end >= comment_start) ? (comment_end - comment_start) : 0;
+                handleCommentDirective(lexer, lexer->text + comment_start, comment_length);
+            }
             // After skipping comment, update token start and continue scanning
             start_line = lexer->line;
             start_column = lexer->column;
@@ -414,6 +552,7 @@ Token *getNextToken(Lexer *lexer) {
          if (lexer->current_char == '(' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == '*') {
              advance(lexer); // Skip '('
              advance(lexer); // Skip '*'
+             size_t comment_start = lexer->pos;
              int comment_level = 1;
              while (lexer->current_char && comment_level > 0) {
                  if (lexer->current_char == '*' && lexer->pos + 1 < lexer->text_len && lexer->text[lexer->pos + 1] == ')') {
@@ -431,6 +570,11 @@ Token *getNextToken(Lexer *lexer) {
              // Check if comment was terminated
              if (comment_level > 0) {
                  fprintf(stderr, "Lexer error at line %d, column %d: Unterminated parenthesis-star comment.\n", lexer->line, lexer->column);
+             }
+             if (comment_level == 0) {
+                 size_t comment_end = (lexer->pos >= 2) ? lexer->pos - 2 : 0; // account for the ')' already consumed
+                 size_t comment_length = (comment_end >= comment_start) ? (comment_end - comment_start) : 0;
+                 handleCommentDirective(lexer, lexer->text + comment_start, comment_length);
              }
              continue; // Resume token search
          }
@@ -642,4 +786,36 @@ void lexerError(Lexer *lexer, const char *msg) {
                 lexer->line, lexer->column, msg, lexer->current_char);
     }
     EXIT_FAILURE_HANDLER();
+}
+
+bool lexerConsumeOverrideBuiltinDirective(Lexer *lexer, const char *procedure_name) {
+    if (!lexer || !lexer->has_pending_builtin_override) {
+        return false;
+    }
+
+    bool matched = false;
+
+    if (!lexer->pending_builtin_override_names || lexer->pending_builtin_override_names[0] == '\0') {
+        matched = true;
+    } else if (procedure_name) {
+        size_t name_len = strlen(procedure_name);
+        char *lower = malloc(name_len + 1);
+        if (!lower) {
+            fprintf(stderr, "Memory allocation failed while matching builtin override directive.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        for (size_t i = 0; i < name_len; i++) {
+            lower[i] = (char)tolower((unsigned char)procedure_name[i]);
+        }
+        lower[name_len] = '\0';
+
+        matched = (strcmp(lower, lexer->pending_builtin_override_names) == 0);
+        free(lower);
+    }
+
+    if (matched) {
+        clearBuiltinOverrideDirective(lexer);
+    }
+
+    return matched;
 }

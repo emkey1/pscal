@@ -15,7 +15,7 @@ typedef struct {
 
 AST *parsePointerType(Parser *parser);
 
-void addProcedure(AST *proc_decl, const char* unit_context_name, HashTable *proc_table);
+void addProcedure(Parser *parser, AST *proc_decl, const char* unit_context_name, HashTable *proc_table);
 
 // Full parser API
 AST *buildProgramAST(Parser *parser, BytecodeChunk* chunk);
