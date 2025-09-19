@@ -11,7 +11,7 @@ function TrimRight(S: string): string;
 function QuotedStr(S: string): string; // Simplified: Doesn't handle internal quotes
 
 // --- File System ---
-function FileExists(FileName: string): Boolean;
+// FileExists is provided as a VM builtin.
 
 // --- Conversions ---
 // function StrToIntDef(S: string; Default: Longint): Longint; // Needs TryStrToInt built-in
@@ -83,8 +83,12 @@ var
 begin
   Len := Length(S);
   First := 1;
-  while (First <= Len) and (S[First] = ' ') do
+  while First <= Len do
+  begin
+    if S[First] <> ' ' then
+      break;
     Inc(First);
+  end;
   if First > Len then
     TrimLeft := ''
   else
@@ -96,8 +100,12 @@ var
   Last: Integer;
 begin
   Last := Length(S);
-  while (Last > 0) and (S[Last] = ' ') do
+  while Last > 0 do
+  begin
+    if S[Last] <> ' ' then
+      break;
     Dec(Last);
+  end;
   if Last < 1 then
     TrimRight := ''
   else
@@ -111,13 +119,21 @@ begin
   Len := Length(S);
   First := 1;
   // Find first non-space character
-  while (First <= Len) and (S[First] = ' ') do
+  while First <= Len do
+  begin
+    if S[First] <> ' ' then
+      break;
     Inc(First);
+  end;
 
   // Find last non-space character
   Last := Len;
-  while (Last >= First) and (S[Last] = ' ') do
+  while Last >= First do
+  begin
+    if S[Last] <> ' ' then
+      break;
     Dec(Last);
+  end;
 
   if First > Last then // String was all spaces or empty
     Trim := ''
@@ -133,30 +149,7 @@ end;
 
 
 // --- File System ---
-
-function FileExists(FileName: string): Boolean;
-var
-  F: Text; // Use Text for Reset/IOResult checking
-  IOStatus: Integer;
-begin
-  // Standard Pascal trick: Try to open for reading, check IOResult
-  {$I-} // Disable IO checking temporarily
-  Assign(F, FileName);
-  Reset(F); // Try to open for reading
-  {$I+} // Re-enable IO checking
-
-  IOStatus := IOResult; // Get result of Reset
-
-  if IOStatus = 0 then // If Reset succeeded (file exists and readable)
-  begin
-    Close(F); // Close the file we opened
-    FileExists := True;
-  end
-  else // Reset failed
-  begin
-    FileExists := False;
-  end;
-end;
+// FileExists is provided as a VM builtin; no wrapper needed here.
 
 // --- Other sections would go here ---
 
